@@ -1,0 +1,306 @@
+export type Lang = 'zh' | 'en';
+
+export const I18N: Record<Lang, Record<string, string>> = {
+  zh: {
+    game_title: '饥饿鲨：无限进化',
+    game_subtitle: '深海基因掠食者 · 模块化骨骼进化',
+    btn_start: '开始捕食',
+    btn_trial_mecha: '🎬 看广告开局试用：满级赛博机械鲨',
+    btn_supply_drop: '🎬 空投基因宝箱',
+    btn_boost: '冲刺',
+    btn_pause: '暂停',
+    btn_resume: '继续狩猎',
+    btn_restart: '重新开始',
+    btn_title: '返回主界面',
+    btn_lang_toggle: '中 / EN',
+    btn_mute: '音效：开',
+    btn_unmute: '音效：关',
+    btn_export_html: '下载单文件 HTML 版',
+
+    hud_hp: '生命值',
+    hud_energy: '冲刺能量',
+    hud_level: '进化等级',
+    hud_score: '掠食得分',
+    hud_genes: '基因碎片',
+    hud_coins: '深海金币',
+    hud_depth: '下潜深度',
+    hud_bite_tier: '可吞噬等级',
+    hud_frenzy: '黄金狂暴磁铁',
+    hud_trial_active: '满级赛博神装试用中',
+
+    zone_shallow: '浅海阳光珊瑚区',
+    zone_twilight: '幽暗暮光中层带',
+    zone_abyss: '克苏鲁深渊海沟',
+
+    control_hint: '左下虚拟摇杆 / WASD / 方向键转向 · 右下按钮 / 空格键 2倍速冲刺 · P 键暂停',
+
+    // Factions
+    faction_MECHA: '赛博机械',
+    faction_ABYSS: '深海克苏鲁',
+    faction_MAGMA: '远古熔岩',
+
+    // Slots
+    slot_JAWS: '嘴部咬合器',
+    slot_DORSAL: '背鳍推进器',
+    slot_TAIL: '尾鳍引擎',
+    slot_ARMOR: '躯干外骨骼',
+    slot_AURA: '伴生基因环',
+
+    // Stat labels
+    stat_speed: '游动移速',
+    stat_bite: '咬合体积阈值',
+    stat_hp_drain: '生命流失减缓',
+    stat_boost_cost: '冲刺耗能降低',
+    stat_magnet: '基因吸附范围',
+
+    // 15 Evolution Organs - MECHA (5)
+    organ_mecha_jaws_name: '高频等离子链锯颚',
+    organ_mecha_jaws_desc: '双排高频振动合金锯齿，可咬碎更大型装甲猎物与水雷，咬合阈值 +1 级。',
+    organ_mecha_dorsal_name: '曲率脉冲雷达背鳍',
+    organ_mecha_dorsal_desc: '搭载深海声呐阵列与流线稳定翼，游动移速 +18%，吸附范围大幅提升。',
+    organ_mecha_tail_name: '双联矢量离子推进尾',
+    organ_mecha_tail_desc: '核聚变等离子尾喷口，冲刺耗能降低 25%，游动移速 +22%。',
+    organ_mecha_armor_name: '钛合金反应装甲壳',
+    organ_mecha_armor_desc: '六边形纳米蜂窝护盾，减缓 25% 饥饿生命流失并降低受击震退。',
+    organ_mecha_aura_name: '无人机电磁纳米引力环',
+    organ_mecha_aura_desc: '环绕全身的磁暴浮游单元，自动吸附大范围基因结晶与金币。',
+
+    // 15 Evolution Organs - ABYSS (5)
+    organ_abyss_jaws_name: '古神深渊吸盘裂口',
+    organ_abyss_jaws_desc: '布满发光利齿的克苏鲁口器，撕裂大型深海猎物，咬合阈值 +1 级。',
+    organ_abyss_dorsal_name: '旧日支配者魔眼背鳍',
+    organ_abyss_dorsal_desc: '背生凝视深渊的诡异复眼，减缓 20% 生命流失并提供精神威慑加速。',
+    organ_abyss_tail_name: '幽冥共生触手鞭尾',
+    organ_abyss_tail_desc: '四条高弹性生物发光触手同步摆动，游动移速 +24%，转向更灵敏。',
+    organ_abyss_armor_name: '深潜者几丁质骨甲',
+    organ_abyss_armor_desc: '深渊高压淬炼的生物角质层，生命流失减缓 28%，咬合阈值小幅强化。',
+    organ_abyss_aura_name: '虚空暗物质噬魂漩涡',
+    organ_abyss_aura_desc: '召唤深渊引力场拉扯周围猎物与基因碎片，冲刺耗能降低 20%。',
+
+    // 15 Evolution Organs - MAGMA (5)
+    organ_magma_jaws_name: '地心黑曜石碎星巨颚',
+    organ_magma_jaws_desc: '流淌炽热岩浆的巨型犬齿，瞬间融化猎物甲壳，咬合阈值 +1 级。',
+    organ_magma_dorsal_name: '火山喷发熔岩帆鳍',
+    organ_magma_dorsal_desc: '喷涌高温蒸汽气泡的背棘，冲刺耗能降低 22%，移速 +16%。',
+    organ_magma_tail_name: '炎魔爆裂推進尾锤',
+    organ_magma_tail_desc: '每次摆尾引爆水下热浪，游动移速 +25%，冲刺尾焰威力倍增。',
+    organ_magma_armor_name: '远古龙鳞玄武岩重甲',
+    organ_magma_armor_desc: '厚重的熔岩结晶鳞片，减缓 30% 生命流失，抵御深海高压。',
+    organ_magma_aura_name: '太阳日冕炽热新星环',
+    organ_magma_aura_desc: '环绕周身的高温等离子日冕，大幅扩大基因吸附半径并加速能量回复。',
+
+    // 8 Prey Tiers
+    prey_tier1_name: '发光基因水母',
+    prey_tier2_name: '浅海能量水晶蟹',
+    prey_tier3_name: '黄金装甲河豚',
+    prey_tier4_name: '无人探测潜艇',
+    prey_tier5_name: '深海高压电鳗',
+    prey_tier6_name: '机械感应水雷',
+    prey_tier7_name: '深渊巨型水晶蟹',
+    prey_tier8_name: '巨型克苏鲁章鱼王',
+
+    // Evolution Modal
+    evo_modal_title: '基因突变 · 进化三选一',
+    evo_modal_subtitle: '选择 1 个进化器官挂载至鲨鱼骨骼，或观看激励视频一次性全部激活！',
+    evo_btn_select: '选择此项',
+    evo_btn_claim_all: '🎬 看广告全部激活 (全都要!)',
+    evo_slot_replace: '将挂载至槽位：',
+
+    // Revive / Game Over Modal
+    gameover_title: '生命耗尽 · 掠食中断',
+    gameover_subtitle: '深海饥饿吞噬了你的体力，是否立即唤醒远古狂暴基因？',
+    btn_revive_ad: '🎬 看广告满血狂暴复活 (+8秒金色磁铁狂暴!)',
+    btn_give_up: '直接结算本局',
+    settlement_title: '深海狩猎结算报告',
+    settlement_subtitle: '本局捕食与基因进化数据统计',
+    stat_final_score: '最终得分',
+    stat_max_depth: '最大下潜深度',
+    stat_prey_eaten: '吞噬猎物总数',
+    stat_organs_equipped: '已挂载进化器官',
+
+    // Simulated Ad Modal
+    ad_sim_badge: '激励视频广告 · 模拟预览环境',
+    ad_sim_title: '正在播放激励视频广告...',
+    ad_sim_desc: '完整观看 3 秒即可免费领取深海基因超级奖励！',
+    ad_sim_countdown: '剩余倒计时：{sec} 秒',
+    ad_sim_ready: '奖励已就绪！点击下方按钮立即发放奖励',
+    ad_sim_claim_btn: '关闭广告并领取奖励',
+    ad_sim_cancel_btn: '放弃奖励',
+    ad_env_wx: '微信小游戏广告组件',
+    ad_env_tt: '抖音小游戏广告组件',
+    ad_env_web: 'H5 跨端模拟激励广告',
+
+    // Floating Combat Texts
+    float_devour: '一口吞噬!',
+    float_crit: '基因暴击!',
+    float_gold_rush: '黄金盛宴!',
+    float_mine_crunch: '咬碎水雷!',
+    float_boss_kill: '吞噬旧日支配者!',
+    float_too_big: '体型过大! 需升级咬合!',
+    float_mine_hit: '水雷震击! 生命受损!',
+    float_supply_drop: '空投基因宝箱已抵达!',
+    float_frenzy_start: '8秒黄金狂暴无敌开启!',
+    float_trial_start: '满级赛博机械鲨已武装!',
+    float_all_three: '三项进化器官全部挂载!'
+  },
+  en: {
+    game_title: 'Hungry Shark: Infinite Evolution',
+    game_subtitle: 'Deep-Sea Apex Predator · Modular Skeletal Evolution',
+    btn_start: 'Start Hunting',
+    btn_trial_mecha: '🎬 Trial Max Mecha Shark (Watch Ad)',
+    btn_supply_drop: '🎬 Ad: Gene Supply Drop',
+    btn_boost: 'Boost',
+    btn_pause: 'Pause',
+    btn_resume: 'Resume Hunt',
+    btn_restart: 'Restart Run',
+    btn_title: 'Main Menu',
+    btn_lang_toggle: '中 / EN',
+    btn_mute: 'Audio: ON',
+    btn_unmute: 'Audio: OFF',
+    btn_export_html: 'Download Single-File HTML',
+
+    hud_hp: 'Vitality HP',
+    hud_energy: 'Boost Energy',
+    hud_level: 'Evo Level',
+    hud_score: 'Apex Score',
+    hud_genes: 'Gene Shards',
+    hud_coins: 'Abyss Gold',
+    hud_depth: 'Ocean Depth',
+    hud_bite_tier: 'Max Bite Tier',
+    hud_frenzy: 'Gold Frenzy Magnet',
+    hud_trial_active: 'Max Mecha Loadout Active',
+
+    zone_shallow: 'Sunlit Coral Reef',
+    zone_twilight: 'Twilight Mesopelagic Zone',
+    zone_abyss: 'Cthulhu Hadal Trench',
+
+    control_hint: 'Bottom-Left Joystick / WASD / Arrows to Steer · Bottom-Right / Space for 2x Boost · P to Pause',
+
+    // Factions
+    faction_MECHA: 'Cyber Mecha',
+    faction_ABYSS: 'Abyssal Cthulhu',
+    faction_MAGMA: 'Ancient Magma',
+
+    // Slots
+    slot_JAWS: 'Jaws Module',
+    slot_DORSAL: 'Dorsal Fin',
+    slot_TAIL: 'Tail Thruster',
+    slot_ARMOR: 'Hull Armor',
+    slot_AURA: 'Bio Aura',
+
+    // Stat labels
+    stat_speed: 'Swim Speed',
+    stat_bite: 'Bite Tier Threshold',
+    stat_hp_drain: 'HP Drain Reduction',
+    stat_boost_cost: 'Boost Cost Reduction',
+    stat_magnet: 'Gene Magnet Radius',
+
+    // 15 Evolution Organs - MECHA (5)
+    organ_mecha_jaws_name: 'Plasma Chainsaw Jaws',
+    organ_mecha_jaws_desc: 'High-frequency vibrating alloy teeth crunch larger prey and mines. Bite Tier +1.',
+    organ_mecha_dorsal_name: 'Warp Sonar Dorsal Fin',
+    organ_mecha_dorsal_desc: 'Deep-sea acoustic array & stabilizer wing. Swim Speed +18% & wider magnet pull.',
+    organ_mecha_tail_name: 'Twin Vector Ion Tail',
+    organ_mecha_tail_desc: 'Fusion plasma tail thrusters. Reduces Boost Cost by 25% & Swim Speed +22%.',
+    organ_mecha_armor_name: 'Titanium Reactive Hull',
+    organ_mecha_armor_desc: 'Hexagonal nano-shield plating slows hunger HP drain by 25% and absorbs knockback.',
+    organ_mecha_aura_name: 'Drone EM Gravity Ring',
+    organ_mecha_aura_desc: 'Orbiting electromagnetic drones pull in distant gene crystals and gold coins.',
+
+    // 15 Evolution Organs - ABYSS (5)
+    organ_abyss_jaws_name: 'Eldritch Maw Suckers',
+    organ_abyss_jaws_desc: 'Bioluminescent Cthulhu mandibles tear apart deep-sea leviathans. Bite Tier +1.',
+    organ_abyss_dorsal_name: 'All-Seeing Eye Dorsal',
+    organ_abyss_dorsal_desc: 'Gazing abyssal ocular fin slows hunger HP drain by 20% and boosts agility.',
+    organ_abyss_tail_name: 'Void Tentacle Whip Tail',
+    organ_abyss_tail_desc: 'Four rhythmic bioluminescent tentacles grant +24% Swim Speed & razor turns.',
+    organ_abyss_armor_name: 'Deep One Chitin Carapace',
+    organ_abyss_armor_desc: 'Trench-hardened bio-chitin slows HP drain by 28% and reinforces jaw strength.',
+    organ_abyss_aura_name: 'Dark Matter Vortex Aura',
+    organ_abyss_aura_desc: 'Summons an abyssal gravity well that pulls prey & shards while cutting Boost Cost by 20%.',
+
+    // 15 Evolution Organs - MAGMA (5)
+    organ_magma_jaws_name: 'Obsidian Core Crusher Jaws',
+    organ_magma_jaws_desc: 'Molten lava fangs melt through heavy armored shells instantly. Bite Tier +1.',
+    organ_magma_dorsal_name: 'Volcanic Vent Sail Fin',
+    organ_magma_dorsal_desc: 'Erupting thermal steam spines cut Boost Cost by 22% and add +16% Swim Speed.',
+    organ_magma_tail_name: 'Inferno Blast Tail Hammer',
+    organ_magma_tail_desc: 'Detonates hydrothermal shockwaves on each stroke. Swim Speed +25%.',
+    organ_magma_armor_name: 'Dragon Basalt Heavy Scales',
+    organ_magma_armor_desc: 'Crystallized magma plating slows hunger HP drain by 30% in extreme depths.',
+    organ_magma_aura_name: 'Solar Corona Nova Ring',
+    organ_magma_aura_desc: 'Searing plasma corona expands gene magnet radius and accelerates energy recovery.',
+
+    // 8 Prey Tiers
+    prey_tier1_name: 'Bioluminescent Gene Jelly',
+    prey_tier2_name: 'Reef Crystal Crab',
+    prey_tier3_name: 'Golden Armored Puffer',
+    prey_tier4_name: 'Autonomous Probe Sub',
+    prey_tier5_name: 'Abyssal Electric Eel',
+    prey_tier6_name: 'Cyber Proximity Mine',
+    prey_tier7_name: 'Giant Abyssal Crystal Crab',
+    prey_tier8_name: 'Giant Cthulhu Kraken Boss',
+
+    // Evolution Modal
+    evo_modal_title: 'Gene Mutation · Pick 1 of 3',
+    evo_modal_subtitle: 'Mount 1 evolution organ onto your shark skeleton, or watch an ad to claim all 3!',
+    evo_btn_select: 'Select',
+    evo_btn_claim_all: '🎬 Watch Ad: Claim All 3!',
+    evo_slot_replace: 'Mounts to slot: ',
+
+    // Revive / Game Over Modal
+    gameover_title: 'Vitality Depleted · Hunt Interrupted',
+    gameover_subtitle: 'The abyssal hunger drained your stamina. Awaken ancient frenzy genes now?',
+    btn_revive_ad: '🎬 Watch Ad: Revive + 8s Gold Frenzy!',
+    btn_give_up: 'End Run & View Report',
+    settlement_title: 'Deep-Sea Hunt Report',
+    settlement_subtitle: 'Predation & Genetic Evolution Summary',
+    stat_final_score: 'Final Score',
+    stat_max_depth: 'Max Depth Reached',
+    stat_prey_eaten: 'Total Prey Devoured',
+    stat_organs_equipped: 'Evolution Organs Mounted',
+
+    // Simulated Ad Modal
+    ad_sim_badge: 'Rewarded Video Ad · Preview Simulator',
+    ad_sim_title: 'Playing Rewarded Video Ad...',
+    ad_sim_desc: 'Watch for 3 seconds to unlock your deep-sea genetic reward!',
+    ad_sim_countdown: 'Reward ready in {sec}s',
+    ad_sim_ready: 'Reward Unlocked! Click below to claim immediately',
+    ad_sim_claim_btn: 'Close Ad & Claim Reward',
+    ad_sim_cancel_btn: 'Skip Reward',
+    ad_env_wx: 'WeChat Mini-Game Ad SDK',
+    ad_env_tt: 'Douyin Mini-Game Ad SDK',
+    ad_env_web: 'HTML5 Simulated Rewarded Ad',
+
+    // Floating Combat Texts
+    float_devour: 'DEVOURED!',
+    float_crit: 'GENE CRIT!',
+    float_gold_rush: 'GOLD BONANZA!',
+    float_mine_crunch: 'MINE CRUNCHED!',
+    float_boss_kill: 'KRAKEN DEVOURED!',
+    float_too_big: 'TOO LARGE! UPGRADE JAWS!',
+    float_mine_hit: 'MINE BLAST! HULL DAMAGED!',
+    float_supply_drop: 'GENE SUPPLY DROP ARRIVED!',
+    float_frenzy_start: '8s GOLD FRENZY UNLEASHED!',
+    float_trial_start: 'MAX MECHA SHARK ARMED!',
+    float_all_three: 'ALL 3 ORGANS MOUNTED!'
+  }
+};
+
+export function detectDefaultLang(): Lang {
+  if (typeof navigator !== 'undefined' && navigator.language) {
+    return navigator.language.toLowerCase().startsWith('en') ? 'en' : 'zh';
+  }
+  return 'zh';
+}
+
+export function translate(key: string, lang: Lang, params?: Record<string, string | number>): string {
+  const dict = I18N[lang] || I18N.zh;
+  let text = dict[key] ?? I18N.zh[key] ?? key;
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      text = text.replace(`{${k}}`, String(v));
+    }
+  }
+  return text;
+}

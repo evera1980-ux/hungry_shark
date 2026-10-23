@@ -1,0 +1,6 @@
+{
+  "name": "Hungry Shark: Infinite Evolution",
+  "description": "A cross-platform HTML5 Canvas 2D underwater predator evolution game featuring procedural skeletal animation, 15 modular cyber/abyss/magma organs, 8 prey tiers across 3 ocean depth zones, real-time bilingual (ZH/EN) switching, Web Audio synthesized SFX, and an adaptive AdManager.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
