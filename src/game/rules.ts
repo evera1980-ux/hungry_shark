@@ -230,9 +230,9 @@ export function getMaxMechaLoadout(): EquippedOrgansMap {
 }
 
 export function getDepthZone(yWorld: number): OceanZoneConfig {
-  const clampedY = Math.max(0, Math.min(GAME_CONFIG.world.height, yWorld));
+  const depthY = Math.max(0, yWorld);
   for (const zone of GAME_CONFIG.zones) {
-    if (clampedY >= zone.minDepth && clampedY <= zone.maxDepth) {
+    if (depthY >= zone.minDepth && depthY <= zone.maxDepth) {
       return zone;
     }
   }

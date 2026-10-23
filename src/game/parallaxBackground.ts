@@ -300,13 +300,15 @@ export class ParallaxBackground {
   }
 
   /**
-   * Loads ocean_bg.png (if available) or slices the high-detail 3-row procedural sheet
-   * into 3 horizontal strips (row 0: Shallow, row 1: Twilight, row 2: Abyss, each height = img.height / 3).
+   * Loads ocean_bg.png (/assets/aistudio/ocean_bg_a7a0ef52.png) and slices it into 3 horizontal ecological strips:
+   * - row 0: Shallow Coral Reef (height = img.height / 3)
+   * - row 1: Twilight Sunken Ruins (height = img.height / 3)
+   * - row 2: Abyssal Magma Trench (height = img.height / 3)
    */
-  public load(url: string = '/ocean_bg.png'): void {
+  public load(url: string = '/assets/aistudio/ocean_bg_a7a0ef52.png'): void {
     if (typeof document === 'undefined') return;
 
-    // Immediately slice fallback 3-tier sheet so frame 0 is ready with zero flicker
+    // Immediately slice fallback 3-tier sheet so frame 0 is ready before image decode completes
     if (this.layers.length === 0) {
       const sheet = createFallbackOceanSheetCanvas();
       this.sliceSheetIntoThreeLayers(sheet);
@@ -314,18 +316,30 @@ export class ParallaxBackground {
     }
 
     if (typeof Image !== 'undefined') {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-          this.sliceSheetIntoThreeLayers(img);
-          this.loaded = true;
-        }
+      const candidates = [
+        url,
+        '/assets/aistudio/ocean_bg_a7a0ef52.png',
+        '/ocean_bg.png',
+        'ocean_bg.png',
+      ];
+      let idx = 0;
+      const tryNext = () => {
+        if (idx >= candidates.length) return;
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+            this.sliceSheetIntoThreeLayers(img);
+            this.loaded = true;
+          }
+        };
+        img.onerror = () => {
+          idx++;
+          tryNext();
+        };
+        img.src = candidates[idx];
       };
-      img.onerror = () => {
-        // Keep the already-sliced 3-layer seamless ocean sheet active
-      };
-      img.src = url;
+      tryNext();
     }
   }
 
@@ -373,7 +387,7 @@ export class ParallaxBackground {
     const aspect = layer.width / layer.height;
     const tileW = Math.max(viewW, Math.round(viewH * aspect));
 
-    // Parallax factor 0.4 + modulo seamless wrap
+    // Parallax factor 0.4 + modulo (%) seamless horizontal tiling
     const parallaxX = cameraX * 0.4;
     const startX = -(((parallaxX % tileW) + tileW) % tileW);
 
@@ -404,22 +418,22 @@ export class ParallaxBackground {
 
     const [layer0, layer1, layer2] = this.layers;
 
-    // 1. Depth Cross-Fade Calculation based on sharkY (0m .. 1800m)
-    // - 0 ~ 550m: Layer 0 (Shallow Coral Reef)
-    // - 550 ~ 850m: Cross-fade Layer 0 -> Layer 1
-    // - 850 ~ 1150m: Layer 1 (Twilight Ruins)
-    // - 1150 ~ 1450m: Cross-fade Layer 1 -> Layer 2
-    // - > 1450m: Layer 2 (Abyssal Magma Trench)
-    if (sharkY < 550) {
+    // 1. Depth Cross-Fade Calculation based on shark.y:
+    // - 0 ~ 680m: Layer 0 (Shallow Coral Reef, 0 ~ 800m zone)
+    // - 680 ~ 920m: Cross-fade Layer 0 -> Layer 1 at the 800m boundary
+    // - 920 ~ 1250m: Layer 1 (Twilight Sunken Ruins)
+    // - 1250 ~ 1520m: Cross-fade Layer 1 -> Layer 2
+    // - > 1520m: Layer 2 (Abyssal Magma Trench)
+    if (sharkY < 680) {
       this.drawTiledLayer(ctx, layer0, cameraX, viewW, viewH, 1.0);
-    } else if (sharkY < 850) {
-      const t = (sharkY - 550) / 300;
+    } else if (sharkY < 920) {
+      const t = (sharkY - 680) / 240;
       this.drawTiledLayer(ctx, layer0, cameraX, viewW, viewH, 1.0);
       this.drawTiledLayer(ctx, layer1, cameraX, viewW, viewH, t);
-    } else if (sharkY < 1150) {
+    } else if (sharkY < 1250) {
       this.drawTiledLayer(ctx, layer1, cameraX, viewW, viewH, 1.0);
-    } else if (sharkY < 1450) {
-      const t = (sharkY - 1150) / 300;
+    } else if (sharkY < 1520) {
+      const t = (sharkY - 1250) / 270;
       this.drawTiledLayer(ctx, layer1, cameraX, viewW, viewH, 1.0);
       this.drawTiledLayer(ctx, layer2, cameraX, viewW, viewH, t);
     } else {

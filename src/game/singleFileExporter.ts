@@ -94,7 +94,7 @@ class ParallaxBackground {
       r: 2 + Math.random() * 5, spd: 20 + Math.random() * 30, phase: Math.random() * 6.28
     }));
   }
-  load(url = 'ocean_bg.png') {
+  load(url = '/assets/aistudio/ocean_bg_a7a0ef52.png') {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -105,6 +105,7 @@ class ParallaxBackground {
         return c;
       });
     };
+    img.onerror = () => { if (url !== 'ocean_bg.png') this.load('ocean_bg.png'); };
     img.src = url;
   }
   drawLayer(ctx, layer, camX, vw, vh, alpha) {
@@ -143,19 +144,86 @@ class ParallaxBackground {
   }
 }
 
+class InfiniteWorldManager {
+  constructor() { this.worldWidth = 3000; this.seaSurfaceY = 0; }
+  update(dt, sharkObj, camObj) {
+    const halfW = this.worldWidth / 2;
+    if (sharkObj.x > halfW) {
+      const nextX = -halfW + 50;
+      camObj.x += (nextX - sharkObj.x);
+      sharkObj.x = nextX;
+    } else if (sharkObj.x < -halfW) {
+      const nextX = halfW - 50;
+      camObj.x += (nextX - sharkObj.x);
+      sharkObj.x = nextX;
+    }
+    if (sharkObj.y < this.seaSurfaceY) sharkObj.y = this.seaSurfaceY;
+    const targetY = Math.max(sharkObj.y, this.seaSurfaceY);
+    camObj.x += (sharkObj.x - camObj.x) * Math.min(1, dt * 6.5);
+    camObj.y += (targetY - camObj.y) * Math.min(1, dt * 6.5);
+  }
+  wrapX(x) {
+    const halfW = this.worldWidth / 2;
+    if (x > halfW) return -halfW + 50;
+    if (x < -halfW) return halfW - 50;
+    return x;
+  }
+}
+
+class EcosystemSpawner {
+  constructor() { this.maxActivePreys = 50; this.spawnRadius = 1500; this.gameTime = 0; this.pool = []; }
+  update(dt, list, sx, sy) {
+    this.gameTime += dt;
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (Math.hypot(list[i].x - sx, list[i].y - sy) > this.spawnRadius * 1.5) {
+        this.pool.push(list.splice(i, 1)[0]);
+      }
+    }
+    while (list.length < this.maxActivePreys) this.spawnPreyOffScreen(list, sx, sy);
+  }
+  spawnPreyOffScreen(list, sx, sy) {
+    const cfg = GAME_CONFIG.preyTiers[Math.floor(Math.random() * GAME_CONFIG.preyTiers.length)];
+    const ang = Math.random() * Math.PI * 2;
+    const dist = 800 + Math.random() * (this.spawnRadius - 800);
+    let px = worldMgr.wrapX(sx + Math.cos(ang) * dist);
+    let py = sy + Math.sin(ang) * dist;
+    if (py < 100) py = 100;
+    const scaleMultiplier = 1.0 + this.gameTime * 0.01;
+    const p = this.pool.pop() || {};
+    p.cfg = cfg; p.x = px; p.y = py;
+    p.vx = (Math.random() < 0.5 ? -1 : 1) * cfg.baseSpeed;
+    p.phase = Math.random() * 6.28;
+    p.scale = scaleMultiplier;
+    list.push(p);
+  }
+}
+
+class InfiniteProgressionManager {
+  constructor() { this.globalDifficultyMultiplier = 1.0; this.totalPlayTime = 0; this.frenzyStacks = 0; }
+  update(dt) {
+    this.totalPlayTime += dt;
+    this.globalDifficultyMultiplier = 1.0 + Math.floor(this.totalPlayTime / 60) * 0.1;
+  }
+  getScaledPreyValue(baseScore) {
+    return Math.floor(baseScore * this.globalDifficultyMultiplier);
+  }
+}
+
 const sprites = new SpriteSheetManager(); sprites.load();
 const parallaxBg = new ParallaxBackground(); parallaxBg.load();
+const worldMgr = new InfiniteWorldManager();
+const ecoSpawner = new EcosystemSpawner();
+const progMgr = new InfiniteProgressionManager();
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
 addEventListener('resize', resize); resize();
 
-let shark = { x: 1200, y: 260, vx: 180, vy: 0, angle: 0, phase: 0, hp: 100, energy: 100, lv: 1, bite: 2, score: 0, genes: 0, coins: 0, boost: false, mecha: false };
-let preys = Array.from({length: 45}, (_, i) => {
-  const cfg = GAME_CONFIG.preyTiers[i % GAME_CONFIG.preyTiers.length];
-  return { cfg, x: Math.random() * 3600 + 200, y: cfg.minDepth + Math.random() * (cfg.maxDepth - cfg.minDepth), vx: (Math.random() < 0.5 ? -1 : 1) * cfg.baseSpeed, phase: i };
-});
+let shark = { x: 0, y: 260, vx: 180, vy: 0, angle: 0, phase: 0, hp: 100, energy: 100, lv: 1, bite: 2, score: 0, genes: 0, coins: 0, boost: false, mecha: false };
+let cam = { x: 0, y: 260 };
+let preys = [];
+for (let i = 0; i < 50; i++) ecoSpawner.spawnPreyOffScreen(preys, 0, 260);
 
 document.getElementById('btn-lang').onclick = () => { lang = lang === 'zh' ? 'en' : 'zh'; };
 document.getElementById('btn-trial').onclick = () => { shark.bite = 8; shark.lv = 5; shark.hp = 100; shark.mecha = true; };
@@ -173,28 +241,38 @@ addEventListener('keyup', (e) => { if (e.code === 'Space') shark.boost = false; 
 const PREY_FRAME_IDX = { 1: 8, 2: 11, 3: 9, 4: 10, 5: 12, 6: 13, 7: 11, 8: 14 };
 
 function loop() {
+  const dt = 0.016;
   shark.phase += 0.14;
   const spd = shark.boost && shark.energy > 0 ? 460 : 240;
   if (shark.boost && shark.energy > 0) shark.energy = Math.max(0, shark.energy - 0.4);
   else shark.energy = Math.min(100, shark.energy + 0.25);
-  shark.x = Math.max(80, Math.min(4100, shark.x + Math.cos(shark.angle) * spd * 0.016));
-  shark.y = Math.max(60, Math.min(1740, shark.y + Math.sin(shark.angle) * spd * 0.016));
+  shark.x += Math.cos(shark.angle) * spd * dt;
+  shark.y += Math.sin(shark.angle) * spd * dt;
+  progMgr.update(dt);
+  worldMgr.update(dt, shark, cam);
+  ecoSpawner.update(dt, preys, shark.x, shark.y);
 
-  parallaxBg.render(ctx, shark.x, shark.y, canvas.width, canvas.height);
+  parallaxBg.render(ctx, cam.x, shark.y, canvas.width, canvas.height);
 
   ctx.save();
-  ctx.translate(canvas.width / 2 - shark.x, canvas.height / 2 - shark.y);
+  ctx.translate(canvas.width / 2 - cam.x, canvas.height / 2 - cam.y);
 
-  for (const p of preys) {
-    p.phase += 0.08; p.x += p.vx * 0.016;
-    if (p.x < 80 || p.x > 4100) p.vx *= -1;
-    if (Math.hypot(shark.x - p.x, shark.y - p.y) < 42 + p.cfg.radius) {
+  for (let i = preys.length - 1; i >= 0; i--) {
+    const p = preys[i];
+    const sm = Math.min(2.2, p.scale || 1);
+    p.phase += 0.08;
+    p.x = worldMgr.wrapX(p.x + p.vx * dt);
+    if (Math.hypot(shark.x - p.x, shark.y - p.y) < 42 + p.cfg.radius * sm) {
       if (shark.bite >= p.cfg.tier) {
-        shark.score += p.cfg.scoreValue; shark.genes += p.cfg.geneValue; shark.coins += p.cfg.coinValue;
+        shark.score += progMgr.getScaledPreyValue(Math.round(p.cfg.scoreValue * sm));
+        shark.genes += Math.round(p.cfg.geneValue * sm);
+        shark.coins += Math.round(p.cfg.coinValue * sm);
         shark.hp = Math.min(100, shark.hp + 8);
-        p.x = Math.random() * 3600 + 200;
+        ecoSpawner.pool.push(preys.splice(i, 1)[0]);
+        ecoSpawner.spawnPreyOffScreen(preys, shark.x, shark.y);
+        continue;
       } else {
-        shark.hp = Math.max(10, shark.hp - 8);
+        shark.hp = Math.max(10, shark.hp - Math.round(8 * progMgr.globalDifficultyMultiplier));
       }
     }
     const pf = sprites.frames[PREY_FRAME_IDX[p.cfg.tier] || 8];
@@ -202,7 +280,7 @@ function loop() {
       ctx.save(); ctx.translate(p.x, p.y);
       if (p.vx < 0) ctx.scale(-1, 1);
       ctx.rotate(Math.sin(p.phase) * 0.08);
-      const sz = p.cfg.radius * 2.4;
+      const sz = p.cfg.radius * 2.4 * sm;
       ctx.drawImage(pf, -sz/2, -sz/2, sz, sz);
       ctx.restore();
     }

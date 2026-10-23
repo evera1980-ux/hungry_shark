@@ -33,6 +33,9 @@ import { OrganCanvasPreview } from './components/OrganCanvasPreview';
 import { downloadStandaloneSingleFileHtml } from './game/singleFileExporter';
 import { spriteSheetManager } from './game/spriteSheetManager';
 import { parallaxBackground } from './game/parallaxBackground';
+import { infiniteWorldManager } from './game/infiniteWorldManager';
+import { ecosystemSpawner } from './game/ecosystemSpawner';
+import { infiniteProgressionManager } from './game/infiniteProgressionManager';
 
 type GameState = 'title' | 'playing' | 'paused' | 'gameover';
 
@@ -236,7 +239,7 @@ export default function App() {
     lastHudSyncTime: number;
   }>({
     shark: {
-      x: 1200,
+      x: 0,
       y: 220,
       vx: 180,
       vy: 0,
@@ -262,7 +265,7 @@ export default function App() {
       stats: computeSharkStats(1, {}, false),
     },
     camera: {
-      x: 1200,
+      x: 0,
       y: 220,
       zoom: 1.0,
     },
@@ -329,7 +332,7 @@ export default function App() {
   // Register Browser Simulated Video Ad Runner & Load 4x4 Sprite Sheet + 3-Layer Parallax Background
   useEffect(() => {
     spriteSheetManager.load('/assets/aistudio/fish_24bdaa5a.png');
-    parallaxBackground.load('/ocean_bg.png');
+    parallaxBackground.load('/assets/aistudio/ocean_bg_a7a0ef52.png');
     adManager.registerBrowserSimulator((placement, onReward, onCancel) => {
       setSimAd({
         active: true,
@@ -437,12 +440,18 @@ export default function App() {
     []
   );
 
-  // Spawn a single prey entity at appropriate depth
+  // Spawn a single prey entity within the [-worldWidth/2, +worldWidth/2] wrap-around world and dynamic infinite depth
   const createPreyEntity = useCallback(
-    (nearSharkX?: number): PreyEntity => {
+    (nearSharkX?: number, nearSharkY?: number): PreyEntity => {
       const sim = simRef.current;
-      // Weight lower tiers slightly higher so there's always plentiful food
-      const weights = [26, 24, 16, 11, 9, 7, 5, 2];
+      const halfW = infiniteWorldManager.worldWidth / 2;
+      const refDepth = typeof nearSharkY === 'number' ? Math.max(0, nearSharkY) : 220;
+
+      // Weight lower tiers higher in shallow water; shift toward deep abyssal tiers when diving past 1200m+
+      const weights =
+        refDepth > 1250
+          ? [12, 12, 14, 16, 16, 12, 12, 6]
+          : [26, 24, 16, 11, 9, 7, 5, 2];
       const totalWeight = weights.reduce((a, b) => a + b, 0);
       let roll = Math.random() * totalWeight;
       let chosenTier: PreyTierConfig = GAME_CONFIG.preyTiers[0];
@@ -454,19 +463,22 @@ export default function App() {
         }
       }
 
-      const y =
+      let y =
         chosenTier.minDepth +
         Math.random() * (chosenTier.maxDepth - chosenTier.minDepth);
-      let x = Math.random() * (GAME_CONFIG.world.width - 200) + 100;
+      // In infinite downward depth mode, if shark dives deeper than 1400m, spawn around the shark's current abyssal depth
+      if (refDepth > 1400) {
+        y = Math.max(1150, refDepth + (Math.random() - 0.45) * 900);
+      }
+
+      let x = (Math.random() - 0.5) * (infiniteWorldManager.worldWidth - 100);
       if (typeof nearSharkX === 'number') {
         const dir = Math.random() < 0.5 ? -1 : 1;
-        x = Math.max(
-          100,
-          Math.min(
-            GAME_CONFIG.world.width - 100,
-            nearSharkX + dir * (480 + Math.random() * 750)
-          )
+        x = infiniteWorldManager.wrapEntityX(
+          nearSharkX + dir * (480 + Math.random() * 750)
         );
+      } else {
+        x = Math.max(-halfW + 50, Math.min(halfW - 50, x));
       }
 
       const moveDir = Math.random() < 0.5 ? -1 : 1;
@@ -498,7 +510,7 @@ export default function App() {
       const stats = computeSharkStats(initialLevel, initialOrgans, false);
 
       sim.shark = {
-        x: 1200,
+        x: 0,
         y: 220,
         vx: stats.moveSpeed * 0.6,
         vy: 0,
@@ -542,18 +554,26 @@ export default function App() {
       sim.pickups.forEach((pk) => (pk.active = false));
       sim.floatTexts.forEach((ft) => (ft.active = false));
 
-      // Populate initial ocean ecosystem
-      sim.preyList = [];
-      for (let i = 0; i < TARGET_PREY_COUNT; i++) {
-        sim.preyList.push(createPreyEntity());
+      // Populate initial ocean ecosystem via EcosystemSpawner object pool & reset InfiniteProgressionManager
+      infiniteProgressionManager.reset();
+      ecosystemSpawner.reset(sim.preyList);
+      for (let i = 0; i < 44; i++) {
+        ecosystemSpawner.spawnPreyOffScreen(
+          sim.preyList,
+          sim.shark.x,
+          sim.shark.y,
+          Math.random,
+          [260, ecosystemSpawner.spawnRadius],
+          0
+        );
       }
-      // Guarantee several edible Tier 1 & Tier 2 fish right in front of the starting shark
+      // Guarantee 6 edible Tier 1 & Tier 2 fish right in front of the starting shark (total = maxActivePreys = 50)
       for (let i = 0; i < 6; i++) {
         const tierConfig = GAME_CONFIG.preyTiers[i % 2];
         sim.preyList.push({
           uid: sim.nextPreyUid++,
           config: tierConfig,
-          x: 1380 + i * 70,
+          x: 180 + i * 70,
           y: 190 + (i % 3) * 35,
           vx: 45,
           vy: 0,
@@ -561,6 +581,7 @@ export default function App() {
           phase: i,
           telegraphTimer: 0,
           isInflated: false,
+          scaleMultiplier: 1.0,
         });
       }
 
@@ -586,7 +607,7 @@ export default function App() {
 
       if (withMaxMechaTrial) {
         soundFX.playEvolution();
-        spawnFloatText(1200, 180, 'float_trial_start', '+5 MECHA', '#38bdf8', 1.25);
+        spawnFloatText(0, 180, 'float_trial_start', '+5 MECHA', '#38bdf8', 1.25);
       }
 
       // Immediately update state and blur any focused button
@@ -675,6 +696,7 @@ export default function App() {
   const handleReviveWithFrenzyAd = useCallback(() => {
     adManager.showRewardedVideoAd('REVIVE_FRENZY', () => {
       const sim = simRef.current;
+      infiniteProgressionManager.addFrenzyStack();
       sim.shark.frenzyTimer = GAME_CONFIG.world.frenzyDuration;
       sim.shark.stats = computeSharkStats(
         sim.shark.level,
@@ -839,7 +861,7 @@ export default function App() {
         shark.swimPhase += dt * 7.5;
         shark.biteAnim = Math.max(0, shark.biteAnim - dt * 3);
         const tSec = now * 0.0008;
-        const targetX = 1200 + Math.cos(tSec) * 280;
+        const targetX = Math.cos(tSec) * 280;
         const targetY = 260 + Math.sin(tSec * 2) * 85;
         const dx = targetX - shark.x;
         const dy = targetY - shark.y;
@@ -853,15 +875,12 @@ export default function App() {
         // Ambient prey swim on title screen
         if (sim.preyList.length === 0) {
           for (let i = 0; i < 32; i++) {
-            sim.preyList.push(createPreyEntity(1200));
+            sim.preyList.push(createPreyEntity(0, 260));
           }
         }
         for (const prey of sim.preyList) {
           prey.phase += dt * 3;
-          prey.x += prey.vx * dt * 0.5;
-          if (prey.x < 100 || prey.x > GAME_CONFIG.world.width - 100) {
-            prey.vx *= -1;
-          }
+          prey.x = infiniteWorldManager.wrapEntityX(prey.x + prey.vx * dt * 0.5);
         }
       } else if (gameStateRef.current === 'playing' && !isPausedOrOverlay) {
         // Hitstop decay
@@ -958,24 +977,12 @@ export default function App() {
         shark.x += shark.vx * simDt;
         shark.y += shark.vy * simDt;
 
-        // Clamp within world bounds
-        const margin = 70;
-        if (shark.x < margin) {
-          shark.x = margin;
-          shark.vx = Math.abs(shark.vx);
-          shark.angle = 0;
-        } else if (shark.x > GAME_CONFIG.world.width - margin) {
-          shark.x = GAME_CONFIG.world.width - margin;
-          shark.vx = -Math.abs(shark.vx);
-          shark.angle = Math.PI;
-        }
-        if (shark.y < 55) {
-          shark.y = 55;
-          shark.vy = Math.abs(shark.vy) * 0.5;
-        } else if (shark.y > GAME_CONFIG.world.height - margin) {
-          shark.y = GAME_CONFIG.world.height - margin;
-          shark.vy = -Math.abs(shark.vy) * 0.5;
-        }
+        // 模块 A：无限世界与动态边界控制器 (InfiniteWorldManager)
+        // 1. 无限横向循环逻辑 ([-worldWidth/2, +worldWidth/2] 自动传送 + 相机无缝同步)
+        // 2. 垂直方向向下无边界跟随 (海面 Y=0，向下深渊无限延伸)
+        infiniteWorldManager.update(dt, shark, sim.camera);
+        sim.camera.zoom +=
+          (shark.stats.cameraZoom - sim.camera.zoom) * Math.min(1, dt * 3.5);
 
         shark.maxDepthReached = Math.max(
           shark.maxDepthReached,
@@ -998,11 +1005,20 @@ export default function App() {
           shark.ghostHp = shark.hp;
         }
 
-        // Smooth camera tracking & dynamic zoom out as shark evolves
-        sim.camera.x += (shark.x - sim.camera.x) * Math.min(1, dt * 6.5);
-        sim.camera.y += (shark.y - sim.camera.y) * Math.min(1, dt * 6.5);
-        sim.camera.zoom +=
-          (shark.stats.cameraZoom - sim.camera.zoom) * Math.min(1, dt * 3.5);
+        // 模块 C：让游戏永远玩下去的数值膨胀系统 (InfiniteProgressionManager)
+        // 每过 60 秒，全球难度（敌人生命值、体型、攻击性、分值回报）提升 10%
+        infiniteProgressionManager.update(simDt);
+
+        // 模块 B：生态鱼群智能刷新与回收池 (EcosystemSpawner)
+        // 维持同屏 maxActivePreys=50，回收距离超出 spawnRadius*1.5 的鱼，并在视野外 (800~1500) 生成随 gameTime 膨胀的鱼群
+        ecosystemSpawner.update(
+          simDt,
+          sim.preyList,
+          shark.x,
+          shark.y,
+          Math.random,
+          shark.score
+        );
 
         // Mouth hitbox world coordinates
         const mouthX = shark.x + Math.cos(shark.angle) * 32 * shark.stats.scale;
@@ -1087,28 +1103,19 @@ export default function App() {
             prey.y += Math.sin(pullAngle) * 340 * simDt;
           }
 
-          prey.x += prey.vx * simDt;
+          prey.x = infiniteWorldManager.wrapEntityX(prey.x + prey.vx * simDt);
           prey.y += prey.vy * simDt;
 
-          // Keep prey within their ecological depth band and world width
-          if (prey.x < 80) {
-            prey.x = 80;
-            prey.vx = Math.abs(prey.vx);
-          } else if (prey.x > GAME_CONFIG.world.width - 80) {
-            prey.x = GAME_CONFIG.world.width - 80;
-            prey.vx = -Math.abs(prey.vx);
-          }
-          if (prey.y < prey.config.minDepth) {
-            prey.y = prey.config.minDepth;
+          // Keep prey below sea surface (Y >= 25)
+          if (prey.y < Math.max(25, prey.config.minDepth)) {
+            prey.y = Math.max(25, prey.config.minDepth);
             prey.vy = Math.abs(prey.vy);
-          } else if (prey.y > prey.config.maxDepth) {
-            prey.y = prey.config.maxDepth;
-            prey.vy = -Math.abs(prey.vy);
           }
 
-          // Check collision with Shark Mouth / Body
+          // Check collision with Shark Mouth / Body (accounting for Infinite Scaling scaleMultiplier)
+          const preyScale = Math.min(2.25, prey.scaleMultiplier ?? 1.0);
           const distToMouth = Math.hypot(mouthX - prey.x, mouthY - prey.y);
-          if (distToMouth < mouthRadius + prey.config.radius) {
+          if (distToMouth < mouthRadius + prey.config.radius * preyScale) {
             const outcome = resolvePreyEncounter(
               shark.stats,
               prey.config,
@@ -1118,12 +1125,48 @@ export default function App() {
 
             if (outcome.canDevour) {
               // Devour! Trigger bite animation, green slime bubbles, coins & DNA crystals
+              const variant = prey.mutationVariant ?? 'NONE';
+              const variantScoreMult =
+                variant === 'GOLDEN_MUTANT'
+                  ? 3.0
+                  : variant === 'ABYSS_BEHEMOTH'
+                  ? 2.2
+                  : 1.0;
+              const frenzyStackMult =
+                shark.frenzyTimer > 0
+                  ? infiniteProgressionManager.getFrenzyScoreMultiplier()
+                  : 1.0;
+              const rewardScale =
+                (prey.scaleMultiplier ?? 1.0) * variantScoreMult * frenzyStackMult;
+
+              const finalScoreGain = infiniteProgressionManager.getScaledPreyValue(
+                Math.round(outcome.scoreGain * rewardScale)
+              );
+
               shark.biteAnim = 1.0;
-              shark.hp = Math.min(shark.stats.maxHp, shark.hp + outcome.hpDelta);
-              shark.score += outcome.scoreGain;
-              shark.genes += outcome.geneGain;
-              shark.coins += outcome.coinGain;
+              shark.hp = Math.min(
+                shark.stats.maxHp,
+                shark.hp + Math.round(outcome.hpDelta * (prey.scaleMultiplier ?? 1.0))
+              );
+              shark.score += finalScoreGain;
+              shark.genes += Math.round(
+                outcome.geneGain * (variant === 'ABYSS_BEHEMOTH' ? 2.5 : 1.0)
+              );
+              shark.coins += Math.round(
+                outcome.coinGain * (variant === 'GOLDEN_MUTANT' ? 3.0 : 1.0)
+              );
               shark.preyEatenCount += 1;
+
+              // Eating a Golden Mutant extends or triggers Infinite Stacking Gold Frenzy!
+              if (variant === 'GOLDEN_MUTANT' && shark.frenzyTimer <= 0 && shark.preyEatenCount % 3 === 0) {
+                infiniteProgressionManager.addFrenzyStack();
+                shark.frenzyTimer = 5.0;
+                shark.stats = computeSharkStats(
+                  shark.level,
+                  equippedRef.current,
+                  true
+                );
+              }
               if (prey.config.tier >= 4) {
                 shark.hitstopTimer = 0.045;
                 shark.cameraShakeTrauma = 0.32;
@@ -1191,11 +1234,22 @@ export default function App() {
                 setEvoChoices(pickEvolutionChoices(equippedRef.current));
               }
 
-              // Respawn replacement prey elsewhere in the ocean
-              sim.preyList[i] = createPreyEntity(shark.x);
+              // Recycle devoured prey into EcosystemSpawner pool and respawn off-screen with Infinite Scaling
+              ecosystemSpawner.recycleAndRespawn(
+                sim.preyList,
+                i,
+                shark.x,
+                shark.y,
+                Math.random,
+                shark.score
+              );
             } else {
               // Oversized Prey or Active Mine Hazard -> Screen Shake, Knockback & Damage
-              shark.hp = Math.max(0, shark.hp + outcome.hpDelta);
+              const dmgScale =
+                Math.min(2.0, prey.scaleMultiplier ?? 1.0) *
+                infiniteProgressionManager.globalDifficultyMultiplier;
+              const scaledDamage = Math.round(outcome.hpDelta * dmgScale);
+              shark.hp = Math.max(0, shark.hp + scaledDamage);
               shark.hitFlashTimer = 0.28;
               shark.hitstopTimer = 0.055;
               shark.cameraShakeTrauma = 0.65;
@@ -1211,13 +1265,13 @@ export default function App() {
                 shark.x,
                 shark.y - 25,
                 outcome.floatTextKey,
-                `${outcome.hpDelta} HP`,
+                `${scaledDamage} HP`,
                 '#fb7185',
                 1.18
               );
 
               if (prey.config.isHazard) {
-                // Mine explodes into green/amber plasma sparks and respawns elsewhere
+                // Mine explodes into green/amber plasma sparks, recycles to pool & respawns off-screen
                 for (let b = 0; b < 16; b++) {
                   const ang = (b * Math.PI * 2) / 16;
                   spawnParticle(
@@ -1231,7 +1285,14 @@ export default function App() {
                     'SPARK'
                   );
                 }
-                sim.preyList[i] = createPreyEntity(shark.x);
+                ecosystemSpawner.recycleAndRespawn(
+                  sim.preyList,
+                  i,
+                  shark.x,
+                  shark.y,
+                  Math.random,
+                  shark.score
+                );
               }
             }
           }
@@ -1388,13 +1449,15 @@ export default function App() {
       ctx.scale(sim.camera.zoom, sim.camera.zoom);
       ctx.translate(-sim.camera.x, -sim.camera.y);
 
-      // Ocean Surface Waves at y = 35
+      // Ocean Surface Waves at y = 0..35 across [-worldWidth/2 - 800, +worldWidth/2 + 800]
+      const surfStart = -infiniteWorldManager.worldWidth / 2 - 800;
+      const surfEnd = infiniteWorldManager.worldWidth / 2 + 800;
       ctx.strokeStyle = 'rgba(125, 211, 252, 0.55)';
       ctx.lineWidth = 4;
       ctx.beginPath();
-      for (let wx = 0; wx <= GAME_CONFIG.world.width; wx += 60) {
-        const wy = 35 + Math.sin(wx * 0.015 + now * 0.003) * 8;
-        if (wx === 0) ctx.moveTo(wx, wy);
+      for (let wx = surfStart; wx <= surfEnd; wx += 60) {
+        const wy = 18 + Math.sin(wx * 0.015 + now * 0.003) * 8;
+        if (wx === surfStart) ctx.moveTo(wx, wy);
         else ctx.lineTo(wx, wy);
       }
       ctx.stroke();
@@ -1406,8 +1469,8 @@ export default function App() {
           ctx.setLineDash([12, 12]);
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.moveTo(0, z.minDepth);
-          ctx.lineTo(GAME_CONFIG.world.width, z.minDepth);
+          ctx.moveTo(surfStart, z.minDepth);
+          ctx.lineTo(surfEnd, z.minDepth);
           ctx.stroke();
           ctx.setLineDash([]);
         }

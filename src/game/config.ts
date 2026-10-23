@@ -68,7 +68,7 @@ export interface OceanZoneConfig {
 
 export const GAME_CONFIG = {
   world: {
-    width: 4200,
+    width: 3000,
     height: 1800,
     baseSharkSpeed: 280,
     boostSpeedMultiplier: 2.0,
@@ -103,7 +103,7 @@ export const GAME_CONFIG = {
       id: 'abyss',
       nameKey: 'zone_abyss',
       minDepth: 1150,
-      maxDepth: 1800,
+      maxDepth: Number.POSITIVE_INFINITY,
       topColor: '#0f172a',
       bottomColor: '#020617',
       accentColor: '#c084fc',

@@ -209,6 +209,8 @@ export function drawSharkWithOrgans(
   ctx.restore();
 }
 
+import { PreyMutationVariant } from './infiniteProgressionManager';
+
 export interface PreyEntity {
   uid: number;
   config: PreyTierConfig;
@@ -220,6 +222,8 @@ export interface PreyEntity {
   phase: number;
   telegraphTimer: number;
   isInflated: boolean;
+  scaleMultiplier?: number;
+  mutationVariant?: PreyMutationVariant;
 }
 
 /**
@@ -231,12 +235,40 @@ export function drawPreyEntity(
   sharkBiteTier: number,
   frenzyActive: boolean
 ): void {
-  const { config, x, y, vx, phase, telegraphTimer, isInflated } = prey;
-  const r = config.radius * (isInflated ? 1.32 : 1.0);
+  const {
+    config,
+    x,
+    y,
+    vx,
+    phase,
+    telegraphTimer,
+    isInflated,
+    mutationVariant = 'NONE',
+  } = prey;
+  const behemothBoost = mutationVariant === 'ABYSS_BEHEMOTH' ? 1.28 : 1.0;
+  const scaleMult = Math.min(2.45, (prey.scaleMultiplier ?? 1.0) * behemothBoost);
+  const r = config.radius * scaleMult * (isInflated ? 1.32 : 1.0);
   const canEat = frenzyActive || sharkBiteTier >= config.tier;
 
   ctx.save();
   ctx.translate(x, y);
+
+  // Mutation Variant Aura (Golden Mutant / Abyss Behemoth)
+  if (mutationVariant === 'GOLDEN_MUTANT') {
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.78)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 5 + Math.sin(phase * 4) * 2, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  } else if (mutationVariant === 'ABYSS_BEHEMOTH') {
+    ctx.strokeStyle = 'rgba(192, 132, 252, 0.75)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 6 + Math.cos(phase * 5) * 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
   // Threat or hazard telegraph ring
   if (!canEat || config.isHazard) {
@@ -269,17 +301,36 @@ export function drawPreyEntity(
   ctx.rotate(swimRock);
   ctx.scale(pulseScale, 2 - pulseScale);
 
+  if (frenzyActive || mutationVariant === 'GOLDEN_MUTANT') {
+    ctx.filter = 'sepia(0.85) saturate(3.2) hue-rotate(5deg) brightness(1.15)';
+  } else if (mutationVariant === 'ABYSS_BEHEMOTH') {
+    ctx.filter = 'hue-rotate(255deg) saturate(1.6) contrast(1.1)';
+  }
+
   const preyFrame = spriteSheetManager.getPreyFrame(config.tier);
   const drawSize = r * 2.35;
   drawCenteredFrame(ctx, preyFrame, drawSize, drawSize * 0.85, 0, 0);
   ctx.restore();
 
-  // Tier indicator label on Tier 3+ prey/hazards
-  if (config.tier >= 3) {
+  // Tier indicator label on Tier 3+ prey/hazards or mutated variants
+  if (config.tier >= 3 || mutationVariant !== 'NONE') {
     ctx.font = '700 11px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillStyle = canEat ? '#86efac' : '#fda4af';
-    ctx.fillText(`T${config.tier}`, 0, -r - 8);
+    ctx.fillStyle =
+      mutationVariant === 'GOLDEN_MUTANT'
+        ? '#fde047'
+        : mutationVariant === 'ABYSS_BEHEMOTH'
+        ? '#e879f9'
+        : canEat
+        ? '#86efac'
+        : '#fda4af';
+    const prefix =
+      mutationVariant === 'GOLDEN_MUTANT'
+        ? '★'
+        : mutationVariant === 'ABYSS_BEHEMOTH'
+        ? '⚡'
+        : '';
+    ctx.fillText(`${prefix}T${config.tier}`, 0, -r - 8);
   }
 
   ctx.restore();

@@ -111,6 +111,7 @@ test('addEvolutionProgress handles single and multi-level XP gains and pickEvolu
 });
 
 import { SPRITE_GRID_MAP } from './spriteSheetManager';
+import { InfiniteWorldManager } from './infiniteWorldManager';
 
 test('SPRITE_GRID_MAP covers all 16 cells of the 4x4 spritesheet uniquely', () => {
   const entries = Object.entries(SPRITE_GRID_MAP);
@@ -118,4 +119,91 @@ test('SPRITE_GRID_MAP covers all 16 cells of the 4x4 spritesheet uniquely', () =
   const coords = new Set(entries.map(([, [r, c]]) => `${r},${c}`));
   assert.equal(coords.size, 16);
 });
+
+test('InfiniteWorldManager wraps horizontally at [-worldWidth/2, +worldWidth/2] and follows unbounded downward depth', () => {
+  const mgr = new InfiniteWorldManager(3000, 0);
+
+  // Right wrap-around: x > 1500 -> -1500 + 50 = -1450
+  const sharkRight = { x: 1520, y: 400 };
+  const camRight = { x: 1510, y: 400 };
+  const resRight = mgr.update(0, sharkRight, camRight);
+  assert.equal(resRight.wrappedHorizontally, true);
+  assert.equal(sharkRight.x, -1450);
+
+  // Left wrap-around: x < -1500 -> +1500 - 50 = +1450
+  const sharkLeft = { x: -1530, y: 600 };
+  const camLeft = { x: -1520, y: 600 };
+  const resLeft = mgr.update(0, sharkLeft, camLeft);
+  assert.equal(resLeft.wrappedHorizontally, true);
+  assert.equal(sharkLeft.x, 1450);
+
+  // Infinite downward depth: y = 6500 is NOT clamped to 1800
+  const sharkDeep = { x: 200, y: 6500 };
+  const camDeep = { x: 200, y: 6400 };
+  const resDeep = mgr.update(1, sharkDeep, camDeep);
+  assert.equal(sharkDeep.y, 6500);
+  assert.equal(resDeep.targetCameraY, 6500);
+  assert.equal(getDepthZone(6500).id, 'abyss');
+
+  // Sea surface clamp: y < 0 is clamped to seaSurfaceY = 0
+  const sharkSurface = { x: 0, y: -45, vy: -100 };
+  const camSurface = { x: 0, y: 10 };
+  const resSurface = mgr.update(0, sharkSurface, camSurface);
+  assert.equal(resSurface.clampedAtSurface, true);
+  assert.equal(sharkSurface.y, 0);
+});
+
+import { EcosystemSpawner } from './ecosystemSpawner';
+import { PreyEntity } from './canvasRenderer';
+
+test('EcosystemSpawner maintains maxActivePreys=50, recycles distant prey beyond 1.5x spawnRadius, and applies Infinite Scaling', () => {
+  const spawner = new EcosystemSpawner(50, 1500);
+  const activePreys: PreyEntity[] = [];
+
+  // Advance 25 seconds -> scaleMultiplier = 1.0 + 25 * 0.01 = 1.25
+  spawner.update(25, activePreys, 0, 500, () => 0.5);
+  assert.equal(activePreys.length, 50);
+  assert.equal(spawner.getScaleMultiplier(), 1.25);
+  assert.equal(activePreys[0].scaleMultiplier, 1.25);
+
+  // Move one prey far outside spawnRadius * 1.5 (e.g. y = 4000, distance = 3500 > 2250)
+  activePreys[0].y = 4000;
+  spawner.update(5, activePreys, 0, 500, () => 0.25);
+  // Still 50 active preys after culling and respawning off-screen with new scaleMultiplier = 1.30
+  assert.equal(activePreys.length, 50);
+  assert.equal(spawner.getScaleMultiplier(), 1.3);
+  assert.equal(activePreys[activePreys.length - 1].scaleMultiplier, 1.3);
+});
+
+import { InfiniteProgressionManager } from './infiniteProgressionManager';
+
+test('InfiniteProgressionManager increases globalDifficultyMultiplier by 10% every 60s and scales prey values', () => {
+  const prog = new InfiniteProgressionManager();
+  assert.equal(prog.globalDifficultyMultiplier, 1.0);
+  assert.equal(prog.getScaledPreyValue(100), 100);
+
+  // Advance 59s -> still 1.0
+  prog.update(59);
+  assert.equal(prog.globalDifficultyMultiplier, 1.0);
+
+  // Advance 2s (total 61s) -> 1.1
+  prog.update(2);
+  assert.equal(prog.globalDifficultyMultiplier, 1.1);
+  assert.equal(prog.getScaledPreyValue(100), 110);
+
+  // Advance 120s (total 181s -> 3 full minutes) -> 1.3
+  prog.update(120);
+  assert.equal(prog.globalDifficultyMultiplier, 1.3);
+  assert.equal(prog.getScaledPreyValue(200), 260);
+
+  // Frenzy stacks & mutation variants
+  assert.equal(prog.addFrenzyStack(), 1.25);
+  assert.equal(prog.addFrenzyStack(), 1.5);
+  assert.equal(prog.rollPreyMutation(10000, () => 0.01), 'GOLDEN_MUTANT');
+  assert.equal(prog.rollPreyMutation(10000, () => 0.28), 'ABYSS_BEHEMOTH');
+  assert.equal(prog.rollPreyMutation(10000, () => 0.95), 'NONE');
+});
+
+
+
 
