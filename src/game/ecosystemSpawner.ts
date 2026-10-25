@@ -16,7 +16,7 @@ export class EcosystemSpawner {
   public maxActivePreys: number = 50;
 
   /**
-   * 在距离玩家多远的外围生成 (800 ~ spawnRadius)
+   * 在距离玩家多远的外围生成 (minSpawnRadius ~ spawnRadius)
    */
   public spawnRadius: number = 1500;
 
@@ -36,9 +36,27 @@ export class EcosystemSpawner {
   private pool: PreyEntity[] = [];
   private nextUid: number = 1;
 
-  constructor(maxActivePreys: number = 50, spawnRadius: number = 1500) {
+  /**
+   * 群居小鱼（SCHOOL_FLEE）成簇结队生成锚点，让小丑鱼/霓虹灯鱼/沙丁鱼等自动排成 3~4 条的小鱼群
+   */
+  private schoolClusterAnchor: {
+    config: PreyTierConfig;
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    angle: number;
+    remainingMates: number;
+  } | null = null;
+
+  constructor(
+    maxActivePreys: number = 50,
+    spawnRadius: number = 1500,
+    minSpawnRadius: number = 540
+  ) {
     this.maxActivePreys = maxActivePreys;
     this.spawnRadius = spawnRadius;
+    this.minSpawnRadius = Math.min(minSpawnRadius, Math.floor(spawnRadius * 0.6));
   }
 
   /**
@@ -46,6 +64,7 @@ export class EcosystemSpawner {
    */
   public reset(activePreys?: PreyEntity[]): void {
     this.gameTime = 0;
+    this.schoolClusterAnchor = null;
     if (activePreys) {
       while (activePreys.length > 0) {
         const p = activePreys.pop();
@@ -55,11 +74,14 @@ export class EcosystemSpawner {
   }
 
   /**
-   * 【核心创新】计算当前游戏时长对应的无限变强倍率
-   * scaleMultiplier = 1.0 + (this.gameTime * 0.01)
+   * 【核心创新】计算当前游戏时长对应的无限变强倍率（前 50s 线性成长，50s 后平滑收敛至 1.65x 软上限，防止小鱼视觉体型超过高阶巨鲨）
    */
   public getScaleMultiplier(): number {
-    return Number((1.0 + this.gameTime * 0.01).toFixed(4));
+    if (this.gameTime <= 50) {
+      return Number((1.0 + this.gameTime * 0.01).toFixed(4));
+    }
+    const extra = Math.min(0.15, (this.gameTime - 50) * 0.0012);
+    return Number((1.5 + extra).toFixed(4));
   }
 
   /**
@@ -84,7 +106,7 @@ export class EcosystemSpawner {
    * 每帧更新：
    * 1. 累加 gameTime
    * 2. 清理距离玩家过远（distance > spawnRadius * 1.5）的鱼并回收到对象池
-   * 3. 维持同屏鱼群数量达到 maxActivePreys (50)
+   * 3. 维持同屏鱼群数量达到 maxActivePreys
    */
   public update(
     deltaTime: number,
@@ -117,7 +139,8 @@ export class EcosystemSpawner {
   }
 
   /**
-   * 在鲨鱼视野外随机方向 (800 ~ spawnRadius) 生成猎物，支持无限向下深渊并应用 Infinite Scaling
+   * 在鲨鱼视野外黄金狩猎环 (minSpawnRadius ~ spawnRadius) 生成猎物，
+   * 支持无限向下深渊、群居鱼成簇编队，并应用 Infinite Scaling
    */
   public spawnPreyOffScreen(
     activePreys: PreyEntity[],
@@ -127,7 +150,51 @@ export class EcosystemSpawner {
     customDistanceRange?: [number, number],
     currentScore: number = 0
   ): PreyEntity {
-    const chosenTier = this.pickPreyConfigForDepth(sharkY, rng);
+    const scaleMultiplier = this.getScaleMultiplier();
+    // 若玩家已快速潜入/上浮离开该鱼群锚点所在水深带，立即清空旧鱼群锚点，防止跨生态层生成伴游鱼
+    if (
+      this.schoolClusterAnchor &&
+      (Math.abs(sharkY - this.schoolClusterAnchor.y) > 320 ||
+        sharkY < this.schoolClusterAnchor.config.minDepth - 120 ||
+        sharkY > this.schoolClusterAnchor.config.maxDepth + 120)
+    ) {
+      this.schoolClusterAnchor = null;
+    }
+
+    // 若当前存在未生成的同伴鱼群锚点，优先在领头鱼附近 (32~68px) 生成同种伴游鱼，形成鱼群编队
+    // 重要防滚雪球机制：伴游鱼固定为普通个体 ('NONE')，严禁一簇鱼群同时刷出 4 条黄金变异鱼导致秒触发狂暴
+    if (this.schoolClusterAnchor && this.schoolClusterAnchor.remainingMates > 0) {
+      const anchor = this.schoolClusterAnchor;
+      anchor.remainingMates -= 1;
+      if (anchor.remainingMates <= 0) {
+        this.schoolClusterAnchor = null;
+      }
+
+      const offsetX = (rng() - 0.5) * 76;
+      const offsetY = (rng() - 0.5) * 52;
+      const mateX = infiniteWorldManager.wrapEntityX(anchor.x + offsetX);
+      const mateY = Math.max(
+        Math.max(25, anchor.config.minDepth),
+        Math.min(anchor.config.maxDepth, anchor.y + offsetY)
+      );
+
+      const entity = this.pool.pop() ?? ({} as PreyEntity);
+      entity.uid = this.nextUid++;
+      entity.config = anchor.config;
+      entity.x = mateX;
+      entity.y = mateY;
+      entity.vx = anchor.vx * (0.94 + rng() * 0.12);
+      entity.vy = anchor.vy + (rng() - 0.5) * 10;
+      entity.angle = anchor.angle;
+      entity.phase = rng() * Math.PI * 2;
+      entity.telegraphTimer = 0;
+      entity.isInflated = false;
+      entity.scaleMultiplier = scaleMultiplier;
+      entity.mutationVariant = 'NONE';
+
+      activePreys.push(entity);
+      return entity;
+    }
 
     const angle = rng() * Math.PI * 2;
     const minD = customDistanceRange ? customDistanceRange[0] : this.minSpawnRadius;
@@ -137,28 +204,58 @@ export class EcosystemSpawner {
     const rawX = sharkX + Math.cos(angle) * distance;
     const spawnX = infiniteWorldManager.wrapEntityX(rawX);
 
-    // Canvas 2D 坐标系下 Y=0 为海面，向下为正方向无限延伸（对应 Cocos Y<0 向下延伸，确保不生成在海面上方）
+    // Canvas 2D 坐标系下 Y=0 为海面，向下为正方向无限延伸（确保不生成在海面上方）
     let spawnY = sharkY + Math.sin(angle) * distance;
-    if (spawnY < 100) {
-      spawnY = 100 + rng() * 180;
+    if (spawnY < 35) {
+      spawnY = 35 + rng() * 220;
     }
 
-    // 【核心创新】应用无限变强数值膨胀（随游戏时长，新刷出的鱼体积、分值、基因奖励成比例上升）
-    const scaleMultiplier = this.getScaleMultiplier();
-    const mutationVariant = infiniteProgressionManager.rollPreyMutation(currentScore, rng);
+    // 根据猎物实际生成的目标水深 spawnY 严格匹配对应生态层的鱼种，并将生成坐标钳制在该物种真实栖息水深内
+    const chosenTier = this.pickPreyConfigForDepth(spawnY, rng);
+    spawnY = Math.max(
+      Math.max(25, chosenTier.minDepth),
+      Math.min(chosenTier.maxDepth, spawnY)
+    );
+    const rolledMutation = infiniteProgressionManager.rollPreyMutation(currentScore, rng);
+    // 水雷/核废料等危险物不生成黄金变异，且浅海前 10 秒降低黄金变异出现率
+    const mutationVariant =
+      chosenTier.isHazard && rolledMutation === 'GOLDEN_MUTANT'
+        ? 'NONE'
+        : rolledMutation;
+
     const speedBoost =
       (mutationVariant === 'ABYSS_BEHEMOTH' ? 1.25 : 1.0) *
       Math.min(1.6, infiniteProgressionManager.globalDifficultyMultiplier);
     const moveDir = rng() < 0.5 ? -1 : 1;
+    const vx = moveDir * chosenTier.baseSpeed * speedBoost;
+    const vy = (rng() - 0.5) * 24;
+    const headingAngle = moveDir > 0 ? 0 : Math.PI;
+
+    // 若抽中小型群居鱼 (SCHOOL_FLEE) 或 T1/T2 浅海鱼，建立 2~3 条伴游鱼编队锚点
+    if (
+      (chosenTier.behavior === 'SCHOOL_FLEE' || chosenTier.tier <= 2) &&
+      !chosenTier.isHazard &&
+      rng() < 0.65
+    ) {
+      this.schoolClusterAnchor = {
+        config: chosenTier,
+        x: spawnX,
+        y: spawnY,
+        vx,
+        vy,
+        angle: headingAngle,
+        remainingMates: chosenTier.tier === 1 ? 3 : 2,
+      };
+    }
 
     const entity = this.pool.pop() ?? ({} as PreyEntity);
     entity.uid = this.nextUid++;
     entity.config = chosenTier;
     entity.x = spawnX;
     entity.y = spawnY;
-    entity.vx = moveDir * chosenTier.baseSpeed * speedBoost;
-    entity.vy = (rng() - 0.5) * 24;
-    entity.angle = moveDir > 0 ? 0 : Math.PI;
+    entity.vx = vx;
+    entity.vy = vy;
+    entity.angle = headingAngle;
     entity.phase = rng() * Math.PI * 2;
     entity.telegraphTimer = 0;
     entity.isInflated = false;
@@ -170,12 +267,12 @@ export class EcosystemSpawner {
   }
 
   /**
-   * 当前悬赏目标鱼 ID（开启时提高该目标鱼在周围海域的刷新权重，确保玩家随时能狩猎目标鱼）
+   * 当前悬赏目标鱼 ID（开启时提高该目标鱼在对应栖息海域的刷新权重）
    */
   public activeTargetPreyId: string | null = null;
 
   private pickPreyConfigForDepth(
-    sharkY: number,
+    targetDepthY: number,
     rng: () => number
   ): PreyTierConfig {
     const allPreys = GAME_CONFIG.preyTiers;
@@ -183,22 +280,35 @@ export class EcosystemSpawner {
       throw new Error('GAME_CONFIG.preyTiers is empty');
     }
 
-    // 若存在当前悬赏目标鱼，22% 概率直接刷新该目标鱼以保证良好狩猎体验
-    if (this.activeTargetPreyId && rng() < 0.22) {
-      const targetConfig = allPreys.find((p) => p.id === this.activeTargetPreyId);
+    const depth = Math.max(25, targetDepthY);
+
+    // 严格筛选当前水深落在该鱼种真实自然栖息带 [minDepth, maxDepth] 内的物种（绝不让浅水鱼刷到深海，也绝不让深水鱼刷到浅海）
+    const habitatPool = allPreys.filter(
+      (p) => depth >= p.minDepth && depth <= p.maxDepth
+    );
+    const activePool =
+      habitatPool.length > 0
+        ? habitatPool
+        : depth <= 520
+        ? allPreys.filter((p) => p.maxDepth <= 520)
+        : allPreys.filter((p) => p.minDepth >= 500);
+
+    // 若存在当前悬赏目标鱼，仅当该目标鱼确实属于当前水深栖息群落时，才以 26% 概率优先刷新（杜绝跨水深强行刷出浅水/深水目标鱼）
+    if (this.activeTargetPreyId && rng() < 0.26) {
+      const targetConfig = activePool.find((p) => p.id === this.activeTargetPreyId);
       if (targetConfig) {
         return targetConfig;
       }
     }
 
-    // 根据下潜深度动态调整 Tier 1..8 的阶位权重
-    const depth = Math.max(0, sharkY);
+    // 根据真实海洋生态垂直分层动态分配 Tier 1..8 阶位权重：
+    // 浅海珊瑚礁 (0~520m)：T1~T4 热带珊瑚礁鱼类；暮光带 (520~1150m)：T3~T6 中层发光鱼与乌贼；深渊带 (1150m+)：T3~T8 深渊掠食者与巨兽
     const tierWeights =
-      depth > 1250
-        ? [14, 14, 15, 15, 14, 11, 11, 6]
-        : depth > 650
-        ? [20, 20, 18, 14, 11, 8, 6, 3]
-        : [28, 25, 16, 11, 8, 6, 4, 2];
+      depth > 1150
+        ? [0, 0, 12, 18, 22, 20, 16, 12]
+        : depth > 520
+        ? [0, 0, 32, 30, 24, 14, 0, 0]
+        : [40, 34, 18, 8, 0, 0, 0, 0];
 
     const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
     let roll = rng() * totalWeight;
@@ -211,20 +321,14 @@ export class EcosystemSpawner {
       }
     }
 
-    const candidates = allPreys.filter((p) => p.tier === chosenTierNum);
-    if (candidates.length === 0) {
-      return allPreys[0];
-    }
-
-    // 优先选择适合当前下潜深度的鱼种（若有多条则随机抽取）
-    const depthMatched = candidates.filter(
-      (p) => depth >= p.minDepth - 180 && depth <= p.maxDepth + 350
-    );
-    const pool = depthMatched.length > 0 ? depthMatched : candidates;
-    const idx = Math.min(pool.length - 1, Math.floor(rng() * pool.length));
-    return pool[idx];
+    const tierMatches = activePool.filter((p) => p.tier === chosenTierNum);
+    const finalPool = tierMatches.length > 0 ? tierMatches : activePool;
+    const idx = Math.min(finalPool.length - 1, Math.floor(rng() * finalPool.length));
+    return finalPool[idx];
   }
 }
 
-export const ecosystemSpawner = new EcosystemSpawner(50, 1500);
+// 局内实时生态生成器：将刷新圈收紧至紧贴视口外缘的黄金狩猎环 (520px ~ 1060px)，同屏上限提升至 58 条
+export const ecosystemSpawner = new EcosystemSpawner(58, 1060, 520);
+
 

@@ -229,9 +229,147 @@ test('InfiniteProgressionManager increases globalDifficultyMultiplier by 10% eve
   assert.equal(prog.addFrenzyStack(), 1.25);
   assert.equal(prog.addFrenzyStack(), 1.5);
   assert.equal(prog.rollPreyMutation(10000, () => 0.01), 'GOLDEN_MUTANT');
-  assert.equal(prog.rollPreyMutation(10000, () => 0.28), 'ABYSS_BEHEMOTH');
+  assert.equal(prog.rollPreyMutation(10000, () => 0.12), 'ABYSS_BEHEMOTH');
   assert.equal(prog.rollPreyMutation(10000, () => 0.95), 'NONE');
 });
+
+import {
+  getEffectivePreyTier,
+  getGeneSurgeCost,
+  getGoldOverdriveCost,
+  getOrganRerollCost,
+  getPreyRelativeVisualScale,
+} from './rules';
+
+test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, Abyss Behemoth armor tier, and dynamic economy costs', () => {
+  // 1. ARMOR no longer grants redundant +1 biteTierBonus; only JAWS and 3-piece MAGMA synergy grant +1 Bite Tier
+  for (const organ of GAME_CONFIG.organs) {
+    if (organ.slot === 'ARMOR') {
+      assert.equal(organ.stats.biteTierBonus, 0, `${organ.id} should not grant biteTierBonus`);
+    }
+    if (organ.slot === 'JAWS') {
+      assert.equal(organ.stats.biteTierBonus, 1, `${organ.id} must grant +1 biteTierBonus`);
+    }
+  }
+
+  // 2. 3-Piece Faction Synergies & Organ Star Upgrades (★1 -> ★3)
+  const mechaLoadout = getMaxMechaLoadout();
+  const s1 = computeSharkStats(4, mechaLoadout, false, { JAWS: 1, TAIL: 1 }, 1.0);
+  const s3 = computeSharkStats(4, mechaLoadout, false, { JAWS: 3, TAIL: 3 }, 1.0);
+  assert.equal(s1.activeSynergy, 'MECHA');
+  assert.ok(s3.moveSpeed > s1.moveSpeed, 'Star-upgraded organs must increase moveSpeed');
+  assert.ok(s3.magnetRadius > s1.magnetRadius, 'Star-upgraded organs must increase magnetRadius');
+
+  // Dynamic metabolic hunger drain increases with level and globalDifficultyMultiplier
+  const earlyDrain = computeSharkStats(1, {}, false, {}, 1.0).hpDrainPerSec;
+  const lateDrain = computeSharkStats(10, {}, false, {}, 1.5).hpDrainPerSec;
+  assert.ok(lateDrain > earlyDrain * 2.5, 'Late-game metabolic hunger drain must scale up significantly');
+
+  // 3. Abyss Behemoth adds +1 effective Bite Tier and increases fail damage
+  const tier4Sub = GAME_CONFIG.preyTiers[3]; // Tier 4 Submarine
+  assert.equal(getEffectivePreyTier(tier4Sub, 'NONE'), 4);
+  assert.equal(getEffectivePreyTier(tier4Sub, 'ABYSS_BEHEMOTH'), 5);
+
+  const tier4Shark = computeSharkStats(4, {}, false); // biteTier = 2 + 2 = 4
+  const normalSubEncounter = resolvePreyEncounter(tier4Shark, tier4Sub, false, false, 'NONE', 1.0);
+  const behemothSubEncounter = resolvePreyEncounter(tier4Shark, tier4Sub, false, false, 'ABYSS_BEHEMOTH', 1.4);
+  assert.equal(normalSubEncounter.canDevour, true, 'BiteTier 4 shark can eat normal Tier 4 sub');
+  assert.equal(behemothSubEncounter.canDevour, false, 'BiteTier 4 shark cannot eat Tier 4 Abyss Behemoth (effective Tier 5)');
+  assert.ok(behemothSubEncounter.hpDelta < -tier4Sub.damageOnFail, 'Abyss Behemoth at 1.4x difficulty deals amplified damage');
+
+  // 4. Dynamic Economy Cost Scaling prevents infinite loop arbitrage
+  assert.equal(getGoldOverdriveCost(0), 35);
+  assert.equal(getGoldOverdriveCost(1), 60);
+  assert.equal(getGoldOverdriveCost(2), 85);
+
+  assert.equal(getGeneSurgeCost(1, 0), 15);
+  assert.equal(getGeneSurgeCost(5, 2), 15 + 24 + 20);
+
+  assert.equal(getOrganRerollCost(0), 8);
+  assert.equal(getOrganRerollCost(3), 20);
+
+  // 5. EcosystemSpawner soft-caps scaleMultiplier at 1.65x in long runs
+  const longSpawner = new EcosystemSpawner(50, 1500);
+  const dummyPreys: PreyEntity[] = [];
+  longSpawner.update(400, dummyPreys, 0, 500, () => 0.5);
+  assert.equal(longSpawner.getScaleMultiplier(), 1.65);
+
+  // 6. Anti-Snowball Verification:
+  // (a) Initial 12s protection + 8 Golden Mutants required + 25s post-frenzy cooldown
+  const progMgr = new InfiniteProgressionManager();
+  progMgr.reset();
+  assert.equal(progMgr.frenzyCooldownTimer, 12);
+  assert.equal(progMgr.registerGoldenMutantDevoured(), false, 'Cannot charge frenzy during 12s initial cooldown');
+  progMgr.update(12.5);
+  for (let i = 0; i < 7; i++) {
+    assert.equal(progMgr.registerGoldenMutantDevoured(), false, `Golden mutant #${i + 1} should not trigger frenzy yet`);
+  }
+  assert.equal(progMgr.registerGoldenMutantDevoured(), true, '8th Golden Mutant after cooldown triggers frenzy');
+  assert.equal(progMgr.frenzyCooldownTimer, 25, 'Post-frenzy cooldown set to 25s');
+
+  // (b) Deep-sea hazards (Naval Mines) ALWAYS explode outside of Gold Frenzy, even at Lv.16 Bite Tier 8 while boosting
+  const maxShark = computeSharkStats(16, getMaxMechaLoadout(), false);
+  assert.equal(maxShark.biteTier, 8);
+  const tier6Mine = GAME_CONFIG.preyTiers[5];
+  const mineHitAtMaxLevel = resolvePreyEncounter(maxShark, tier6Mine, false, true, 'NONE', 1.5);
+  assert.equal(mineHitAtMaxLevel.canDevour, false, 'Mines must ALWAYS explode outside of Gold Frenzy even at Bite Tier 8');
+  assert.ok(mineHitAtMaxLevel.hpDelta < -80, 'Mines deal lethal flat + maxHP% damage in deep sea');
+
+  // (c) Tier 8 Bosses & Tier 7+ Abyss Behemoths require active Boost outside of Gold Frenzy even at Bite Tier 8
+  const tier8Boss = GAME_CONFIG.preyTiers[7];
+  const bossNoBoost = resolvePreyEncounter(maxShark, tier8Boss, false, false, 'NONE', 1.2);
+  const bossWithBoost = resolvePreyEncounter(maxShark, tier8Boss, false, true, 'NONE', 1.2);
+  assert.equal(bossNoBoost.canDevour, false, 'Tier 8 Boss counter-bites if shark is not actively Boosting');
+  assert.equal(bossWithBoost.canDevour, true, 'Tier 8 Boss can be devoured at Bite Tier 8 when actively Boosting');
+
+  // 7. Relative Prey Shrinking: shark scale stays non-obstructive (<= 1.28) while other fish shrink progressively as shark levels up
+  const lv1Shark = computeSharkStats(1, {}, false);
+  const lv5Shark = computeSharkStats(5, {}, false);
+  const lv12Shark = computeSharkStats(12, getMaxMechaLoadout(), false);
+  assert.equal(lv1Shark.relativePreyScale, 1.0);
+  assert.ok(lv5Shark.relativePreyScale < lv1Shark.relativePreyScale);
+  assert.ok(lv12Shark.relativePreyScale < lv5Shark.relativePreyScale);
+  assert.ok(lv12Shark.scale <= 1.28, 'Shark on-screen scale must stay bounded so it never obstructs field of view');
+
+  const tier1Fish = GAME_CONFIG.preyTiers[0];
+  const fishScaleAtLv1 = getPreyRelativeVisualScale(tier1Fish, lv1Shark, 'NONE');
+  const fishScaleAtLv5 = getPreyRelativeVisualScale(tier1Fish, lv5Shark, 'NONE');
+  const fishScaleAtLv12 = getPreyRelativeVisualScale(tier1Fish, lv12Shark, 'NONE');
+  assert.ok(fishScaleAtLv5 < fishScaleAtLv1, 'Prey visually shrinks as shark grows to Lv.5');
+  assert.ok(fishScaleAtLv12 < fishScaleAtLv5, 'Prey shrinks further at Lv.12');
+
+  // 8. Authentic Marine Depth Stratification: shallow coral reef fish never spawn in deep sea, and deep-sea fish never spawn in shallow water
+  const depthSpawner = new EcosystemSpawner(50, 1000, 500);
+  const shallowSamples: PreyEntity[] = [];
+  const deepSamples: PreyEntity[] = [];
+
+  for (let i = 0; i < 40; i++) {
+    // Spawn near y = 180m (Shallow Coral Reef) with tight radius [10, 60]
+    const sPrey = depthSpawner.spawnPreyOffScreen(shallowSamples, 0, 180, () => (i % 10) / 10, [10, 60], 0);
+    assert.ok(
+      sPrey.y >= sPrey.config.minDepth && sPrey.y <= sPrey.config.maxDepth,
+      `Shallow spawn ${sPrey.config.id} at y=${sPrey.y} must be within [${sPrey.config.minDepth}, ${sPrey.config.maxDepth}]`
+    );
+    assert.ok(
+      sPrey.config.minDepth <= 520,
+      `Deep-sea species ${sPrey.config.id} (minDepth=${sPrey.config.minDepth}) must never spawn in shallow water`
+    );
+
+    // Spawn near y = 1500m (Deep Abyss) with tight radius [10, 60]
+    const dPrey = depthSpawner.spawnPreyOffScreen(deepSamples, 0, 1500, () => (i % 10) / 10, [10, 60], 0);
+    assert.ok(
+      dPrey.y >= dPrey.config.minDepth && dPrey.y <= dPrey.config.maxDepth,
+      `Deep spawn ${dPrey.config.id} at y=${dPrey.y} must be within [${dPrey.config.minDepth}, ${dPrey.config.maxDepth}]`
+    );
+    assert.ok(
+      dPrey.config.maxDepth >= 1150,
+      `Shallow reef species ${dPrey.config.id} (maxDepth=${dPrey.config.maxDepth}) must never spawn in the deep abyss`
+    );
+  }
+});
+
+
+
 
 
 

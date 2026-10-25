@@ -346,20 +346,52 @@ export class ParallaxBackground {
   private sliceSheetIntoThreeLayers(
     source: HTMLImageElement | HTMLCanvasElement
   ): void {
-    const w =
+    const rawW =
       source instanceof HTMLImageElement ? source.naturalWidth : source.width;
-    const h =
+    const rawH =
       source instanceof HTMLImageElement ? source.naturalHeight : source.height;
-    const layerH = Math.floor(h / 3);
+    const layerH = Math.floor(rawH / 3);
+
+    // Trim 12px from left/right edges to remove any source image border artifacts,
+    // and build a 2x ping-pong mirror-tiled strip [A | flipH(A)] so horizontal wrapping has zero seam
+    const trimX = rawW > 200 ? 12 : 0;
+    const cropW = Math.max(1, rawW - trimX * 2);
 
     const sliced: HTMLCanvasElement[] = [];
     for (let row = 0; row < 3; row++) {
       const c = document.createElement('canvas');
-      c.width = w;
+      c.width = cropW * 2;
       c.height = layerH;
       const cCtx = c.getContext('2d');
       if (cCtx) {
-        cCtx.drawImage(source, 0, row * layerH, w, layerH, 0, 0, w, layerH);
+        // Left half: normal strip
+        cCtx.drawImage(
+          source,
+          trimX,
+          row * layerH,
+          cropW,
+          layerH,
+          0,
+          0,
+          cropW,
+          layerH
+        );
+        // Right half: horizontally mirrored strip so both joins (x=cropW and x=2*cropW) match pixel-for-pixel
+        cCtx.save();
+        cCtx.translate(cropW * 2, 0);
+        cCtx.scale(-1, 1);
+        cCtx.drawImage(
+          source,
+          trimX,
+          row * layerH,
+          cropW,
+          layerH,
+          0,
+          0,
+          cropW,
+          layerH
+        );
+        cCtx.restore();
       }
       sliced.push(c);
     }
@@ -500,6 +532,52 @@ export class ParallaxBackground {
       ctx.stroke();
     }
     ctx.restore();
+
+    // 4. P2-1 Depth-Based Ambient Pressure Vignette & Abyssal Magma Underglow
+    if (sharkY > 520) {
+      ctx.save();
+      const depthPressure = Math.min(1, (sharkY - 520) / 1100);
+      const outerR = Math.hypot(viewW, viewH) * 0.58;
+      const innerR = Math.min(viewW, viewH) * (0.28 - depthPressure * 0.06);
+      const vig = ctx.createRadialGradient(
+        viewW * 0.5,
+        viewH * 0.5,
+        innerR,
+        viewW * 0.5,
+        viewH * 0.5,
+        outerR
+      );
+      vig.addColorStop(0, 'rgba(2, 6, 23, 0)');
+      vig.addColorStop(
+        0.72,
+        `rgba(4, 12, 34, ${(depthPressure * 0.28).toFixed(3)})`
+      );
+      vig.addColorStop(
+        1,
+        `rgba(2, 6, 23, ${(depthPressure * 0.56).toFixed(3)})`
+      );
+      ctx.fillStyle = vig;
+      ctx.fillRect(0, 0, viewW, viewH);
+
+      // Pulsing hydrothermal magma underglow when diving into the Abyssal Trench (>1180m)
+      if (sharkY > 1180) {
+        const magmaFactor = Math.min(1, (sharkY - 1180) / 450);
+        const pulse = 0.78 + Math.sin(nowMs * 0.0028) * 0.22;
+        const lavaGrad = ctx.createLinearGradient(0, viewH * 0.62, 0, viewH);
+        lavaGrad.addColorStop(0, 'rgba(234, 88, 12, 0)');
+        lavaGrad.addColorStop(
+          0.7,
+          `rgba(234, 88, 12, ${(magmaFactor * 0.12 * pulse).toFixed(3)})`
+        );
+        lavaGrad.addColorStop(
+          1,
+          `rgba(251, 146, 60, ${(magmaFactor * 0.26 * pulse).toFixed(3)})`
+        );
+        ctx.fillStyle = lavaGrad;
+        ctx.fillRect(0, viewH * 0.62, viewW, viewH * 0.38);
+      }
+      ctx.restore();
+    }
   }
 }
 
