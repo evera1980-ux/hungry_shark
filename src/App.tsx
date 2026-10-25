@@ -4,6 +4,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { detectDefaultLang, Lang, translate } from './game/i18n';
 import {
   GAME_CONFIG,
@@ -166,6 +167,9 @@ export default function App() {
     biteTier: 2,
     frenzyTimer: 0,
     trialActive: false,
+    targetFishNameKey: 'prey_blue_tang_name',
+    targetFishProgress: 0,
+    targetFishRequired: 2,
   });
 
   const [equippedOrgans, setEquippedOrgans] = useState<EquippedOrgansMap>({});
@@ -237,6 +241,11 @@ export default function App() {
     floatTexts: PooledFloatText[];
     floatCursor: number;
     lastHudSyncTime: number;
+    targetBounty: {
+      preyConfig: PreyTierConfig;
+      progress: number;
+      required: number;
+    };
   }>({
     shark: {
       x: 0,
@@ -319,6 +328,13 @@ export default function App() {
     })),
     floatCursor: 0,
     lastHudSyncTime: 0,
+    targetBounty: {
+      preyConfig:
+        GAME_CONFIG.preyTiers.find((p) => p.id === 'regal_blue_tang') ??
+        GAME_CONFIG.preyTiers[1],
+      progress: 0,
+      required: 2,
+    },
   });
 
   // Sync document.body.dataset.state whenever gameState changes
@@ -329,9 +345,12 @@ export default function App() {
     }
   }, [gameState]);
 
-  // Register Browser Simulated Video Ad Runner & Load 4x4 Sprite Sheet + 3-Layer Parallax Background
+  // Register Browser Simulated Video Ad Runner & Load 4x4 + 6x5 Sprite Sheets + 3-Layer Parallax Background
   useEffect(() => {
-    spriteSheetManager.load('/assets/aistudio/fish_24bdaa5a.png');
+    spriteSheetManager.load(
+      '/assets/aistudio/fish_24bdaa5a.png',
+      '/assets/aistudio/fish2_fc857cfa.png'
+    );
     parallaxBackground.load('/assets/aistudio/ocean_bg_a7a0ef52.png');
     adManager.registerBrowserSimulator((placement, onReward, onCancel) => {
       setSimAd({
@@ -440,7 +459,26 @@ export default function App() {
     []
   );
 
-  // Spawn a single prey entity within the [-worldWidth/2, +worldWidth/2] wrap-around world and dynamic infinite depth
+  // Pick an edible Target Fish species for the active Target Bounty mission
+  const rollTargetBountyConfig = useCallback(
+    (maxBiteTier: number, currentDepth: number, excludeId?: string): PreyTierConfig => {
+      const edible = GAME_CONFIG.preyTiers.filter(
+        (p) =>
+          p.tier <= Math.max(2, maxBiteTier) &&
+          !p.isHazard &&
+          p.id !== excludeId
+      );
+      const depthSuitable = edible.filter(
+        (p) => currentDepth >= p.minDepth - 220 && currentDepth <= p.maxDepth + 350
+      );
+      const pool = depthSuitable.length > 0 ? depthSuitable : edible;
+      if (pool.length === 0) return GAME_CONFIG.preyTiers[0];
+      return pool[Math.floor(Math.random() * pool.length)];
+    },
+    []
+  );
+
+  // Spawn a single prey entity across all 32 marine species in GAME_CONFIG.preyTiers
   const createPreyEntity = useCallback(
     (nearSharkX?: number, nearSharkY?: number): PreyEntity => {
       const sim = simRef.current;
@@ -448,20 +486,28 @@ export default function App() {
       const refDepth = typeof nearSharkY === 'number' ? Math.max(0, nearSharkY) : 220;
 
       // Weight lower tiers higher in shallow water; shift toward deep abyssal tiers when diving past 1200m+
-      const weights =
+      const tierWeights =
         refDepth > 1250
           ? [12, 12, 14, 16, 16, 12, 12, 6]
           : [26, 24, 16, 11, 9, 7, 5, 2];
-      const totalWeight = weights.reduce((a, b) => a + b, 0);
+      const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
       let roll = Math.random() * totalWeight;
-      let chosenTier: PreyTierConfig = GAME_CONFIG.preyTiers[0];
-      for (let i = 0; i < GAME_CONFIG.preyTiers.length; i++) {
-        roll -= weights[i];
+      let chosenTierNum = 1;
+      for (let t = 0; t < tierWeights.length; t++) {
+        roll -= tierWeights[t];
         if (roll <= 0) {
-          chosenTier = GAME_CONFIG.preyTiers[i];
+          chosenTierNum = t + 1;
           break;
         }
       }
+
+      const tierCandidates = GAME_CONFIG.preyTiers.filter(
+        (p) => p.tier === chosenTierNum
+      );
+      const chosenTier: PreyTierConfig =
+        tierCandidates.length > 0
+          ? tierCandidates[Math.floor(Math.random() * tierCandidates.length)]
+          : GAME_CONFIG.preyTiers[0];
 
       let y =
         chosenTier.minDepth +
@@ -554,6 +600,15 @@ export default function App() {
       sim.pickups.forEach((pk) => (pk.active = false));
       sim.floatTexts.forEach((ft) => (ft.active = false));
 
+      // Initialize first Target Fish Bounty & sync with EcosystemSpawner
+      const firstTargetConfig = rollTargetBountyConfig(stats.biteTier, 220);
+      sim.targetBounty = {
+        preyConfig: firstTargetConfig,
+        progress: 0,
+        required: 2,
+      };
+      ecosystemSpawner.activeTargetPreyId = firstTargetConfig.id;
+
       // Populate initial ocean ecosystem via EcosystemSpawner object pool & reset InfiniteProgressionManager
       infiniteProgressionManager.reset();
       ecosystemSpawner.reset(sim.preyList);
@@ -567,9 +622,19 @@ export default function App() {
           0
         );
       }
-      // Guarantee 6 edible Tier 1 & Tier 2 fish right in front of the starting shark (total = maxActivePreys = 50)
+      // Guarantee 6 edible Tier 1 & Tier 2 target fish right in front of the starting shark (including the active Target Bounty species!)
+      const starterShowcaseIds = [
+        firstTargetConfig.id,
+        'neon_tetra_school',
+        'regal_blue_tang',
+        'coral_clownfish',
+        'rainbow_seahorse',
+        'striped_butterflyfish',
+      ];
       for (let i = 0; i < 6; i++) {
-        const tierConfig = GAME_CONFIG.preyTiers[i % 2];
+        const tierConfig =
+          GAME_CONFIG.preyTiers.find((p) => p.id === starterShowcaseIds[i]) ??
+          GAME_CONFIG.preyTiers[i % 2];
         sim.preyList.push({
           uid: sim.nextPreyUid++,
           config: tierConfig,
@@ -603,6 +668,9 @@ export default function App() {
         biteTier: stats.biteTier,
         frenzyTimer: withMaxMechaTrial ? 4 : 0,
         trialActive: withMaxMechaTrial,
+        targetFishNameKey: firstTargetConfig.nameKey,
+        targetFishProgress: 0,
+        targetFishRequired: 2,
       });
 
       if (withMaxMechaTrial) {
@@ -617,7 +685,7 @@ export default function App() {
       document.body.dataset.state = 'playing';
       setGameState('playing');
     },
-    [createPreyEntity, spawnFloatText]
+    [rollTargetBountyConfig, spawnFloatText]
   );
 
   // If booted with ?autostart=1, initialize the ocean run immediately on mount
@@ -1214,6 +1282,38 @@ export default function App() {
                 outcome.isCrit ? 1.22 : 1.0
               );
 
+              // Check if devoured prey matches the active Target Fish Bounty (🎯 悬赏目标鱼)
+              if (prey.config.id === sim.targetBounty.preyConfig.id) {
+                sim.targetBounty.progress += 1;
+                if (sim.targetBounty.progress >= sim.targetBounty.required) {
+                  const bountyBonusScore = infiniteProgressionManager.getScaledPreyValue(
+                    350 * prey.config.tier
+                  );
+                  shark.score += bountyBonusScore;
+                  shark.genes += 12;
+                  shark.coins += 18;
+                  spawnFloatText(
+                    shark.x,
+                    shark.y - 38,
+                    'float_target_bounty',
+                    `+${bountyBonusScore} 🎯`,
+                    '#38bdf8',
+                    1.28
+                  );
+                  const nextTarget = rollTargetBountyConfig(
+                    shark.stats.biteTier,
+                    shark.y,
+                    prey.config.id
+                  );
+                  sim.targetBounty = {
+                    preyConfig: nextTarget,
+                    progress: 0,
+                    required: 2,
+                  };
+                  ecosystemSpawner.activeTargetPreyId = nextTarget.id;
+                }
+              }
+
               // Evolution XP check
               const prog = addEvolutionProgress(
                 shark.level,
@@ -1416,6 +1516,9 @@ export default function App() {
             biteTier: shark.stats.biteTier,
             frenzyTimer: Number(shark.frenzyTimer.toFixed(1)),
             trialActive: shark.trialActive,
+            targetFishNameKey: sim.targetBounty.preyConfig.nameKey,
+            targetFishProgress: sim.targetBounty.progress,
+            targetFishRequired: sim.targetBounty.required,
           });
         }
       }
@@ -1449,9 +1552,12 @@ export default function App() {
       ctx.scale(sim.camera.zoom, sim.camera.zoom);
       ctx.translate(-sim.camera.x, -sim.camera.y);
 
-      // Ocean Surface Waves at y = 0..35 across [-worldWidth/2 - 800, +worldWidth/2 + 800]
-      const surfStart = -infiniteWorldManager.worldWidth / 2 - 800;
-      const surfEnd = infiniteWorldManager.worldWidth / 2 + 800;
+      // Dynamic phase-locked horizontal span around camera.x (120px is a multiple of 60px wave step & 24px dash period)
+      const halfSpanX = Math.ceil(viewW / Math.max(0.35, sim.camera.zoom)) + 480;
+      const surfStart = Math.floor((sim.camera.x - halfSpanX) / 120) * 120;
+      const surfEnd = Math.ceil((sim.camera.x + halfSpanX) / 120) * 120;
+
+      // Ocean Surface Waves at y = 0..35 extending infinitely with the camera
       ctx.strokeStyle = 'rgba(125, 211, 252, 0.55)';
       ctx.lineWidth = 4;
       ctx.beginPath();
@@ -1462,7 +1568,7 @@ export default function App() {
       }
       ctx.stroke();
 
-      // Zone Depth Boundary Lines (Subtle diegetic depth markers)
+      // Zone Depth Boundary Lines (Subtle diegetic depth markers, phase-locked to 24px dash cycle)
       for (const z of GAME_CONFIG.zones) {
         if (z.minDepth > 0) {
           ctx.strokeStyle = 'rgba(148, 163, 184, 0.14)';
@@ -1508,7 +1614,8 @@ export default function App() {
             ctx,
             prey,
             shark.stats.biteTier,
-            shark.frenzyTimer > 0
+            shark.frenzyTimer > 0,
+            sim.targetBounty.preyConfig.id
           );
         }
       }
@@ -1645,731 +1752,891 @@ export default function App() {
       />
 
       {/* Low HP Danger Vignette */}
-      {gameState === 'playing' && hudState.hp < hudState.maxHp * 0.28 && (
-        <div
-          className="fixed inset-0 pointer-events-none transition-opacity duration-300"
-          style={{
-            boxShadow: 'inset 0 0 90px rgba(244, 63, 94, 0.55)',
-          }}
-        />
-      )}
+      <AnimatePresence>
+        {gameState === 'playing' && hudState.hp < hudState.maxHp * 0.28 && (
+          <motion.div
+            key="low-hp-vignette"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 pointer-events-none animate-pulse-danger"
+            style={{
+              boxShadow: 'inset 0 0 90px rgba(244, 63, 94, 0.55)',
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* ==================== TOP-RIGHT UTILITY BAR (ON TITLE SCREEN) ==================== */}
-      {gameState === 'title' && (
-        <div className="fixed top-4 right-4 z-30 flex items-center gap-2 pointer-events-auto">
-          <button
-            type="button"
-            onClick={toggleLanguage}
-            aria-label={t('btn_lang_toggle')}
-            className="px-3.5 py-2 rounded-lg font-display font-bold text-xs tracking-wide text-sky-100 bg-slate-900/90 border border-sky-400/40 hover:border-sky-300 hover:bg-slate-800 active:scale-95 transition-transform whitespace-nowrap shrink-0 cursor-pointer"
+      <AnimatePresence>
+        {gameState === 'title' && (
+          <motion.div
+            key="title-top-right-bar"
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+            className="fixed top-4 right-4 z-30 flex items-center gap-2 pointer-events-auto"
           >
-            🌐 {t('btn_lang_toggle')} ({lang.toUpperCase()})
-          </button>
-
-          <button
-            type="button"
-            tabIndex={-1}
-            onClick={toggleMute}
-            aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
-            className="px-3 py-2 rounded-lg font-display font-semibold text-xs text-slate-200 bg-slate-900/90 border border-slate-700 hover:border-slate-500 active:scale-95 transition-transform whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            {isMuted ? '🔇' : '🔊'} {isMuted ? t('btn_unmute') : t('btn_mute')}
-          </button>
-        </div>
-      )}
-
-      {/* ==================== 1. TITLE SCREEN OVERLAY ==================== */}
-      {gameState === 'title' && (
-        <section
-          aria-label={t('game_title')}
-          className="fixed inset-0 z-20 flex flex-col justify-between p-6 md:p-12 pointer-events-none"
-          style={{
-            background:
-              'radial-gradient(circle at 50% 35%, rgba(2, 132, 199, 0.12) 0%, rgba(2, 6, 23, 0.78) 100%)',
-          }}
-        >
-          <div className="h-4" />
-
-          {/* Centerpiece SVG Emblem + Primary Start & Trial Max Mecha Ad CTA */}
-          <div className="max-w-xl mx-auto flex flex-col items-center text-center pointer-events-auto -mt-12">
-            {/* Bespoke Inline SVG Shark Fin & DNA Crest Emblem */}
-            <svg
-              viewBox="0 0 180 76"
-              className="w-36 h-16 mb-2 overflow-visible"
-              aria-hidden="true"
+            <button
+              type="button"
+              onClick={toggleLanguage}
+              aria-label={t('btn_lang_toggle')}
+              className="game-btn-spring px-3.5 py-2 rounded-lg font-display font-bold text-xs tracking-wide text-sky-100 bg-slate-900/90 border border-sky-400/40 hover:border-sky-300 hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <defs>
-                <linearGradient id="crestGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#38bdf8" />
-                  <stop offset="50%" stopColor="#2dd4bf" />
-                  <stop offset="100%" stopColor="#a855f7" />
-                </linearGradient>
-              </defs>
-              <path
-                d="M25 62 Q70 52 92 10 Q96 36 116 54 Q138 58 156 62 Z"
-                fill="url(#crestGrad)"
-                stroke="#e0f2fe"
-                strokeWidth="2.5"
-              />
-              <circle cx="92" cy="42" r="6" fill="#fde047" />
-              <path
-                d="M16 66 Q90 54 164 66"
-                fill="none"
-                stroke="#38bdf8"
-                strokeWidth="3"
-                strokeLinecap="round"
-              />
-            </svg>
-
-            <h1
-              className="font-display font-extrabold text-white tracking-tight hud-stroke mb-2"
-              style={{
-                fontSize: 'clamp(2.1rem, 4.2vw, 3.4rem)',
-                textWrap: 'balance',
-              }}
-            >
-              {t('game_title')}
-            </h1>
-
-            <p className="text-sky-200/90 text-sm md:text-base font-medium mb-6 max-w-md">
-              {t('game_subtitle')}
-            </p>
-
-            {/* Primary Actions (<= 3 menu actions total) */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 w-full">
-              <button
-                type="button"
-                data-start="true"
-                onClick={() => startNewRun(false)}
-                className="w-full sm:w-auto px-8 py-3.5 rounded-xl font-display font-extrabold text-base md:text-lg text-slate-950 bg-emerald-400 hover:bg-emerald-300 active:scale-95 transition-transform shadow-lg cursor-pointer whitespace-nowrap shrink-0"
-              >
-                ▶ {t('btn_start')}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleTrialMaxMechaAd}
-                className="w-full sm:w-auto px-6 py-3.5 rounded-xl font-display font-bold text-sm md:text-base text-amber-950 bg-amber-400 hover:bg-amber-300 active:scale-95 transition-transform shadow-lg cursor-pointer whitespace-nowrap shrink-0"
-              >
-                {t('btn_trial_mecha')}
-              </button>
-            </div>
+              🌐 {t('btn_lang_toggle')} ({lang.toUpperCase()})
+            </button>
 
             <button
               type="button"
-              onClick={downloadStandaloneSingleFileHtml}
-              className="mt-3.5 px-4 py-1 text-xs font-medium text-sky-300/85 hover:text-white underline underline-offset-4 cursor-pointer whitespace-nowrap"
+              tabIndex={-1}
+              onClick={toggleMute}
+              aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
+              className="game-btn-spring px-3 py-2 rounded-lg font-display font-semibold text-xs text-slate-200 bg-slate-900/90 border border-slate-700 hover:border-slate-500 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              ⬇ {t('btn_export_html')}
+              {isMuted ? '🔇' : '🔊'} {isMuted ? t('btn_unmute') : t('btn_mute')}
             </button>
-          </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-          {/* Flat Single-Line Control Hint in Bottom Safe Margin */}
-          <div className="text-center text-xs md:text-sm text-slate-300/90 font-medium tracking-wide">
-            {t('control_hint')}
-          </div>
-        </section>
-      )}
+      {/* ==================== 1. TITLE SCREEN OVERLAY ==================== */}
+      <AnimatePresence>
+        {gameState === 'title' && (
+          <motion.section
+            key="title-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            aria-label={t('game_title')}
+            className="fixed inset-0 z-20 flex flex-col justify-between p-6 md:p-12 pointer-events-none"
+            style={{
+              background:
+                'radial-gradient(circle at 50% 35%, rgba(2, 132, 199, 0.12) 0%, rgba(2, 6, 23, 0.78) 100%)',
+            }}
+          >
+            <div className="h-4" />
 
-      {/* ==================== 2. PLAYING HUD (WORLD-MATCHED PERIMETER CLUSTERS) ==================== */}
-      {gameState !== 'title' && (
-        <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-2.5 md:p-5">
-          {/* Top Perimeter Row: Left Vitality/Evolution Cluster + Center Score & Gene Supply Drop + Right Utility Buttons */}
-          <div className="flex flex-col md:flex-row items-stretch md:items-start justify-between gap-2.5 w-full">
-            {/* Top Row on Mobile: Vitality Card + Compact Utility Controls side-by-side */}
-            <div className="flex items-start justify-between gap-2">
-              {/* Top-Left Cluster: Vitality HP, Boost Energy, Evolution Level & 5 Organ Sockets */}
-              <div className="flex flex-col gap-1.5 bg-slate-950/85 border border-sky-500/30 rounded-xl p-2.5 md:p-3 w-[225px] sm:w-[260px] md:w-[280px] pointer-events-auto shrink-0">
-                {/* HP Bar with Delayed Damage Ghost Bar */}
-                <div>
-                  <div className="flex items-center justify-between text-[11px] md:text-xs font-bold mb-1">
-                    <span className="text-emerald-300 uppercase tracking-wider">
-                      {t('hud_hp')}
-                    </span>
-                    <span className="font-mono-num text-white">
-                      {hudState.hp}/{hudState.maxHp}
-                    </span>
-                  </div>
-                  <div className="relative h-2.5 md:h-3 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700">
-                    <div
-                      ref={hpGhostFillRef}
-                      className="absolute inset-y-0 left-0 w-full bg-rose-500/70 origin-left transition-transform duration-75"
-                      style={{ transform: 'scaleX(1)' }}
-                    />
-                    <div
-                      ref={hpBarFillRef}
-                      className="relative h-full w-full bg-emerald-400 origin-left"
-                      style={{ transform: 'scaleX(1)' }}
-                    />
-                  </div>
-                </div>
+            {/* Centerpiece SVG Emblem + Primary Start & Trial Max Mecha Ad CTA */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: -16 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+              className="max-w-xl mx-auto flex flex-col items-center text-center pointer-events-auto -mt-12"
+            >
+              {/* Bespoke Inline SVG Shark Fin & DNA Crest Emblem */}
+              <svg
+                viewBox="0 0 180 76"
+                className="w-36 h-16 mb-2 overflow-visible animate-float-emblem"
+                aria-hidden="true"
+              >
+                <defs>
+                  <linearGradient id="crestGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#38bdf8" />
+                    <stop offset="50%" stopColor="#2dd4bf" />
+                    <stop offset="100%" stopColor="#a855f7" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d="M25 62 Q70 52 92 10 Q96 36 116 54 Q138 58 156 62 Z"
+                  fill="url(#crestGrad)"
+                  stroke="#e0f2fe"
+                  strokeWidth="2.5"
+                />
+                <circle cx="92" cy="42" r="6" fill="#fde047" />
+                <path
+                  d="M16 66 Q90 54 164 66"
+                  fill="none"
+                  stroke="#38bdf8"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                />
+              </svg>
 
-                {/* Boost Energy Bar */}
-                <div>
-                  <div className="flex items-center justify-between text-[11px] md:text-xs font-bold mb-1">
-                    <span className="text-sky-300 uppercase tracking-wider">
-                      {t('hud_energy')}
-                    </span>
-                    <span className="font-mono-num text-sky-100">
-                      {hudState.energy}%
-                    </span>
-                  </div>
-                  <div className="relative h-2 md:h-2.5 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700">
-                    <div
-                      ref={energyBarFillRef}
-                      className="h-full w-full bg-sky-400 origin-left"
-                      style={{ transform: 'scaleX(1)' }}
-                    />
-                  </div>
-                </div>
+              <h1
+                className="font-display font-extrabold text-white tracking-tight hud-stroke mb-2"
+                style={{
+                  fontSize: 'clamp(2.1rem, 4.2vw, 3.4rem)',
+                  textWrap: 'balance',
+                }}
+              >
+                {t('game_title')}
+              </h1>
 
-                {/* Evolution Level & XP Progress */}
-                <div>
-                  <div className="flex items-center justify-between text-[11px] md:text-xs font-bold mb-1">
-                    <span className="text-purple-300">
-                      {t('hud_level')} Lv.{hudState.level} · {t('hud_bite_tier')} T
-                      {hudState.biteTier}
-                    </span>
-                    <span className="font-mono-num text-purple-200">
-                      {hudState.xp}/{hudState.xpToNext}
-                    </span>
-                  </div>
-                  <div className="relative h-1.5 md:h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700">
-                    <div
-                      ref={xpBarFillRef}
-                      className="h-full w-full bg-purple-400 origin-left"
-                      style={{ transform: 'scaleX(0)' }}
-                    />
-                  </div>
-                </div>
+              <p className="text-sky-200/90 text-sm md:text-base font-medium mb-6 max-w-md">
+                {t('game_subtitle')}
+              </p>
 
-                {/* 5 Modular Organ Sockets Strip */}
-                <div className="flex items-center justify-between gap-1 pt-1 border-t border-slate-800">
-                  {ALL_SLOTS.map((slot) => {
-                    const mounted = equippedOrgans[slot];
-                    return (
-                      <div
-                        key={slot}
-                        title={
-                          mounted
-                            ? `${t(mounted.nameKey)}: ${t(mounted.descKey)}`
-                            : t(`slot_${slot}`)
-                        }
-                        className={`px-1.5 py-0.5 rounded text-[9px] md:text-[10px] font-mono-num font-bold border ${
-                          mounted
-                            ? 'bg-sky-950/90 border-sky-400 text-sky-200'
-                            : 'bg-slate-900/70 border-slate-800 text-slate-500'
-                        }`}
-                      >
-                        {slot}
-                      </div>
-                    );
-                  })}
-                </div>
+              {/* Primary Actions (<= 3 menu actions total) */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 w-full">
+                <button
+                  type="button"
+                  data-start="true"
+                  onClick={() => startNewRun(false)}
+                  className="game-btn-spring w-full sm:w-auto px-8 py-3.5 rounded-xl font-display font-extrabold text-base md:text-lg text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  ▶ {t('btn_start')}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleTrialMaxMechaAd}
+                  className="game-btn-spring w-full sm:w-auto px-6 py-3.5 rounded-xl font-display font-bold text-sm md:text-base text-amber-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  {t('btn_trial_mecha')}
+                </button>
               </div>
 
-              {/* Mobile-only right utility stack */}
-              <div className="flex md:hidden flex-col items-end gap-1.5 pointer-events-auto">
+              <button
+                type="button"
+                onClick={downloadStandaloneSingleFileHtml}
+                className="mt-3.5 px-4 py-1 text-xs font-medium text-sky-300/85 hover:text-white underline underline-offset-4 cursor-pointer whitespace-nowrap transition-colors"
+              >
+                ⬇ {t('btn_export_html')}
+              </button>
+            </motion.div>
+
+            {/* Flat Single-Line Control Hint in Bottom Safe Margin */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ delay: 0.08, duration: 0.25 }}
+              className="text-center text-xs md:text-sm text-slate-300/90 font-medium tracking-wide"
+            >
+              {t('control_hint')}
+            </motion.div>
+          </motion.section>
+        )}
+      </AnimatePresence>
+
+      {/* ==================== 2. PLAYING HUD (WORLD-MATCHED PERIMETER CLUSTERS) ==================== */}
+      <AnimatePresence>
+        {gameState !== 'title' && (
+          <motion.div
+            key="playing-hud"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-2.5 md:p-5"
+          >
+            {/* Top Perimeter Row: Left Vitality/Evolution Cluster + Center Score & Gene Supply Drop + Right Utility Buttons */}
+            <div className="flex flex-col md:flex-row items-stretch md:items-start justify-between gap-2.5 w-full">
+              {/* Top Row on Mobile: Vitality Card + Compact Utility Controls side-by-side */}
+              <div className="flex items-start justify-between gap-2">
+                {/* Top-Left Cluster: Vitality HP, Boost Energy, Evolution Level & 5 Organ Sockets */}
+                <motion.div
+                  initial={{ opacity: 0, x: -32, y: -12 }}
+                  animate={{ opacity: 1, x: 0, y: 0 }}
+                  exit={{ opacity: 0, x: -32, y: -12 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+                  className="game-hud-card flex flex-col gap-1.5 bg-slate-950/85 border border-sky-500/30 rounded-xl p-2.5 md:p-3 w-[225px] sm:w-[260px] md:w-[280px] pointer-events-auto shrink-0"
+                >
+                  {/* HP Bar with Delayed Damage Ghost Bar */}
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] md:text-xs font-bold mb-1">
+                      <span className="text-emerald-300 uppercase tracking-wider">
+                        {t('hud_hp')}
+                      </span>
+                      <span className="font-mono-num text-white">
+                        {hudState.hp}/{hudState.maxHp}
+                      </span>
+                    </div>
+                    <div className="relative h-2.5 md:h-3 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700">
+                      <div
+                        ref={hpGhostFillRef}
+                        className="absolute inset-y-0 left-0 w-full bg-rose-500/70 origin-left transition-transform duration-75"
+                        style={{ transform: 'scaleX(1)' }}
+                      />
+                      <div
+                        ref={hpBarFillRef}
+                        className="relative h-full w-full bg-emerald-400 origin-left"
+                        style={{ transform: 'scaleX(1)' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Boost Energy Bar */}
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] md:text-xs font-bold mb-1">
+                      <span className="text-sky-300 uppercase tracking-wider">
+                        {t('hud_energy')}
+                      </span>
+                      <span className="font-mono-num text-sky-100">
+                        {hudState.energy}%
+                      </span>
+                    </div>
+                    <div className="relative h-2 md:h-2.5 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700">
+                      <div
+                        ref={energyBarFillRef}
+                        className="h-full w-full bg-sky-400 origin-left"
+                        style={{ transform: 'scaleX(1)' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Evolution Level & XP Progress */}
+                  <div>
+                    <div className="flex items-center justify-between text-[11px] md:text-xs font-bold mb-1">
+                      <span className="text-purple-300">
+                        {t('hud_level')} Lv.{hudState.level} · {t('hud_bite_tier')} T
+                        {hudState.biteTier}
+                      </span>
+                      <span className="font-mono-num text-purple-200">
+                        {hudState.xp}/{hudState.xpToNext}
+                      </span>
+                    </div>
+                    <div className="relative h-1.5 md:h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700">
+                      <div
+                        ref={xpBarFillRef}
+                        className="h-full w-full bg-purple-400 origin-left"
+                        style={{ transform: 'scaleX(0)' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 5 Modular Organ Sockets Strip */}
+                  <div className="flex items-center justify-between gap-1 pt-1 border-t border-slate-800">
+                    {ALL_SLOTS.map((slot) => {
+                      const mounted = equippedOrgans[slot];
+                      return (
+                        <div
+                          key={slot}
+                          title={
+                            mounted
+                              ? `${t(mounted.nameKey)}: ${t(mounted.descKey)}`
+                              : t(`slot_${slot}`)
+                          }
+                          className={`px-1.5 py-0.5 rounded text-[9px] md:text-[10px] font-mono-num font-bold border transition-all duration-200 ${
+                            mounted
+                              ? 'bg-sky-950/90 border-sky-400 text-sky-200 scale-105'
+                              : 'bg-slate-900/70 border-slate-800 text-slate-500'
+                          }`}
+                        >
+                          {slot}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+
+                {/* Mobile-only right utility stack */}
+                <motion.div
+                  initial={{ opacity: 0, x: 24, y: -10 }}
+                  animate={{ opacity: 1, x: 0, y: 0 }}
+                  exit={{ opacity: 0, x: 24, y: -10 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 28 }}
+                  className="flex md:hidden flex-col items-end gap-1.5 pointer-events-auto"
+                >
+                  <button
+                    type="button"
+                    onClick={toggleLanguage}
+                    aria-label={t('btn_lang_toggle')}
+                    className="game-btn-spring px-2.5 py-1.5 rounded-lg font-display font-bold text-[11px] text-sky-100 bg-slate-900/90 border border-sky-400/40 whitespace-nowrap cursor-pointer"
+                  >
+                    🌐 {lang.toUpperCase()}
+                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={toggleMute}
+                      aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
+                      className="game-btn-spring px-2.5 py-1.5 rounded-lg font-display font-semibold text-[11px] text-slate-200 bg-slate-900/90 border border-slate-700 whitespace-nowrap cursor-pointer"
+                    >
+                      {isMuted ? '🔇' : '🔊'}
+                    </button>
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={(e) => {
+                        e.currentTarget.blur();
+                        setGameState('paused');
+                      }}
+                      aria-label={t('btn_pause')}
+                      className="game-btn-spring px-2.5 py-1.5 rounded-lg font-display font-semibold text-[11px] text-slate-200 bg-slate-900/90 border border-slate-700 whitespace-nowrap cursor-pointer"
+                    >
+                      ⏸
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGeneSupplyDropAd}
+                    className="game-btn-spring px-2.5 py-1.5 rounded-lg font-display font-bold text-[11px] text-amber-950 bg-amber-400 shadow whitespace-nowrap cursor-pointer"
+                  >
+                    {t('btn_supply_drop')}
+                  </button>
+                </motion.div>
+              </div>
+
+              {/* Center Score & Gene Supply Drop Ad Cluster */}
+              <motion.div
+                initial={{ opacity: 0, y: -24 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -24 }}
+                transition={{ type: 'spring', stiffness: 340, damping: 28, delay: 0.03 }}
+                className="flex flex-wrap items-center gap-2.5 pointer-events-auto"
+              >
+                <div className="game-hud-card bg-slate-950/85 border border-slate-700/80 rounded-xl px-3.5 py-1.5 md:px-4 md:py-2 flex items-center gap-3.5">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                      {t('hud_score')}
+                    </div>
+                    <div className="font-display font-extrabold text-lg md:text-2xl text-white font-mono-num">
+                      {hudState.score}
+                    </div>
+                  </div>
+
+                  <div className="h-6 w-px bg-slate-800" />
+
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-emerald-400 font-semibold">
+                      🧬 {t('hud_genes')}
+                    </div>
+                    <div className="font-display font-bold text-sm md:text-lg text-emerald-300 font-mono-num">
+                      {hudState.genes}
+                    </div>
+                  </div>
+
+                  <div className="h-6 w-px bg-slate-800" />
+
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wider text-amber-400 font-semibold">
+                      🪙 {t('hud_coins')}
+                    </div>
+                    <div className="font-display font-bold text-sm md:text-lg text-amber-300 font-mono-num">
+                      {hudState.coins}
+                    </div>
+                  </div>
+
+                  <div className="hidden sm:block h-6 w-px bg-slate-800" />
+
+                  <div className="hidden sm:block">
+                    <div className="text-[10px] uppercase tracking-wider text-sky-400 font-semibold">
+                      {t(hudState.zoneKey)}
+                    </div>
+                    <div className="font-mono-num font-bold text-xs md:text-sm text-sky-200">
+                      {hudState.depth}m
+                    </div>
+                  </div>
+
+                  <div className="hidden lg:block h-6 w-px bg-slate-800" />
+
+                  <div className="hidden lg:block">
+                    <div className="text-[10px] uppercase tracking-wider text-cyan-300 font-semibold">
+                      🎯 {t('hud_target_fish')}
+                    </div>
+                    <div className="font-display font-bold text-xs md:text-sm text-cyan-100 whitespace-nowrap">
+                      {t(hudState.targetFishNameKey)}{' '}
+                      <span className="font-mono-num text-amber-300">
+                        ({hudState.targetFishProgress}/{hudState.targetFishRequired})
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* High-Conversion Ad Placement #4: Top Bar Gene Supply Drop (Desktop/Tablet) */}
+                <button
+                  type="button"
+                  onClick={handleGeneSupplyDropAd}
+                  className="game-btn-spring hidden md:inline-flex px-4 py-2.5 rounded-xl font-display font-bold text-xs md:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 shadow-md cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  {t('btn_supply_drop')}
+                </button>
+
+                <AnimatePresence>
+                  {hudState.frenzyTimer > 0 && (
+                    <motion.div
+                      key="frenzy-badge"
+                      initial={{ opacity: 0, scale: 0.7, y: -8 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.7, y: -8 }}
+                      transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+                      className="animate-frenzy-glow px-3 py-1.5 rounded-lg bg-amber-400 text-slate-950 font-display font-extrabold text-xs font-mono-num"
+                    >
+                      ⚡ {t('hud_frenzy')}: {hudState.frenzyTimer.toFixed(1)}s
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+
+              {/* Desktop Top-Right Utility Controls */}
+              <motion.div
+                initial={{ opacity: 0, x: 32, y: -12 }}
+                animate={{ opacity: 1, x: 0, y: 0 }}
+                exit={{ opacity: 0, x: 32, y: -12 }}
+                transition={{ type: 'spring', stiffness: 350, damping: 28, delay: 0.05 }}
+                className="hidden md:flex items-center gap-2 pointer-events-auto shrink-0"
+              >
                 <button
                   type="button"
                   onClick={toggleLanguage}
                   aria-label={t('btn_lang_toggle')}
-                  className="px-2.5 py-1.5 rounded-lg font-display font-bold text-[11px] text-sky-100 bg-slate-900/90 border border-sky-400/40 whitespace-nowrap cursor-pointer"
+                  className="game-btn-spring px-3.5 py-2 rounded-lg font-display font-bold text-xs tracking-wide text-sky-100 bg-slate-900/90 border border-sky-400/40 hover:border-sky-300 hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  🌐 {lang.toUpperCase()}
+                  🌐 {t('btn_lang_toggle')} ({lang.toUpperCase()})
                 </button>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    onClick={toggleMute}
-                    aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
-                    className="px-2.5 py-1.5 rounded-lg font-display font-semibold text-[11px] text-slate-200 bg-slate-900/90 border border-slate-700 whitespace-nowrap cursor-pointer"
-                  >
-                    {isMuted ? '🔇' : '🔊'}
-                  </button>
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    onClick={(e) => {
-                      e.currentTarget.blur();
-                      setGameState('paused');
-                    }}
-                    aria-label={t('btn_pause')}
-                    className="px-2.5 py-1.5 rounded-lg font-display font-semibold text-[11px] text-slate-200 bg-slate-900/90 border border-slate-700 whitespace-nowrap cursor-pointer"
-                  >
-                    ⏸
-                  </button>
-                </div>
+
                 <button
                   type="button"
-                  onClick={handleGeneSupplyDropAd}
-                  className="px-2.5 py-1.5 rounded-lg font-display font-bold text-[11px] text-amber-950 bg-amber-400 shadow whitespace-nowrap cursor-pointer"
+                  tabIndex={-1}
+                  onClick={toggleMute}
+                  aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
+                  className="game-btn-spring px-3 py-2 rounded-lg font-display font-semibold text-xs text-slate-200 bg-slate-900/90 border border-slate-700 hover:border-slate-500 whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  {t('btn_supply_drop')}
+                  {isMuted ? '🔇' : '🔊'} {isMuted ? t('btn_unmute') : t('btn_mute')}
                 </button>
-              </div>
-            </div>
 
-            {/* Center Score & Gene Supply Drop Ad Cluster */}
-            <div className="flex flex-wrap items-center gap-2.5 pointer-events-auto">
-              <div className="bg-slate-950/85 border border-slate-700/80 rounded-xl px-3.5 py-1.5 md:px-4 md:py-2 flex items-center gap-3.5">
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
-                    {t('hud_score')}
-                  </div>
-                  <div className="font-display font-extrabold text-lg md:text-2xl text-white font-mono-num">
-                    {hudState.score}
-                  </div>
-                </div>
-
-                <div className="h-6 w-px bg-slate-800" />
-
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-emerald-400 font-semibold">
-                    🧬 {t('hud_genes')}
-                  </div>
-                  <div className="font-display font-bold text-sm md:text-lg text-emerald-300 font-mono-num">
-                    {hudState.genes}
-                  </div>
-                </div>
-
-                <div className="h-6 w-px bg-slate-800" />
-
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-amber-400 font-semibold">
-                    🪙 {t('hud_coins')}
-                  </div>
-                  <div className="font-display font-bold text-sm md:text-lg text-amber-300 font-mono-num">
-                    {hudState.coins}
-                  </div>
-                </div>
-
-                <div className="hidden sm:block h-6 w-px bg-slate-800" />
-
-                <div className="hidden sm:block">
-                  <div className="text-[10px] uppercase tracking-wider text-sky-400 font-semibold">
-                    {t(hudState.zoneKey)}
-                  </div>
-                  <div className="font-mono-num font-bold text-xs md:text-sm text-sky-200">
-                    {hudState.depth}m
-                  </div>
-                </div>
-              </div>
-
-              {/* High-Conversion Ad Placement #4: Top Bar Gene Supply Drop (Desktop/Tablet) */}
-              <button
-                type="button"
-                onClick={handleGeneSupplyDropAd}
-                className="hidden md:inline-flex px-4 py-2.5 rounded-xl font-display font-bold text-xs md:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 active:scale-95 transition-transform shadow-md cursor-pointer whitespace-nowrap shrink-0"
-              >
-                {t('btn_supply_drop')}
-              </button>
-
-              {hudState.frenzyTimer > 0 && (
-                <div className="px-3 py-1.5 rounded-lg bg-amber-500/95 text-slate-950 font-display font-extrabold text-xs font-mono-num">
-                  ⚡ {t('hud_frenzy')}: {hudState.frenzyTimer.toFixed(1)}s
-                </div>
-              )}
-            </div>
-
-            {/* Desktop Top-Right Utility Controls */}
-            <div className="hidden md:flex items-center gap-2 pointer-events-auto shrink-0">
-              <button
-                type="button"
-                onClick={toggleLanguage}
-                aria-label={t('btn_lang_toggle')}
-                className="px-3.5 py-2 rounded-lg font-display font-bold text-xs tracking-wide text-sky-100 bg-slate-900/90 border border-sky-400/40 hover:border-sky-300 hover:bg-slate-800 active:scale-95 transition-transform whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                🌐 {t('btn_lang_toggle')} ({lang.toUpperCase()})
-              </button>
-
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={toggleMute}
-                aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
-                className="px-3 py-2 rounded-lg font-display font-semibold text-xs text-slate-200 bg-slate-900/90 border border-slate-700 hover:border-slate-500 active:scale-95 transition-transform whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                {isMuted ? '🔇' : '🔊'} {isMuted ? t('btn_unmute') : t('btn_mute')}
-              </button>
-
-              <button
-                type="button"
-                tabIndex={-1}
-                onClick={(e) => {
-                  e.currentTarget.blur();
-                  setGameState('paused');
-                }}
-                aria-label={t('btn_pause')}
-                className="px-3 py-2 rounded-lg font-display font-semibold text-xs text-slate-200 bg-slate-900/90 border border-slate-700 hover:border-slate-500 active:scale-95 transition-transform whitespace-nowrap shrink-0 cursor-pointer"
-              >
-                ⏸ {t('btn_pause')} [P]
-              </button>
-            </div>
-          </div>
-
-          {/* Bottom Perimeter Row: Left Virtual Joystick + Right Boost Button */}
-          <div className="flex items-end justify-between w-full pb-2 px-2">
-            {/* Bottom-Left Virtual Joystick (Mouse & Touch Drag) */}
-            <div
-              role="slider"
-              aria-label="Virtual Steering Joystick"
-              aria-valuenow={Math.round(joystickVisual.dx)}
-              onPointerDown={handleJoystickPointerDown}
-              onPointerMove={handleJoystickPointerMove}
-              onPointerUp={handleJoystickPointerUp}
-              onPointerCancel={handleJoystickPointerUp}
-              className="relative w-28 h-28 md:w-32 md:h-32 rounded-full bg-slate-900/65 border-2 border-sky-400/40 flex items-center justify-center pointer-events-auto cursor-grab active:cursor-grabbing touch-none"
-            >
-              <div className="w-16 h-16 rounded-full border border-sky-400/20 pointer-events-none" />
-              <div
-                className="w-12 h-12 rounded-full bg-sky-400/90 border-2 border-white shadow-md pointer-events-none transition-transform duration-75"
-                style={{
-                  transform: `translate3d(${joystickVisual.dx}px, ${joystickVisual.dy}px, 0)`,
-                }}
-              />
-            </div>
-
-            {/* Bottom-Right Large 2x Boost Button */}
-            <button
-              type="button"
-              onPointerDown={(e) => {
-                e.currentTarget.setPointerCapture(e.pointerId);
-                simRef.current.input.boostPointerHeld = true;
-                setBoostVisual(true);
-              }}
-              onPointerUp={() => {
-                simRef.current.input.boostPointerHeld = false;
-                setBoostVisual(simRef.current.input.keys.has('Space'));
-              }}
-              onPointerCancel={() => {
-                simRef.current.input.boostPointerHeld = false;
-                setBoostVisual(false);
-              }}
-              className={`w-24 h-24 md:w-28 md:h-28 rounded-full font-display font-extrabold text-sm md:text-base flex flex-col items-center justify-center border-4 shadow-xl pointer-events-auto cursor-pointer transition-transform ${
-                boostVisual
-                  ? 'bg-sky-400 text-slate-950 border-white scale-95'
-                  : 'bg-slate-900/85 text-sky-200 border-sky-400 hover:bg-slate-800'
-              }`}
-            >
-              <span className="text-xl leading-none mb-1">🚀</span>
-              <span>{t('btn_boost')}</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ==================== 3. EVOLUTION 3-CHOICE MODAL (WITH CLAIM ALL 3 AD) ==================== */}
-      {evoChoices && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('evo_modal_title')}
-          className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/88 pointer-events-auto"
-        >
-          <div className="w-full max-w-3xl bg-slate-900 border border-sky-500/40 rounded-2xl p-5 md:p-7 shadow-2xl">
-            <div className="text-center mb-5">
-              <h2 className="font-display font-extrabold text-2xl md:text-3xl text-white mb-1">
-                🧬 {t('evo_modal_title')}
-              </h2>
-              <p className="text-xs md:text-sm text-slate-300">
-                {t('evo_modal_subtitle')}
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              {evoChoices.map((organ) => (
-                <div
-                  key={organ.id}
-                  className="flex flex-col justify-between bg-slate-950 border border-slate-800 hover:border-sky-400/60 rounded-xl p-4 transition-colors"
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    setGameState('paused');
+                  }}
+                  aria-label={t('btn_pause')}
+                  className="game-btn-spring px-3 py-2 rounded-lg font-display font-semibold text-xs text-slate-200 bg-slate-900/90 border border-slate-700 hover:border-slate-500 whitespace-nowrap shrink-0 cursor-pointer"
                 >
-                  <div>
-                    <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-                      <span>{t(`faction_${organ.faction}`)}</span>
-                      <span>·</span>
-                      <span>{t(`slot_${organ.slot}`)}</span>
-                    </div>
-
-                    <div className="flex items-center gap-3 mb-3">
-                      <OrganCanvasPreview organ={organ} size={60} />
-                      <h3 className="font-display font-bold text-base text-white leading-snug">
-                        {t(organ.nameKey)}
-                      </h3>
-                    </div>
-
-                    <p className="text-xs text-slate-300 leading-relaxed mb-4">
-                      {t(organ.descKey)}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handleSelectSingleOrgan(organ)}
-                    className="w-full py-2.5 px-4 rounded-lg font-display font-bold text-xs md:text-sm text-white bg-sky-600 hover:bg-sky-500 active:scale-95 transition-transform cursor-pointer whitespace-nowrap"
-                  >
-                    {t('evo_btn_select')}
-                  </button>
-                </div>
-              ))}
+                  ⏸ {t('btn_pause')} [P]
+                </button>
+              </motion.div>
             </div>
 
-            {/* High-Conversion Golden Ad CTA: Claim All 3 Organs at Once! */}
-            <div className="flex justify-center">
-              <button
-                type="button"
-                onClick={handleClaimAllThreeOrgansAd}
-                className="w-full md:w-auto min-w-[290px] py-3.5 px-8 rounded-xl font-display font-extrabold text-sm md:text-base text-slate-950 bg-amber-400 hover:bg-amber-300 active:scale-95 transition-transform shadow-lg cursor-pointer whitespace-nowrap"
+            {/* Bottom Perimeter Row: Left Virtual Joystick + Right Boost Button */}
+            <div className="flex items-end justify-between w-full pb-2 px-2">
+              {/* Bottom-Left Virtual Joystick (Mouse & Touch Drag) */}
+              <motion.div
+                initial={{ opacity: 0, y: 36, scale: 0.85 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 36, scale: 0.85 }}
+                transition={{ type: 'spring', stiffness: 340, damping: 26 }}
+                role="slider"
+                aria-label="Virtual Steering Joystick"
+                aria-valuenow={Math.round(joystickVisual.dx)}
+                onPointerDown={handleJoystickPointerDown}
+                onPointerMove={handleJoystickPointerMove}
+                onPointerUp={handleJoystickPointerUp}
+                onPointerCancel={handleJoystickPointerUp}
+                className="relative w-28 h-28 md:w-32 md:h-32 rounded-full bg-slate-900/65 border-2 border-sky-400/40 flex items-center justify-center pointer-events-auto cursor-grab active:cursor-grabbing touch-none"
               >
-                {t('evo_btn_claim_all')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                <div className="w-16 h-16 rounded-full border border-sky-400/20 pointer-events-none" />
+                <div
+                  className="w-12 h-12 rounded-full bg-sky-400/90 border-2 border-white shadow-md pointer-events-none transition-transform duration-75"
+                  style={{
+                    transform: `translate3d(${joystickVisual.dx}px, ${joystickVisual.dy}px, 0)`,
+                  }}
+                />
+              </motion.div>
 
-      {/* ==================== 4. PAUSE MODAL ==================== */}
-      {gameState === 'paused' && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('btn_pause')}
-          className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/88 pointer-events-auto"
-        >
-          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 text-center shadow-2xl">
-            <h2 className="font-display font-extrabold text-2xl text-white mb-2">
-              {t('btn_pause')}
-            </h2>
-            <p className="text-xs text-slate-400 mb-5">
-              {t('stat_organs_equipped')}: {Object.keys(equippedOrgans).length} / 5
-            </p>
-
-            {/* Equipped Organ Summary List */}
-            <div className="flex flex-col gap-2 mb-6 text-left">
-              {ALL_SLOTS.map((slot) => {
-                const org = equippedOrgans[slot];
-                return (
-                  <div
-                    key={slot}
-                    className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs"
-                  >
-                    <span className="text-slate-400 font-semibold">
-                      {t(`slot_${slot}`)}
-                    </span>
-                    <span className={org ? 'text-sky-300 font-bold' : 'text-slate-600'}>
-                      {org ? t(org.nameKey) : '—'}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <button
+              {/* Bottom-Right Large 2x Boost Button */}
+              <motion.button
+                initial={{ opacity: 0, y: 36, scale: 0.85 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 36, scale: 0.85 }}
+                transition={{ type: 'spring', stiffness: 340, damping: 26 }}
                 type="button"
-                onClick={() => setGameState('playing')}
-                className="w-full py-3 rounded-xl font-display font-bold text-sm text-slate-950 bg-emerald-400 hover:bg-emerald-300 cursor-pointer"
-              >
-                ▶ {t('btn_resume')}
-              </button>
-              <button
-                type="button"
-                onClick={toggleLanguage}
-                className="w-full py-2.5 rounded-xl font-display font-semibold text-xs text-sky-200 bg-slate-800 hover:bg-slate-700 cursor-pointer"
-              >
-                🌐 {t('btn_lang_toggle')} ({lang.toUpperCase()})
-              </button>
-              <button
-                type="button"
-                onClick={() => startNewRun(false)}
-                className="w-full py-2.5 rounded-xl font-display font-semibold text-xs text-slate-200 bg-slate-800 hover:bg-slate-700 cursor-pointer"
-              >
-                ↻ {t('btn_restart')}
-              </button>
-              <button
-                type="button"
-                onClick={() => setGameState('title')}
-                className="w-full py-2.5 rounded-xl font-display font-semibold text-xs text-slate-400 hover:text-white cursor-pointer"
-              >
-                {t('btn_title')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ==================== 5. GAMEOVER / AD REVIVE & SETTLEMENT MODAL ==================== */}
-      {gameState === 'gameover' && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={reviveOffered ? t('gameover_title') : t('settlement_title')}
-          className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/90 pointer-events-auto"
-        >
-          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 text-center shadow-2xl">
-            {reviveOffered ? (
-              <>
-                <h2 className="font-display font-extrabold text-2xl text-rose-400 mb-2">
-                  ⚡ {t('gameover_title')}
-                </h2>
-                <p className="text-xs md:text-sm text-slate-300 mb-6">
-                  {t('gameover_subtitle')}
-                </p>
-
-                <div className="flex flex-col gap-3">
-                  <button
-                    type="button"
-                    onClick={handleReviveWithFrenzyAd}
-                    className="w-full py-4 px-5 rounded-xl font-display font-extrabold text-sm md:text-base text-slate-950 bg-amber-400 hover:bg-amber-300 active:scale-95 transition-transform shadow-lg cursor-pointer"
-                  >
-                    {t('btn_revive_ad')}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      adManager.showInterstitialAd();
-                      setReviveOffered(false);
-                    }}
-                    className="w-full py-2.5 rounded-xl font-display font-semibold text-xs text-slate-400 hover:text-white cursor-pointer"
-                  >
-                    {t('btn_give_up')}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <h2 className="font-display font-extrabold text-2xl text-white mb-1">
-                  🏆 {t('settlement_title')}
-                </h2>
-                <p className="text-xs text-slate-400 mb-5">
-                  {t('settlement_subtitle')}
-                </p>
-
-                <div className="grid grid-cols-2 gap-3 mb-6 text-left">
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                    <div className="text-[11px] text-slate-400">
-                      {t('stat_final_score')}
-                    </div>
-                    <div className="font-display font-extrabold text-xl text-white font-mono-num">
-                      {runSnapshot.score}
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                    <div className="text-[11px] text-slate-400">
-                      {t('stat_max_depth')}
-                    </div>
-                    <div className="font-display font-extrabold text-xl text-sky-300 font-mono-num">
-                      {runSnapshot.maxDepth}m
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                    <div className="text-[11px] text-slate-400">
-                      {t('stat_prey_eaten')}
-                    </div>
-                    <div className="font-display font-extrabold text-xl text-emerald-300 font-mono-num">
-                      {runSnapshot.preyEaten}
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                    <div className="text-[11px] text-slate-400">
-                      {t('stat_organs_equipped')}
-                    </div>
-                    <div className="font-display font-extrabold text-xl text-purple-300 font-mono-num">
-                      {runSnapshot.organsCount} / 5
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  <button
-                    type="button"
-                    data-start="true"
-                    onClick={() => startNewRun(false)}
-                    className="w-full py-3.5 rounded-xl font-display font-extrabold text-base text-slate-950 bg-emerald-400 hover:bg-emerald-300 cursor-pointer"
-                  >
-                    ▶ {t('btn_restart')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleTrialMaxMechaAd}
-                    className="w-full py-3 rounded-xl font-display font-bold text-xs md:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 cursor-pointer"
-                  >
-                    {t('btn_trial_mecha')}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ==================== 6. SIMULATED REWARDED VIDEO AD OVERLAY (3S COUNTDOWN) ==================== */}
-      {simAd && simAd.active && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={t('ad_sim_title')}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95 pointer-events-auto"
-        >
-          <div className="w-full max-w-md bg-slate-900 border-2 border-amber-400/70 rounded-2xl p-6 text-center shadow-2xl">
-            <div className="text-xs font-mono-num text-amber-300 uppercase tracking-wider mb-2">
-              {t('ad_sim_badge')} · {t(`ad_env_${adManager.detectPlatform()}`)}
-            </div>
-
-            <h3 className="font-display font-extrabold text-xl text-white mb-2">
-              🎬 {t('ad_sim_title')}
-            </h3>
-            <p className="text-xs text-slate-300 mb-5">{t('ad_sim_desc')}</p>
-
-            {/* Visual Animated Ad Preview Stage */}
-            <div className="relative h-36 w-full rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center mb-5 overflow-hidden">
-              <div className="font-display font-extrabold text-4xl text-amber-400 font-mono-num mb-1">
-                {simAd.secondsLeft > 0 ? `${simAd.secondsLeft}s` : '✓'}
-              </div>
-              <div className="text-xs text-sky-200 font-medium">
-                {simAd.secondsLeft > 0
-                  ? t('ad_sim_countdown', { sec: simAd.secondsLeft })
-                  : t('ad_sim_ready')}
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-2.5">
-              <button
-                type="button"
-                disabled={simAd.secondsLeft > 0}
-                onClick={() => {
-                  const rewardFn = simAd.onReward;
-                  setSimAd(null);
-                  rewardFn();
+                onPointerDown={(e) => {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  simRef.current.input.boostPointerHeld = true;
+                  setBoostVisual(true);
                 }}
-                className={`w-full py-3.5 rounded-xl font-display font-extrabold text-sm transition-transform ${
-                  simAd.secondsLeft > 0
-                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                    : 'bg-emerald-400 text-slate-950 hover:bg-emerald-300 active:scale-95 cursor-pointer'
+                onPointerUp={() => {
+                  simRef.current.input.boostPointerHeld = false;
+                  setBoostVisual(simRef.current.input.keys.has('Space'));
+                }}
+                onPointerCancel={() => {
+                  simRef.current.input.boostPointerHeld = false;
+                  setBoostVisual(false);
+                }}
+                className={`w-24 h-24 md:w-28 md:h-28 rounded-full font-display font-extrabold text-sm md:text-base flex flex-col items-center justify-center border-4 shadow-xl pointer-events-auto cursor-pointer transition-transform ${
+                  boostVisual
+                    ? 'bg-sky-400 text-slate-950 border-white scale-95'
+                    : 'bg-slate-900/85 text-sky-200 border-sky-400 hover:bg-slate-800'
                 }`}
               >
-                🎁 {t('ad_sim_claim_btn')}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const cancelFn = simAd.onCancel;
-                  setSimAd(null);
-                  if (cancelFn) cancelFn();
-                }}
-                className="w-full py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
-              >
-                {t('ad_sim_cancel_btn')}
-              </button>
+                <span className="text-xl leading-none mb-1">🚀</span>
+                <span>{t('btn_boost')}</span>
+              </motion.button>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ==================== 3. EVOLUTION 3-CHOICE MODAL (WITH CLAIM ALL 3 AD) ==================== */}
+      <AnimatePresence>
+        {evoChoices && (
+          <motion.div
+            key="evo-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('evo_modal_title')}
+            className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/88 backdrop-blur-sm pointer-events-auto"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.86, y: 28 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+              className="w-full max-w-3xl bg-slate-900 border border-sky-500/40 rounded-2xl p-5 md:p-7 shadow-2xl"
+            >
+              <div className="text-center mb-5">
+                <h2 className="font-display font-extrabold text-2xl md:text-3xl text-white mb-1">
+                  🧬 {t('evo_modal_title')}
+                </h2>
+                <p className="text-xs md:text-sm text-slate-300">
+                  {t('evo_modal_subtitle')}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                {evoChoices.map((organ, idx) => (
+                  <motion.div
+                    key={organ.id}
+                    initial={{ opacity: 0, y: 22, scale: 0.92 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{
+                      delay: idx * 0.06,
+                      type: 'spring',
+                      stiffness: 380,
+                      damping: 26,
+                    }}
+                    className="flex flex-col justify-between bg-slate-950 border border-slate-800 hover:border-sky-400/60 rounded-xl p-4 transition-colors"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+                        <span>{t(`faction_${organ.faction}`)}</span>
+                        <span>·</span>
+                        <span>{t(`slot_${organ.slot}`)}</span>
+                      </div>
+
+                      <div className="flex items-center gap-3 mb-3">
+                        <OrganCanvasPreview organ={organ} size={60} />
+                        <h3 className="font-display font-bold text-base text-white leading-snug">
+                          {t(organ.nameKey)}
+                        </h3>
+                      </div>
+
+                      <p className="text-xs text-slate-300 leading-relaxed mb-4">
+                        {t(organ.descKey)}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSelectSingleOrgan(organ)}
+                      className="game-btn-spring w-full py-2.5 px-4 rounded-lg font-display font-bold text-xs md:text-sm text-white bg-sky-600 hover:bg-sky-500 cursor-pointer whitespace-nowrap"
+                    >
+                      {t('evo_btn_select')}
+                    </button>
+                  </motion.div>
+                ))}
+              </div>
+
+              {/* High-Conversion Golden Ad CTA: Claim All 3 Organs at Once! */}
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={handleClaimAllThreeOrgansAd}
+                  className="game-btn-spring w-full md:w-auto min-w-[290px] py-3.5 px-8 rounded-xl font-display font-extrabold text-sm md:text-base text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer whitespace-nowrap"
+                >
+                  {t('evo_btn_claim_all')}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ==================== 4. PAUSE MODAL ==================== */}
+      <AnimatePresence>
+        {gameState === 'paused' && (
+          <motion.div
+            key="pause-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('btn_pause')}
+            className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/88 backdrop-blur-sm pointer-events-auto"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.88, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 18 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+              className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 text-center shadow-2xl"
+            >
+              <h2 className="font-display font-extrabold text-2xl text-white mb-2">
+                {t('btn_pause')}
+              </h2>
+              <p className="text-xs text-slate-400 mb-5">
+                {t('stat_organs_equipped')}: {Object.keys(equippedOrgans).length} / 5
+              </p>
+
+              {/* Equipped Organ Summary List */}
+              <div className="flex flex-col gap-2 mb-6 text-left">
+                {ALL_SLOTS.map((slot) => {
+                  const org = equippedOrgans[slot];
+                  return (
+                    <div
+                      key={slot}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs"
+                    >
+                      <span className="text-slate-400 font-semibold">
+                        {t(`slot_${slot}`)}
+                      </span>
+                      <span className={org ? 'text-sky-300 font-bold' : 'text-slate-600'}>
+                        {org ? t(org.nameKey) : '—'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  type="button"
+                  onClick={() => setGameState('playing')}
+                  className="game-btn-spring w-full py-3 rounded-xl font-display font-bold text-sm text-slate-950 bg-emerald-400 hover:bg-emerald-300 cursor-pointer"
+                >
+                  ▶ {t('btn_resume')}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleLanguage}
+                  className="game-btn-spring w-full py-2.5 rounded-xl font-display font-semibold text-xs text-sky-200 bg-slate-800 hover:bg-slate-700 cursor-pointer"
+                >
+                  🌐 {t('btn_lang_toggle')} ({lang.toUpperCase()})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => startNewRun(false)}
+                  className="game-btn-spring w-full py-2.5 rounded-xl font-display font-semibold text-xs text-slate-200 bg-slate-800 hover:bg-slate-700 cursor-pointer"
+                >
+                  ↻ {t('btn_restart')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGameState('title')}
+                  className="game-btn-spring w-full py-2.5 rounded-xl font-display font-semibold text-xs text-slate-400 hover:text-white cursor-pointer"
+                >
+                  {t('btn_title')}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ==================== 5. GAMEOVER / AD REVIVE & SETTLEMENT MODAL ==================== */}
+      <AnimatePresence>
+        {gameState === 'gameover' && (
+          <motion.div
+            key="gameover-modal-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.22 }}
+            role="dialog"
+            aria-modal="true"
+            aria-label={reviveOffered ? t('gameover_title') : t('settlement_title')}
+            className="fixed inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm pointer-events-auto"
+          >
+            <motion.div
+              key={reviveOffered ? 'revive-card' : 'settlement-card'}
+              initial={{ opacity: 0, scale: 0.88, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 18 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+              className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-6 text-center shadow-2xl"
+            >
+              {reviveOffered ? (
+                <>
+                  <h2 className="font-display font-extrabold text-2xl text-rose-400 mb-2">
+                    ⚡ {t('gameover_title')}
+                  </h2>
+                  <p className="text-xs md:text-sm text-slate-300 mb-6">
+                    {t('gameover_subtitle')}
+                  </p>
+
+                  <div className="flex flex-col gap-3">
+                    <button
+                      type="button"
+                      onClick={handleReviveWithFrenzyAd}
+                      className="game-btn-spring w-full py-4 px-5 rounded-xl font-display font-extrabold text-sm md:text-base text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer"
+                    >
+                      {t('btn_revive_ad')}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        adManager.showInterstitialAd();
+                        setReviveOffered(false);
+                      }}
+                      className="game-btn-spring w-full py-2.5 rounded-xl font-display font-semibold text-xs text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      {t('btn_give_up')}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2 className="font-display font-extrabold text-2xl text-white mb-1">
+                    🏆 {t('settlement_title')}
+                  </h2>
+                  <p className="text-xs text-slate-400 mb-5">
+                    {t('settlement_subtitle')}
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3 mb-6 text-left">
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                      <div className="text-[11px] text-slate-400">
+                        {t('stat_final_score')}
+                      </div>
+                      <div className="font-display font-extrabold text-xl text-white font-mono-num">
+                        {runSnapshot.score}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                      <div className="text-[11px] text-slate-400">
+                        {t('stat_max_depth')}
+                      </div>
+                      <div className="font-display font-extrabold text-xl text-sky-300 font-mono-num">
+                        {runSnapshot.maxDepth}m
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                      <div className="text-[11px] text-slate-400">
+                        {t('stat_prey_eaten')}
+                      </div>
+                      <div className="font-display font-extrabold text-xl text-emerald-300 font-mono-num">
+                        {runSnapshot.preyEaten}
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                      <div className="text-[11px] text-slate-400">
+                        {t('stat_organs_equipped')}
+                      </div>
+                      <div className="font-display font-extrabold text-xl text-purple-300 font-mono-num">
+                        {runSnapshot.organsCount} / 5
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <button
+                      type="button"
+                      data-start="true"
+                      onClick={() => startNewRun(false)}
+                      className="game-btn-spring w-full py-3.5 rounded-xl font-display font-extrabold text-base text-slate-950 bg-emerald-400 hover:bg-emerald-300 cursor-pointer"
+                    >
+                      ▶ {t('btn_restart')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTrialMaxMechaAd}
+                      className="game-btn-spring w-full py-3 rounded-xl font-display font-bold text-xs md:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 cursor-pointer"
+                    >
+                      {t('btn_trial_mecha')}
+                    </button>
+                  </div>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ==================== 6. SIMULATED REWARDED VIDEO AD OVERLAY (3S COUNTDOWN) ==================== */}
+      <AnimatePresence>
+        {simAd && simAd.active && (
+          <motion.div
+            key="sim-ad-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t('ad_sim_title')}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/95 backdrop-blur-sm pointer-events-auto"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.86, y: 24 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 16 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+              className="w-full max-w-md bg-slate-900 border-2 border-amber-400/70 rounded-2xl p-6 text-center shadow-2xl"
+            >
+              <div className="text-xs font-mono-num text-amber-300 uppercase tracking-wider mb-2">
+                {t('ad_sim_badge')} · {t(`ad_env_${adManager.detectPlatform()}`)}
+              </div>
+
+              <h3 className="font-display font-extrabold text-xl text-white mb-2">
+                🎬 {t('ad_sim_title')}
+              </h3>
+              <p className="text-xs text-slate-300 mb-5">{t('ad_sim_desc')}</p>
+
+              {/* Visual Animated Ad Preview Stage */}
+              <div className="relative h-36 w-full rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center mb-5 overflow-hidden">
+                <div className="font-display font-extrabold text-4xl text-amber-400 font-mono-num mb-1">
+                  {simAd.secondsLeft > 0 ? `${simAd.secondsLeft}s` : '✓'}
+                </div>
+                <div className="text-xs text-sky-200 font-medium">
+                  {simAd.secondsLeft > 0
+                    ? t('ad_sim_countdown', { sec: simAd.secondsLeft })
+                    : t('ad_sim_ready')}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                <button
+                  type="button"
+                  disabled={simAd.secondsLeft > 0}
+                  onClick={() => {
+                    const rewardFn = simAd.onReward;
+                    setSimAd(null);
+                    rewardFn();
+                  }}
+                  className={`game-btn-spring w-full py-3.5 rounded-xl font-display font-extrabold text-sm ${
+                    simAd.secondsLeft > 0
+                      ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                      : 'bg-emerald-400 text-slate-950 hover:bg-emerald-300 cursor-pointer'
+                  }`}
+                >
+                  🎁 {t('ad_sim_claim_btn')}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cancelFn = simAd.onCancel;
+                    setSimAd(null);
+                    if (cancelFn) cancelFn();
+                  }}
+                  className="game-btn-spring w-full py-2 text-xs text-slate-400 hover:text-white cursor-pointer"
+                >
+                  {t('ad_sim_cancel_btn')}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }

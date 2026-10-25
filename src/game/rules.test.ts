@@ -30,9 +30,9 @@ test('I18N dictionary has complete and matching keys in both zh and en', () => {
   );
 });
 
-test('GAME_CONFIG has 15 organs across 3 factions and 5 slots, plus 8 prey tiers', () => {
+test('GAME_CONFIG has 15 organs across 3 factions and 5 slots, plus 33 target prey species across 8 tiers', () => {
   assert.equal(GAME_CONFIG.organs.length, 15);
-  assert.equal(GAME_CONFIG.preyTiers.length, 8);
+  assert.equal(GAME_CONFIG.preyTiers.length, 33);
 
   const factions = new Set(GAME_CONFIG.organs.map((o) => o.faction));
   const slots = new Set(GAME_CONFIG.organs.map((o) => o.slot));
@@ -45,6 +45,12 @@ test('GAME_CONFIG has 15 organs across 3 factions and 5 slots, plus 8 prey tiers
     assert.ok(I18N.en[organ.nameKey], `Missing en name for ${organ.id}`);
     assert.ok(I18N.zh[organ.descKey], `Missing zh desc for ${organ.id}`);
     assert.ok(I18N.en[organ.descKey], `Missing en desc for ${organ.id}`);
+  }
+
+  // Every prey species nameKey exists in I18N
+  for (const prey of GAME_CONFIG.preyTiers) {
+    assert.ok(I18N.zh[prey.nameKey], `Missing zh name for prey ${prey.id}`);
+    assert.ok(I18N.en[prey.nameKey], `Missing en name for prey ${prey.id}`);
   }
 });
 
@@ -110,37 +116,60 @@ test('addEvolutionProgress handles single and multi-level XP gains and pickEvolu
   assert.equal(getDepthZone(1500).id, 'abyss');
 });
 
-import { SPRITE_GRID_MAP } from './spriteSheetManager';
+import {
+  SPRITE_GRID_MAP,
+  FISH2_GRID_MAP,
+  FISH2_CELL_BOUNDS,
+} from './spriteSheetManager';
 import { InfiniteWorldManager } from './infiniteWorldManager';
 
-test('SPRITE_GRID_MAP covers all 16 cells of the 4x4 spritesheet uniquely', () => {
+test('SPRITE_GRID_MAP covers all 16 primary cells and FISH2_GRID_MAP covers all 30 target fish cells uniquely', () => {
   const entries = Object.entries(SPRITE_GRID_MAP);
   assert.equal(entries.length, 16);
   const coords = new Set(entries.map(([, [r, c]]) => `${r},${c}`));
   assert.equal(coords.size, 16);
+
+  const fish2Entries = Object.entries(FISH2_GRID_MAP);
+  assert.equal(fish2Entries.length, 30);
+  const fish2Coords = new Set(fish2Entries.map(([, [r, c]]) => `${r},${c}`));
+  assert.equal(fish2Coords.size, 30);
+
+  for (const [key, [x0, y0, x1, y1]] of Object.entries(FISH2_CELL_BOUNDS)) {
+    assert.ok(x1 > x0 && y1 > y0, `Invalid bounds for ${key}`);
+  }
 });
 
-test('InfiniteWorldManager wraps horizontally at [-worldWidth/2, +worldWidth/2] and follows unbounded downward depth', () => {
-  const mgr = new InfiniteWorldManager(3000, 0);
+test('InfiniteWorldManager provides seamless continuous horizontal swimming without boundary refresh and unbounded downward depth', () => {
+  // Default continuous mode: crossing ±1500 does NOT teleport/reset coordinates
+  const continuousMgr = new InfiniteWorldManager(3000, 0, false);
 
-  // Right wrap-around: x > 1500 -> -1500 + 50 = -1450
   const sharkRight = { x: 1520, y: 400 };
   const camRight = { x: 1510, y: 400 };
-  const resRight = mgr.update(0, sharkRight, camRight);
-  assert.equal(resRight.wrappedHorizontally, true);
-  assert.equal(sharkRight.x, -1450);
+  const resRight = continuousMgr.update(0, sharkRight, camRight);
+  assert.equal(resRight.wrappedHorizontally, false);
+  assert.equal(sharkRight.x, 1520);
+  assert.equal(camRight.x, 1520);
 
-  // Left wrap-around: x < -1500 -> +1500 - 50 = +1450
-  const sharkLeft = { x: -1530, y: 600 };
-  const camLeft = { x: -1520, y: 600 };
-  const resLeft = mgr.update(0, sharkLeft, camLeft);
-  assert.equal(resLeft.wrappedHorizontally, true);
-  assert.equal(sharkLeft.x, 1450);
+  const sharkLeft = { x: -4530, y: 600 };
+  const camLeft = { x: -4520, y: 600 };
+  const resLeft = continuousMgr.update(0, sharkLeft, camLeft);
+  assert.equal(resLeft.wrappedHorizontally, false);
+  assert.equal(sharkLeft.x, -4530);
+
+  // Optional hard-wrap mode shifts active entities together when enabled
+  const wrapMgr = new InfiniteWorldManager(3000, 0, true);
+  const wrappedShark = { x: 1520, y: 400 };
+  const wrappedCam = { x: 1510, y: 400 };
+  const nearbyFish = [{ x: 1480, y: 400 }];
+  const resWrap = wrapMgr.update(0, wrappedShark, wrappedCam, nearbyFish);
+  assert.equal(resWrap.wrappedHorizontally, true);
+  assert.equal(wrappedShark.x, -1450);
+  assert.equal(nearbyFish[0].x, -1490);
 
   // Infinite downward depth: y = 6500 is NOT clamped to 1800
   const sharkDeep = { x: 200, y: 6500 };
   const camDeep = { x: 200, y: 6400 };
-  const resDeep = mgr.update(1, sharkDeep, camDeep);
+  const resDeep = continuousMgr.update(1, sharkDeep, camDeep);
   assert.equal(sharkDeep.y, 6500);
   assert.equal(resDeep.targetCameraY, 6500);
   assert.equal(getDepthZone(6500).id, 'abyss');
@@ -148,7 +177,7 @@ test('InfiniteWorldManager wraps horizontally at [-worldWidth/2, +worldWidth/2] 
   // Sea surface clamp: y < 0 is clamped to seaSurfaceY = 0
   const sharkSurface = { x: 0, y: -45, vy: -100 };
   const camSurface = { x: 0, y: 10 };
-  const resSurface = mgr.update(0, sharkSurface, camSurface);
+  const resSurface = continuousMgr.update(0, sharkSurface, camSurface);
   assert.equal(resSurface.clampedAtSurface, true);
   assert.equal(sharkSurface.y, 0);
 });

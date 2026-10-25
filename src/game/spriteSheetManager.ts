@@ -1,4 +1,4 @@
-export type SpriteFrameKey =
+export type PrimarySpriteFrameKey =
   | 'BASE_SHARK'      // Row 0, Col 0 (0)
   | 'MECHA_JAWS'      // Row 0, Col 1 (1)
   | 'ABYSS_JAWS'      // Row 0, Col 2 (2)
@@ -16,7 +16,50 @@ export type SpriteFrameKey =
   | 'PREY_KRAKEN'     // Row 3, Col 2 (14)
   | 'DEVOUR_FX';      // Row 3, Col 3 (15)
 
-export const SPRITE_GRID_MAP: Record<SpriteFrameKey, [number, number]> = {
+/**
+ * All 30 marine target species & relics from the 6x5 sheet (/assets/aistudio/fish2_fc857cfa.png)
+ */
+export type Fish2SpriteKey =
+  // Row 0: Shallow Reef Small Life
+  | 'FISH2_TETRA_SCHOOL'
+  | 'FISH2_BLUE_TANG'
+  | 'FISH2_CLOWNFISH'
+  | 'FISH2_SEAHORSE'
+  | 'FISH2_HERMIT_CRAB'
+  // Row 1: Coral Reef Mid-Tier
+  | 'FISH2_BUTTERFLYFISH'
+  | 'FISH2_BARRACUDA'
+  | 'FISH2_LIONFISH'
+  | 'FISH2_MORAY_EEL'
+  | 'FISH2_SNORKEL_MASK'
+  // Row 2: Twilight Bioluminescent & Pelagic
+  | 'FISH2_JELLY_SWARM'
+  | 'FISH2_HATCHETFISH'
+  | 'FISH2_LANTERNFISH'
+  | 'FISH2_VAMPIRE_SQUID'
+  | 'FISH2_SPIKY_PUFFER'
+  // Row 3: Deep Sea & Sunken Trench
+  | 'FISH2_GIANT_ISOPOD'
+  | 'FISH2_ANGLERFISH'
+  | 'FISH2_COELACANTH'
+  | 'FISH2_GIANT_SQUID'
+  | 'FISH2_YELLOW_SUB'
+  // Row 4: Abyssal Predators & Relics
+  | 'FISH2_KING_CRAB'
+  | 'FISH2_VIPERFISH'
+  | 'FISH2_BLOBFISH'
+  | 'FISH2_GULPER_EEL'
+  | 'FISH2_SUNKEN_IDOL'
+  // Row 5: Bosses, Hazards & Special Collectibles
+  | 'FISH2_KRAKEN_TENTACLE'
+  | 'FISH2_MECHA_SHARK'
+  | 'FISH2_TOXIC_SLIME'
+  | 'FISH2_MEG_TOOTH'
+  | 'FISH2_PLASMA_CORE';
+
+export type SpriteFrameKey = PrimarySpriteFrameKey | Fish2SpriteKey;
+
+export const SPRITE_GRID_MAP: Record<PrimarySpriteFrameKey, [number, number]> = {
   BASE_SHARK: [0, 0],
   MECHA_JAWS: [0, 1],
   ABYSS_JAWS: [0, 2],
@@ -35,12 +78,50 @@ export const SPRITE_GRID_MAP: Record<SpriteFrameKey, [number, number]> = {
   DEVOUR_FX: [3, 3],
 };
 
+export const FISH2_GRID_MAP: Record<Fish2SpriteKey, [number, number]> = {
+  // Row 0
+  FISH2_TETRA_SCHOOL: [0, 0],
+  FISH2_BLUE_TANG: [0, 1],
+  FISH2_CLOWNFISH: [0, 2],
+  FISH2_SEAHORSE: [0, 3],
+  FISH2_HERMIT_CRAB: [0, 4],
+  // Row 1
+  FISH2_BUTTERFLYFISH: [1, 0],
+  FISH2_BARRACUDA: [1, 1],
+  FISH2_LIONFISH: [1, 2],
+  FISH2_MORAY_EEL: [1, 3],
+  FISH2_SNORKEL_MASK: [1, 4],
+  // Row 2
+  FISH2_JELLY_SWARM: [2, 0],
+  FISH2_HATCHETFISH: [2, 1],
+  FISH2_LANTERNFISH: [2, 2],
+  FISH2_VAMPIRE_SQUID: [2, 3],
+  FISH2_SPIKY_PUFFER: [2, 4],
+  // Row 3
+  FISH2_GIANT_ISOPOD: [3, 0],
+  FISH2_ANGLERFISH: [3, 1],
+  FISH2_COELACANTH: [3, 2],
+  FISH2_GIANT_SQUID: [3, 3],
+  FISH2_YELLOW_SUB: [3, 4],
+  // Row 4
+  FISH2_KING_CRAB: [4, 0],
+  FISH2_VIPERFISH: [4, 1],
+  FISH2_BLOBFISH: [4, 2],
+  FISH2_GULPER_EEL: [4, 3],
+  FISH2_SUNKEN_IDOL: [4, 4],
+  // Row 5
+  FISH2_KRAKEN_TENTACLE: [5, 0],
+  FISH2_MECHA_SHARK: [5, 1],
+  FISH2_TOXIC_SLIME: [5, 2],
+  FISH2_MEG_TOOTH: [5, 3],
+  FISH2_PLASMA_CORE: [5, 4],
+};
+
 /**
- * Exact normalized cell bounds [x0, y0, x1, y1] for each of the 16 sprites in the 4x4 sheet
- * so wide sprites (like Row 0 Col 0 Shark, Row 3 Col 0 Eel, Row 3 Col 2 Kraken Boss) are never clipped.
+ * Exact normalized cell bounds [x0, y0, x1, y1] for each of the 16 sprites in the primary 4x4 sheet
  */
 export const SPRITE_CELL_BOUNDS: Record<
-  SpriteFrameKey,
+  PrimarySpriteFrameKey,
   [number, number, number, number]
 > = {
   // Row 0
@@ -65,61 +146,135 @@ export const SPRITE_CELL_BOUNDS: Record<
   DEVOUR_FX: [0.795, 0.74, 0.99, 0.988],
 };
 
+/**
+ * Exact whitespace-valley normalized cell bounds [x0, y0, x1, y1] for all 30 sprites in /assets/aistudio/fish2_fc857cfa.png
+ */
+export const FISH2_CELL_BOUNDS: Record<
+  Fish2SpriteKey,
+  [number, number, number, number]
+> = {
+  // Column 0 (x: 0.000 .. 0.194)
+  FISH2_TETRA_SCHOOL: [0.0, 0.0, 0.194, 0.138],
+  FISH2_BUTTERFLYFISH: [0.0, 0.138, 0.194, 0.3242],
+  FISH2_JELLY_SWARM: [0.0, 0.3242, 0.194, 0.4974],
+  FISH2_GIANT_ISOPOD: [0.0, 0.4974, 0.194, 0.6563],
+  FISH2_KING_CRAB: [0.0, 0.6563, 0.194, 0.8294],
+  FISH2_KRAKEN_TENTACLE: [0.0, 0.8294, 0.194, 1.0],
+
+  // Column 1 (x: 0.194 .. 0.398)
+  FISH2_BLUE_TANG: [0.194, 0.0, 0.398, 0.151],
+  FISH2_BARRACUDA: [0.194, 0.151, 0.398, 0.3177],
+  FISH2_HATCHETFISH: [0.194, 0.3177, 0.398, 0.4974],
+  FISH2_ANGLERFISH: [0.194, 0.4974, 0.398, 0.6641],
+  FISH2_VIPERFISH: [0.194, 0.6641, 0.398, 0.8138],
+  FISH2_MECHA_SHARK: [0.194, 0.8138, 0.398, 1.0],
+
+  // Column 2 (x: 0.398 .. 0.598)
+  FISH2_CLOWNFISH: [0.398, 0.0, 0.598, 0.151],
+  FISH2_LIONFISH: [0.398, 0.151, 0.598, 0.3307],
+  FISH2_LANTERNFISH: [0.398, 0.3307, 0.598, 0.4883],
+  FISH2_COELACANTH: [0.398, 0.4883, 0.598, 0.6589],
+  FISH2_BLOBFISH: [0.398, 0.6589, 0.598, 0.832],
+  FISH2_TOXIC_SLIME: [0.398, 0.832, 0.598, 1.0],
+
+  // Column 3 (x: 0.598 .. 0.822)
+  FISH2_SEAHORSE: [0.598, 0.0, 0.822, 0.1641],
+  FISH2_MORAY_EEL: [0.598, 0.1641, 0.822, 0.3008],
+  FISH2_VAMPIRE_SQUID: [0.598, 0.3008, 0.822, 0.4922],
+  FISH2_GIANT_SQUID: [0.598, 0.4922, 0.822, 0.6641],
+  FISH2_GULPER_EEL: [0.598, 0.6641, 0.822, 0.8164],
+  FISH2_MEG_TOOTH: [0.598, 0.8164, 0.822, 1.0],
+
+  // Column 4 (x: 0.822 .. 1.000)
+  FISH2_HERMIT_CRAB: [0.822, 0.0, 1.0, 0.1549],
+  FISH2_SNORKEL_MASK: [0.822, 0.1549, 1.0, 0.3268],
+  FISH2_SPIKY_PUFFER: [0.822, 0.3268, 1.0, 0.4987],
+  FISH2_YELLOW_SUB: [0.822, 0.4987, 1.0, 0.6654],
+  FISH2_SUNKEN_IDOL: [0.822, 0.6654, 1.0, 0.832],
+  FISH2_PLASMA_CORE: [0.822, 0.832, 1.0, 1.0],
+};
+
 export class SpriteSheetManager {
   public frames: Partial<Record<SpriteFrameKey, HTMLCanvasElement>> = {};
   public rawGridFrames: HTMLCanvasElement[] = [];
+  public fish2GridFrames: HTMLCanvasElement[] = [];
   public loaded: boolean = false;
+  public fish2Loaded: boolean = false;
   private loadingPromise: Promise<void> | null = null;
 
   /**
-   * Loads the 4x4 sprite sheet, removes pure white background (R>240, G>240, B>240 -> Alpha=0)
-   * via offscreen Canvas getImageData, and slices into 16 tight transparent sprite frames.
+   * Loads both the primary 4x4 sprite sheet (/assets/aistudio/fish_24bdaa5a.png)
+   * and the extended 6x5 target fish sprite sheet (/assets/aistudio/fish2_fc857cfa.png),
+   * removing pure white backgrounds via offscreen Canvas getImageData and slicing tight transparent frames.
    */
-  public load(url: string = '/assets/aistudio/fish_24bdaa5a.png'): Promise<void> {
-    if (this.loaded) return Promise.resolve();
+  public load(
+    primaryUrl: string = '/assets/aistudio/fish_24bdaa5a.png',
+    fish2Url: string = '/assets/aistudio/fish2_fc857cfa.png'
+  ): Promise<void> {
+    if (this.loaded && this.fish2Loaded) return Promise.resolve();
     if (this.loadingPromise) return this.loadingPromise;
     if (typeof Image === 'undefined' || typeof document === 'undefined') {
       return Promise.resolve();
     }
 
-    this.loadingPromise = new Promise((resolve) => {
+    const loadPrimary = new Promise<void>((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
-        this.processAndSliceImage(img);
+        this.processAndSlicePrimaryImage(img);
         this.loaded = true;
         resolve();
       };
       img.onerror = () => {
-        if (url !== '/spritesheet.png') {
-          this.loadingPromise = null;
-          this.load('/spritesheet.png').then(resolve);
+        if (primaryUrl !== '/spritesheet.png') {
+          const fallbackImg = new Image();
+          fallbackImg.crossOrigin = 'anonymous';
+          fallbackImg.onload = () => {
+            this.processAndSlicePrimaryImage(fallbackImg);
+            this.loaded = true;
+            resolve();
+          };
+          fallbackImg.onerror = () => resolve();
+          fallbackImg.src = '/spritesheet.png';
         } else {
           resolve();
         }
       };
-      img.src = url;
+      img.src = primaryUrl;
     });
 
+    const loadFish2 = new Promise<void>((resolve) => {
+      const img2 = new Image();
+      img2.crossOrigin = 'anonymous';
+      img2.onload = () => {
+        this.processAndSliceFish2Image(img2);
+        this.fish2Loaded = true;
+        resolve();
+      };
+      img2.onerror = () => resolve();
+      img2.src = fish2Url;
+    });
+
+    this.loadingPromise = Promise.all([loadPrimary, loadFish2]).then(() => undefined);
     return this.loadingPromise;
   }
 
-  private processAndSliceImage(img: HTMLImageElement): void {
+  private createChromaKeyCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
     const fullW = img.naturalWidth || img.width;
     const fullH = img.naturalHeight || img.height;
-    if (!fullW || !fullH) return;
+    if (!fullW || !fullH) return null;
 
     const sheetCanvas = document.createElement('canvas');
     sheetCanvas.width = fullW;
     sheetCanvas.height = fullH;
     const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
-    if (!sheetCtx) return;
+    if (!sheetCtx) return null;
 
     sheetCtx.drawImage(img, 0, 0);
     const imgData = sheetCtx.getImageData(0, 0, fullW, fullH);
     const data = imgData.data;
 
-    // 1. Chroma-Key White Background Removal: R > 240, G > 240, B > 240 -> Alpha = 0
+    // Chroma-Key White Background Removal: R > 240, G > 240, B > 240 -> Alpha = 0
     for (let i = 0; i < data.length; i += 4) {
       const r = data[i];
       const g = data[i + 1];
@@ -134,10 +289,75 @@ export class SpriteSheetManager {
       }
     }
     sheetCtx.putImageData(imgData, 0, 0);
+    return sheetCanvas;
+  }
 
-    // 2. Slice all 16 sprites using their cell bounds and trim transparent padding
+  private sliceBoundedFrame(
+    sheetCanvas: HTMLCanvasElement,
+    sheetCtx: CanvasRenderingContext2D,
+    bounds: [number, number, number, number]
+  ): HTMLCanvasElement {
+    const fullW = sheetCanvas.width;
+    const fullH = sheetCanvas.height;
+    const [nx0, ny0, nx1, ny1] = bounds;
+    const sx = Math.floor(nx0 * fullW);
+    const sy = Math.floor(ny0 * fullH);
+    const cellW = Math.max(1, Math.floor((nx1 - nx0) * fullW));
+    const cellH = Math.max(1, Math.floor((ny1 - ny0) * fullH));
+
+    const cellData = sheetCtx.getImageData(sx, sy, cellW, cellH);
+    let minX = cellW;
+    let minY = cellH;
+    let maxX = 0;
+    let maxY = 0;
+    let hasPixels = false;
+
+    for (let py = 0; py < cellH; py++) {
+      for (let px = 0; px < cellW; px++) {
+        const alpha = cellData.data[(py * cellW + px) * 4 + 3];
+        if (alpha > 18) {
+          hasPixels = true;
+          if (px < minX) minX = px;
+          if (py < minY) minY = py;
+          if (px > maxX) maxX = px;
+          if (py > maxY) maxY = py;
+        }
+      }
+    }
+
+    const frameCanvas = document.createElement('canvas');
+    if (hasPixels) {
+      const pad = 4;
+      const bx = Math.max(0, minX - pad);
+      const by = Math.max(0, minY - pad);
+      const bw = Math.min(cellW - bx, maxX - minX + 1 + pad * 2);
+      const bh = Math.min(cellH - by, maxY - minY + 1 + pad * 2);
+      frameCanvas.width = bw;
+      frameCanvas.height = bh;
+      const fCtx = frameCanvas.getContext('2d');
+      if (fCtx) {
+        fCtx.drawImage(sheetCanvas, sx + bx, sy + by, bw, bh, 0, 0, bw, bh);
+      }
+    } else {
+      frameCanvas.width = cellW;
+      frameCanvas.height = cellH;
+      const fCtx = frameCanvas.getContext('2d');
+      if (fCtx) {
+        fCtx.drawImage(sheetCanvas, sx, sy, cellW, cellH, 0, 0, cellW, cellH);
+      }
+    }
+
+    return frameCanvas;
+  }
+
+  private processAndSlicePrimaryImage(img: HTMLImageElement): void {
+    const sheetCanvas = this.createChromaKeyCanvas(img);
+    if (!sheetCanvas) return;
+    const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
+    if (!sheetCtx) return;
+
     this.rawGridFrames = [];
-    const orderedKeys: SpriteFrameKey[] = [
+    const orderedKeys: PrimarySpriteFrameKey[] = [
       'BASE_SHARK',
       'MECHA_JAWS',
       'ABYSS_JAWS',
@@ -157,56 +377,33 @@ export class SpriteSheetManager {
     ];
 
     for (const key of orderedKeys) {
-      const [nx0, ny0, nx1, ny1] = SPRITE_CELL_BOUNDS[key];
-      const sx = Math.floor(nx0 * fullW);
-      const sy = Math.floor(ny0 * fullH);
-      const cellW = Math.floor((nx1 - nx0) * fullW);
-      const cellH = Math.floor((ny1 - ny0) * fullH);
-
-      const cellData = sheetCtx.getImageData(sx, sy, cellW, cellH);
-      let minX = cellW;
-      let minY = cellH;
-      let maxX = 0;
-      let maxY = 0;
-      let hasPixels = false;
-
-      for (let py = 0; py < cellH; py++) {
-        for (let px = 0; px < cellW; px++) {
-          const alpha = cellData.data[(py * cellW + px) * 4 + 3];
-          if (alpha > 18) {
-            hasPixels = true;
-            if (px < minX) minX = px;
-            if (py < minY) minY = py;
-            if (px > maxX) maxX = px;
-            if (py > maxY) maxY = py;
-          }
-        }
-      }
-
-      const frameCanvas = document.createElement('canvas');
-      if (hasPixels) {
-        const pad = 4;
-        const bx = Math.max(0, minX - pad);
-        const by = Math.max(0, minY - pad);
-        const bw = Math.min(cellW - bx, maxX - minX + 1 + pad * 2);
-        const bh = Math.min(cellH - by, maxY - minY + 1 + pad * 2);
-        frameCanvas.width = bw;
-        frameCanvas.height = bh;
-        const fCtx = frameCanvas.getContext('2d');
-        if (fCtx) {
-          fCtx.drawImage(sheetCanvas, sx + bx, sy + by, bw, bh, 0, 0, bw, bh);
-        }
-      } else {
-        frameCanvas.width = cellW;
-        frameCanvas.height = cellH;
-        const fCtx = frameCanvas.getContext('2d');
-        if (fCtx) {
-          fCtx.drawImage(sheetCanvas, sx, sy, cellW, cellH, 0, 0, cellW, cellH);
-        }
-      }
-
+      const frameCanvas = this.sliceBoundedFrame(
+        sheetCanvas,
+        sheetCtx,
+        SPRITE_CELL_BOUNDS[key]
+      );
       this.frames[key] = frameCanvas;
       this.rawGridFrames.push(frameCanvas);
+    }
+  }
+
+  private processAndSliceFish2Image(img: HTMLImageElement): void {
+    const sheetCanvas = this.createChromaKeyCanvas(img);
+    if (!sheetCanvas) return;
+    const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
+    if (!sheetCtx) return;
+
+    this.fish2GridFrames = [];
+    const orderedFish2Keys = Object.keys(FISH2_GRID_MAP) as Fish2SpriteKey[];
+
+    for (const key of orderedFish2Keys) {
+      const frameCanvas = this.sliceBoundedFrame(
+        sheetCanvas,
+        sheetCtx,
+        FISH2_CELL_BOUNDS[key]
+      );
+      this.frames[key] = frameCanvas;
+      this.fish2GridFrames.push(frameCanvas);
     }
   }
 
@@ -244,22 +441,32 @@ export class SpriteSheetManager {
     }
   }
 
+  public getPreySprite(config: {
+    tier: number;
+    spriteKey?: SpriteFrameKey;
+  }): HTMLCanvasElement | undefined {
+    if (config.spriteKey && this.frames[config.spriteKey]) {
+      return this.frames[config.spriteKey];
+    }
+    return this.getPreyFrame(config.tier);
+  }
+
   public getPreyFrame(tier: number): HTMLCanvasElement | undefined {
     switch (tier) {
       case 1:
-        return this.frames.PREY_JELLY;
+        return this.frames.FISH2_JELLY_SWARM ?? this.frames.PREY_JELLY;
       case 2:
-        return this.frames.PREY_CRAB;
+        return this.frames.FISH2_CLOWNFISH ?? this.frames.PREY_CRAB;
       case 3:
-        return this.frames.PREY_PUFFER;
+        return this.frames.FISH2_SPIKY_PUFFER ?? this.frames.PREY_PUFFER;
       case 4:
-        return this.frames.PREY_SUB;
+        return this.frames.FISH2_YELLOW_SUB ?? this.frames.PREY_SUB;
       case 5:
-        return this.frames.PREY_EEL;
+        return this.frames.FISH2_ANGLERFISH ?? this.frames.PREY_EEL;
       case 6:
         return this.frames.PREY_MINE;
       case 7:
-        return this.frames.PREY_CRAB;
+        return this.frames.FISH2_COELACANTH ?? this.frames.PREY_CRAB;
       case 8:
         return this.frames.PREY_KRAKEN;
       default:
@@ -269,3 +476,4 @@ export class SpriteSheetManager {
 }
 
 export const spriteSheetManager = new SpriteSheetManager();
+

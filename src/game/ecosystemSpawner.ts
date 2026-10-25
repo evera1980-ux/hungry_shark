@@ -169,34 +169,62 @@ export class EcosystemSpawner {
     return entity;
   }
 
+  /**
+   * 当前悬赏目标鱼 ID（开启时提高该目标鱼在周围海域的刷新权重，确保玩家随时能狩猎目标鱼）
+   */
+  public activeTargetPreyId: string | null = null;
+
   private pickPreyConfigForDepth(
     sharkY: number,
     rng: () => number
   ): PreyTierConfig {
-    const tiers = GAME_CONFIG.preyTiers;
-    if (tiers.length === 0) {
+    const allPreys = GAME_CONFIG.preyTiers;
+    if (allPreys.length === 0) {
       throw new Error('GAME_CONFIG.preyTiers is empty');
     }
 
-    // 根据下潜深度与游戏时间动态调整 8 个阶位猎物权重
+    // 若存在当前悬赏目标鱼，22% 概率直接刷新该目标鱼以保证良好狩猎体验
+    if (this.activeTargetPreyId && rng() < 0.22) {
+      const targetConfig = allPreys.find((p) => p.id === this.activeTargetPreyId);
+      if (targetConfig) {
+        return targetConfig;
+      }
+    }
+
+    // 根据下潜深度动态调整 Tier 1..8 的阶位权重
     const depth = Math.max(0, sharkY);
-    const weights =
+    const tierWeights =
       depth > 1250
         ? [14, 14, 15, 15, 14, 11, 11, 6]
         : depth > 650
         ? [20, 20, 18, 14, 11, 8, 6, 3]
         : [28, 25, 16, 11, 8, 6, 4, 2];
 
-    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
     let roll = rng() * totalWeight;
-    for (let i = 0; i < tiers.length; i++) {
-      roll -= weights[i];
+    let chosenTierNum = 1;
+    for (let t = 0; t < tierWeights.length; t++) {
+      roll -= tierWeights[t];
       if (roll <= 0) {
-        return tiers[i];
+        chosenTierNum = t + 1;
+        break;
       }
     }
-    return tiers[0];
+
+    const candidates = allPreys.filter((p) => p.tier === chosenTierNum);
+    if (candidates.length === 0) {
+      return allPreys[0];
+    }
+
+    // 优先选择适合当前下潜深度的鱼种（若有多条则随机抽取）
+    const depthMatched = candidates.filter(
+      (p) => depth >= p.minDepth - 180 && depth <= p.maxDepth + 350
+    );
+    const pool = depthMatched.length > 0 ? depthMatched : candidates;
+    const idx = Math.min(pool.length - 1, Math.floor(rng() * pool.length));
+    return pool[idx];
   }
 }
 
 export const ecosystemSpawner = new EcosystemSpawner(50, 1500);
+

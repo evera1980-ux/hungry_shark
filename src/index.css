@@ -43,3 +43,60 @@
   -webkit-text-stroke: 3px rgba(2, 6, 23, 0.9);
   text-shadow: 0 2px 6px rgba(2, 6, 23, 0.85);
 }
+
+@keyframes float-emblem {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes pulse-danger {
+  0%, 100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes frenzy-glow {
+  0%, 100% {
+    box-shadow: 0 0 14px rgba(250, 204, 21, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 26px rgba(250, 204, 21, 0.85);
+  }
+}
+
+.animate-float-emblem {
+  animation: float-emblem 3.2s ease-in-out infinite;
+}
+
+.animate-pulse-danger {
+  animation: pulse-danger 1.1s ease-in-out infinite;
+}
+
+.animate-frenzy-glow {
+  animation: frenzy-glow 1.2s ease-in-out infinite;
+}
+
+.game-hud-card {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.game-btn-spring {
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.18s ease;
+}
+
+.game-btn-spring:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.02);
+}
+
+.game-btn-spring:active:not(:disabled) {
+  transform: translateY(1px) scale(0.95);
+}

@@ -227,13 +227,14 @@ export interface PreyEntity {
 }
 
 /**
- * Draw any of the 8 Ocean Prey / Hazard / Boss tiers using the sliced sprites from SpriteSheetManager
+ * Draw any of the 32 Ocean Prey / Hazard / Boss species using the sliced sprites from SpriteSheetManager
  */
 export function drawPreyEntity(
   ctx: CanvasRenderingContext2D,
   prey: PreyEntity,
   sharkBiteTier: number,
-  frenzyActive: boolean
+  frenzyActive: boolean,
+  targetPreyId?: string
 ): void {
   const {
     config,
@@ -249,9 +250,21 @@ export function drawPreyEntity(
   const scaleMult = Math.min(2.45, (prey.scaleMultiplier ?? 1.0) * behemothBoost);
   const r = config.radius * scaleMult * (isInflated ? 1.32 : 1.0);
   const canEat = frenzyActive || sharkBiteTier >= config.tier;
+  const isBountyTarget = Boolean(targetPreyId && config.id === targetPreyId);
 
   ctx.save();
   ctx.translate(x, y);
+
+  // Active Target Fish Bounty Lock Reticle (🎯)
+  if (isBountyTarget) {
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 9 + Math.sin(phase * 5) * 2.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   // Mutation Variant Aura (Golden Mutant / Abyss Behemoth)
   if (mutationVariant === 'GOLDEN_MUTANT') {
@@ -287,8 +300,7 @@ export function drawPreyEntity(
   }
 
   ctx.save();
-  // Note: In the sprite sheet, Pufferfish [2,1], Submarine [2,2], Crystal Crab [2,3],
-  // and Electric Eel [3,0] face right (+X). Flip horizontally when swimming left (vx < -1).
+  // All directional sprites in both sheets face right (+X). Flip horizontally when swimming left (vx < -1).
   if (config.behavior !== 'DRIFT_SWARM' && config.behavior !== 'MINE_HAZARD') {
     if (vx < -1) {
       ctx.scale(-1, 1);
@@ -307,31 +319,34 @@ export function drawPreyEntity(
     ctx.filter = 'hue-rotate(255deg) saturate(1.6) contrast(1.1)';
   }
 
-  const preyFrame = spriteSheetManager.getPreyFrame(config.tier);
+  const preyFrame = spriteSheetManager.getPreySprite(config);
   const drawSize = r * 2.35;
   drawCenteredFrame(ctx, preyFrame, drawSize, drawSize * 0.85, 0, 0);
   ctx.restore();
 
-  // Tier indicator label on Tier 3+ prey/hazards or mutated variants
-  if (config.tier >= 3 || mutationVariant !== 'NONE') {
+  // Tier indicator label on Tier 3+ prey/hazards, mutated variants, or active Bounty Target
+  if (config.tier >= 3 || mutationVariant !== 'NONE' || isBountyTarget) {
     ctx.font = '700 11px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillStyle =
-      mutationVariant === 'GOLDEN_MUTANT'
-        ? '#fde047'
-        : mutationVariant === 'ABYSS_BEHEMOTH'
-        ? '#e879f9'
-        : canEat
-        ? '#86efac'
-        : '#fda4af';
-    const prefix =
-      mutationVariant === 'GOLDEN_MUTANT'
-        ? '★'
-        : mutationVariant === 'ABYSS_BEHEMOTH'
-        ? '⚡'
-        : '';
+    ctx.fillStyle = isBountyTarget
+      ? '#38bdf8'
+      : mutationVariant === 'GOLDEN_MUTANT'
+      ? '#fde047'
+      : mutationVariant === 'ABYSS_BEHEMOTH'
+      ? '#e879f9'
+      : canEat
+      ? '#86efac'
+      : '#fda4af';
+    const prefix = isBountyTarget
+      ? '🎯'
+      : mutationVariant === 'GOLDEN_MUTANT'
+      ? '★'
+      : mutationVariant === 'ABYSS_BEHEMOTH'
+      ? '⚡'
+      : '';
     ctx.fillText(`${prefix}T${config.tier}`, 0, -r - 8);
   }
 
   ctx.restore();
 }
+
