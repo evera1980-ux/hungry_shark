@@ -244,8 +244,10 @@ export default function App() {
   const hpGhostFillRef = useRef<HTMLDivElement | null>(null);
   const energyBarFillRef = useRef<HTMLDivElement | null>(null);
   const xpBarFillRef = useRef<HTMLDivElement | null>(null);
+  const joystickKnobRef = useRef<HTMLDivElement | null>(null);
+  const lastTouchActionTimeRef = useRef<number>(0);
 
-  // Virtual Joystick UI state for rendering knob position
+  // Virtual Joystick UI state (kept for aria-valuenow; knob transform updates via joystickKnobRef at 60Hz without re-rendering buttons)
   const [joystickVisual, setJoystickVisual] = useState<{
     active: boolean;
     dx: number;
@@ -296,12 +298,15 @@ export default function App() {
     input: {
       keys: Set<string>;
       joyActive: boolean;
+      joyPointerId: number | null;
       joyOriginX: number;
       joyOriginY: number;
       joyDx: number;
       joyDy: number;
       boostPointerHeld: boolean;
+      boostPointerId: number | null;
       canvasPointerActive: boolean;
+      canvasPointerId: number | null;
       canvasPointerX: number;
       canvasPointerY: number;
       rightMouseBoostHeld: boolean;
@@ -369,12 +374,15 @@ export default function App() {
     input: {
       keys: new Set(),
       joyActive: false,
+      joyPointerId: null,
       joyOriginX: 0,
       joyOriginY: 0,
       joyDx: 0,
       joyDy: 0,
       boostPointerHeld: false,
+      boostPointerId: null,
       canvasPointerActive: false,
+      canvasPointerId: null,
       canvasPointerX: 0,
       canvasPointerY: 0,
       rightMouseBoostHeld: false,
@@ -746,11 +754,17 @@ export default function App() {
       // Clear held inputs
       sim.input.keys.clear();
       sim.input.joyActive = false;
+      sim.input.joyPointerId = null;
       sim.input.joyDx = 0;
       sim.input.joyDy = 0;
       sim.input.boostPointerHeld = false;
+      sim.input.boostPointerId = null;
       sim.input.canvasPointerActive = false;
+      sim.input.canvasPointerId = null;
       sim.input.rightMouseBoostHeld = false;
+      if (joystickKnobRef.current) {
+        joystickKnobRef.current.style.transform = 'translate3d(0px, 0px, 0)';
+      }
       setJoystickVisual({ active: false, dx: 0, dy: 0 });
       setBoostVisual(false);
 
@@ -946,6 +960,39 @@ export default function App() {
           1.22
         );
       }
+
+      // Immediately sync HUD state so mobile multi-touch taps reflect on the exact same frame
+      const activeForm = getSharkFormById(sim.shark.sharkFormId);
+      const activeUpg =
+        nextSave.sharkUpgradeLevels[sim.shark.sharkFormId] ?? 1;
+      const nextUpgCost = getSharkUpgradeCost(activeForm, activeUpg);
+      const nextEvo = getNextEvolutionTarget(sim.shark.sharkFormId, nextSave);
+      const nextEval = nextEvo
+        ? evaluateSharkUnlock(
+            nextEvo,
+            nextSave,
+            0,
+            0,
+            Math.max(nextSave.bestInRunLevel, sim.shark.level),
+            Math.max(nextSave.bestDepthReached, Math.round(sim.shark.maxDepthReached))
+          )
+        : null;
+      setHudState((prev) => ({
+        ...prev,
+        coins: nextSave.bankedCoins,
+        hp: Math.ceil(sim.shark.hp),
+        maxHp: sim.shark.stats.maxHp,
+        biteTier: sim.shark.stats.biteTier,
+        activeUpgradeLevel: activeUpg,
+        bodyUpgradeCost: nextUpgCost,
+        canUpgradeBodyNow:
+          !sim.shark.trialActive &&
+          activeUpg < 10 &&
+          nextSave.bankedCoins >= nextUpgCost,
+        nextEvoTargetId: nextEvo?.id ?? null,
+        canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
+      }));
+
       soundFX.playEvolution();
     },
     [recomputeSharkStats, spawnFloatText]
@@ -1068,6 +1115,38 @@ export default function App() {
         '#fde047',
         1.38
       );
+
+      // Immediately sync HUD state on Morph Breakthrough
+      const newUpg = nextSave.sharkUpgradeLevels[sharkId] ?? 1;
+      const newUpgCost = getSharkUpgradeCost(form, newUpg);
+      const nextEvoAfter = getNextEvolutionTarget(sharkId, nextSave);
+      const nextEvalAfter = nextEvoAfter
+        ? evaluateSharkUnlock(
+            nextEvoAfter,
+            nextSave,
+            0,
+            0,
+            Math.max(nextSave.bestInRunLevel, sim.shark.level),
+            Math.max(nextSave.bestDepthReached, Math.round(sim.shark.maxDepthReached))
+          )
+        : null;
+      setHudState((prev) => ({
+        ...prev,
+        coins: nextSave.bankedCoins,
+        genes: nextSave.bankedGenes,
+        hp: sim.shark.stats.maxHp,
+        maxHp: sim.shark.stats.maxHp,
+        energy: sim.shark.stats.maxEnergy,
+        maxEnergy: sim.shark.stats.maxEnergy,
+        biteTier: sim.shark.stats.biteTier,
+        activeSharkId: sharkId,
+        activeUpgradeLevel: newUpg,
+        unlockedFormsCount: nextSave.unlockedSharkIds.length,
+        nextEvoTargetId: nextEvoAfter?.id ?? null,
+        canBreakthroughNow: Boolean(nextEvalAfter?.canUnlockNow),
+        canUpgradeBodyNow: newUpg < 10 && nextSave.bankedCoins >= newUpgCost,
+        bodyUpgradeCost: newUpgCost,
+      }));
     },
     [recomputeSharkStats, spawnFloatText, spawnParticle]
   );
@@ -1353,9 +1432,15 @@ export default function App() {
     const handleWindowBlur = () => {
       simRef.current.input.keys.clear();
       simRef.current.input.joyActive = false;
+      simRef.current.input.joyPointerId = null;
       simRef.current.input.boostPointerHeld = false;
+      simRef.current.input.boostPointerId = null;
       simRef.current.input.canvasPointerActive = false;
+      simRef.current.input.canvasPointerId = null;
       simRef.current.input.rightMouseBoostHeld = false;
+      if (joystickKnobRef.current) {
+        joystickKnobRef.current.style.transform = 'translate3d(0px, 0px, 0)';
+      }
       setJoystickVisual({ active: false, dx: 0, dy: 0 });
       setBoostVisual(false);
     };
@@ -2580,10 +2665,17 @@ export default function App() {
   }, [createPreyEntity, recomputeSharkStats, spawnFloatText, spawnParticle, spawnPickup]);
 
   // Full-Canvas Direct Pointer Steering & Right-Click Boost Handlers (P0-4)
+  // Strictly tracks its own pointerId so multi-touch fingers on HUD buttons or Joystick never collide
   const handleCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (gameStateRef.current !== 'playing') return;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    if (simRef.current.input.joyActive) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore capture errors on synthetic events
+    }
     simRef.current.input.canvasPointerActive = true;
+    simRef.current.input.canvasPointerId = e.pointerId;
     simRef.current.input.canvasPointerX = e.clientX;
     simRef.current.input.canvasPointerY = e.clientY;
     if (e.button === 2) {
@@ -2593,18 +2685,30 @@ export default function App() {
   };
 
   const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (
+      simRef.current.input.canvasPointerActive &&
+      simRef.current.input.canvasPointerId !== null &&
+      e.pointerId !== simRef.current.input.canvasPointerId
+    ) {
+      return;
+    }
     simRef.current.input.canvasPointerX = e.clientX;
     simRef.current.input.canvasPointerY = e.clientY;
   };
 
   const handleCanvasPointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (
+      simRef.current.input.canvasPointerId !== null &&
+      e.pointerId !== simRef.current.input.canvasPointerId
+    ) {
+      return;
+    }
     if (e.button === 2) {
       simRef.current.input.rightMouseBoostHeld = false;
     }
-    if (e.buttons === 0) {
-      simRef.current.input.canvasPointerActive = false;
-      simRef.current.input.rightMouseBoostHeld = false;
-    }
+    simRef.current.input.canvasPointerActive = false;
+    simRef.current.input.canvasPointerId = null;
+    simRef.current.input.rightMouseBoostHeld = false;
     setBoostVisual(
       simRef.current.input.boostPointerHeld ||
         simRef.current.input.rightMouseBoostHeld ||
@@ -2613,8 +2717,15 @@ export default function App() {
   };
 
   // Virtual Joystick Pointer Handlers (Bottom-Left)
+  // Uses direct DOM transform on joystickKnobRef during pointermove so holding the joystick
+  // causes ZERO React re-renders and never blocks simultaneous right-thumb button taps on mobile!
   const handleJoystickPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore capture errors on synthetic events
+    }
     const rect = e.currentTarget.getBoundingClientRect();
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
@@ -2628,15 +2739,24 @@ export default function App() {
     const ny = dist > 0 ? (Math.sin(angle) * clampedDist) / maxR : 0;
 
     simRef.current.input.joyActive = true;
+    simRef.current.input.joyPointerId = e.pointerId;
     simRef.current.input.joyOriginX = centerX;
     simRef.current.input.joyOriginY = centerY;
     simRef.current.input.joyDx = nx;
     simRef.current.input.joyDy = ny;
-    setJoystickVisual({ active: true, dx: nx * maxR, dy: ny * maxR });
+    if (joystickKnobRef.current) {
+      joystickKnobRef.current.style.transform = `translate3d(${(nx * maxR).toFixed(1)}px, ${(ny * maxR).toFixed(1)}px, 0)`;
+    }
   };
 
   const handleJoystickPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!simRef.current.input.joyActive) return;
+    if (
+      !simRef.current.input.joyActive ||
+      (simRef.current.input.joyPointerId !== null &&
+        e.pointerId !== simRef.current.input.joyPointerId)
+    ) {
+      return;
+    }
     const rawDx = e.clientX - simRef.current.input.joyOriginX;
     const rawDy = e.clientY - simRef.current.input.joyOriginY;
     const maxR = 46;
@@ -2648,14 +2768,62 @@ export default function App() {
 
     simRef.current.input.joyDx = nx;
     simRef.current.input.joyDy = ny;
-    setJoystickVisual({ active: true, dx: nx * maxR, dy: ny * maxR });
+    if (joystickKnobRef.current) {
+      joystickKnobRef.current.style.transform = `translate3d(${(nx * maxR).toFixed(1)}px, ${(ny * maxR).toFixed(1)}px, 0)`;
+    }
   };
 
-  const handleJoystickPointerUp = () => {
+  const handleJoystickPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (
+      simRef.current.input.joyPointerId !== null &&
+      e.pointerId !== simRef.current.input.joyPointerId
+    ) {
+      return;
+    }
     simRef.current.input.joyActive = false;
+    simRef.current.input.joyPointerId = null;
     simRef.current.input.joyDx = 0;
     simRef.current.input.joyDy = 0;
-    setJoystickVisual({ active: false, dx: 0, dy: 0 });
+    if (joystickKnobRef.current) {
+      joystickKnobRef.current.style.transform = 'translate3d(0px, 0px, 0)';
+    }
+  };
+
+  /**
+   * Mobile Multi-Touch Button Helper:
+   * On mobile browsers (iOS Safari / Android Chrome / WebViews), holding Finger #1 on the Virtual Joystick or Canvas
+   * suppresses synthetic `click` (`onClick`) events for Finger #2 tapping HUD buttons.
+   * This helper fires the action immediately on `onPointerDown` / `onTouchStart` while guarding against duplicate `onClick` firing.
+   */
+  const bindMultiTouchButton = (
+    action: () => void,
+    isDisabled: boolean = false
+  ) => {
+    const triggerOnce = (
+      e:
+        | React.PointerEvent<HTMLButtonElement>
+        | React.TouchEvent<HTMLButtonElement>
+        | React.MouseEvent<HTMLButtonElement>
+    ) => {
+      if (isDisabled) return;
+      e.stopPropagation();
+      const now = performance.now();
+      if (now - lastTouchActionTimeRef.current < 320) return;
+      lastTouchActionTimeRef.current = now;
+      action();
+    };
+    return {
+      onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        triggerOnce(e);
+      },
+      onTouchStart: (e: React.TouchEvent<HTMLButtonElement>) => {
+        triggerOnce(e);
+      },
+      onClick: (e: React.MouseEvent<HTMLButtonElement>) => {
+        triggerOnce(e);
+      },
+    };
   };
 
   const toggleLanguage = () => {
@@ -2974,8 +3142,8 @@ export default function App() {
 
                   <button
                     type="button"
-                    onClick={() => setShowAtlasModal(true)}
-                    className="px-2 py-0.5 rounded-md bg-sky-500/20 hover:bg-sky-500/35 border border-sky-400/50 text-[9px] font-display font-bold text-sky-200 shrink-0 cursor-pointer"
+                    {...bindMultiTouchButton(() => setShowAtlasModal(true))}
+                    className="px-2 py-0.5 rounded-md bg-sky-500/20 hover:bg-sky-500/35 border border-sky-400/50 text-[9px] font-display font-bold text-sky-200 shrink-0 cursor-pointer touch-manipulation"
                   >
                     🧬 {hudState.unlockedFormsCount}/48
                   </button>
@@ -3120,9 +3288,9 @@ export default function App() {
               >
                 <button
                   type="button"
-                  onClick={toggleLanguage}
+                  {...bindMultiTouchButton(toggleLanguage)}
                   aria-label={t('btn_lang_toggle')}
-                  className="game-btn-spring h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg font-display font-bold text-[11px] sm:text-xs tracking-wide text-sky-100 bg-slate-950/90 border border-sky-400/40 hover:border-sky-300 whitespace-nowrap cursor-pointer"
+                  className="game-btn-spring h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg font-display font-bold text-[11px] sm:text-xs tracking-wide text-sky-100 bg-slate-950/90 border border-sky-400/40 hover:border-sky-300 whitespace-nowrap cursor-pointer touch-manipulation"
                 >
                   🌐 <span className="hidden md:inline">{t('btn_lang_toggle')} </span>(
                   {lang.toUpperCase()})
@@ -3131,9 +3299,12 @@ export default function App() {
                 <button
                   type="button"
                   tabIndex={-1}
-                  onClick={toggleMute}
+                  {...bindMultiTouchButton(() => {
+                    const muted = soundFX.toggleMute();
+                    setIsMuted(muted);
+                  })}
                   aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
-                  className="game-btn-spring h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg font-display font-semibold text-[11px] sm:text-xs text-slate-200 bg-slate-950/90 border border-slate-700 hover:border-slate-500 whitespace-nowrap cursor-pointer"
+                  className="game-btn-spring h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg font-display font-semibold text-[11px] sm:text-xs text-slate-200 bg-slate-950/90 border border-slate-700 hover:border-slate-500 whitespace-nowrap cursor-pointer touch-manipulation"
                 >
                   {isMuted ? '🔇' : '🔊'}
                   <span className="hidden lg:inline ml-1">
@@ -3144,12 +3315,9 @@ export default function App() {
                 <button
                   type="button"
                   tabIndex={-1}
-                  onClick={(e) => {
-                    e.currentTarget.blur();
-                    setGameState('paused');
-                  }}
+                  {...bindMultiTouchButton(() => setGameState('paused'))}
                   aria-label={t('btn_pause')}
-                  className="game-btn-spring h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg font-display font-semibold text-[11px] sm:text-xs text-slate-200 bg-slate-950/90 border border-slate-700 hover:border-slate-500 whitespace-nowrap cursor-pointer"
+                  className="game-btn-spring h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg font-display font-semibold text-[11px] sm:text-xs text-slate-200 bg-slate-950/90 border border-slate-700 hover:border-slate-500 whitespace-nowrap cursor-pointer touch-manipulation"
                 >
                   ⏸<span className="hidden lg:inline ml-1">{t('btn_pause')} [P]</span>
                 </button>
@@ -3179,9 +3347,10 @@ export default function App() {
                 <div className="absolute left-1.5 w-2 h-1 rounded-full bg-sky-400/35 pointer-events-none" />
                 <div className="absolute right-1.5 w-2 h-1 rounded-full bg-sky-400/35 pointer-events-none" />
                 <div
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-sky-400/95 border-2 border-white shadow-md pointer-events-none transition-transform duration-75"
+                  ref={joystickKnobRef}
+                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-sky-400/95 border-2 border-white shadow-md pointer-events-none"
                   style={{
-                    transform: `translate3d(${joystickVisual.dx}px, ${joystickVisual.dy}px, 0)`,
+                    transform: 'translate3d(0px, 0px, 0)',
                   }}
                 />
               </motion.div>
@@ -3200,8 +3369,8 @@ export default function App() {
                     <button
                       type="button"
                       data-testid="inrun-breakthrough-btn"
-                      onClick={handleInRunBreakthroughOrAtlas}
-                      className="game-btn-spring px-3 py-1.5 rounded-xl font-display font-extrabold text-xs bg-emerald-400 text-slate-950 border-2 border-white hover:bg-emerald-300 shadow-lg cursor-pointer whitespace-nowrap animate-bounce"
+                      {...bindMultiTouchButton(handleInRunBreakthroughOrAtlas)}
+                      className="game-btn-spring px-3 py-1.5 rounded-xl font-display font-extrabold text-xs bg-emerald-400 text-slate-950 border-2 border-white hover:bg-emerald-300 shadow-lg cursor-pointer whitespace-nowrap touch-manipulation"
                     >
                       ⚡{' '}
                       {lang === 'zh'
@@ -3214,8 +3383,10 @@ export default function App() {
                     <button
                       type="button"
                       data-testid="inrun-upgrade-body-btn"
-                      onClick={() => handleUpgradeSharkForm(hudState.activeSharkId)}
-                      className="game-btn-spring px-2.5 py-1.5 rounded-xl font-display font-bold text-[11px] sm:text-xs bg-amber-400/95 text-slate-950 border border-white hover:bg-amber-300 shadow-md cursor-pointer whitespace-nowrap"
+                      {...bindMultiTouchButton(() =>
+                        handleUpgradeSharkForm(hudState.activeSharkId)
+                      )}
+                      className="game-btn-spring px-2.5 py-1.5 rounded-xl font-display font-bold text-[11px] sm:text-xs bg-amber-400/95 text-slate-950 border border-white hover:bg-amber-300 shadow-md cursor-pointer whitespace-nowrap touch-manipulation"
                     >
                       ⬆️{' '}
                       {lang === 'zh'
@@ -3227,8 +3398,8 @@ export default function App() {
                   <button
                     type="button"
                     data-testid="hud-open-atlas-btn"
-                    onClick={() => setShowAtlasModal(true)}
-                    className="game-btn-spring px-2.5 py-1.5 rounded-xl font-display font-bold text-[11px] sm:text-xs bg-slate-950/90 text-sky-200 border border-sky-400/50 hover:border-sky-300 whitespace-nowrap cursor-pointer transition-all"
+                    {...bindMultiTouchButton(() => setShowAtlasModal(true))}
+                    className="game-btn-spring px-2.5 py-1.5 rounded-xl font-display font-bold text-[11px] sm:text-xs bg-slate-950/90 text-sky-200 border border-sky-400/50 hover:border-sky-300 whitespace-nowrap cursor-pointer transition-all touch-manipulation"
                   >
                     🧬{' '}
                     {lang === 'zh'
@@ -3242,9 +3413,9 @@ export default function App() {
                   <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={handleGeneSupplyDropAd}
+                      {...bindMultiTouchButton(handleGeneSupplyDropAd)}
                       title={t('btn_supply_drop')}
-                      className="game-btn-spring px-2.5 py-2 rounded-xl font-display font-bold text-[11px] sm:text-xs text-amber-950 bg-amber-400 hover:bg-amber-300 border border-amber-200 shadow-md cursor-pointer whitespace-nowrap"
+                      className="game-btn-spring px-2.5 py-2 rounded-xl font-display font-bold text-[11px] sm:text-xs text-amber-950 bg-amber-400 hover:bg-amber-300 border border-amber-200 shadow-md cursor-pointer whitespace-nowrap touch-manipulation"
                     >
                       <span className="hidden lg:inline">{t('btn_supply_drop')}</span>
                       <span className="lg:hidden">{t('btn_supply_short')}</span>
@@ -3253,9 +3424,12 @@ export default function App() {
                     <button
                       type="button"
                       disabled={hudState.coins < hudState.goldOverdriveCost}
-                      onClick={handleGoldOverdrive}
+                      {...bindMultiTouchButton(
+                        handleGoldOverdrive,
+                        hudState.coins < hudState.goldOverdriveCost
+                      )}
                       title={t('btn_gold_overdrive', { cost: hudState.goldOverdriveCost })}
-                      className={`game-btn-spring px-2.5 py-2 rounded-xl font-display font-bold text-[11px] sm:text-xs border whitespace-nowrap transition-all ${
+                      className={`game-btn-spring px-2.5 py-2 rounded-xl font-display font-bold text-[11px] sm:text-xs border whitespace-nowrap transition-all touch-manipulation ${
                         hudState.coins >= hudState.goldOverdriveCost
                           ? 'bg-amber-500 text-slate-950 border-amber-200 hover:bg-amber-400 shadow-md cursor-pointer animate-pulse'
                           : 'bg-slate-950/85 text-amber-200/45 border-amber-500/25 cursor-not-allowed'
@@ -3272,9 +3446,12 @@ export default function App() {
                     <button
                       type="button"
                       disabled={hudState.genes < hudState.geneSurgeCost}
-                      onClick={handleGeneSurge}
+                      {...bindMultiTouchButton(
+                        handleGeneSurge,
+                        hudState.genes < hudState.geneSurgeCost
+                      )}
                       title={t('btn_gene_surge', { cost: hudState.geneSurgeCost })}
-                      className={`game-btn-spring px-2.5 py-2 rounded-xl font-display font-bold text-[11px] sm:text-xs border whitespace-nowrap transition-all ${
+                      className={`game-btn-spring px-2.5 py-2 rounded-xl font-display font-bold text-[11px] sm:text-xs border whitespace-nowrap transition-all touch-manipulation ${
                         hudState.genes >= hudState.geneSurgeCost
                           ? 'bg-emerald-400 text-slate-950 border-emerald-200 hover:bg-emerald-300 shadow-md cursor-pointer animate-pulse'
                           : 'bg-slate-950/85 text-emerald-200/45 border-emerald-500/25 cursor-not-allowed'
@@ -3293,19 +3470,39 @@ export default function App() {
                   <button
                     type="button"
                     onPointerDown={(e) => {
-                      e.currentTarget.setPointerCapture(e.pointerId);
+                      e.stopPropagation();
+                      try {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      } catch {
+                        // Ignore capture errors on synthetic events
+                      }
                       simRef.current.input.boostPointerHeld = true;
+                      simRef.current.input.boostPointerId = e.pointerId;
                       setBoostVisual(true);
                     }}
-                    onPointerUp={() => {
+                    onPointerUp={(e) => {
+                      if (
+                        simRef.current.input.boostPointerId !== null &&
+                        e.pointerId !== simRef.current.input.boostPointerId
+                      ) {
+                        return;
+                      }
                       simRef.current.input.boostPointerHeld = false;
+                      simRef.current.input.boostPointerId = null;
                       setBoostVisual(simRef.current.input.keys.has('Space'));
                     }}
-                    onPointerCancel={() => {
+                    onPointerCancel={(e) => {
+                      if (
+                        simRef.current.input.boostPointerId !== null &&
+                        e.pointerId !== simRef.current.input.boostPointerId
+                      ) {
+                        return;
+                      }
                       simRef.current.input.boostPointerHeld = false;
+                      simRef.current.input.boostPointerId = null;
                       setBoostVisual(false);
                     }}
-                    className={`landscape-thumb-boost relative w-22 h-22 sm:w-24 sm:h-24 md:w-28 md:h-28 rounded-full font-display font-extrabold text-xs sm:text-sm md:text-base flex flex-col items-center justify-center shadow-xl cursor-pointer transition-transform shrink-0 ${
+                    className={`landscape-thumb-boost relative w-22 h-22 sm:w-24 sm:h-24 md:w-28 md:h-28 rounded-full font-display font-extrabold text-xs sm:text-sm md:text-base flex flex-col items-center justify-center shadow-xl cursor-pointer transition-transform shrink-0 touch-none ${
                       boostVisual
                         ? 'bg-sky-400 text-slate-950 scale-95'
                         : 'bg-slate-950/90 text-sky-100 hover:bg-slate-900'
