@@ -31,13 +31,15 @@
   - **磁吸半径加成**：每升 1 级增加 `+(Lv - 1) * 10 px` 金币/基因吸附半径。
   - **咬合阶位 `T` 成长**：随着局内等级提升，自动增加局内咬合加成 `inRunBiteBonus`（详见第 2 节）。
 
-### 1.2 跨局鲨鱼躯体强化等级 `Lv.1 ~ Lv.10`（左上角形态旁 `Lv.X/10` 与右下角 `⬆️ 躯体 Lv.+1`）
+### 1.2 跨局鲨鱼躯体强化等级 `Lv.1 ~ Lv.10`（左上角形态旁 `Lv.X` 与右下角 `⬆️ 强化躯体`）
 - **持久化规则**：每只已解锁的鲨鱼形态都拥有独立的 `Lv.1 ~ Lv.10` 躯体强化等级，**永久保存在存档中，跨局绝不清零**。
-- **消耗货币**：仅消耗**金币 `🪙`**（不消耗基因 `🧬`，基因专门留作解锁新物种与局内突破）。
-- **每级强化消耗公式**（位于 `src/game/sharkEvolutionConfig.ts` ➔ `getSharkUpgradeCost(form, currentLevel)`）：
-  $$\text{Cost}(L_{\text{upg}}) = \text{round}\left(\text{upgradeBaseCoinCost} \times 1.38^{(L_{\text{upg}} - 1)}\right)$$
+- **消耗货币（金币高频强化 + 关键阶级基因突破）**：
+  - **常规强化级（`Lv.1→2, 2→3, 3→4, 5→6, 6→7, 7→8, 8→9`）**：仅消耗**金币 `🪙`**（基因消耗为 `0`），并且基础金币消耗下调约 `15%`，指数调整为 `1.36`。
+  - **咬合阶级突破级（`Lv.4 → Lv.5` 与 `Lv.9 → Lv.10`）**：这两级分别赋予该鲨鱼永久 **`+1 T` 咬合阶位突破**，除金币外还需消耗**基因碎片 `🧬`**（由 `getSharkUpgradeGeneCost(form, currentUpgradeLevel)` 计算：`Lv.4→5` 消耗 $\text{round}(\text{refGenes} \times 0.35 + 6)$，`Lv.9→10` 消耗 $\text{round}(\text{refGenes} \times 0.65 + 14)$）。
+- **每级强化金币消耗公式**（位于 `src/game/sharkEvolutionConfig.ts` ➔ `getSharkUpgradeCost(form, currentLevel)`）：
+  $$\text{Cost}_{\text{coin}}(L_{\text{upg}}) = \text{round}\left(\text{upgradeBaseCoinCost} \times 1.36^{(L_{\text{upg}} - 1)}\right)$$
 - **每升 1 级躯体强化带来的永久属性提升**：
-  - **最大生命值倍率**：`+8% / 级`（满级 `Lv.10` 为 `1.72x` 生命上限，且每次点击升级立即恢复 `+30 HP`）。
+  - **最大生命值倍率**：`+8% / 级`（满级 `Lv.10` 为 `1.72x` 生命上限，且每次点击升级立即恢复 `25%` 最大生命值）。
   - **游动与冲刺移速**：`+2.2% / 级`（满级 `Lv.10` 为 `+19.8%` 移速）。
   - **饥饿掉血减免**：`+1.5% / 级`（满级 `Lv.10` 为 `-13.5%` 饥饿衰减）。
   - **冲刺耗能减免**：`+1.8% / 级`（满级 `Lv.10` 为 `-16.2%` 冲刺耗能）。
@@ -153,21 +155,22 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 ---
 
-## 5. 双货币经济循环与防套利动态消耗
+## 5. 双货币经济循环与防套利动态消耗（4:1 黄金产销比）
 
-### 5.1 金币 `🪙` 与基因 `🧬` 的职责分离
-- **金币 `🪙`（高频养成货币）**：
-  - **获取**：海中拾取金币、吞噬猎物自动掉落（随猎物阶位与丰饶倍率增长）、完成悬赏双倍奖励、局内升级固定奖励。
-  - **消耗**：① 强化当前鲨鱼躯体等级（`Lv.1 -> Lv.10`）；② 破茧进化解锁新鲨鱼形态；③ 局内释放 `🪙 黄金狂暴` 急救技能。
-- **基因碎片 `🧬`（高价值突破货币）**：
-  - **获取**：吞噬猎物掉落基因结晶、冲刺破甲猎杀双倍掉落、深海精英与 Boss 巨量掉落、完成悬赏目标。
-  - **消耗**：① 破茧进化解锁新鲨鱼形态；② 局内释放 `🧬 基因突破`（立即获得 `+55%` 当前等级所需 XP 并回复 `+25 HP`）。
+### 5.1 金币 `🪙` 与基因 `🧬` 的获取/消耗平衡（~4:1 产出比）
+- **金币 `🪙`（高频养成与战术货币）**：
+  - **获取**：全部 33 种猎物的 `coinValue` 与 `geneValue` 按约 **4:1 ~ 4.5:1** 黄金比例配置；普通猎物死亡爆出的拾取球中 **75% 为金币球 `COIN`**、25% 为基因结晶；此外包含黄金变异鱼 `3.0x` 金币倍率与悬赏目标鱼丰厚金币奖励。
+  - **消耗**：① 强化当前鲨鱼躯体等级（`Lv.1 -> Lv.10`）；② 破茧进化解锁新鲨鱼形态；③ 局内释放 `🪙 黄金狂暴` 战术爆发技能。
+- **基因碎片 `🧬`（高价值突破与质变货币）**：
+  - **获取**：浅海普通小鱼仅少量产出基因（`geneValue = 1~2`），高浓度基因产出来自：**🎯 悬赏目标鱼**（完成悬赏奖励 `18 + 4 * tier` 基因及必掉额外基因结晶）、**深渊巨兽变异体 (`ABYSS_BEHEMOTH`, `2.5x` 基因)** 与 **`T4+` 深海大型猎物**。
+  - **消耗**：① 破茧进化解锁新鲨鱼形态；② 躯体强化在 **`Lv.4 → Lv.5` 与 `Lv.9 → Lv.10` 咬合阶级突破点** 的基因消耗；③ 局内释放 `🧬 基因突破`（立即获得 `+55%` 当前等级所需 XP、回复 `+30 HP` 并 **100% 瞬间回满冲刺能量槽 ⚡**）。
 
-### 5.2 局内技能动态递增消耗（防止无限刷技能套利）
-- **`🪙 黄金狂暴` 局内消耗公式**（`getGoldOverdriveCost(useCount)`）：
-  $$\text{Cost}_{\text{gold}}(n) = 35 + n \times 25 \quad (n = 0, 1, 2, \dots)$$
-- **`🧬 基因突破` 局内消耗公式**（`getGeneSurgeCost(level, useCount)`）：
-  $$\text{Cost}_{\text{gene}}(L, n) = 15 + (L - 1) \times 6 + n \times 10$$
+### 5.2 局内技能“代际锚定 + 二次方加速递增”消耗公式（防止高代际永动套利）
+- **`🪙 黄金狂暴` 局内消耗公式**（`getGoldOverdriveCost(useCount, generationRow)`）：
+  $$\text{Cost}_{\text{gold}}(n, \text{row}) = \text{round}\Big(\big(35 + 25n + 12n^2\big) \times \big(1 + 0.35 \times \max(0, \text{row})\big)\Big)$$
+  - 初代幼鲨前 3 次依然亲民（`35 -> 72 -> 133`），第 4 次起二次方项快速拉升，且随鲨鱼代际（`row = 0..5`）自动锚定单局购买力，彻底杜绝高阶鲨鱼无限连开黄金狂暴套利。
+- **`🧬 基因突破` 局内消耗公式**（`getGeneSurgeCost(level, useCount, generationRow)`）：
+  $$\text{Cost}_{\text{gene}}(L, n, \text{row}) = \text{round}\Big(\big(12 + 5(L - 1) + 10n + 6n^2\big) \times \big(1 + 0.25 \times \max(0, \text{row})\big)\Big)$$
 
 ---
 
@@ -204,5 +207,6 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-10-27 | 重构双货币经济系统：① 猎物金币/基因产出重构为 ~4:1 黄金比（普通拾取球 75% 金币 / 25% 基因，高浓度基因聚焦于悬赏鱼与深海巨兽）；② 躯体强化常规金币消耗下调 15%，并在 `Lv.4→5` 与 `Lv.9→10` 阶级突破点引入基因消耗 `getSharkUpgradeGeneCost`；③ 黄金狂暴与基因突破改为“代际锚定 + 二次方递增 (`n^2`)”公式 | `src/game/config.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts`, `src/App.tsx`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/game/rules.test.ts` |
 | 2026-10-27 | 新增第 3.4 节“黄金狂暴阶段体型保持特例”：进入黄金阶段时不缩小其他鱼类，保持进入前的巨兽体型以强化猎杀成就感 | `src/game/rules.ts`, `src/game/canvasRenderer.ts`, `src/game/rules.test.ts` |
 | 2026-10-26 | 编写完整数值策划案：明确双轨 `Lv`、咬合阶位 `T`、猎物相对体型算法 `getPreyRelativeVisualScale`、48 阶进化矩阵与深度分布规则 | `src/game/rules.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/config.ts` |

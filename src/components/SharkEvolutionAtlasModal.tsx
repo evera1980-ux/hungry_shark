@@ -6,6 +6,7 @@ import {
   getGlobalAtlasBonuses,
   getSharkFormById,
   getSharkUpgradeCost,
+  getSharkUpgradeGeneCost,
   LINEAGE_META,
   SHARK_EVOLUTION_FORMS,
   SharkFormConfig,
@@ -53,9 +54,17 @@ export const SharkEvolutionAtlasModal: React.FC<
   const inspectedUpgradeLv =
     metaSave.sharkUpgradeLevels[inspectedForm.id] ?? 1;
   const upgradeCost = getSharkUpgradeCost(inspectedForm, inspectedUpgradeLv);
+  const upgradeGeneCost = getSharkUpgradeGeneCost(
+    inspectedForm,
+    inspectedUpgradeLv
+  );
 
   const totalCoins = metaSave.bankedCoins + liveRunCoins;
   const totalGenes = metaSave.bankedGenes + liveRunGenes;
+  const canAffordUpgrade =
+    inspectedUpgradeLv < 10 &&
+    totalCoins >= upgradeCost &&
+    totalGenes >= upgradeGeneCost;
   const maxLvRecord = Math.max(metaSave.bestInRunLevel, liveRunLevel);
   const maxDepthRecord = Math.max(
     metaSave.bestDepthReached,
@@ -470,18 +479,18 @@ export const SharkEvolutionAtlasModal: React.FC<
             <div className="mt-3 pt-2.5 border-t border-slate-800 space-y-2">
               {isInspectedUnlocked ? (
                 <>
-                  {/* Coin Upgrade Button (Lv.1 -> Lv.10) */}
+                  {/* Coin + Breakthrough Gene Upgrade Button (Lv.1 -> Lv.10) */}
                   <button
                     type="button"
                     data-testid="atlas-upgrade-btn"
                     disabled={
-                      inspectedUpgradeLv >= 10 || totalCoins < upgradeCost
+                      inspectedUpgradeLv >= 10 || !canAffordUpgrade
                     }
                     onClick={() => onUpgradeShark(inspectedForm.id)}
                     className={`w-full py-2 px-3 rounded-xl font-black text-xs flex items-center justify-between transition ${
                       inspectedUpgradeLv >= 10
                         ? 'bg-slate-800 text-slate-400 cursor-not-allowed'
-                        : totalCoins >= upgradeCost
+                        : canAffordUpgrade
                         ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 shadow-lg cursor-pointer'
                         : 'bg-slate-800/80 text-slate-400 border border-slate-700 cursor-not-allowed'
                     }`}
@@ -493,17 +502,25 @@ export const SharkEvolutionAtlasModal: React.FC<
                           ? '体质已强化至满级 (Lv.10)'
                           : 'MAX UPGRADE (Lv.10)'
                         : lang === 'zh'
-                        ? `强化体质 (Lv.${inspectedUpgradeLv} → Lv.${
+                        ? `${upgradeGeneCost > 0 ? '阶级突破' : '强化体质'} (Lv.${inspectedUpgradeLv} → Lv.${
                             inspectedUpgradeLv + 1
                           })`
-                        : `Upgrade Body (Lv.${inspectedUpgradeLv} → Lv.${
+                        : `${upgradeGeneCost > 0 ? 'Tier Breakthrough' : 'Upgrade Body'} (Lv.${inspectedUpgradeLv} → Lv.${
                             inspectedUpgradeLv + 1
                           })`}
                     </span>
                     {inspectedUpgradeLv < 10 && (
-                      <span className="font-mono flex items-center gap-1">
-                        <UiAtlasIcon iconKey="UI_ICON_COIN" size={14} />
-                        {upgradeCost.toLocaleString()}
+                      <span className="font-mono flex items-center gap-2">
+                        <span className="flex items-center gap-1">
+                          <UiAtlasIcon iconKey="UI_ICON_COIN" size={14} />
+                          {upgradeCost.toLocaleString()}
+                        </span>
+                        {upgradeGeneCost > 0 && (
+                          <span className="flex items-center gap-1 text-emerald-950 bg-emerald-300/90 px-1.5 py-0.5 rounded-md">
+                            <UiAtlasIcon iconKey="UI_ICON_GENE" size={12} />
+                            {upgradeGeneCost.toLocaleString()}
+                          </span>
+                        )}
                       </span>
                     )}
                   </button>

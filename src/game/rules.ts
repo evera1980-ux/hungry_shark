@@ -43,14 +43,29 @@ export function getXpRequiredForLevel(level: number): number {
 }
 
 /**
- * Dynamic In-Run Economy Costs to prevent infinite overdrive / level-skip arbitrage
+ * Dynamic In-Run Economy Costs (Generation-Anchored + Quadratic Acceleration)
+ * - First 1~2 uses remain affordable for emergency saves in early runs.
+ * - Quadratic `n^2` acceleration + generation row multiplier (`row = 0..5`) prevents
+ *   late-game deep-sea infinite Gold Frenzy / Gene Surge loop arbitrage.
  */
-export function getGoldOverdriveCost(useCount: number): number {
-  return 35 + Math.max(0, useCount) * 25;
+export function getGoldOverdriveCost(
+  useCount: number,
+  generationRow: number = 0
+): number {
+  const n = Math.max(0, useCount);
+  const rowMult = 1 + Math.max(0, generationRow) * 0.35;
+  return Math.round((35 + n * 25 + n * n * 12) * rowMult);
 }
 
-export function getGeneSurgeCost(level: number, useCount: number): number {
-  return 15 + Math.max(0, level - 1) * 6 + Math.max(0, useCount) * 10;
+export function getGeneSurgeCost(
+  level: number,
+  useCount: number,
+  generationRow: number = 0
+): number {
+  const lv = Math.max(1, level);
+  const n = Math.max(0, useCount);
+  const rowMult = 1 + Math.max(0, generationRow) * 0.25;
+  return Math.round((12 + (lv - 1) * 5 + n * 10 + n * n * 6) * rowMult);
 }
 
 export function getOrganRerollCost(rerollCount: number): number {

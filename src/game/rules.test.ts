@@ -18,6 +18,7 @@ import {
   getNextEvolutionTarget,
   getSharkFormById,
   getSharkUpgradeCost,
+  getSharkUpgradeGeneCost,
   SHARK_EVOLUTION_FORMS,
 } from './sharkEvolutionConfig';
 import { SHARK_CELL_BOUNDS, SHARK_GRID_MAP } from './spriteSheetManager';
@@ -288,13 +289,21 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   assert.equal(behemothSubEncounter.canDevour, false, 'BiteTier 4 shark cannot eat Tier 4 Abyss Behemoth (effective Tier 5)');
   assert.ok(behemothSubEncounter.hpDelta < -tier4Sub.damageOnFail, 'Abyss Behemoth at 1.4x difficulty deals amplified damage');
 
-  // 4. Dynamic Economy Cost Scaling prevents infinite loop arbitrage
+  // 4. Dynamic Economy Cost Scaling (Generation-Anchored + Quadratic n^2) prevents infinite loop arbitrage
   assert.equal(getGoldOverdriveCost(0), 35);
-  assert.equal(getGoldOverdriveCost(1), 60);
-  assert.equal(getGoldOverdriveCost(2), 85);
+  assert.equal(getGoldOverdriveCost(1), 72);
+  assert.equal(getGoldOverdriveCost(2), 133);
+  assert.ok(
+    getGoldOverdriveCost(1, 3) > getGoldOverdriveCost(1, 0),
+    'Gold Overdrive cost must scale up with shark generation row'
+  );
 
-  assert.equal(getGeneSurgeCost(1, 0), 15);
-  assert.equal(getGeneSurgeCost(5, 2), 15 + 24 + 20);
+  assert.equal(getGeneSurgeCost(1, 0), 12);
+  assert.equal(getGeneSurgeCost(5, 2), 76);
+  assert.ok(
+    getGeneSurgeCost(5, 2, 3) > getGeneSurgeCost(5, 2, 0),
+    'Gene Surge cost must scale up with shark generation row'
+  );
 
   assert.equal(getOrganRerollCost(0), 8);
   assert.equal(getOrganRerollCost(3), 20);
@@ -426,11 +435,19 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
   assert.equal(readyEval.genesMet, true);
   assert.equal(readyEval.canUnlockNow, true);
 
-  // 3. Verify Body Upgrade Cost & Stat Scaling (Lv.1 -> Lv.5 -> Lv.10)
+  // 3. Verify Body Upgrade Cost & Stat Scaling (Lv.1 -> Lv.5 -> Lv.10) + Breakthrough Gene Sinks at Lv.4->5 and Lv.9->10
   const clownForm = getSharkFormById('shark_00_clown_fry');
   const costLv1 = getSharkUpgradeCost(clownForm, 1);
   const costLv5 = getSharkUpgradeCost(clownForm, 5);
   assert.ok(costLv5 > costLv1, 'Body upgrade cost must scale progressively with level');
+  assert.equal(getSharkUpgradeGeneCost(clownForm, 1), 0, 'Normal level upgrade (Lv.1->2) requires 0 genes');
+  assert.equal(getSharkUpgradeGeneCost(clownForm, 3), 0, 'Normal level upgrade (Lv.3->4) requires 0 genes');
+  assert.ok(getSharkUpgradeGeneCost(clownForm, 4) > 0, 'Breakthrough level upgrade (Lv.4->5, +1 Bite Tier) requires Gene Shards');
+  assert.equal(getSharkUpgradeGeneCost(clownForm, 7), 0, 'Normal level upgrade (Lv.7->8) requires 0 genes');
+  assert.ok(
+    getSharkUpgradeGeneCost(clownForm, 9) > getSharkUpgradeGeneCost(clownForm, 4),
+    'Max-level breakthrough upgrade (Lv.9->10, +1 Bite Tier) requires more Gene Shards than Lv.4->5'
+  );
 
   const statsLv1 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false, 1.0, 1);
   const statsLv5 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 5, false, 1.0, 1);

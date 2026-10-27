@@ -30,6 +30,7 @@ import {
   getNextEvolutionTarget,
   getSharkFormById,
   getSharkUpgradeCost,
+  getSharkUpgradeGeneCost,
   LINEAGE_META,
   loadSharkMetaSave,
   saveSharkMetaSave,
@@ -190,6 +191,7 @@ export default function App() {
         )
       : null;
     const upgCost = getSharkUpgradeCost(activeForm, activeUpg);
+    const upgGeneCost = getSharkUpgradeGeneCost(activeForm, activeUpg);
     return {
       hp: 100,
       maxHp: 100,
@@ -210,8 +212,8 @@ export default function App() {
       targetFishProgress: 0,
       targetFishRequired: 2,
       activeSynergy: null as FactionId | null,
-      goldOverdriveCost: getGoldOverdriveCost(0),
-      geneSurgeCost: getGeneSurgeCost(1, 0),
+      goldOverdriveCost: getGoldOverdriveCost(0, activeForm.row),
+      geneSurgeCost: getGeneSurgeCost(1, 0, activeForm.row),
       comboCount: 0,
       comboMultiplier: 1.0,
       goldenMutantCharge: 0,
@@ -222,8 +224,12 @@ export default function App() {
       unlockedFormsCount: initialSave.unlockedSharkIds.length,
       nextEvoTargetId: nextEvo?.id ?? null,
       canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
-      canUpgradeBodyNow: activeUpg < 10 && initialSave.bankedCoins >= upgCost,
+      canUpgradeBodyNow:
+        activeUpg < 10 &&
+        initialSave.bankedCoins >= upgCost &&
+        initialSave.bankedGenes >= upgGeneCost,
       bodyUpgradeCost: upgCost,
+      bodyUpgradeGeneCost: upgGeneCost,
     };
   });
 
@@ -847,6 +853,7 @@ export default function App() {
           )
         : null;
       const upgCost = getSharkUpgradeCost(activeForm, chosenUpgLevel);
+      const upgGeneCost = getSharkUpgradeGeneCost(activeForm, chosenUpgLevel);
 
       setShowAtlasModal(false);
       setReviveOffered(true);
@@ -870,8 +877,8 @@ export default function App() {
         targetFishProgress: 0,
         targetFishRequired: 2,
         activeSynergy: stats.activeSynergy,
-        goldOverdriveCost: getGoldOverdriveCost(0),
-        geneSurgeCost: getGeneSurgeCost(initialLevel, 0),
+        goldOverdriveCost: getGoldOverdriveCost(0, activeForm.row),
+        geneSurgeCost: getGeneSurgeCost(initialLevel, 0, activeForm.row),
         comboCount: 0,
         comboMultiplier: 1.0,
         goldenMutantCharge: 0,
@@ -882,8 +889,12 @@ export default function App() {
         unlockedFormsCount: unlockedCount,
         nextEvoTargetId: nextEvo?.id ?? null,
         canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
-        canUpgradeBodyNow: chosenUpgLevel < 10 && save.bankedCoins >= upgCost,
+        canUpgradeBodyNow:
+          chosenUpgLevel < 10 &&
+          save.bankedCoins >= upgCost &&
+          save.bankedGenes >= upgGeneCost,
         bodyUpgradeCost: upgCost,
+        bodyUpgradeGeneCost: upgGeneCost,
       });
 
       if (withMaxMechaTrial) {
@@ -914,7 +925,7 @@ export default function App() {
     }
   }, [gameState, startNewRun]);
 
-  // Upgrade any unlocked shark form's body level (Lv.1 -> Lv.10) using Coins
+  // Upgrade any unlocked shark form's body level (Lv.1 -> Lv.10) using Coins (+ Genes at Lv.4->5 and Lv.9->10 Bite Tier breakthroughs)
   const handleUpgradeSharkForm = useCallback(
     (sharkId: string) => {
       const sim = simRef.current;
@@ -924,12 +935,14 @@ export default function App() {
       if (curLv >= 10) return;
       const form = getSharkFormById(sharkId);
       const cost = getSharkUpgradeCost(form, curLv);
-      if (save.bankedCoins < cost) return;
+      const geneCost = getSharkUpgradeGeneCost(form, curLv);
+      if (save.bankedCoins < cost || save.bankedGenes < geneCost) return;
 
       const nextLv = curLv + 1;
       const nextSave: SharkMetaSaveData = {
         ...save,
         bankedCoins: save.bankedCoins - cost,
+        bankedGenes: save.bankedGenes - geneCost,
         sharkUpgradeLevels: {
           ...save.sharkUpgradeLevels,
           [sharkId]: nextLv,
@@ -940,6 +953,7 @@ export default function App() {
       setMetaSave(nextSave);
 
       sim.shark.coins = nextSave.bankedCoins;
+      sim.shark.genes = nextSave.bankedGenes;
       if (sim.shark.sharkFormId === sharkId && !sim.shark.trialActive) {
         sim.shark.stats = recomputeSharkStats(
           sim.shark.level,
@@ -967,6 +981,7 @@ export default function App() {
       const activeUpg =
         nextSave.sharkUpgradeLevels[sim.shark.sharkFormId] ?? 1;
       const nextUpgCost = getSharkUpgradeCost(activeForm, activeUpg);
+      const nextUpgGeneCost = getSharkUpgradeGeneCost(activeForm, activeUpg);
       const nextEvo = getNextEvolutionTarget(sim.shark.sharkFormId, nextSave);
       const nextEval = nextEvo
         ? evaluateSharkUnlock(
@@ -981,15 +996,18 @@ export default function App() {
       setHudState((prev) => ({
         ...prev,
         coins: nextSave.bankedCoins,
+        genes: nextSave.bankedGenes,
         hp: Math.ceil(sim.shark.hp),
         maxHp: sim.shark.stats.maxHp,
         biteTier: sim.shark.stats.biteTier,
         activeUpgradeLevel: activeUpg,
         bodyUpgradeCost: nextUpgCost,
+        bodyUpgradeGeneCost: nextUpgGeneCost,
         canUpgradeBodyNow:
           !sim.shark.trialActive &&
           activeUpg < 10 &&
-          nextSave.bankedCoins >= nextUpgCost,
+          nextSave.bankedCoins >= nextUpgCost &&
+          nextSave.bankedGenes >= nextUpgGeneCost,
         nextEvoTargetId: nextEvo?.id ?? null,
         canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
       }));
@@ -1120,6 +1138,7 @@ export default function App() {
       // Immediately sync HUD state on Morph Breakthrough
       const newUpg = nextSave.sharkUpgradeLevels[sharkId] ?? 1;
       const newUpgCost = getSharkUpgradeCost(form, newUpg);
+      const newUpgGeneCost = getSharkUpgradeGeneCost(form, newUpg);
       const nextEvoAfter = getNextEvolutionTarget(sharkId, nextSave);
       const nextEvalAfter = nextEvoAfter
         ? evaluateSharkUnlock(
@@ -1145,8 +1164,12 @@ export default function App() {
         unlockedFormsCount: nextSave.unlockedSharkIds.length,
         nextEvoTargetId: nextEvoAfter?.id ?? null,
         canBreakthroughNow: Boolean(nextEvalAfter?.canUnlockNow),
-        canUpgradeBodyNow: newUpg < 10 && nextSave.bankedCoins >= newUpgCost,
+        canUpgradeBodyNow:
+          newUpg < 10 &&
+          nextSave.bankedCoins >= newUpgCost &&
+          nextSave.bankedGenes >= newUpgGeneCost,
         bodyUpgradeCost: newUpgCost,
+        bodyUpgradeGeneCost: newUpgGeneCost,
       }));
     },
     [recomputeSharkStats, spawnFloatText, spawnParticle]
@@ -1251,7 +1274,11 @@ export default function App() {
     const sim = simRef.current;
     const shark = sim.shark;
     const save = metaSaveRef.current;
-    const cost = getGoldOverdriveCost(economyUsesRef.current.goldOverdriveCount);
+    const activeForm = getSharkFormById(shark.sharkFormId);
+    const cost = getGoldOverdriveCost(
+      economyUsesRef.current.goldOverdriveCount,
+      activeForm.row
+    );
     if (save.bankedCoins < cost) return;
 
     const nextSave: SharkMetaSaveData = {
@@ -1288,19 +1315,22 @@ export default function App() {
       energy: Math.round(shark.energy),
       frenzyTimer: Number(shark.frenzyTimer.toFixed(1)),
       goldOverdriveCost: getGoldOverdriveCost(
-        economyUsesRef.current.goldOverdriveCount
+        economyUsesRef.current.goldOverdriveCount,
+        activeForm.row
       ),
     }));
   }, [recomputeSharkStats, spawnFloatText]);
 
-  // P2-2 In-Run Economy Action 2: Spend Dynamic Gene Shards for Mutation Surge (+55% Evolution XP & instant Level-Up check)
+  // P2-2 In-Run Economy Action 2: Spend Dynamic Gene Shards for Mutation Surge (+55% Evolution XP, +30 HP, 100% Energy Refill & instant Level-Up check)
   const handleGeneSurge = useCallback(() => {
     const sim = simRef.current;
     const shark = sim.shark;
     const save = metaSaveRef.current;
+    const activeForm = getSharkFormById(shark.sharkFormId);
     const cost = getGeneSurgeCost(
       shark.level,
-      economyUsesRef.current.geneSurgeCount
+      economyUsesRef.current.geneSurgeCount,
+      activeForm.row
     );
     if (save.bankedGenes < cost) return;
 
@@ -1317,13 +1347,15 @@ export default function App() {
     const xpReq = getXpRequiredForLevel(shark.level);
     const bonusXp = Math.ceil(xpReq * 0.55);
     shark.xp += bonusXp;
-    shark.hp = Math.min(shark.stats.maxHp, shark.hp + 25);
+    shark.hp = Math.min(shark.stats.maxHp, shark.hp + 30);
+    shark.energy = shark.stats.maxEnergy;
+    shark.morphFlashTimer = Math.max(shark.morphFlashTimer, 0.55);
     soundFX.playEvolution();
     spawnFloatText(
       shark.x,
       shark.y - 42,
       'float_gene_surge',
-      `+${bonusXp} XP`,
+      `+${bonusXp} XP · MAX ⚡`,
       '#34d399',
       1.26
     );
@@ -1357,9 +1389,11 @@ export default function App() {
       xp: Math.round(shark.xp),
       xpToNext: getXpRequiredForLevel(shark.level),
       hp: Math.ceil(shark.hp),
+      energy: Math.round(shark.energy),
       geneSurgeCost: getGeneSurgeCost(
         shark.level,
-        economyUsesRef.current.geneSurgeCount
+        economyUsesRef.current.geneSurgeCount,
+        activeForm.row
       ),
     }));
   }, [recomputeSharkStats, spawnFloatText]);
@@ -1993,17 +2027,31 @@ export default function App() {
                 );
               }
 
-              // Spawn Collectible Gold Coins & DNA Helix Pickups
+              // Spawn Collectible Gold Coins (75%) & DNA Helix Pickups (25% on normal fish; guaranteed bonus DNA on Bounty Target / Abyss Behemoth / T4+)
+              const isHighGeneSource =
+                prey.config.id === sim.targetBounty.preyConfig.id ||
+                variant === 'ABYSS_BEHEMOTH' ||
+                prey.config.tier >= 4;
               const pickupDrops = Math.min(6, Math.ceil(prey.config.tier / 2) + 1);
               for (let d = 0; d < pickupDrops; d++) {
                 const ang = Math.random() * Math.PI * 2;
+                const dropKind =
+                  isHighGeneSource && d % 2 === 1
+                    ? 'DNA_CRYSTAL'
+                    : d % 4 === 3
+                    ? 'DNA_CRYSTAL'
+                    : 'COIN';
+                const basePickupVal =
+                  dropKind === 'COIN'
+                    ? Math.max(3, Math.round(prey.config.tier * 2.5 * atlasBonus.rewardMultiplier))
+                    : Math.max(1, Math.round(prey.config.tier * 1.2 * atlasBonus.rewardMultiplier));
                 spawnPickup(
                   prey.x,
                   prey.y,
                   Math.cos(ang) * 95,
                   Math.sin(ang) * 95,
-                  d % 2 === 0 ? 'COIN' : 'DNA_CRYSTAL',
-                  Math.max(2, Math.round(prey.config.tier * 2 * atlasBonus.rewardMultiplier))
+                  dropKind,
+                  basePickupVal
                 );
               }
 
@@ -2018,21 +2066,27 @@ export default function App() {
                 outcome.isCrit || shark.comboCount >= 5 ? 1.22 : 1.0
               );
 
-              // Check if devoured prey matches the active Target Fish Bounty (🎯 悬赏目标鱼)
+              // Check if devoured prey matches the active Target Fish Bounty (🎯 悬赏目标鱼 — Primary High-Concentration Gene & Coin Source)
               if (prey.config.id === sim.targetBounty.preyConfig.id) {
                 sim.targetBounty.progress += 1;
                 if (sim.targetBounty.progress >= sim.targetBounty.required) {
                   const bountyBonusScore = infiniteProgressionManager.getScaledPreyValue(
                     350 * prey.config.tier
                   );
+                  const bountyGenes = Math.round(
+                    (18 + prey.config.tier * 4) * atlasBonus.rewardMultiplier
+                  );
+                  const bountyCoins = Math.round(
+                    (48 + prey.config.tier * 12) * atlasBonus.rewardMultiplier
+                  );
                   shark.score += bountyBonusScore;
-                  shark.genes += Math.round(14 * atlasBonus.rewardMultiplier);
-                  shark.coins += Math.round(22 * atlasBonus.rewardMultiplier);
+                  shark.genes += bountyGenes;
+                  shark.coins += bountyCoins;
                   spawnFloatText(
                     shark.x,
                     shark.y - 38,
                     'float_target_bounty',
-                    `+${bountyBonusScore} 🎯`,
+                    `+${bountyBonusScore} 🎯 (+${bountyGenes}🧬)`,
                     '#38bdf8',
                     1.28
                   );
@@ -2327,6 +2381,7 @@ export default function App() {
               )
             : null;
           const upgCost = getSharkUpgradeCost(activeForm, activeUpg);
+          const upgGeneCost = getSharkUpgradeGeneCost(activeForm, activeUpg);
           const currentZone = getDepthZone(shark.y);
 
           setHudState({
@@ -2350,11 +2405,13 @@ export default function App() {
             targetFishRequired: sim.targetBounty.required,
             activeSynergy: shark.stats.activeSynergy,
             goldOverdriveCost: getGoldOverdriveCost(
-              economyUsesRef.current.goldOverdriveCount
+              economyUsesRef.current.goldOverdriveCount,
+              activeForm.row
             ),
             geneSurgeCost: getGeneSurgeCost(
               shark.level,
-              economyUsesRef.current.geneSurgeCount
+              economyUsesRef.current.geneSurgeCount,
+              activeForm.row
             ),
             comboCount: shark.comboCount,
             comboMultiplier: Number(
@@ -2369,8 +2426,12 @@ export default function App() {
             nextEvoTargetId: nextEvo?.id ?? null,
             canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
             canUpgradeBodyNow:
-              !shark.trialActive && activeUpg < 10 && activeSave.bankedCoins >= upgCost,
+              !shark.trialActive &&
+              activeUpg < 10 &&
+              activeSave.bankedCoins >= upgCost &&
+              activeSave.bankedGenes >= upgGeneCost,
             bodyUpgradeCost: upgCost,
+            bodyUpgradeGeneCost: upgGeneCost,
           });
         }
       }
@@ -3435,9 +3496,18 @@ export default function App() {
                       <span className="absolute -top-1 -right-0.5 px-1 py-0.2 rounded-full bg-amber-400 text-slate-950 font-mono-num font-black text-[8px] border border-white leading-none">
                         Lv.{hudState.activeUpgradeLevel + 1}
                       </span>
-                      <span className="absolute -bottom-1 px-1.5 py-0.2 rounded-full bg-slate-950/95 border border-amber-400/80 text-amber-300 font-mono-num font-extrabold text-[8px] flex items-center gap-0.5 leading-none">
+                      <span className="absolute -bottom-1 px-1.5 py-0.2 rounded-full bg-slate-950/95 border border-amber-400/80 text-amber-300 font-mono-num font-extrabold text-[8px] flex items-center gap-0.5 leading-none whitespace-nowrap">
                         <UiAtlasIcon iconKey="UI_ICON_COIN" size={9} />
                         {hudState.bodyUpgradeCost}
+                        {hudState.bodyUpgradeGeneCost > 0 && (
+                          <>
+                            <span className="text-emerald-300 ml-0.5">+</span>
+                            <UiAtlasIcon iconKey="UI_ICON_GENE" size={8} />
+                            <span className="text-emerald-300">
+                              {hudState.bodyUpgradeGeneCost}
+                            </span>
+                          </>
+                        )}
                       </span>
                     </button>
                   )}

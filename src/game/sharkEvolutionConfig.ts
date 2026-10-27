@@ -828,7 +828,7 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
     const genGeneStep = [8, 20, 48, 110, 260, 620][row];
     const unlockGenes = index === 0 ? 0 : genGeneBase + col * genGeneStep;
 
-    const baseUpgradeCoinCost = [25, 80, 220, 520, 1200, 2600][row] + col * [5, 12, 30, 65, 150, 320][row];
+    const baseUpgradeCoinCost = [22, 68, 185, 440, 1020, 2200][row] + col * [4, 10, 25, 55, 125, 270][row];
 
     return {
       index,
@@ -878,7 +878,31 @@ export function getSharkUpgradeCost(
 ): number {
   const lv = Math.max(1, Math.min(10, currentUpgradeLevel));
   if (lv >= 10) return 0;
-  return Math.round(form.baseUpgradeCoinCost * Math.pow(1.38, lv - 1));
+  return Math.round(form.baseUpgradeCoinCost * Math.pow(1.36, lv - 1));
+}
+
+/**
+ * Gene Shard breakthrough cost for body upgrades:
+ * - Regular levels (Lv.1->2, 2->3, 3->4, 5->6, 6->7, 7->8, 8->9) cost 0 Genes (Coins only).
+ * - Breakthrough levels (Lv.4->5 and Lv.9->10, which permanently grant +1 Bite Tier `T`)
+ *   require Gene Shards as genetic mutation catalysts!
+ */
+export function getSharkUpgradeGeneCost(
+  form: SharkFormConfig,
+  currentUpgradeLevel: number
+): number {
+  const lv = Math.max(1, Math.min(10, currentUpgradeLevel));
+  if (lv >= 10) return 0;
+  const refGenes = Math.max(20, form.unlockGenes);
+  if (lv === 4) {
+    // Lv.4 -> Lv.5 (+1 Bite Tier Breakthrough)
+    return Math.round(refGenes * 0.35 + 6);
+  }
+  if (lv === 9) {
+    // Lv.9 -> Lv.10 (Max-Level +1 Bite Tier Breakthrough)
+    return Math.round(refGenes * 0.65 + 14);
+  }
+  return 0;
 }
 
 /**
