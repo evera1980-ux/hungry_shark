@@ -463,51 +463,87 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
   assert.ok(bonus48.rewardMultiplier > bonus1.rewardMultiplier);
 });
 
-test('Visual Size vs. Devourability Contract: every fish smaller than the player shark is directly swallowed, and every fish equal/larger deals damage', () => {
+test('Visual Size vs. Devourability Contract + Gold Frenzy Size Preservation Exception', () => {
   const sharkFormsToTest = [
-    { id: 'shark_00_clown_fry', inRunLv: 1, upgLv: 1, frenzy: false },
-    { id: 'shark_05_mako_spear', inRunLv: 3, upgLv: 5, frenzy: false },
-    { id: 'shark_16_basking_filter', inRunLv: 5, upgLv: 6, frenzy: false },
-    { id: 'shark_25_bio_venom', inRunLv: 7, upgLv: 8, frenzy: false },
-    { id: 'shark_47_omega_devourer', inRunLv: 10, upgLv: 10, frenzy: false },
-    { id: 'shark_00_clown_fry', inRunLv: 1, upgLv: 1, frenzy: true },
+    { id: 'shark_00_clown_fry', inRunLv: 1, upgLv: 1 },
+    { id: 'shark_05_mako_spear', inRunLv: 3, upgLv: 5 },
+    { id: 'shark_16_basking_filter', inRunLv: 5, upgLv: 6 },
+    { id: 'shark_25_bio_venom', inRunLv: 7, upgLv: 8 },
+    { id: 'shark_47_omega_devourer', inRunLv: 10, upgLv: 10 },
   ];
 
   const variants = ['NONE', 'GOLDEN_MUTANT', 'ABYSS_BEHEMOTH'] as const;
 
   for (const cfg of sharkFormsToTest) {
-    const sharkStats = computeEvolvedSharkStats(
+    const normalStats = computeEvolvedSharkStats(
       cfg.inRunLv,
       cfg.id,
       cfg.upgLv,
-      cfg.frenzy,
+      false,
       1.0,
       10
     );
-    const sharkDrawSize = 96 * sharkStats.scale;
+    const frenzyStats = computeEvolvedSharkStats(
+      cfg.inRunLv,
+      cfg.id,
+      cfg.upgLv,
+      true,
+      1.0,
+      10
+    );
+    const sharkDrawSize = 96 * normalStats.scale;
 
     for (const prey of GAME_CONFIG.preyTiers) {
       for (const variant of variants) {
-        const visualScale = getPreyRelativeVisualScale(
+        const normalVisualScale = getPreyRelativeVisualScale(
           prey,
-          sharkStats,
+          normalStats,
           variant,
-          cfg.frenzy
+          false
         );
-        const preyDrawSize = prey.radius * visualScale * 2.25;
-        // Test non-boosting direct contact!
-        const outcome = resolvePreyEncounter(
-          sharkStats,
+        const frenzyVisualScale = getPreyRelativeVisualScale(
           prey,
-          cfg.frenzy,
+          frenzyStats,
+          variant,
+          true
+        );
+
+        // Gold Frenzy Special Exception: entering Gold Frenzy must NEVER shrink any fish;
+        // every species keeps its exact pre-frenzy visual size!
+        assert.equal(
+          frenzyVisualScale,
+          normalVisualScale,
+          `Gold Frenzy must preserve pre-frenzy visual size for ${prey.id} (${variant}) on ${cfg.id}`
+        );
+
+        const preyDrawSize = prey.radius * normalVisualScale * 2.25;
+        // Test normal state (frenzy = false) non-boosting direct contact
+        const normalOutcome = resolvePreyEncounter(
+          normalStats,
+          prey,
+          false,
           false,
           variant,
           1.0
         );
+        // Test Gold Frenzy state (frenzy = true): even giant oversized monsters & mines are devourable!
+        const frenzyOutcome = resolvePreyEncounter(
+          frenzyStats,
+          prey,
+          true,
+          false,
+          variant,
+          1.0
+        );
+        assert.equal(
+          frenzyOutcome.canDevour,
+          true,
+          `During Gold Frenzy, ${prey.id} (${variant}) must be devourable even while preserving its pre-frenzy size`
+        );
 
         if (preyDrawSize < sharkDrawSize) {
           assert.equal(
-            outcome.canDevour,
+            normalOutcome.canDevour,
             true,
             `Prey ${prey.id} (${variant}) with drawSize=${preyDrawSize.toFixed(1)} < sharkDrawSize=${sharkDrawSize.toFixed(1)} MUST be directly devourable without boosting!`
           );
@@ -517,13 +553,13 @@ test('Visual Size vs. Devourability Contract: every fish smaller than the player
           );
         } else {
           assert.equal(
-            outcome.canDevour,
+            normalOutcome.canDevour,
             false,
-            `Prey ${prey.id} (${variant}) with drawSize=${preyDrawSize.toFixed(1)} >= sharkDrawSize=${sharkDrawSize.toFixed(1)} MUST deal damage on contact!`
+            `Prey ${prey.id} (${variant}) with drawSize=${preyDrawSize.toFixed(1)} >= sharkDrawSize=${sharkDrawSize.toFixed(1)} MUST deal damage on contact outside Gold Frenzy!`
           );
           assert.ok(
-            outcome.hpDelta < 0,
-            `Dangerous prey ${prey.id} must reduce shark HP on contact`
+            normalOutcome.hpDelta < 0,
+            `Dangerous prey ${prey.id} must reduce shark HP on contact outside Gold Frenzy`
           );
           assert.ok(
             preyDrawSize >= sharkDrawSize * 1.15,

@@ -113,29 +113,29 @@ export const LINEAGE_META: Record<
   }
 > = {
   APEX_BIO: {
-    nameZh: '🌊 远古巨兽血统',
-    nameEn: '🌊 Apex Leviathan',
-    badgeColor: '#38bdf8',
+    nameZh: '远古狂暴血统',
+    nameEn: 'Apex Leviathan',
+    badgeColor: '#f43f5e',
     descZh: '高额生命上限与吞噬回血，巨口咬合判定范围扩大',
     descEn: 'High max HP & devour heal, wider jaw bite radius',
   },
   CYBER_MECHA: {
-    nameZh: '🤖 赛博机甲血统',
-    nameEn: '🤖 Cyber Mecha',
+    nameZh: '赛博机甲血统',
+    nameEn: 'Cyber Mecha',
     badgeColor: '#22d3ee',
     descZh: '推进极速大幅提升，冲刺能耗降低，自带大范围磁吸雷达',
     descEn: 'High swim velocity, lower boost drain & wide magnet radar',
   },
   ELEMENTAL_CORE: {
-    nameZh: '🔥 地心元素血统',
-    nameEn: '🔥 Elemental Core',
+    nameZh: '地心元素血统',
+    nameEn: 'Elemental Core',
     badgeColor: '#fb923c',
     descZh: '高额捕食得分加成，狂暴持续时间延长，冲刺破甲伤害倍增',
     descEn: 'High score multiplier, extended Gold Frenzy & armor break',
   },
   ELDER_ABYSS: {
-    nameZh: '🐙 克苏鲁古神血统',
-    nameEn: '🐙 Elder Abyss',
+    nameZh: '克苏鲁深渊血统',
+    nameEn: 'Elder Abyss',
     badgeColor: '#c084fc',
     descZh: '深海饥饿代谢大幅减缓，深渊抗压无惧黑暗，额外基因结晶产出',
     descEn: 'Slow hunger drain in deep sea, abyssal resilience & bonus genes',

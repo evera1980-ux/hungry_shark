@@ -12,6 +12,7 @@ import {
   SharkMetaSaveData,
 } from '../game/sharkEvolutionConfig';
 import { SharkFormCanvasPreview } from './SharkFormCanvasPreview';
+import { getLineageUiIconKey, UiAtlasIcon } from './UiAtlasIcon';
 
 interface SharkEvolutionAtlasModalProps {
   lang: Lang;
@@ -78,7 +79,7 @@ export const SharkEvolutionAtlasModal: React.FC<
         {/* Top Header Bar */}
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 sm:px-4 sm:py-2.5 bg-slate-950/90 border-b border-slate-800/90 shrink-0">
           <div className="flex items-center gap-2.5">
-            <span className="text-lg sm:text-xl">🧬</span>
+            <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={28} />
             <div>
               <h2 className="text-sm sm:text-base font-black text-white tracking-wide flex items-center gap-2">
                 <span>
@@ -101,11 +102,11 @@ export const SharkEvolutionAtlasModal: React.FC<
           {/* Live Persistent Resource Bar */}
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-amber-400/35 text-xs font-mono font-bold text-amber-300">
-              <span>🪙</span>
+              <UiAtlasIcon iconKey="UI_ICON_COIN" size={16} />
               <span>{totalCoins.toLocaleString()}</span>
             </div>
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900 border border-emerald-400/35 text-xs font-mono font-bold text-emerald-300">
-              <span>🧬</span>
+              <UiAtlasIcon iconKey="UI_ICON_GENE" size={16} />
               <span>{totalGenes.toLocaleString()}</span>
             </div>
             <div className="hidden md:flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700/80 text-[11px] font-mono text-slate-300">
@@ -225,19 +226,21 @@ export const SharkEvolutionAtlasModal: React.FC<
                           <div className="mt-0.5 w-full flex items-center justify-center">
                             {isActive ? (
                               <span className="px-1.5 py-0.2 rounded bg-emerald-500/25 text-emerald-300 text-[9px] font-extrabold">
-                                {lang === 'zh' ? '🦈 出战中' : 'ACTIVE'}
+                                {lang === 'zh' ? '出战中' : 'ACTIVE'}
                               </span>
                             ) : unlocked ? (
                               <span className="text-[9px] font-mono font-bold text-sky-300">
                                 Lv.{upLv}/10
                               </span>
                             ) : check.canUnlockNow ? (
-                              <span className="px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 text-[9px] font-extrabold">
-                                ⚡ {lang === 'zh' ? '可进化' : 'READY'}
+                              <span className="px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 text-[9px] font-extrabold flex items-center gap-0.5">
+                                <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={11} />
+                                {lang === 'zh' ? '可进化' : 'READY'}
                               </span>
                             ) : (
-                              <span className="text-[9px] font-mono text-slate-500">
-                                🔒 🪙{shark.unlockCoins}
+                              <span className="text-[9px] font-mono text-slate-500 flex items-center gap-0.5">
+                                <UiAtlasIcon iconKey="UI_ICON_COIN" size={11} />
+                                {shark.unlockCoins}
                               </span>
                             )}
                           </div>
@@ -260,13 +263,17 @@ export const SharkEvolutionAtlasModal: React.FC<
                     #{inspectedForm.index + 1} · Gen.{inspectedForm.generation}
                   </span>
                   <span
-                    className="px-2 py-0.5 rounded-full font-bold text-[10px]"
+                    className="px-2 py-0.5 rounded-full font-bold text-[10px] flex items-center gap-1"
                     style={{
                       backgroundColor: `${lineageInfo.badgeColor}22`,
                       color: lineageInfo.badgeColor,
                       border: `1px solid ${lineageInfo.badgeColor}55`,
                     }}
                   >
+                    <UiAtlasIcon
+                      iconKey={getLineageUiIconKey(inspectedForm.lineage)}
+                      size={14}
+                    />
                     {lang === 'zh' ? lineageInfo.nameZh : lineageInfo.nameEn}
                   </span>
                 </div>
@@ -294,8 +301,14 @@ export const SharkEvolutionAtlasModal: React.FC<
 
               {/* Passive Bloodline Trait */}
               <div className="rounded-xl bg-slate-950/75 border border-slate-800/90 p-2.5">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400 mb-0.5">
-                  {lang === 'zh' ? '✨ 专属进化特性' : '✨ Evolution Trait'}
+                <div className="text-[10px] font-bold uppercase tracking-wider text-sky-400 mb-0.5 flex items-center gap-1">
+                  <UiAtlasIcon
+                    iconKey={getLineageUiIconKey(inspectedForm.lineage)}
+                    size={13}
+                  />
+                  <span>
+                    {lang === 'zh' ? '专属进化特性' : 'Evolution Trait'}
+                  </span>
                 </div>
                 <p className="text-xs text-slate-200 leading-snug">
                   {lang === 'zh'
@@ -307,8 +320,9 @@ export const SharkEvolutionAtlasModal: React.FC<
               {/* Core Numerical Attributes */}
               <div className="grid grid-cols-2 gap-1.5 text-xs">
                 <div className="rounded-lg bg-slate-950/70 border border-slate-800/80 px-2.5 py-1.5">
-                  <div className="text-[10px] text-slate-400">
-                    {lang === 'zh' ? '基础咬合阶位' : 'Base Bite Tier'}
+                  <div className="text-[10px] text-slate-400 flex items-center gap-1">
+                    <UiAtlasIcon iconKey="UI_BADGE_TIER" size={12} />
+                    <span>{lang === 'zh' ? '基础咬合阶位' : 'Base Bite Tier'}</span>
                   </div>
                   <div className="font-mono font-black text-amber-300">
                     Tier {inspectedForm.baseBiteTier}{' '}
@@ -357,10 +371,11 @@ export const SharkEvolutionAtlasModal: React.FC<
               {!isInspectedUnlocked && (
                 <div className="rounded-xl bg-slate-950/90 border border-amber-500/30 p-2.5 space-y-1.5 text-xs">
                   <div className="text-[11px] font-extrabold text-amber-300 flex items-center justify-between">
-                    <span>
+                    <span className="flex items-center gap-1">
+                      <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={14} />
                       {lang === 'zh'
-                        ? '🔓 破茧进化解锁条件'
-                        : '🔓 Evolution Requirements'}
+                        ? '破茧进化解锁条件'
+                        : 'Evolution Requirements'}
                     </span>
                     {unlockCheck.canUnlockNow && (
                       <span className="text-emerald-400">
@@ -424,24 +439,26 @@ export const SharkEvolutionAtlasModal: React.FC<
                     <span className="text-slate-300">
                       3. {lang === 'zh' ? '进化消耗' : 'Evolution Cost'}
                     </span>
-                    <div className="flex items-center gap-2 font-mono font-bold">
+                    <div className="flex items-center gap-2.5 font-mono font-bold">
                       <span
-                        className={
+                        className={`flex items-center gap-1 ${
                           unlockCheck.coinsMet
                             ? 'text-amber-300'
                             : 'text-rose-400'
-                        }
+                        }`}
                       >
-                        🪙 {inspectedForm.unlockCoins.toLocaleString()}
+                        <UiAtlasIcon iconKey="UI_ICON_COIN" size={14} />
+                        {inspectedForm.unlockCoins.toLocaleString()}
                       </span>
                       <span
-                        className={
+                        className={`flex items-center gap-1 ${
                           unlockCheck.genesMet
                             ? 'text-emerald-300'
                             : 'text-rose-400'
-                        }
+                        }`}
                       >
-                        🧬 {inspectedForm.unlockGenes.toLocaleString()}
+                        <UiAtlasIcon iconKey="UI_ICON_GENE" size={14} />
+                        {inspectedForm.unlockGenes.toLocaleString()}
                       </span>
                     </div>
                   </div>
@@ -469,22 +486,24 @@ export const SharkEvolutionAtlasModal: React.FC<
                         : 'bg-slate-800/80 text-slate-400 border border-slate-700 cursor-not-allowed'
                     }`}
                   >
-                    <span>
+                    <span className="flex items-center gap-1.5">
+                      <UiAtlasIcon iconKey="UI_BTN_BODY_UPGRADE" size={18} />
                       {inspectedUpgradeLv >= 10
                         ? lang === 'zh'
-                          ? '★ 体质已强化至满级 (Lv.10)'
-                          : '★ MAX UPGRADE (Lv.10)'
+                          ? '体质已强化至满级 (Lv.10)'
+                          : 'MAX UPGRADE (Lv.10)'
                         : lang === 'zh'
-                        ? `⬆️ 强化体质 (Lv.${inspectedUpgradeLv} → Lv.${
+                        ? `强化体质 (Lv.${inspectedUpgradeLv} → Lv.${
                             inspectedUpgradeLv + 1
                           })`
-                        : `⬆️ Upgrade Body (Lv.${inspectedUpgradeLv} → Lv.${
+                        : `Upgrade Body (Lv.${inspectedUpgradeLv} → Lv.${
                             inspectedUpgradeLv + 1
                           })`}
                     </span>
                     {inspectedUpgradeLv < 10 && (
-                      <span className="font-mono">
-                        🪙 {upgradeCost.toLocaleString()}
+                      <span className="font-mono flex items-center gap-1">
+                        <UiAtlasIcon iconKey="UI_ICON_COIN" size={14} />
+                        {upgradeCost.toLocaleString()}
                       </span>
                     )}
                   </button>
@@ -503,11 +522,11 @@ export const SharkEvolutionAtlasModal: React.FC<
                   >
                     {isInspectedActive
                       ? lang === 'zh'
-                        ? '🦈 当前正在使用该形态'
-                        : '🦈 Currently Active Form'
+                        ? '当前正在使用该形态'
+                        : 'Currently Active Form'
                       : lang === 'zh'
-                      ? '🦈 切换为当前出战鲨鱼'
-                      : '🦈 Deploy This Shark Form'}
+                      ? '切换为当前出战鲨鱼'
+                      : 'Deploy This Shark Form'}
                   </button>
                 </>
               ) : (
@@ -522,7 +541,7 @@ export const SharkEvolutionAtlasModal: React.FC<
                       : 'bg-slate-800/80 text-slate-500 border border-slate-700 cursor-not-allowed'
                   }`}
                 >
-                  <span>🧬</span>
+                  <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={18} />
                   <span>
                     {unlockCheck.canUnlockNow
                       ? lang === 'zh'

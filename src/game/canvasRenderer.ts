@@ -257,15 +257,17 @@ export function drawPreyEntity(
     mutationVariant = 'NONE',
   } = prey;
   const effectiveTier = getEffectivePreyTier(config, mutationVariant);
-  const canEatByTier = config.isHazard
-    ? frenzyActive || canEatMines
-    : frenzyActive || sharkBiteTier >= effectiveTier;
+  const canEatWithoutFrenzy = config.isHazard
+    ? canEatMines
+    : sharkBiteTier >= effectiveTier;
+  const canEatByTier = frenzyActive || canEatWithoutFrenzy;
   const needsBoostNow = false;
   const canEat = canEatByTier;
   const visualScale = getPreyRelativeVisualScale(
     config,
     {
       biteTier: sharkBiteTier,
+      normalBiteTier: sharkBiteTier,
       relativePreyScale,
       scale: sharkScale,
       canEatMines,
@@ -273,15 +275,15 @@ export function drawPreyEntity(
     mutationVariant,
     frenzyActive
   );
-  // Keep inflated edible pufferfish strictly smaller than the shark (<= 0.72x shark size), while inedible puffers inflate to look even more menacing
-  const inflateMult = isInflated ? (canEat ? 1.12 : 1.24) : 1.0;
+  // Keep inflated edible pufferfish strictly smaller than the shark (<= 0.72x shark size), while giant puffers preserve their menacing size even during Gold Frenzy
+  const inflateMult = isInflated ? (canEatWithoutFrenzy ? 1.12 : 1.24) : 1.0;
   const r = config.radius * visualScale * inflateMult;
   const isBountyTarget = Boolean(targetPreyId && config.id === targetPreyId);
 
   ctx.save();
   ctx.translate(x, y);
 
-  // Active Target Fish Bounty Lock Reticle (🎯)
+  // Active Target Fish Bounty Lock Reticle
   if (isBountyTarget) {
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
     ctx.lineWidth = 2.5;
@@ -309,7 +311,7 @@ export function drawPreyEntity(
     ctx.stroke();
   }
 
-  // Threat ring (crimson) vs Boost Armor-Break prompt ring (amber dashed)
+  // Threat ring (crimson) vs Gold Frenzy giant-hunt highlight ring
   if (needsBoostNow) {
     ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
     ctx.lineWidth = 2.2;
@@ -318,7 +320,7 @@ export function drawPreyEntity(
     ctx.arc(0, 0, r + 7 + Math.sin(phase * 6) * 2, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
-  } else if (!canEat || config.isHazard) {
+  } else if (!canEat || (config.isHazard && !canEatByTier)) {
     ctx.strokeStyle =
       telegraphTimer > 0 ? '#f43f5e' : 'rgba(244, 63, 94, 0.55)';
     ctx.lineWidth = telegraphTimer > 0 ? 3 : 1.8;
@@ -331,6 +333,15 @@ export function drawPreyEntity(
       Math.PI * 2
     );
     ctx.stroke();
+  } else if (frenzyActive && !canEatWithoutFrenzy) {
+    // During Gold Frenzy, giant apex prey/hazards keep their massive size and glow with a golden feast ring!
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.85)';
+    ctx.lineWidth = 2.4;
+    ctx.setLineDash([7, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 6 + Math.sin(phase * 6) * 2.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
   }
 
   ctx.save();
@@ -384,6 +395,8 @@ export function drawPreyEntity(
     ctx.textAlign = 'center';
     ctx.fillStyle = !canEatByTier
       ? '#fda4af'
+      : frenzyActive && !canEatWithoutFrenzy
+      ? '#fde047'
       : needsBoostNow
       ? '#fde047'
       : isBountyTarget
@@ -393,18 +406,26 @@ export function drawPreyEntity(
       : mutationVariant === 'ABYSS_BEHEMOTH'
       ? '#e879f9'
       : '#86efac';
-    const prefix = !canEatByTier
-      ? '⚠️'
-      : needsBoostNow
-      ? '🚀'
+
+    const iconKey = !canEatByTier
+      ? 'UI_ICON_DANGER_SKULL'
       : isBountyTarget
-      ? '🎯'
-      : mutationVariant === 'GOLDEN_MUTANT'
-      ? '★'
-      : mutationVariant === 'ABYSS_BEHEMOTH'
-      ? '⚡'
-      : '';
-    ctx.fillText(`${prefix}T${effectiveTier}`, 0, -r - 8);
+      ? 'UI_ICON_BOUNTY_TARGET'
+      : null;
+    const iconFrame = iconKey
+      ? spriteSheetManager.getUiIconFrame(iconKey)
+      : undefined;
+
+    if (iconFrame) {
+      ctx.drawImage(iconFrame, -19, -r - 20, 14, 14);
+      ctx.fillText(`T${effectiveTier}`, 5, -r - 9);
+    } else {
+      const prefix =
+        mutationVariant === 'GOLDEN_MUTANT' || (frenzyActive && !canEatWithoutFrenzy)
+          ? '★'
+          : '';
+      ctx.fillText(`${prefix}T${effectiveTier}`, 0, -r - 8);
+    }
   }
 
   ctx.restore();
@@ -565,12 +586,6 @@ export function drawOffScreenRadarIndicators(
         : kind === 'GOLDEN'
         ? '#fde047'
         : '#f43f5e';
-    const badgePrefix =
-      kind === 'BOUNTY'
-        ? '🎯'
-        : kind === 'GOLDEN'
-        ? '★'
-        : `⚠️T${prey.config.tier}`;
     const distMeters = Math.max(5, Math.round(worldDist / 12));
     const pulse = 0.85 + 0.15 * Math.sin(nowMs * 0.008);
 
@@ -602,6 +617,20 @@ export function drawOffScreenRadarIndicators(
     const preyFrame = spriteSheetManager.getPreySprite(prey.config);
     drawNaturalAspectFrame(ctx, preyFrame, 21, 0, -2);
 
+    // Corner UI icon badge on radar pod
+    const podBadgeKey =
+      kind === 'BOUNTY'
+        ? 'UI_ICON_BOUNTY_TARGET'
+        : kind === 'DANGER'
+        ? 'UI_ICON_DANGER_SKULL'
+        : null;
+    const podBadgeFrame = podBadgeKey
+      ? spriteSheetManager.getUiIconFrame(podBadgeKey)
+      : undefined;
+    if (podBadgeFrame) {
+      ctx.drawImage(podBadgeFrame, -20, -20, 15, 15);
+    }
+
     // Distance pill label
     ctx.font = '700 10px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
@@ -611,7 +640,9 @@ export function drawOffScreenRadarIndicators(
     ctx.lineWidth = 1;
     ctx.strokeRect(-26, 13, 52, 14);
     ctx.fillStyle = borderColor;
-    ctx.fillText(`${badgePrefix} ${distMeters}m`, 0, 23);
+    const labelText =
+      kind === 'DANGER' ? `T${prey.config.tier} ${distMeters}m` : `${distMeters}m`;
+    ctx.fillText(labelText, 0, 23);
 
     ctx.restore();
   }

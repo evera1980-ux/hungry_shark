@@ -22,6 +22,7 @@ export interface ComputedSharkStats {
   moveSpeed: number;
   boostSpeed: number;
   biteTier: number;
+  normalBiteTier?: number;
   hpDrainPerSec: number;
   boostDrainPerSec: number;
   magnetRadius: number;
@@ -74,35 +75,41 @@ export function getEffectivePreyTier(
 /**
  * Computes the visual & hitbox scale of a prey entity relative to the shark's current on-screen size.
  * Core visual-gameplay contract:
- * 1. Any prey that can be directly swallowed (`canDevourDirectly === true`) is rendered STRICTLY SMALLER
- *    than the player's shark on screen (`preyDrawSize <= 0.64 * sharkDrawSize`), and shrinks progressively
- *    as the shark's biteTier and in-run level (`relativePreyScale`) increase.
- * 2. Any prey/hazard that deals damage on contact (`canDevourDirectly === false`) is rendered EQUAL TO OR
- *    LARGER than the player's shark on screen (`preyDrawSize >= 1.18 * sharkDrawSize`), scaling up with tier gap.
+ * 1. Normal State (`frenzyActive === false`):
+ *    - Any prey that can be directly swallowed (`canDevourNormally === true`) is rendered STRICTLY SMALLER
+ *      than the player's shark on screen (`preyDrawSize <= 0.64 * sharkDrawSize`), and shrinks progressively
+ *      as the shark's biteTier and in-run level (`relativePreyScale`) increase.
+ *    - Any prey/hazard that deals damage on contact (`canDevourNormally === false`) is rendered EQUAL TO OR
+ *      LARGER than the player's shark on screen (`preyDrawSize >= 1.18 * sharkDrawSize`), scaling up with tier gap.
+ * 2. Gold Frenzy Special Exception (`frenzyActive === true`):
+ *    - Entering Gold Frenzy temporarily boosts bite power to swallow everything (`resolvePreyEncounter` -> DEVOUR),
+ *      but DOES NOT shrink other fish! All fish and giant deep-sea monsters preserve their pre-frenzy visual size
+ *      (`normalBiteTier`) so hunting and devouring massive predators during Gold Frenzy feels maximally rewarding.
  */
 export function getPreyRelativeVisualScale(
   prey: PreyTierConfig,
   sharkStats: Pick<ComputedSharkStats, 'biteTier' | 'relativePreyScale'> &
-    Partial<Pick<ComputedSharkStats, 'scale' | 'canEatMines'>>,
+    Partial<Pick<ComputedSharkStats, 'scale' | 'canEatMines' | 'normalBiteTier'>>,
   mutationVariant: PreyMutationVariant = 'NONE',
-  frenzyActive: boolean = false
+  _frenzyActive: boolean = false
 ): number {
   const sharkScale = sharkStats.scale ?? 1.0;
   const baseRel = sharkStats.relativePreyScale ?? 1.0;
   const effectiveTier = getEffectivePreyTier(prey, mutationVariant);
-  const effectiveBiteTier = frenzyActive ? 8 : sharkStats.biteTier;
+  // Always use the shark's pre-frenzy normalBiteTier for visual sizing so Gold Frenzy never shrinks giant prey
+  const visualBiteTier = sharkStats.normalBiteTier ?? sharkStats.biteTier;
 
-  const canDevourDirectly = prey.isHazard
-    ? frenzyActive || Boolean(sharkStats.canEatMines)
-    : frenzyActive || effectiveBiteTier >= effectiveTier;
+  const canDevourNormally = prey.isHazard
+    ? Boolean(sharkStats.canEatMines)
+    : visualBiteTier >= effectiveTier;
 
   // Scale factor at which `prey.radius * visualScale * 2.25 === 96 * sharkScale` (exact 1:1 visual parity with player shark)
   const sharkParityScale =
     (SHARK_EQUIVALENT_RADIUS * sharkScale) / Math.max(1, prey.radius);
 
-  if (canDevourDirectly) {
+  if (canDevourNormally) {
     // Edible fish: strictly smaller than the player's shark (<= 64% of shark's linear size)
-    const tierDiff = Math.max(0, effectiveBiteTier - effectiveTier);
+    const tierDiff = Math.max(0, visualBiteTier - effectiveTier);
     const tierRatio = Math.max(0.18, 0.64 * Math.pow(0.79, tierDiff));
     const levelShrink = 0.64 + 0.36 * baseRel;
     const targetSharkRatio = Math.max(
@@ -112,8 +119,8 @@ export function getPreyRelativeVisualScale(
     return Number((sharkParityScale * targetSharkRatio).toFixed(3));
   }
 
-  // Inedible / dangerous fish: strictly equal to or larger than the player's shark (>= 118% of shark's linear size)
-  const overTier = Math.max(1, effectiveTier - effectiveBiteTier);
+  // Inedible / dangerous fish (or giant prey during Gold Frenzy): strictly >= 118% of shark's linear size
+  const overTier = Math.max(1, effectiveTier - visualBiteTier);
   const behemothExtra = mutationVariant === 'ABYSS_BEHEMOTH' ? 0.12 : 0;
   const bossExtra = prey.isBoss ? 0.14 : 0;
   const targetDangerRatio = Math.min(
@@ -209,7 +216,8 @@ export function computeSharkStats(
   const levelBiteBonus =
     level <= 4 ? Math.floor(level / 2) : 2 + Math.floor((level - 4) / 3);
   const rawBiteTier = GAME_CONFIG.world.baseBiteTier + levelBiteBonus + biteTierBonus;
-  const biteTier = frenzyActive ? 8 : Math.min(8, rawBiteTier);
+  const normalBiteTier = Math.min(8, rawBiteTier);
+  const biteTier = frenzyActive ? 8 : normalBiteTier;
 
   const baseSpeed = GAME_CONFIG.world.baseSharkSpeed * (1 + (level - 1) * 0.03 + speedBonus);
   const moveSpeed = Math.round(frenzyActive ? baseSpeed * 1.35 : baseSpeed);
@@ -243,6 +251,7 @@ export function computeSharkStats(
     moveSpeed,
     boostSpeed,
     biteTier,
+    normalBiteTier,
     hpDrainPerSec,
     boostDrainPerSec,
     magnetRadius,
@@ -291,7 +300,8 @@ export function computeEvolvedSharkStats(
     genMaxBiteTier,
     form.baseBiteTier + upgradeBiteBonus + inRunBiteBonus
   );
-  const biteTier = frenzyActive ? 8 : Math.min(8, rawBiteTier);
+  const normalBiteTier = Math.min(8, rawBiteTier);
+  const biteTier = frenzyActive ? 8 : normalBiteTier;
 
   // Non-obstructive shark scale (1.0 -> 1.28) + progressive relative prey shrinking (1.0 -> 0.40)
   const scale = Number(
@@ -389,6 +399,7 @@ export function computeEvolvedSharkStats(
     moveSpeed,
     boostSpeed,
     biteTier,
+    normalBiteTier,
     hpDrainPerSec,
     boostDrainPerSec,
     magnetRadius,

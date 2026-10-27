@@ -1,0 +1,15 @@
+# Cursor AI Mandatory Project Governance Rules
+
+Before reading, modifying, or generating any code in this repository, you MUST read and strictly obey:
+1. `/AGENTS.md` (Root AI Governance & Code-to-Doc Sync Matrix)
+2. `/docs/00-AI_CONSTRAINTS.md` (6 Hard Guardrails & Atomic Documentation Update Protocol)
+
+## Mandatory Atomic Code-to-Doc Synchronization Rule
+Whenever you modify any code file in `src/`, you MUST check the Code-to-Doc Sync Matrix in `/AGENTS.md` and update the corresponding `.md` file(s) in `/docs/` (`01-ARCHITECTURE.md`, `02-DESIGN_SPEC.md`, `03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, or `04-COLLABORATION_AND_DEPLOYMENT.md`) in the SAME turn before completing your response. Never leave documentation out of sync with the codebase.
+
+## Core Non-Negotiable Invariants
+1. **48-Form Pure Shark Morphology**: Never draw external organ attachments on the shark. All progression visuals come from the 8x6 sprite sheet (`/public/assets/aistudio/sharks_ec921c3b.png`) + spine wave animation.
+2. **Visual Size === Edible Rule**: All directly edible prey (`canDevourDirectly === true`) MUST render and collide at `<= 64%` of the player shark's linear size (`getPreyRelativeVisualScale`). All dangerous/inedible prey (`canDevourDirectly === false`) MUST render and collide at `>= 118%` of the player shark's linear size.
+3. **Mobile Multi-Touch Isolation**: Never call React `setState` inside `handleJoystickPointerMove` (use `joystickKnobRef.current.style.transform` directly). All in-run HUD buttons MUST use `bindMultiTouchButton` (`onPointerDown` + `onTouchStart` + `onClick` with 320ms debounce) so tapping buttons with the right thumb while holding the left-thumb virtual joystick responds immediately.
+4. **Strict Marine Depth Zones**: Maintain the 85% native depth habitat spawn rule and hard depth clamping (`[chosenTier.minDepth, chosenTier.maxDepth]`).
+5. **Verification**: Run `npx tsx --test src/game/rules.test.ts` and `npm run lint` after logic changes.

@@ -59,10 +59,75 @@ export type Fish2SpriteKey =
   | 'FISH2_MEG_TOOTH'
   | 'FISH2_PLASMA_CORE';
 
+/**
+ * 24 Professional Game UI Icons & Medallions from the 6x4 sheet (/assets/aistudio/icons_f5128c12.png)
+ */
+export type UiIconKey =
+  // Row 0: Circular Tactical & Evolution Skill Medallions
+  | 'UI_BTN_BOOST'
+  | 'UI_BTN_BODY_UPGRADE'
+  | 'UI_BTN_MORPH_EVOLVE'
+  | 'UI_BTN_GOLD_FRENZY'
+  | 'UI_BTN_GENE_SURGE'
+  | 'UI_BTN_SUPPLY_DROP'
+  // Row 1: HUD Frames, Virtual Joystick & Core Currencies
+  | 'UI_AVATAR_FRAME'
+  | 'UI_BADGE_TIER'
+  | 'UI_JOYSTICK_BASE'
+  | 'UI_JOYSTICK_KNOB'
+  | 'UI_ICON_COIN'
+  | 'UI_ICON_GENE'
+  // Row 2: Telemetry, Status & Rewarded Video Icons
+  | 'UI_ICON_BOUNTY_TARGET'
+  | 'UI_ICON_DEPTH'
+  | 'UI_ICON_COMBO_FIRE'
+  | 'UI_ICON_SCORE_TROPHY'
+  | 'UI_ICON_DANGER_SKULL'
+  | 'UI_ICON_VIDEO_AD'
+  // Row 3: System Controls & 4 Shark Evolution Lineage Crests
+  | 'UI_ICON_PAUSE'
+  | 'UI_ICON_SOUND'
+  | 'UI_LINEAGE_BIO'
+  | 'UI_LINEAGE_MECHA'
+  | 'UI_LINEAGE_ELEM'
+  | 'UI_LINEAGE_ABYSS';
+
+export const UI_ICON_GRID_MAP: Record<UiIconKey, [number, number]> = {
+  // Row 0
+  UI_BTN_BOOST: [0, 0],
+  UI_BTN_BODY_UPGRADE: [0, 1],
+  UI_BTN_MORPH_EVOLVE: [0, 2],
+  UI_BTN_GOLD_FRENZY: [0, 3],
+  UI_BTN_GENE_SURGE: [0, 4],
+  UI_BTN_SUPPLY_DROP: [0, 5],
+  // Row 1
+  UI_AVATAR_FRAME: [1, 0],
+  UI_BADGE_TIER: [1, 1],
+  UI_JOYSTICK_BASE: [1, 2],
+  UI_JOYSTICK_KNOB: [1, 3],
+  UI_ICON_COIN: [1, 4],
+  UI_ICON_GENE: [1, 5],
+  // Row 2
+  UI_ICON_BOUNTY_TARGET: [2, 0],
+  UI_ICON_DEPTH: [2, 1],
+  UI_ICON_COMBO_FIRE: [2, 2],
+  UI_ICON_SCORE_TROPHY: [2, 3],
+  UI_ICON_DANGER_SKULL: [2, 4],
+  UI_ICON_VIDEO_AD: [2, 5],
+  // Row 3
+  UI_ICON_PAUSE: [3, 0],
+  UI_ICON_SOUND: [3, 1],
+  UI_LINEAGE_BIO: [3, 2],
+  UI_LINEAGE_MECHA: [3, 3],
+  UI_LINEAGE_ELEM: [3, 4],
+  UI_LINEAGE_ABYSS: [3, 5],
+};
+
 export type SpriteFrameKey =
   | PrimarySpriteFrameKey
   | Fish2SpriteKey
-  | SharkSpriteKey;
+  | SharkSpriteKey
+  | UiIconKey;
 
 export const SPRITE_GRID_MAP: Record<PrimarySpriteFrameKey, [number, number]> = {
   BASE_SHARK: [0, 0],
@@ -236,26 +301,50 @@ for (let r = 0; r < 6; r++) {
 
 export class SpriteSheetManager {
   public frames: Partial<Record<SpriteFrameKey, HTMLCanvasElement>> = {};
+  public uiIconDataUrls: Partial<Record<UiIconKey, string>> = {};
   public rawGridFrames: HTMLCanvasElement[] = [];
   public fish2GridFrames: HTMLCanvasElement[] = [];
   public sharksGridFrames: HTMLCanvasElement[] = [];
+  public uiIconsGridFrames: HTMLCanvasElement[] = [];
   public loaded: boolean = false;
   public fish2Loaded: boolean = false;
   public sharksLoaded: boolean = false;
+  public uiIconsLoaded: boolean = false;
   private loadingPromise: Promise<void> | null = null;
+  private listeners: Set<() => void> = new Set();
+
+  public subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private notifyListeners(): void {
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
 
   /**
    * Loads:
    * 1. Primary 4x4 sprite sheet (/assets/aistudio/fish_24bdaa5a.png)
    * 2. Extended 6x5 target fish sprite sheet (/assets/aistudio/fish2_fc857cfa.png)
    * 3. 48-Shark Evolution Matrix 8x6 sprite sheet (/assets/aistudio/sharks_ec921c3b.png)
+   * 4. 24-Icon Game UI Atlas 6x4 sprite sheet (/assets/aistudio/icons_f5128c12.png)
    */
   public load(
     primaryUrl: string = '/assets/aistudio/fish_24bdaa5a.png',
     fish2Url: string = '/assets/aistudio/fish2_fc857cfa.png',
-    sharksUrl: string = '/assets/aistudio/sharks_ec921c3b.png'
+    sharksUrl: string = '/assets/aistudio/sharks_ec921c3b.png',
+    uiIconsUrl: string = '/assets/aistudio/icons_f5128c12.png'
   ): Promise<void> {
-    if (this.loaded && this.fish2Loaded && this.sharksLoaded) {
+    if (
+      this.loaded &&
+      this.fish2Loaded &&
+      this.sharksLoaded &&
+      this.uiIconsLoaded
+    ) {
       return Promise.resolve();
     }
     if (this.loadingPromise) return this.loadingPromise;
@@ -269,6 +358,7 @@ export class SpriteSheetManager {
       img.onload = () => {
         this.processAndSlicePrimaryImage(img);
         this.loaded = true;
+        this.notifyListeners();
         resolve();
       };
       img.onerror = () => {
@@ -278,6 +368,7 @@ export class SpriteSheetManager {
           fallbackImg.onload = () => {
             this.processAndSlicePrimaryImage(fallbackImg);
             this.loaded = true;
+            this.notifyListeners();
             resolve();
           };
           fallbackImg.onerror = () => resolve();
@@ -295,6 +386,7 @@ export class SpriteSheetManager {
       img2.onload = () => {
         this.processAndSliceFish2Image(img2);
         this.fish2Loaded = true;
+        this.notifyListeners();
         resolve();
       };
       img2.onerror = () => resolve();
@@ -307,15 +399,32 @@ export class SpriteSheetManager {
       imgSharks.onload = () => {
         this.processAndSliceSharksImage(imgSharks);
         this.sharksLoaded = true;
+        this.notifyListeners();
         resolve();
       };
       imgSharks.onerror = () => resolve();
       imgSharks.src = sharksUrl;
     });
 
-    this.loadingPromise = Promise.all([loadPrimary, loadFish2, loadSharks]).then(
-      () => undefined
-    );
+    const loadUiIcons = new Promise<void>((resolve) => {
+      const imgIcons = new Image();
+      imgIcons.crossOrigin = 'anonymous';
+      imgIcons.onload = () => {
+        this.processAndSliceUiIconsImage(imgIcons);
+        this.uiIconsLoaded = true;
+        this.notifyListeners();
+        resolve();
+      };
+      imgIcons.onerror = () => resolve();
+      imgIcons.src = uiIconsUrl;
+    });
+
+    this.loadingPromise = Promise.all([
+      loadPrimary,
+      loadFish2,
+      loadSharks,
+      loadUiIcons,
+    ]).then(() => undefined);
     return this.loadingPromise;
   }
 
@@ -487,8 +596,189 @@ export class SpriteSheetManager {
     }
   }
 
+  /**
+   * Slices the 6x4 Game UI Icon Atlas (/assets/aistudio/icons_f5128c12.png) using
+   * Flood-Fill Alpha Matting from the cell perimeter (plus hollow center seed for
+   * UI_AVATAR_FRAME and UI_JOYSTICK_BASE) so internal specular highlights and white teeth
+   * remain 100% opaque while the outer background & hollow rings become cleanly transparent.
+   */
+  private processAndSliceUiIconsImage(img: HTMLImageElement): void {
+    const fullW = img.naturalWidth || img.width;
+    const fullH = img.naturalHeight || img.height;
+    if (!fullW || !fullH) return;
+
+    const rawCanvas = document.createElement('canvas');
+    rawCanvas.width = fullW;
+    rawCanvas.height = fullH;
+    const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+    if (!rawCtx) return;
+    rawCtx.drawImage(img, 0, 0);
+
+    this.uiIconsGridFrames = [];
+    const orderedKeys = Object.keys(UI_ICON_GRID_MAP) as UiIconKey[];
+
+    for (const key of orderedKeys) {
+      const [row, col] = UI_ICON_GRID_MAP[key];
+      const sx = Math.floor((col / 6) * fullW);
+      const sy = Math.floor((row / 4) * fullH);
+      const ex = Math.floor(((col + 1) / 6) * fullW);
+      const ey = Math.floor(((row + 1) / 4) * fullH);
+      const cellW = Math.max(1, ex - sx);
+      const cellH = Math.max(1, ey - sy);
+
+      const cellData = rawCtx.getImageData(sx, sy, cellW, cellH);
+      const data = cellData.data;
+      const visited = new Uint8Array(cellW * cellH);
+      const queue = new Int32Array(cellW * cellH);
+      let qHead = 0;
+      let qTail = 0;
+
+      const isBgWhite = (idx: number): boolean => {
+        const p = idx * 4;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        return (
+          r >= 225 &&
+          g >= 225 &&
+          b >= 225 &&
+          Math.max(r, g, b) - Math.min(r, g, b) <= 28
+        );
+      };
+
+      const enqueue = (px: number, py: number) => {
+        if (px < 0 || px >= cellW || py < 0 || py >= cellH) return;
+        const idx = py * cellW + px;
+        if (visited[idx]) return;
+        if (!isBgWhite(idx)) return;
+        visited[idx] = 1;
+        queue[qTail++] = idx;
+      };
+
+      // Seed perimeter pixels
+      for (let px = 0; px < cellW; px++) {
+        enqueue(px, 0);
+        enqueue(px, cellH - 1);
+      }
+      for (let py = 0; py < cellH; py++) {
+        enqueue(0, py);
+        enqueue(cellW - 1, py);
+      }
+
+      // Seed hollow center for ring icons (UI_AVATAR_FRAME and UI_JOYSTICK_BASE)
+      if (key === 'UI_AVATAR_FRAME' || key === 'UI_JOYSTICK_BASE') {
+        const cx = Math.floor(cellW / 2);
+        const cy = Math.floor(cellH / 2);
+        for (let dy = -4; dy <= 4; dy++) {
+          for (let dx = -4; dx <= 4; dx++) {
+            enqueue(cx + dx, cy + dy);
+          }
+        }
+      }
+
+      // BFS Flood-Fill
+      while (qHead < qTail) {
+        const curr = queue[qHead++];
+        const p = curr * 4;
+        data[p + 3] = 0;
+        const cx = curr % cellW;
+        const cy = (curr - cx) / cellW;
+        if (cx > 0) enqueue(cx - 1, cy);
+        if (cx + 1 < cellW) enqueue(cx + 1, cy);
+        if (cy > 0) enqueue(cx, cy - 1);
+        if (cy + 1 < cellH) enqueue(cx, cy + 1);
+      }
+
+      // Anti-alias feathering on 1px boundary next to flood-filled background
+      for (let py = 1; py < cellH - 1; py++) {
+        for (let px = 1; px < cellW - 1; px++) {
+          const idx = py * cellW + px;
+          if (visited[idx]) continue;
+          if (
+            visited[idx - 1] ||
+            visited[idx + 1] ||
+            visited[idx - cellW] ||
+            visited[idx + cellW]
+          ) {
+            const p = idx * 4;
+            const lum = (data[p] + data[p + 1] + data[p + 2]) / 3;
+            if (lum > 205) {
+              data[p + 3] = Math.round(
+                data[p + 3] * Math.max(0.15, (240 - lum) / 35)
+              );
+            }
+          }
+        }
+      }
+
+      // Find tight bounding box of non-transparent icon pixels
+      let minX = cellW;
+      let minY = cellH;
+      let maxX = 0;
+      let maxY = 0;
+      let hasPixels = false;
+
+      for (let py = 0; py < cellH; py++) {
+        for (let px = 0; px < cellW; px++) {
+          if (data[(py * cellW + px) * 4 + 3] > 20) {
+            hasPixels = true;
+            if (px < minX) minX = px;
+            if (py < minY) minY = py;
+            if (px > maxX) maxX = px;
+            if (py > maxY) maxY = py;
+          }
+        }
+      }
+
+      const tempCell = document.createElement('canvas');
+      tempCell.width = cellW;
+      tempCell.height = cellH;
+      const tempCtx = tempCell.getContext('2d');
+      if (tempCtx) {
+        tempCtx.putImageData(cellData, 0, 0);
+      }
+
+      // Normalize into a crisp 128x128 square offscreen canvas preserving aspect ratio
+      const outSize = 128;
+      const frameCanvas = document.createElement('canvas');
+      frameCanvas.width = outSize;
+      frameCanvas.height = outSize;
+      const fCtx = frameCanvas.getContext('2d');
+
+      if (fCtx && hasPixels) {
+        const bw = Math.max(1, maxX - minX + 1);
+        const bh = Math.max(1, maxY - minY + 1);
+        const targetSpan = outSize - 6; // 3px clean breathing margin on each side
+        const scale = Math.min(targetSpan / bw, targetSpan / bh);
+        const dw = bw * scale;
+        const dh = bh * scale;
+        const dx = (outSize - dw) / 2;
+        const dy = (outSize - dh) / 2;
+        fCtx.drawImage(tempCell, minX, minY, bw, bh, dx, dy, dw, dh);
+      } else if (fCtx) {
+        fCtx.drawImage(tempCell, 0, 0, cellW, cellH, 0, 0, outSize, outSize);
+      }
+
+      this.frames[key] = frameCanvas;
+      this.uiIconsGridFrames.push(frameCanvas);
+      try {
+        this.uiIconDataUrls[key] = frameCanvas.toDataURL('image/png');
+      } catch {
+        // Ignore dataURL security errors if any
+      }
+    }
+  }
+
   public getFrame(key: SpriteFrameKey): HTMLCanvasElement | undefined {
     return this.frames[key];
+  }
+
+  public getUiIconFrame(key: UiIconKey): HTMLCanvasElement | undefined {
+    return this.frames[key];
+  }
+
+  public getUiIconDataUrl(key: UiIconKey): string | undefined {
+    return this.uiIconDataUrls[key];
   }
 
   public getSharkFormFrame(

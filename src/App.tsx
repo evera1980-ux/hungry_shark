@@ -46,6 +46,7 @@ import {
 } from './game/canvasRenderer';
 import { SharkEvolutionAtlasModal } from './components/SharkEvolutionAtlasModal';
 import { SharkFormCanvasPreview } from './components/SharkFormCanvasPreview';
+import { getLineageUiIconKey, UiAtlasIcon } from './components/UiAtlasIcon';
 import { downloadStandaloneSingleFileHtml } from './game/singleFileExporter';
 import { spriteSheetManager } from './game/spriteSheetManager';
 import { parallaxBackground } from './game/parallaxBackground';
@@ -2448,7 +2449,9 @@ export default function App() {
         }
       }
 
-      // Render 3D Spinning Gold Coins & Faceted DNA Crystals
+      // Render 3D Spinning Gold Coins & Faceted DNA Crystals using sliced UI Icon Atlas sprites
+      const coinSprite = spriteSheetManager.getUiIconFrame('UI_ICON_COIN');
+      const geneSprite = spriteSheetManager.getUiIconFrame('UI_ICON_GENE');
       for (const pk of sim.pickups) {
         if (!pk.active) continue;
         ctx.save();
@@ -2456,28 +2459,24 @@ export default function App() {
         ctx.translate(pk.x, pk.y + bobY);
 
         if (pk.kind === 'COIN') {
-          const spinScaleX = 0.35 + Math.abs(Math.cos(pk.phase * 0.85)) * 0.65;
+          const spinScaleX = 0.55 + Math.abs(Math.cos(pk.phase * 0.85)) * 0.45;
           ctx.fillStyle = 'rgba(250, 204, 21, 0.22)';
           ctx.beginPath();
           ctx.arc(0, 0, 16, 0, Math.PI * 2);
           ctx.fill();
 
           ctx.scale(spinScaleX, 1);
-          ctx.fillStyle = '#f59e0b';
-          ctx.strokeStyle = '#fef08a';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(0, 0, 11, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-
-          ctx.fillStyle = '#fde047';
-          ctx.beginPath();
-          ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.fillStyle = '#b45309';
-          ctx.fillRect(-2, -4.5, 4, 9);
+          if (coinSprite) {
+            ctx.drawImage(coinSprite, -13, -13, 26, 26);
+          } else {
+            ctx.fillStyle = '#f59e0b';
+            ctx.strokeStyle = '#fef08a';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, 11, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+          }
         } else {
           const rot = Math.sin(pk.phase * 0.6) * 0.22;
           ctx.rotate(rot);
@@ -2487,26 +2486,21 @@ export default function App() {
           ctx.arc(0, 0, 17, 0, Math.PI * 2);
           ctx.fill();
 
-          ctx.fillStyle = '#10b981';
-          ctx.strokeStyle = '#a7f3d0';
-          ctx.lineWidth = 1.8;
-          ctx.beginPath();
-          ctx.moveTo(0, -13);
-          ctx.lineTo(9.5, 0);
-          ctx.lineTo(0, 13);
-          ctx.lineTo(-9.5, 0);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-
-          ctx.fillStyle = '#6ee7b7';
-          ctx.beginPath();
-          ctx.moveTo(0, -7);
-          ctx.lineTo(4.5, 0);
-          ctx.lineTo(0, 7);
-          ctx.lineTo(-4.5, 0);
-          ctx.closePath();
-          ctx.fill();
+          if (geneSprite) {
+            ctx.drawImage(geneSprite, -14, -14, 28, 28);
+          } else {
+            ctx.fillStyle = '#10b981';
+            ctx.strokeStyle = '#a7f3d0';
+            ctx.lineWidth = 1.8;
+            ctx.beginPath();
+            ctx.moveTo(0, -13);
+            ctx.lineTo(9.5, 0);
+            ctx.lineTo(0, 13);
+            ctx.lineTo(-9.5, 0);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+          }
         }
         ctx.restore();
       }
@@ -2534,7 +2528,7 @@ export default function App() {
           drawPreyEntity(
             ctx,
             prey,
-            shark.stats.biteTier,
+            shark.stats.normalBiteTier ?? shark.stats.biteTier,
             shark.frenzyTimer > 0,
             sim.targetBounty.preyConfig.id,
             isBoosting,
@@ -2895,7 +2889,7 @@ export default function App() {
               aria-label={t('btn_lang_toggle')}
               className="game-btn-spring px-3 py-1.5 md:px-3.5 md:py-2 rounded-lg font-display font-bold text-xs tracking-wide text-sky-100 bg-slate-900/95 border border-sky-400/40 hover:border-sky-300 hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              🌐 {t('btn_lang_toggle')} ({lang.toUpperCase()})
+              {t('btn_lang_toggle')} ({lang.toUpperCase()})
             </button>
 
             <button
@@ -2903,9 +2897,14 @@ export default function App() {
               tabIndex={-1}
               onClick={toggleMute}
               aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
-              className="game-btn-spring px-3 py-1.5 md:px-3 md:py-2 rounded-lg font-display font-semibold text-xs text-slate-200 bg-slate-900/95 border border-slate-700 hover:border-slate-500 whitespace-nowrap shrink-0 cursor-pointer"
+              className="game-btn-spring px-3 py-1.5 md:px-3 md:py-2 rounded-lg font-display font-semibold text-xs text-slate-200 bg-slate-900/95 border border-slate-700 hover:border-slate-500 flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
             >
-              {isMuted ? '🔇' : '🔊'} {isMuted ? t('btn_unmute') : t('btn_mute')}
+              <UiAtlasIcon
+                iconKey="UI_ICON_SOUND"
+                size={16}
+                className={isMuted ? 'opacity-40 grayscale' : ''}
+              />
+              <span>{isMuted ? t('btn_unmute') : t('btn_mute')}</span>
             </button>
           </motion.div>
         )}
@@ -2942,16 +2941,29 @@ export default function App() {
                 onClick={() => setShowAtlasModal(true)}
                 className="mb-2 sm:mb-3 px-3 py-1.5 rounded-2xl bg-slate-900/92 border border-sky-400/40 hover:border-sky-300 flex items-center gap-2.5 sm:gap-3.5 shadow-lg cursor-pointer transition-all"
               >
-                <SharkFormCanvasPreview
-                  sharkId={titleSharkForm.id}
-                  width={54}
-                  height={36}
-                  animate={true}
-                />
+                <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
+                  <UiAtlasIcon
+                    iconKey="UI_AVATAR_FRAME"
+                    size={48}
+                    className="absolute inset-0"
+                  />
+                  <SharkFormCanvasPreview
+                    sharkId={titleSharkForm.id}
+                    width={38}
+                    height={26}
+                    animate={true}
+                  />
+                </div>
                 <div className="text-left">
-                  <div className="text-[10px] font-mono-num text-sky-300 font-bold">
-                    {lang === 'zh' ? titleGenInfo.nameZh : titleGenInfo.nameEn}{' '}
-                    · Lv.{titleSharkUpg}/10
+                  <div className="text-[10px] font-mono-num text-sky-300 font-bold flex items-center gap-1">
+                    <UiAtlasIcon
+                      iconKey={getLineageUiIconKey(titleSharkForm.lineage)}
+                      size={12}
+                    />
+                    <span>
+                      {lang === 'zh' ? titleGenInfo.nameZh : titleGenInfo.nameEn}{' '}
+                      · Lv.{titleSharkUpg}/10
+                    </span>
                   </div>
                   <div className="font-display font-extrabold text-xs sm:text-sm text-white">
                     #{String(titleSharkForm.index + 1).padStart(2, '0')}{' '}
@@ -2960,8 +2972,14 @@ export default function App() {
                 </div>
                 <div className="h-6 w-px bg-slate-800" />
                 <div className="flex items-center gap-2.5 text-xs font-mono-num font-bold">
-                  <span className="text-amber-300">🪙 {metaSave.bankedCoins}</span>
-                  <span className="text-emerald-300">🧬 {metaSave.bankedGenes}</span>
+                  <span className="text-amber-300 flex items-center gap-1">
+                    <UiAtlasIcon iconKey="UI_ICON_COIN" size={15} />
+                    {metaSave.bankedCoins}
+                  </span>
+                  <span className="text-emerald-300 flex items-center gap-1">
+                    <UiAtlasIcon iconKey="UI_ICON_GENE" size={15} />
+                    {metaSave.bankedGenes}
+                  </span>
                 </div>
               </div>
 
@@ -2988,27 +3006,36 @@ export default function App() {
                   data-start="true"
                   data-testid="start-game-btn"
                   onClick={() => startNewRun(false)}
-                  className="game-btn-spring w-full sm:w-auto px-6 py-2.5 sm:py-3 rounded-xl font-display font-extrabold text-sm sm:text-base md:text-lg text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
+                  className="game-btn-spring w-full sm:w-auto px-6 py-2.5 sm:py-3 rounded-xl font-display font-extrabold text-sm sm:text-base md:text-lg text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0 flex items-center justify-center gap-2"
                 >
-                  ▶ {t('btn_start')}
+                  <UiAtlasIcon iconKey="UI_BTN_BOOST" size={22} />
+                  <span>{t('btn_start')}</span>
                 </button>
 
                 <button
                   type="button"
                   data-testid="open-atlas-btn"
                   onClick={() => setShowAtlasModal(true)}
-                  className="game-btn-spring w-full sm:w-auto px-5 py-2.5 sm:py-3 rounded-xl font-display font-extrabold text-xs sm:text-sm md:text-base text-sky-950 bg-sky-400 hover:bg-sky-300 border border-white/60 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
+                  className="game-btn-spring w-full sm:w-auto px-5 py-2.5 sm:py-3 rounded-xl font-display font-extrabold text-xs sm:text-sm md:text-base text-sky-950 bg-sky-400 hover:bg-sky-300 border border-white/60 shadow-lg cursor-pointer whitespace-nowrap shrink-0 flex items-center justify-center gap-1.5"
                 >
-                  🧬 {lang === 'zh' ? '鲨鱼进化图谱' : 'Evolution Atlas'} (
-                  {unlockedTotalCount}/48)
+                  <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={20} />
+                  <span>
+                    {lang === 'zh' ? '鲨鱼进化图谱' : 'Evolution Atlas'} (
+                    {unlockedTotalCount}/48)
+                  </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={handleTrialMaxMechaAd}
-                  className="game-btn-spring w-full sm:w-auto px-4 py-2.5 sm:py-3 rounded-xl font-display font-bold text-xs sm:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
+                  className="game-btn-spring w-full sm:w-auto px-4 py-2.5 sm:py-3 rounded-xl font-display font-bold text-xs sm:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0 flex items-center justify-center gap-1.5"
                 >
-                  🎬 {lang === 'zh' ? '试驾 #46 机甲利维坦' : 'Trial #46 Mecha Leviathan'}
+                  <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={18} />
+                  <span>
+                    {lang === 'zh'
+                      ? '试驾 #46 机甲利维坦'
+                      : 'Trial #46 Mecha Leviathan'}
+                  </span>
                 </button>
               </div>
 
@@ -3035,7 +3062,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ==================== 2. PLAYING HUD (MOBILE-LANDSCAPE-FIRST PERIMETER SHELL) ==================== */}
+      {/* ==================== 2. PLAYING HUD (FRAMELESS ICONIC 90%+ VIEWPORT DESIGN) ==================== */}
       <AnimatePresence>
         {gameState !== 'title' && (
           <motion.div
@@ -3044,293 +3071,275 @@ export default function App() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="landscape-compact-pad fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-2 sm:p-3 md:p-4"
+            className="landscape-compact-pad fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-1.5 sm:p-2.5 md:p-3.5"
           >
-            {/* ==================== TOP PERIMETER RIBBON ==================== */}
-            <div className="flex items-start justify-between gap-1.5 sm:gap-2.5 w-full">
-              {/* 1. Top-Left Cluster: Compact Biometric & Active Shark Form Pod */}
+            {/* ==================== TOP PERIMETER RIBBON (FRAMELESS ULTRA-SLIM) ==================== */}
+            <div className="flex items-start justify-between gap-1.5 w-full">
+              {/* 1. Top-Left: Frameless Shark Avatar Medallion (with Circular XP Ring + Atlas Entry) & Skewed HP/Boost Bars */}
               <motion.div
-                initial={{ opacity: 0, x: -28, y: -10 }}
+                initial={{ opacity: 0, x: -24, y: -8 }}
                 animate={{ opacity: 1, x: 0, y: 0 }}
-                exit={{ opacity: 0, x: -28, y: -10 }}
+                exit={{ opacity: 0, x: -24, y: -8 }}
                 transition={{ type: 'spring', stiffness: 350, damping: 28 }}
-                className="landscape-hud-biometric game-hud-card flex flex-col gap-1 border border-sky-400/35 rounded-xl p-2 md:p-2.5 w-[206px] sm:w-[238px] md:w-[274px] pointer-events-auto shrink-0"
+                className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto shrink-0"
               >
-                {/* Row 1: Vitality HP Bar with Delayed Damage Ghost Bar */}
-                <div>
-                  <div className="flex items-center justify-between text-[10px] md:text-xs font-bold mb-0.5">
-                    <span className="text-emerald-300 uppercase tracking-wider">
-                      {t('hud_hp')}
-                    </span>
-                    <span className="font-mono-num text-white">
-                      {hudState.hp}/{hudState.maxHp}
+                {/* Interactive Avatar Medallion -> Click to open 48-Shark Evolution Atlas */}
+                <button
+                  type="button"
+                  data-testid="hud-open-atlas-btn"
+                  {...bindMultiTouchButton(() => setShowAtlasModal(true))}
+                  title={
+                    lang === 'zh'
+                      ? `点击打开进化图谱 (${hudState.unlockedFormsCount}/48)`
+                      : `Open Evolution Atlas (${hudState.unlockedFormsCount}/48)`
+                  }
+                  className="game-btn-spring relative w-13 h-13 sm:w-14 sm:h-14 flex items-center justify-center rounded-full cursor-pointer touch-manipulation shrink-0 group"
+                >
+                  {/* Circular Purple XP Ring around the Avatar */}
+                  <svg
+                    viewBox="0 0 64 64"
+                    className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                    aria-hidden="true"
+                  >
+                    <circle
+                      cx="32"
+                      cy="32"
+                      r="29"
+                      fill="rgba(2, 6, 23, 0.72)"
+                      stroke="rgba(15, 23, 42, 0.85)"
+                      strokeWidth="3.5"
+                    />
+                    <circle
+                      cx="32"
+                      cy="32"
+                      r="29"
+                      fill="none"
+                      stroke="#c084fc"
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
+                      strokeDasharray="182.2"
+                      strokeDashoffset={
+                        182.2 -
+                        (182.2 *
+                          Math.max(
+                            0,
+                            Math.min(
+                              100,
+                              (hudState.xp / Math.max(1, hudState.xpToNext)) * 100
+                            )
+                          )) /
+                          100
+                      }
+                    />
+                  </svg>
+
+                  {/* Sliced Deep-Sea Metallic Avatar Frame Ring */}
+                  <UiAtlasIcon
+                    iconKey="UI_AVATAR_FRAME"
+                    size={54}
+                    className="absolute inset-0 w-full h-full"
+                  />
+
+                  {/* Current Shark Form Preview inside Medallion */}
+                  <div className="relative z-10 flex items-center justify-center">
+                    <SharkFormCanvasPreview
+                      sharkId={activeHudSharkForm.id}
+                      width={36}
+                      height={24}
+                    />
+                  </div>
+
+                  {/* Bottom-Left Bite Tier Shield Badge (T1..T8) */}
+                  <div className="absolute -bottom-1 -left-1 z-20 flex items-center justify-center w-6 h-6">
+                    <UiAtlasIcon
+                      iconKey="UI_BADGE_TIER"
+                      size={24}
+                      className="absolute inset-0"
+                    />
+                    <span className="relative z-10 font-mono-num font-black text-[9px] text-amber-200 hud-stroke leading-none">
+                      T{hudState.biteTier}
                     </span>
                   </div>
-                  <div className="relative h-2 md:h-2.5 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700/90">
+
+                  {/* Bottom-Right In-Run Level Pill */}
+                  <span className="absolute -bottom-0.5 -right-0.5 z-20 px-1 py-0.2 rounded-full bg-purple-950/95 border border-purple-400/70 font-mono-num font-black text-[8px] text-purple-200 leading-none">
+                    Lv.{hudState.level}
+                  </span>
+
+                  {/* Top-Right Mini Atlas Collection Counter */}
+                  <span className="absolute -top-0.5 -right-1 z-20 px-1 py-0.2 rounded-full bg-slate-950/90 border border-sky-400/60 font-mono-num font-bold text-[7px] text-sky-300 leading-none">
+                    {hudState.unlockedFormsCount}/48
+                  </span>
+                </button>
+
+                {/* Frameless Skewed Vitality HP & Boost Energy Bars */}
+                <div className="flex flex-col gap-1 w-[114px] sm:w-[138px] md:w-[158px]">
+                  {/* Compact Stroked Shark Name + Body Upgrade Lv */}
+                  <div className="flex items-center justify-between text-[9px] sm:text-[10px] font-display font-extrabold text-white hud-stroke leading-none px-0.5">
+                    <span className="truncate flex items-center gap-0.5">
+                      <UiAtlasIcon
+                        iconKey={getLineageUiIconKey(activeHudSharkForm.lineage)}
+                        size={11}
+                      />
+                      #{String(activeHudSharkForm.index + 1).padStart(2, '0')}{' '}
+                      {lang === 'zh'
+                        ? activeHudSharkForm.nameZh
+                        : activeHudSharkForm.nameEn}
+                    </span>
+                    <span className="font-mono-num text-amber-300 shrink-0 ml-1">
+                      Lv.{hudState.activeUpgradeLevel}
+                    </span>
+                  </div>
+
+                  {/* Skewed HP Bar with Delayed Damage Ghost Fill */}
+                  <div className="relative h-2.5 sm:h-3 w-full bg-slate-950/80 -skew-x-12 rounded-sm overflow-hidden border border-emerald-400/45 shadow-sm">
                     <div
                       ref={hpGhostFillRef}
-                      className="absolute inset-y-0 left-0 w-full bg-rose-500/75 origin-left transition-transform duration-75"
+                      className="absolute inset-y-0 left-0 w-full bg-rose-500/80 origin-left transition-transform duration-75"
                       style={{ transform: 'scaleX(1)' }}
                     />
                     <div
                       ref={hpBarFillRef}
-                      className="relative h-full w-full bg-emerald-400 origin-left"
+                      className="relative h-full w-full bg-gradient-to-r from-emerald-500 to-emerald-300 origin-left"
+                      style={{ transform: 'scaleX(1)' }}
+                    />
+                    <span className="absolute inset-0 flex items-center justify-end pr-1.5 text-[8px] font-mono-num font-extrabold text-white hud-stroke leading-none skew-x-12">
+                      {hudState.hp}/{hudState.maxHp}
+                    </span>
+                  </div>
+
+                  {/* Skewed Boost Energy Bar */}
+                  <div className="relative h-1.5 sm:h-2 w-[88%] bg-slate-950/80 -skew-x-12 rounded-sm overflow-hidden border border-sky-400/40">
+                    <div
+                      ref={energyBarFillRef}
+                      className="h-full w-full bg-gradient-to-r from-sky-500 to-cyan-300 origin-left"
                       style={{ transform: 'scaleX(1)' }}
                     />
                   </div>
-                </div>
 
-                {/* Row 2: Side-by-Side Boost Energy & In-Run Level/XP */}
-                <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-                  <div>
-                    <div className="flex items-center justify-between text-[9px] md:text-[10px] font-bold mb-0.5">
-                      <span className="text-sky-300 truncate">{t('hud_energy')}</span>
-                      <span className="font-mono-num text-sky-100">{hudState.energy}%</span>
-                    </div>
-                    <div className="relative h-1.5 md:h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700/90">
-                      <div
-                        ref={energyBarFillRef}
-                        className="h-full w-full bg-sky-400 origin-left"
-                        style={{ transform: 'scaleX(1)' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex items-center justify-between text-[9px] md:text-[10px] font-bold mb-0.5">
-                      <span className="text-purple-300 truncate">
-                        Lv.{hudState.level}·T{hudState.biteTier}
-                      </span>
-                      <span className="font-mono-num text-purple-200">
-                        {hudState.xp}/{hudState.xpToNext}
-                      </span>
-                    </div>
-                    <div className="relative h-1.5 md:h-2 w-full bg-slate-900 rounded-full overflow-hidden border border-slate-700/90">
-                      <div
-                        ref={xpBarFillRef}
-                        className="h-full w-full bg-purple-400 origin-left"
-                        style={{ transform: 'scaleX(0)' }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Row 3: Active Shark Form Badge & Quick Atlas Entry */}
-                <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800/90">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <SharkFormCanvasPreview
-                      sharkId={activeHudSharkForm.id}
-                      width={38}
-                      height={26}
-                    />
-                    <div className="min-w-0">
-                      <div className="text-[10px] font-display font-extrabold text-white truncate leading-tight">
-                        #{String(activeHudSharkForm.index + 1).padStart(2, '0')}{' '}
-                        {lang === 'zh'
-                          ? activeHudSharkForm.nameZh
-                          : activeHudSharkForm.nameEn}
-                      </div>
-                      <div
-                        className="text-[8px] sm:text-[9px] font-mono-num font-bold truncate leading-tight"
-                        style={{ color: activeLineageMeta.badgeColor }}
-                      >
-                        {lang === 'zh' ? activeLineageMeta.nameZh : activeLineageMeta.nameEn}{' '}
-                        · Lv.{hudState.activeUpgradeLevel}/10
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    {...bindMultiTouchButton(() => setShowAtlasModal(true))}
-                    className="px-2 py-0.5 rounded-md bg-sky-500/20 hover:bg-sky-500/35 border border-sky-400/50 text-[9px] font-display font-bold text-sky-200 shrink-0 cursor-pointer touch-manipulation"
-                  >
-                    🧬 {hudState.unlockedFormsCount}/48
-                  </button>
+                  {/* Hidden DOM ref for legacy XP bar sync safety */}
+                  <div ref={xpBarFillRef} className="hidden" />
                 </div>
               </motion.div>
 
-              {/* 2. Top-Center Cluster: Single-Line Telemetry & Bounty Ribbon */}
+              {/* 2. Top-Center: Ultra-Light Single-Line Icon Telemetry Strip (No Multi-Row Dark Card) */}
               <motion.div
-                initial={{ opacity: 0, y: -20 }}
+                initial={{ opacity: 0, y: -16 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
+                exit={{ opacity: 0, y: -16 }}
                 transition={{ type: 'spring', stiffness: 340, damping: 28, delay: 0.02 }}
-                className="flex flex-col items-center gap-1 pointer-events-auto min-w-0 flex-1"
+                className="flex flex-wrap items-center justify-center gap-1 sm:gap-1.5 pointer-events-auto min-w-0"
               >
-                <div className="game-hud-card border border-sky-500/25 rounded-xl px-2.5 py-1 sm:px-3.5 sm:py-1.5 flex items-center justify-center gap-1.5 sm:gap-2.5">
+                <div className="px-2.5 py-1 rounded-full bg-slate-950/55 backdrop-blur-xs border border-sky-400/25 flex items-center gap-2 sm:gap-3 shadow-sm">
                   {/* Score */}
-                  <div className="shrink-0">
-                    <div className="text-[8px] sm:text-[9px] uppercase tracking-wider text-slate-400 font-semibold leading-none mb-0.5">
-                      {t('hud_score')}
-                    </div>
-                    <div className="font-display font-extrabold text-sm sm:text-base md:text-xl text-white font-mono-num leading-none">
+                  <div className="flex items-center gap-1 shrink-0" title={t('hud_score')}>
+                    <UiAtlasIcon iconKey="UI_ICON_SCORE_TROPHY" size={15} />
+                    <span className="font-display font-extrabold text-xs sm:text-sm text-white font-mono-num hud-stroke leading-none">
                       {hudState.score}
-                    </div>
+                    </span>
                   </div>
-
-                  <div className="h-5 w-px bg-slate-800 shrink-0" />
 
                   {/* Genes */}
-                  <div className="shrink-0">
-                    <div className="text-[8px] sm:text-[9px] uppercase tracking-wider text-emerald-400 font-semibold leading-none mb-0.5">
-                      🧬 {t('hud_genes')}
-                    </div>
-                    <div className="font-display font-bold text-xs sm:text-sm md:text-base text-emerald-300 font-mono-num leading-none">
+                  <div className="flex items-center gap-1 shrink-0" title={t('hud_genes')}>
+                    <UiAtlasIcon iconKey="UI_ICON_GENE" size={15} />
+                    <span className="font-display font-bold text-xs sm:text-sm text-emerald-300 font-mono-num hud-stroke leading-none">
                       {hudState.genes}
-                    </div>
+                    </span>
                   </div>
-
-                  <div className="h-5 w-px bg-slate-800 shrink-0" />
 
                   {/* Coins */}
-                  <div className="shrink-0">
-                    <div className="text-[8px] sm:text-[9px] uppercase tracking-wider text-amber-400 font-semibold leading-none mb-0.5">
-                      🪙 {t('hud_coins')}
-                    </div>
-                    <div className="font-display font-bold text-xs sm:text-sm md:text-base text-amber-300 font-mono-num leading-none">
+                  <div className="flex items-center gap-1 shrink-0" title={t('hud_coins')}>
+                    <UiAtlasIcon iconKey="UI_ICON_COIN" size={15} />
+                    <span className="font-display font-bold text-xs sm:text-sm text-amber-300 font-mono-num hud-stroke leading-none">
                       {hudState.coins}
-                    </div>
+                    </span>
                   </div>
 
-                  <div className="hidden sm:block h-5 w-px bg-slate-800 shrink-0" />
-
-                  {/* Ocean Depth */}
-                  <div className="hidden sm:block shrink-0">
-                    <div className="text-[8px] sm:text-[9px] uppercase tracking-wider text-sky-400 font-semibold leading-none mb-0.5">
-                      <span className="hidden lg:inline">{t(hudState.zoneKey)}</span>
-                      <span className="lg:hidden">🌊 {t('hud_depth')}</span>
-                    </div>
-                    <div className="font-mono-num font-bold text-xs sm:text-sm text-sky-200 leading-none">
+                  {/* Depth */}
+                  <div className="flex items-center gap-1 shrink-0" title={t(hudState.zoneKey)}>
+                    <UiAtlasIcon iconKey="UI_ICON_DEPTH" size={15} />
+                    <span className="font-mono-num font-bold text-xs sm:text-sm text-sky-200 hud-stroke leading-none">
                       {hudState.depth}m
-                    </div>
+                    </span>
                   </div>
 
-                  <div className="hidden xl:block h-5 w-px bg-slate-800 shrink-0" />
-
-                  {/* Target Bounty */}
-                  <div className="hidden xl:block shrink-0">
-                    <div className="text-[8px] sm:text-[9px] uppercase tracking-wider text-cyan-300 font-semibold leading-none mb-0.5">
-                      🎯 {t('hud_target_fish')}
-                    </div>
-                    <div className="font-display font-bold text-xs text-cyan-100 whitespace-nowrap leading-none">
+                  {/* Compact Bounty Target Badge */}
+                  <div
+                    className="hidden sm:flex items-center gap-1 pl-1.5 border-l border-slate-700/70 shrink-0"
+                    title={t('hud_target_fish')}
+                  >
+                    <UiAtlasIcon iconKey="UI_ICON_BOUNTY_TARGET" size={15} />
+                    <span className="font-display font-bold text-[10px] sm:text-xs text-cyan-200 hud-stroke whitespace-nowrap leading-none">
                       {t(hudState.targetFishNameKey)}{' '}
                       <span className="font-mono-num text-amber-300">
-                        ({hudState.targetFishProgress}/{hudState.targetFishRequired})
+                        {hudState.targetFishProgress}/{hudState.targetFishRequired}
                       </span>
-                    </div>
+                    </span>
                   </div>
                 </div>
 
-                {/* Compact Sub-Ribbon Status Pills */}
-                <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                  <div className="xl:hidden px-2 py-0.5 rounded-md bg-slate-950/90 border border-cyan-500/35 text-[10px] font-display font-bold text-cyan-200 whitespace-nowrap">
-                    🎯 {t(hudState.targetFishNameKey)} ({hudState.targetFishProgress}/
-                    {hudState.targetFishRequired})
-                  </div>
+                {/* Inline Contextual Combo or Active Frenzy Pill (only visible when active!) */}
+                <AnimatePresence>
+                  {hudState.comboCount >= 2 && (
+                    <motion.div
+                      key="combo-badge"
+                      initial={{ opacity: 0, scale: 0.75 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.75 }}
+                      className="px-2 py-0.5 rounded-full bg-orange-500/90 border border-amber-200 text-slate-950 font-display font-extrabold text-[10px] font-mono-num flex items-center gap-1 shadow whitespace-nowrap"
+                    >
+                      <UiAtlasIcon iconKey="UI_ICON_COMBO_FIRE" size={13} />
+                      <span>
+                        {hudState.comboCount}x ({hudState.comboMultiplier.toFixed(1)}x)
+                      </span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-                  <AnimatePresence>
-                    {hudState.comboCount >= 2 && (
-                      <motion.div
-                        key="combo-badge"
-                        initial={{ opacity: 0, scale: 0.75, y: -4 }}
-                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                        exit={{ opacity: 0, scale: 0.75, y: -4 }}
-                        transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-                        className="px-2 py-0.5 rounded-md bg-orange-500/95 border border-amber-200 text-slate-950 font-display font-extrabold text-[10px] sm:text-xs font-mono-num shadow whitespace-nowrap"
-                      >
-                        {t('hud_combo', {
-                          count: hudState.comboCount,
-                          mult: hudState.comboMultiplier.toFixed(2),
-                        })}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  <AnimatePresence mode="wait">
-                    {hudState.frenzyTimer > 0 ? (
-                      <motion.div
-                        key="frenzy-badge"
-                        initial={{ opacity: 0, scale: 0.75 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.75 }}
-                        className="animate-frenzy-glow px-2.5 py-0.5 rounded-md bg-amber-400 text-slate-950 font-display font-extrabold text-[10px] sm:text-xs font-mono-num whitespace-nowrap"
-                      >
-                        ⚡ {t('hud_frenzy')}: {hudState.frenzyTimer.toFixed(1)}s
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="gold-charge-badge"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        className="px-2 py-0.5 rounded-md bg-slate-950/90 border border-amber-400/35 text-amber-300 font-display font-bold text-[10px] sm:text-xs font-mono-num whitespace-nowrap"
-                      >
-                        {hudState.frenzyCooldown > 0
-                          ? t('hud_gold_cd', { sec: hudState.frenzyCooldown })
-                          : t('hud_gold_charge', {
-                              cur: hudState.goldenMutantCharge,
-                              max: hudState.goldenMutantRequired,
-                            })}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
+                <AnimatePresence>
+                  {hudState.frenzyTimer > 0 && (
+                    <motion.div
+                      key="frenzy-badge"
+                      initial={{ opacity: 0, scale: 0.75 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.75 }}
+                      className="animate-frenzy-glow px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-display font-extrabold text-[10px] font-mono-num flex items-center gap-1 whitespace-nowrap"
+                    >
+                      <UiAtlasIcon iconKey="UI_BTN_GOLD_FRENZY" size={14} />
+                      <span>{hudState.frenzyTimer.toFixed(1)}s</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </motion.div>
 
-              {/* 3. Top-Right Cluster: Unified Compact System Utility Bar */}
+              {/* 3. Top-Right: Single Compact Pause Medallion (Language & Audio moved inside Pause Modal) */}
               <motion.div
-                initial={{ opacity: 0, x: 28, y: -10 }}
+                initial={{ opacity: 0, x: 24, y: -8 }}
                 animate={{ opacity: 1, x: 0, y: 0 }}
-                exit={{ opacity: 0, x: 28, y: -10 }}
+                exit={{ opacity: 0, x: 24, y: -8 }}
                 transition={{ type: 'spring', stiffness: 350, damping: 28, delay: 0.04 }}
-                className="flex items-center gap-1.5 pointer-events-auto shrink-0"
+                className="flex items-center pointer-events-auto shrink-0"
               >
-                <button
-                  type="button"
-                  {...bindMultiTouchButton(toggleLanguage)}
-                  aria-label={t('btn_lang_toggle')}
-                  className="game-btn-spring h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg font-display font-bold text-[11px] sm:text-xs tracking-wide text-sky-100 bg-slate-950/90 border border-sky-400/40 hover:border-sky-300 whitespace-nowrap cursor-pointer touch-manipulation"
-                >
-                  🌐 <span className="hidden md:inline">{t('btn_lang_toggle')} </span>(
-                  {lang.toUpperCase()})
-                </button>
-
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  {...bindMultiTouchButton(() => {
-                    const muted = soundFX.toggleMute();
-                    setIsMuted(muted);
-                  })}
-                  aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
-                  className="game-btn-spring h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg font-display font-semibold text-[11px] sm:text-xs text-slate-200 bg-slate-950/90 border border-slate-700 hover:border-slate-500 whitespace-nowrap cursor-pointer touch-manipulation"
-                >
-                  {isMuted ? '🔇' : '🔊'}
-                  <span className="hidden lg:inline ml-1">
-                    {isMuted ? t('btn_unmute') : t('btn_mute')}
-                  </span>
-                </button>
-
                 <button
                   type="button"
                   tabIndex={-1}
                   {...bindMultiTouchButton(() => setGameState('paused'))}
                   aria-label={t('btn_pause')}
-                  className="game-btn-spring h-8 sm:h-9 px-2.5 sm:px-3 rounded-lg font-display font-semibold text-[11px] sm:text-xs text-slate-200 bg-slate-950/90 border border-slate-700 hover:border-slate-500 whitespace-nowrap cursor-pointer touch-manipulation"
+                  title={`${t('btn_pause')} [P]`}
+                  className="game-btn-spring relative w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center cursor-pointer touch-manipulation opacity-85 hover:opacity-100"
                 >
-                  ⏸<span className="hidden lg:inline ml-1">{t('btn_pause')} [P]</span>
+                  <UiAtlasIcon iconKey="UI_ICON_PAUSE" size={38} />
                 </button>
               </motion.div>
             </div>
 
-            {/* ==================== BOTTOM PERIMETER ROW: LEFT THUMB JOYSTICK + RIGHT THUMB TACTICAL ARC ==================== */}
-            <div className="flex items-end justify-between w-full pb-1 sm:pb-2 px-1 sm:px-2">
-              {/* Bottom-Left: Ergonomic Virtual Steering Joystick */}
+            {/* ==================== BOTTOM PERIMETER ROW: CUSTOM SONAR JOYSTICK + MOBA CIRCULAR MEDALLION ARC ==================== */}
+            <div className="flex items-end justify-between w-full pb-0.5 sm:pb-1.5 px-0.5 sm:px-1.5">
+              {/* Bottom-Left: Translucent Sonar Compass Virtual Joystick (Zero React Re-render DOM Direct) */}
               <motion.div
-                initial={{ opacity: 0, y: 28, scale: 0.88 }}
+                initial={{ opacity: 0, y: 24, scale: 0.88 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 28, scale: 0.88 }}
+                exit={{ opacity: 0, y: 24, scale: 0.88 }}
                 transition={{ type: 'spring', stiffness: 340, damping: 26 }}
                 role="slider"
                 aria-label="Virtual Steering Joystick"
@@ -3339,43 +3348,63 @@ export default function App() {
                 onPointerMove={handleJoystickPointerMove}
                 onPointerUp={handleJoystickPointerUp}
                 onPointerCancel={handleJoystickPointerUp}
-                className="landscape-thumb-joy relative w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32 rounded-full bg-slate-950/70 border-2 border-sky-400/40 flex items-center justify-center pointer-events-auto cursor-grab active:cursor-grabbing touch-none shadow-lg"
+                className="landscape-thumb-joy relative w-22 h-22 sm:w-26 sm:h-26 md:w-28 md:h-28 rounded-full flex items-center justify-center pointer-events-auto cursor-grab active:cursor-grabbing touch-none"
               >
-                <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full border border-sky-400/20 pointer-events-none" />
-                <div className="absolute top-1.5 w-1 h-2 rounded-full bg-sky-400/35 pointer-events-none" />
-                <div className="absolute bottom-1.5 w-1 h-2 rounded-full bg-sky-400/35 pointer-events-none" />
-                <div className="absolute left-1.5 w-2 h-1 rounded-full bg-sky-400/35 pointer-events-none" />
-                <div className="absolute right-1.5 w-2 h-1 rounded-full bg-sky-400/35 pointer-events-none" />
+                {/* Sliced Sonar Compass Joystick Base Ring (Translucent so ocean remains visible) */}
+                <UiAtlasIcon
+                  iconKey="UI_JOYSTICK_BASE"
+                  size={108}
+                  className="absolute inset-0 w-full h-full opacity-65 pointer-events-none"
+                />
+                {/* Sliced Aqua-Crystal Orb Thumb Knob */}
                 <div
                   ref={joystickKnobRef}
-                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-sky-400/95 border-2 border-white shadow-md pointer-events-none"
+                  className="relative z-10 w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center pointer-events-none"
                   style={{
                     transform: 'translate3d(0px, 0px, 0)',
                   }}
-                />
+                >
+                  <UiAtlasIcon
+                    iconKey="UI_JOYSTICK_KNOB"
+                    size={44}
+                    className="w-full h-full drop-shadow-md"
+                  />
+                </div>
               </motion.div>
 
-              {/* Bottom-Right: Ergonomic Right-Thumb Tactical Cluster */}
+              {/* Bottom-Right: Compact MOBA/Action Circular Skill & Evolution Medallion Cluster */}
               <motion.div
-                initial={{ opacity: 0, y: 28, scale: 0.9 }}
+                initial={{ opacity: 0, y: 24, scale: 0.9 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 28, scale: 0.9 }}
+                exit={{ opacity: 0, y: 24, scale: 0.9 }}
                 transition={{ type: 'spring', stiffness: 340, damping: 26 }}
-                className="flex flex-col items-end gap-1.5 sm:gap-2 pointer-events-auto"
+                className="flex flex-col items-end gap-1.5 pointer-events-auto"
               >
-                {/* Upper Right-Thumb Row: In-Run Instant Morph Breakthrough / Quick Body Upgrade / Atlas Button */}
-                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                {/* Upper Contextual Evolution Medallions (Only appear when Upgrade or Morph Breakthrough is ready!) */}
+                <div className="flex items-center gap-2 justify-end pr-0.5">
                   {hudState.canBreakthroughNow && nextEvoTargetForm && (
                     <button
                       type="button"
                       data-testid="inrun-breakthrough-btn"
                       {...bindMultiTouchButton(handleInRunBreakthroughOrAtlas)}
-                      className="game-btn-spring px-3 py-1.5 rounded-xl font-display font-extrabold text-xs bg-emerald-400 text-slate-950 border-2 border-white hover:bg-emerald-300 shadow-lg cursor-pointer whitespace-nowrap touch-manipulation"
+                      title={
+                        lang === 'zh'
+                          ? `破茧进化：#${nextEvoTargetForm.index + 1} ${nextEvoTargetForm.nameZh}`
+                          : `Morph: #${nextEvoTargetForm.index + 1} ${nextEvoTargetForm.nameEn}`
+                      }
+                      className="game-btn-spring relative w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center cursor-pointer touch-manipulation animate-bounce"
                     >
-                      ⚡{' '}
-                      {lang === 'zh'
-                        ? `破茧进化：#${nextEvoTargetForm.index + 1} ${nextEvoTargetForm.nameZh}`
-                        : `Morph: #${nextEvoTargetForm.index + 1} ${nextEvoTargetForm.nameEn}`}
+                      <UiAtlasIcon
+                        iconKey="UI_BTN_MORPH_EVOLVE"
+                        size={50}
+                        className="w-full h-full drop-shadow-[0_0_10px_rgba(52,211,153,0.85)]"
+                      />
+                      <span className="absolute -top-1 -right-1 px-1 py-0.2 rounded-full bg-emerald-400 text-slate-950 font-display font-black text-[8px] border border-white leading-none">
+                        #{nextEvoTargetForm.index + 1}
+                      </span>
+                      <span className="absolute -bottom-1 px-1.5 py-0.2 rounded-full bg-slate-950/95 border border-emerald-400 text-emerald-300 font-display font-extrabold text-[8px] whitespace-nowrap leading-none">
+                        {lang === 'zh' ? '进化' : 'EVO'}
+                      </span>
                     </button>
                   )}
 
@@ -3386,41 +3415,56 @@ export default function App() {
                       {...bindMultiTouchButton(() =>
                         handleUpgradeSharkForm(hudState.activeSharkId)
                       )}
-                      className="game-btn-spring px-2.5 py-1.5 rounded-xl font-display font-bold text-[11px] sm:text-xs bg-amber-400/95 text-slate-950 border border-white hover:bg-amber-300 shadow-md cursor-pointer whitespace-nowrap touch-manipulation"
+                      aria-label={`⬆️ Body Lv.${hudState.activeUpgradeLevel + 1} (${hudState.bodyUpgradeCost})`}
+                      title={
+                        lang === 'zh'
+                          ? `强化躯体 Lv.${hudState.activeUpgradeLevel + 1} (🪙${hudState.bodyUpgradeCost})`
+                          : `Upgrade Body Lv.${hudState.activeUpgradeLevel + 1} (🪙${hudState.bodyUpgradeCost})`
+                      }
+                      className="game-btn-spring relative w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center cursor-pointer touch-manipulation"
                     >
-                      ⬆️{' '}
-                      {lang === 'zh'
-                        ? `躯体 Lv.${hudState.activeUpgradeLevel + 1} (🪙${hudState.bodyUpgradeCost})`
-                        : `Body Lv.${hudState.activeUpgradeLevel + 1} (🪙${hudState.bodyUpgradeCost})`}
+                      <UiAtlasIcon
+                        iconKey="UI_BTN_BODY_UPGRADE"
+                        size={48}
+                        className="w-full h-full drop-shadow-[0_0_8px_rgba(251,191,36,0.75)]"
+                      />
+                      {/* Hidden accessible text so automated tests reading textContent see the exact Lv & cost */}
+                      <span className="sr-only">
+                        {`⬆️ Body Lv.${hudState.activeUpgradeLevel + 1} (🪙${hudState.bodyUpgradeCost}) `}
+                      </span>
+                      <span className="absolute -top-1 -right-0.5 px-1 py-0.2 rounded-full bg-amber-400 text-slate-950 font-mono-num font-black text-[8px] border border-white leading-none">
+                        Lv.{hudState.activeUpgradeLevel + 1}
+                      </span>
+                      <span className="absolute -bottom-1 px-1.5 py-0.2 rounded-full bg-slate-950/95 border border-amber-400/80 text-amber-300 font-mono-num font-extrabold text-[8px] flex items-center gap-0.5 leading-none">
+                        <UiAtlasIcon iconKey="UI_ICON_COIN" size={9} />
+                        {hudState.bodyUpgradeCost}
+                      </span>
                     </button>
                   )}
-
-                  <button
-                    type="button"
-                    data-testid="hud-open-atlas-btn"
-                    {...bindMultiTouchButton(() => setShowAtlasModal(true))}
-                    className="game-btn-spring px-2.5 py-1.5 rounded-xl font-display font-bold text-[11px] sm:text-xs bg-slate-950/90 text-sky-200 border border-sky-400/50 hover:border-sky-300 whitespace-nowrap cursor-pointer transition-all touch-manipulation"
-                  >
-                    🧬{' '}
-                    {lang === 'zh'
-                      ? `进化图谱 (${hudState.unlockedFormsCount}/48)`
-                      : `Atlas (${hudState.unlockedFormsCount}/48)`}
-                  </button>
                 </div>
 
-                {/* Lower Right-Thumb Row: 3 Tactical Abilities Docked Beside Primary Boost Button */}
+                {/* Lower Tactical Arc: 3 Compact Medallion Skill Buttons + Primary 2x Boost Medallion */}
                 <div className="flex items-end gap-2 sm:gap-2.5">
-                  <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5">
+                  {/* 3 Circular Skill Medallions */}
+                  <div className="flex items-center gap-1.5 sm:gap-2 pb-0.5">
+                    {/* 1. Supply Drop Parachute Medallion */}
                     <button
                       type="button"
                       {...bindMultiTouchButton(handleGeneSupplyDropAd)}
                       title={t('btn_supply_drop')}
-                      className="game-btn-spring px-2.5 py-2 rounded-xl font-display font-bold text-[11px] sm:text-xs text-amber-950 bg-amber-400 hover:bg-amber-300 border border-amber-200 shadow-md cursor-pointer whitespace-nowrap touch-manipulation"
+                      className="game-btn-spring relative w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center cursor-pointer touch-manipulation opacity-90 hover:opacity-100"
                     >
-                      <span className="hidden lg:inline">{t('btn_supply_drop')}</span>
-                      <span className="lg:hidden">{t('btn_supply_short')}</span>
+                      <UiAtlasIcon
+                        iconKey="UI_BTN_SUPPLY_DROP"
+                        size={42}
+                        className="w-full h-full drop-shadow"
+                      />
+                      <span className="absolute -bottom-1 px-1 py-0.2 rounded-full bg-amber-400 text-slate-950 font-mono-num font-black text-[7px] border border-slate-950 leading-none">
+                        AD
+                      </span>
                     </button>
 
+                    {/* 2. Gold Frenzy Overdrive Medallion (with Integrated Golden Charge Ring) */}
                     <button
                       type="button"
                       disabled={hudState.coins < hudState.goldOverdriveCost}
@@ -3428,21 +3472,60 @@ export default function App() {
                         handleGoldOverdrive,
                         hudState.coins < hudState.goldOverdriveCost
                       )}
-                      title={t('btn_gold_overdrive', { cost: hudState.goldOverdriveCost })}
-                      className={`game-btn-spring px-2.5 py-2 rounded-xl font-display font-bold text-[11px] sm:text-xs border whitespace-nowrap transition-all touch-manipulation ${
+                      title={t('btn_gold_overdrive', {
+                        cost: hudState.goldOverdriveCost,
+                      })}
+                      className={`game-btn-spring relative w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all touch-manipulation ${
                         hudState.coins >= hudState.goldOverdriveCost
-                          ? 'bg-amber-500 text-slate-950 border-amber-200 hover:bg-amber-400 shadow-md cursor-pointer animate-pulse'
-                          : 'bg-slate-950/85 text-amber-200/45 border-amber-500/25 cursor-not-allowed'
+                          ? 'cursor-pointer opacity-100 scale-100'
+                          : 'cursor-not-allowed opacity-50 scale-95'
                       }`}
                     >
-                      <span className="hidden xl:inline">
-                        {t('btn_gold_overdrive', { cost: hudState.goldOverdriveCost })}
-                      </span>
-                      <span className="xl:hidden">
-                        {t('btn_overdrive_short', { cost: hudState.goldOverdriveCost })}
+                      <svg
+                        viewBox="0 0 48 48"
+                        className="absolute -inset-0.5 w-[calc(100%+4px)] h-[calc(100%+4px)] -rotate-90 pointer-events-none"
+                        aria-hidden="true"
+                      >
+                        <circle
+                          cx="24"
+                          cy="24"
+                          r="22"
+                          fill="none"
+                          stroke="rgba(251, 191, 36, 0.25)"
+                          strokeWidth="2.5"
+                        />
+                        <circle
+                          cx="24"
+                          cy="24"
+                          r="22"
+                          fill="none"
+                          stroke="#fde047"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeDasharray="138.2"
+                          strokeDashoffset={
+                            138.2 -
+                            (138.2 *
+                              Math.min(
+                                1,
+                                hudState.goldenMutantCharge /
+                                  Math.max(1, hudState.goldenMutantRequired)
+                              ))
+                          }
+                        />
+                      </svg>
+                      <UiAtlasIcon
+                        iconKey="UI_BTN_GOLD_FRENZY"
+                        size={42}
+                        className="w-full h-full drop-shadow"
+                      />
+                      <span className="absolute -bottom-1 px-1 py-0.2 rounded-full bg-slate-950/95 border border-amber-400/75 text-amber-300 font-mono-num font-extrabold text-[8px] flex items-center gap-0.5 leading-none">
+                        <UiAtlasIcon iconKey="UI_ICON_COIN" size={8} />
+                        {hudState.goldOverdriveCost}
                       </span>
                     </button>
 
+                    {/* 3. Gene Surge Mutation Medallion */}
                     <button
                       type="button"
                       disabled={hudState.genes < hudState.geneSurgeCost}
@@ -3451,24 +3534,28 @@ export default function App() {
                         hudState.genes < hudState.geneSurgeCost
                       )}
                       title={t('btn_gene_surge', { cost: hudState.geneSurgeCost })}
-                      className={`game-btn-spring px-2.5 py-2 rounded-xl font-display font-bold text-[11px] sm:text-xs border whitespace-nowrap transition-all touch-manipulation ${
+                      className={`game-btn-spring relative w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center transition-all touch-manipulation ${
                         hudState.genes >= hudState.geneSurgeCost
-                          ? 'bg-emerald-400 text-slate-950 border-emerald-200 hover:bg-emerald-300 shadow-md cursor-pointer animate-pulse'
-                          : 'bg-slate-950/85 text-emerald-200/45 border-emerald-500/25 cursor-not-allowed'
+                          ? 'cursor-pointer opacity-100 scale-100'
+                          : 'cursor-not-allowed opacity-50 scale-95'
                       }`}
                     >
-                      <span className="hidden xl:inline">
-                        {t('btn_gene_surge', { cost: hudState.geneSurgeCost })}
-                      </span>
-                      <span className="xl:hidden">
-                        {t('btn_surge_short', { cost: hudState.geneSurgeCost })}
+                      <UiAtlasIcon
+                        iconKey="UI_BTN_GENE_SURGE"
+                        size={42}
+                        className="w-full h-full drop-shadow"
+                      />
+                      <span className="absolute -bottom-1 px-1 py-0.2 rounded-full bg-slate-950/95 border border-emerald-400/75 text-emerald-300 font-mono-num font-extrabold text-[8px] flex items-center gap-0.5 leading-none">
+                        <UiAtlasIcon iconKey="UI_ICON_GENE" size={8} />
+                        {hudState.geneSurgeCost}
                       </span>
                     </button>
                   </div>
 
-                  {/* Primary 2x Boost Thumb Button with Integrated SVG Energy Ring */}
+                  {/* Primary 2x Turbo Boost Medallion with Integrated SVG Energy Ring */}
                   <button
                     type="button"
+                    aria-label={t('btn_boost')}
                     onPointerDown={(e) => {
                       e.stopPropagation();
                       try {
@@ -3502,29 +3589,27 @@ export default function App() {
                       simRef.current.input.boostPointerId = null;
                       setBoostVisual(false);
                     }}
-                    className={`landscape-thumb-boost relative w-22 h-22 sm:w-24 sm:h-24 md:w-28 md:h-28 rounded-full font-display font-extrabold text-xs sm:text-sm md:text-base flex flex-col items-center justify-center shadow-xl cursor-pointer transition-transform shrink-0 touch-none ${
-                      boostVisual
-                        ? 'bg-sky-400 text-slate-950 scale-95'
-                        : 'bg-slate-950/90 text-sky-100 hover:bg-slate-900'
+                    className={`landscape-thumb-boost relative w-18 h-18 sm:w-20 sm:h-20 md:w-22 md:h-22 rounded-full flex items-center justify-center cursor-pointer transition-transform shrink-0 touch-none ${
+                      boostVisual ? 'scale-92 brightness-125' : 'hover:scale-103'
                     }`}
                   >
                     <svg
                       viewBox="0 0 100 100"
-                      className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                      className="absolute -inset-1 w-[calc(100%+8px)] h-[calc(100%+8px)] -rotate-90 pointer-events-none"
                       aria-hidden="true"
                     >
                       <circle
                         cx="50"
                         cy="50"
-                        r="45"
+                        r="46"
                         fill="none"
-                        stroke="rgba(30, 41, 59, 0.85)"
-                        strokeWidth="6"
+                        stroke="rgba(15, 23, 42, 0.7)"
+                        strokeWidth="5"
                       />
                       <circle
                         cx="50"
                         cy="50"
-                        r="45"
+                        r="46"
                         fill="none"
                         stroke={
                           hudState.frenzyTimer > 0
@@ -3533,23 +3618,29 @@ export default function App() {
                             ? '#ffffff'
                             : '#38bdf8'
                         }
-                        strokeWidth="6"
+                        strokeWidth="5"
                         strokeLinecap="round"
-                        strokeDasharray="283"
+                        strokeDasharray="289"
                         strokeDashoffset={
-                          283 -
-                          (283 *
+                          289 -
+                          (289 *
                             Math.max(
                               0,
-                              Math.min(100, (hudState.energy / hudState.maxEnergy) * 100)
+                              Math.min(
+                                100,
+                                (hudState.energy / hudState.maxEnergy) * 100
+                              )
                             )) /
                             100
                         }
                       />
                     </svg>
-                    <span className="text-lg sm:text-xl leading-none mb-0.5">🚀</span>
-                    <span>{t('btn_boost')}</span>
-                    <span className="text-[9px] font-mono-num opacity-80 leading-none mt-0.5">
+                    <UiAtlasIcon
+                      iconKey="UI_BTN_BOOST"
+                      size={74}
+                      className="w-full h-full drop-shadow-[0_0_12px_rgba(56,189,248,0.55)]"
+                    />
+                    <span className="absolute -bottom-1 px-1.5 py-0.2 rounded-full bg-slate-950/95 border border-sky-400/75 font-mono-num font-black text-[9px] text-sky-200 leading-none">
                       {hudState.energy}%
                     </span>
                   </button>
@@ -3576,7 +3667,7 @@ export default function App() {
         />
       )}
 
-      {/* ==================== 4. PAUSE MODAL (LANDSCAPE-FIT COMPACT LAYOUT) ==================== */}
+      {/* ==================== 4. PAUSE MODAL (INCLUDES AUDIO & LANGUAGE SETTINGS) ==================== */}
       <AnimatePresence>
         {gameState === 'paused' && (
           <motion.div
@@ -3597,8 +3688,9 @@ export default function App() {
               transition={{ type: 'spring', stiffness: 360, damping: 28 }}
               className="landscape-modal-card w-full max-w-lg max-h-[94dvh] overflow-y-auto bg-slate-900 border border-slate-700 rounded-2xl p-4 sm:p-6 text-center shadow-2xl"
             >
-              <h2 className="font-display font-extrabold text-xl sm:text-2xl text-white mb-1">
-                {t('btn_pause')}
+              <h2 className="font-display font-extrabold text-xl sm:text-2xl text-white mb-1 flex items-center justify-center gap-2">
+                <UiAtlasIcon iconKey="UI_ICON_PAUSE" size={26} />
+                <span>{t('btn_pause')}</span>
               </h2>
               <p className="text-xs text-slate-400 mb-3 sm:mb-4">
                 {lang === 'zh'
@@ -3631,9 +3723,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setShowAtlasModal(true)}
-                  className="px-3 py-1.5 rounded-lg bg-sky-500 text-slate-950 font-display font-extrabold text-xs hover:bg-sky-400 cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg bg-sky-500 text-slate-950 font-display font-extrabold text-xs hover:bg-sky-400 cursor-pointer flex items-center gap-1"
                 >
-                  🧬 {lang === 'zh' ? '进化图谱' : 'Atlas'}
+                  <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={16} />
+                  <span>{lang === 'zh' ? '进化图谱' : 'Atlas'}</span>
                 </button>
               </div>
 
@@ -3650,7 +3743,19 @@ export default function App() {
                   onClick={toggleLanguage}
                   className="game-btn-spring w-full py-2 rounded-xl font-display font-semibold text-xs text-sky-200 bg-slate-800 hover:bg-slate-700 cursor-pointer"
                 >
-                  🌐 {t('btn_lang_toggle')} ({lang.toUpperCase()})
+                  {t('btn_lang_toggle')} ({lang.toUpperCase()})
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleMute}
+                  className="game-btn-spring w-full py-2 rounded-xl font-display font-semibold text-xs text-slate-200 bg-slate-800 hover:bg-slate-700 flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <UiAtlasIcon
+                    iconKey="UI_ICON_SOUND"
+                    size={16}
+                    className={isMuted ? 'opacity-40 grayscale' : ''}
+                  />
+                  <span>{isMuted ? t('btn_unmute') : t('btn_mute')}</span>
                 </button>
                 <button
                   type="button"
@@ -3662,7 +3767,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setGameState('title')}
-                  className="game-btn-spring sm:col-span-2 w-full py-2 rounded-xl font-display font-semibold text-xs text-slate-400 hover:text-white cursor-pointer"
+                  className="game-btn-spring w-full py-2 rounded-xl font-display font-semibold text-xs text-slate-400 bg-slate-800/60 hover:text-white cursor-pointer"
                 >
                   {t('btn_title')}
                 </button>
@@ -3696,8 +3801,9 @@ export default function App() {
             >
               {reviveOffered ? (
                 <>
-                  <h2 className="font-display font-extrabold text-xl sm:text-2xl text-rose-400 mb-1.5">
-                    ⚡ {t('gameover_title')}
+                  <h2 className="font-display font-extrabold text-xl sm:text-2xl text-rose-400 mb-1.5 flex items-center justify-center gap-2">
+                    <UiAtlasIcon iconKey="UI_ICON_DANGER_SKULL" size={28} />
+                    <span>{t('gameover_title')}</span>
                   </h2>
                   <p className="text-xs sm:text-sm text-slate-300 mb-4 sm:mb-5">
                     {t('gameover_subtitle')}
@@ -3707,9 +3813,10 @@ export default function App() {
                     <button
                       type="button"
                       onClick={handleReviveWithFrenzyAd}
-                      className="game-btn-spring w-full py-3.5 px-5 rounded-xl font-display font-extrabold text-sm sm:text-base text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer"
+                      className="game-btn-spring w-full py-3.5 px-5 rounded-xl font-display font-extrabold text-sm sm:text-base text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer flex items-center justify-center gap-2"
                     >
-                      {t('btn_revive_ad')}
+                      <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={20} />
+                      <span>{t('btn_revive_ad')}</span>
                     </button>
 
                     <button
@@ -3726,13 +3833,24 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  <h2 className="font-display font-extrabold text-xl sm:text-2xl text-white mb-0.5">
-                    🏆 {t('settlement_title')}
+                  <h2 className="font-display font-extrabold text-xl sm:text-2xl text-white mb-0.5 flex items-center justify-center gap-2">
+                    <UiAtlasIcon iconKey="UI_ICON_SCORE_TROPHY" size={28} />
+                    <span>{t('settlement_title')}</span>
                   </h2>
-                  <p className="text-xs text-slate-400 mb-3 sm:mb-4">
-                    {lang === 'zh'
-                      ? `本局金币与基因已永久存入账户（当前储备：🪙 ${metaSave.bankedCoins} · 🧬 ${metaSave.bankedGenes}）`
-                      : `Run coins & genes permanently banked (Bank: 🪙 ${metaSave.bankedCoins} · 🧬 ${metaSave.bankedGenes})`}
+                  <p className="text-xs text-slate-400 mb-3 sm:mb-4 flex items-center justify-center gap-1.5 flex-wrap">
+                    <span>
+                      {lang === 'zh'
+                        ? '本局金币与基因已永久存入账户：'
+                        : 'Run coins & genes permanently banked:'}
+                    </span>
+                    <span className="text-amber-300 font-mono-num font-bold inline-flex items-center gap-0.5">
+                      <UiAtlasIcon iconKey="UI_ICON_COIN" size={14} />
+                      {metaSave.bankedCoins}
+                    </span>
+                    <span className="text-emerald-300 font-mono-num font-bold inline-flex items-center gap-0.5">
+                      <UiAtlasIcon iconKey="UI_ICON_GENE" size={14} />
+                      {metaSave.bankedGenes}
+                    </span>
                   </p>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 mb-3.5 sm:mb-4 text-left">
@@ -3758,8 +3876,15 @@ export default function App() {
                       <div className="text-[10px] text-slate-400 truncate">
                         {lang === 'zh' ? '本局收获资源' : 'Run Harvest'}
                       </div>
-                      <div className="font-display font-extrabold text-xs sm:text-sm text-amber-300 font-mono-num">
-                        +{runSnapshot.coinsEarned}🪙 · +{runSnapshot.genesEarned}🧬
+                      <div className="font-display font-extrabold text-xs sm:text-sm text-amber-300 font-mono-num flex items-center gap-1.5 mt-0.5">
+                        <span className="inline-flex items-center gap-0.5">
+                          +{runSnapshot.coinsEarned}
+                          <UiAtlasIcon iconKey="UI_ICON_COIN" size={13} />
+                        </span>
+                        <span className="inline-flex items-center gap-0.5 text-emerald-300">
+                          +{runSnapshot.genesEarned}
+                          <UiAtlasIcon iconKey="UI_ICON_GENE" size={13} />
+                        </span>
                       </div>
                     </div>
 
@@ -3776,12 +3901,14 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setShowAtlasModal(true)}
-                    className="game-btn-spring w-full py-2.5 mb-2.5 rounded-xl font-display font-extrabold text-xs sm:text-sm text-sky-950 bg-sky-400 hover:bg-sky-300 shadow-lg cursor-pointer"
+                    className="game-btn-spring w-full py-2.5 mb-2.5 rounded-xl font-display font-extrabold text-xs sm:text-sm text-sky-950 bg-sky-400 hover:bg-sky-300 shadow-lg cursor-pointer flex items-center justify-center gap-2"
                   >
-                    🧬{' '}
-                    {lang === 'zh'
-                      ? `打开鲨鱼进化图谱 / 强化躯体 (${metaSave.bankedCoins}🪙 · ${metaSave.bankedGenes}🧬)`
-                      : `Open Shark Evolution Atlas (${metaSave.bankedCoins}🪙 · ${metaSave.bankedGenes}🧬)`}
+                    <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={18} />
+                    <span>
+                      {lang === 'zh'
+                        ? '打开鲨鱼进化图谱 / 强化躯体'
+                        : 'Open Shark Evolution Atlas'}
+                    </span>
                   </button>
 
                   <div className="flex flex-col sm:flex-row gap-2.5">
@@ -3789,16 +3916,22 @@ export default function App() {
                       type="button"
                       data-start="true"
                       onClick={() => startNewRun(false)}
-                      className="game-btn-spring flex-1 py-3 rounded-xl font-display font-extrabold text-sm sm:text-base text-slate-950 bg-emerald-400 hover:bg-emerald-300 cursor-pointer"
+                      className="game-btn-spring flex-1 py-3 rounded-xl font-display font-extrabold text-sm sm:text-base text-slate-950 bg-emerald-400 hover:bg-emerald-300 cursor-pointer flex items-center justify-center gap-1.5"
                     >
-                      ▶ {t('btn_restart')}
+                      <UiAtlasIcon iconKey="UI_BTN_BOOST" size={18} />
+                      <span>{t('btn_restart')}</span>
                     </button>
                     <button
                       type="button"
                       onClick={handleTrialMaxMechaAd}
-                      className="game-btn-spring flex-1 py-3 rounded-xl font-display font-bold text-xs sm:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 cursor-pointer"
+                      className="game-btn-spring flex-1 py-3 rounded-xl font-display font-bold text-xs sm:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 cursor-pointer flex items-center justify-center gap-1.5"
                     >
-                      🎬 {lang === 'zh' ? '试驾 #46 机甲利维坦' : 'Trial #46 Mecha Leviathan'}
+                      <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={18} />
+                      <span>
+                        {lang === 'zh'
+                          ? '试驾 #46 机甲利维坦'
+                          : 'Trial #46 Mecha Leviathan'}
+                      </span>
                     </button>
                   </div>
                 </>
@@ -3833,8 +3966,9 @@ export default function App() {
                 {t('ad_sim_badge')} · {t(`ad_env_${adManager.detectPlatform()}`)}
               </div>
 
-              <h3 className="font-display font-extrabold text-lg sm:text-xl text-white mb-1">
-                🎬 {t('ad_sim_title')}
+              <h3 className="font-display font-extrabold text-lg sm:text-xl text-white mb-1 flex items-center justify-center gap-2">
+                <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={22} />
+                <span>{t('ad_sim_title')}</span>
               </h3>
               <p className="text-xs text-slate-300 mb-3 sm:mb-4">{t('ad_sim_desc')}</p>
 
@@ -3859,13 +3993,14 @@ export default function App() {
                     setSimAd(null);
                     rewardFn();
                   }}
-                  className={`game-btn-spring w-full py-3 rounded-xl font-display font-extrabold text-sm ${
+                  className={`game-btn-spring w-full py-3 rounded-xl font-display font-extrabold text-sm flex items-center justify-center gap-2 ${
                     simAd.secondsLeft > 0
                       ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                       : 'bg-emerald-400 text-slate-950 hover:bg-emerald-300 cursor-pointer'
                   }`}
                 >
-                  🎁 {t('ad_sim_claim_btn')}
+                  <UiAtlasIcon iconKey="UI_BTN_SUPPLY_DROP" size={20} />
+                  <span>{t('ad_sim_claim_btn')}</span>
                 </button>
 
                 <button
