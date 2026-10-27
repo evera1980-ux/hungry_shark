@@ -4,6 +4,7 @@ import {
   getEffectivePreyTier,
   getPreyRelativeVisualScale,
 } from './rules';
+import { getSharkFormById } from './sharkEvolutionConfig';
 import { spriteSheetManager } from './spriteSheetManager';
 
 export interface RenderSharkParams {
@@ -17,34 +18,15 @@ export interface RenderSharkParams {
   frenzyTimer: number;
   hitFlashTimer: number;
   invulnerableTimer?: number;
-  equipped: EquippedOrgansMap;
-}
-
-/**
- * Helper to draw a sliced sprite frame centered at (offsetX, offsetY) with target width & height
- */
-function drawCenteredFrame(
-  ctx: CanvasRenderingContext2D,
-  frame: HTMLCanvasElement | undefined,
-  width: number,
-  height: number,
-  offsetX: number = 0,
-  offsetY: number = 0
-): void {
-  if (!frame || frame.width === 0 || frame.height === 0) return;
-  ctx.drawImage(
-    frame,
-    offsetX - width / 2,
-    offsetY - height / 2,
-    width,
-    height
-  );
+  equipped?: EquippedOrgansMap;
+  sharkFormId?: string;
+  morphFlashTimer?: number;
 }
 
 /**
  * Helper to draw a sliced sprite frame while preserving its true tight-cropped aspect ratio
- * so elongated creatures (Moray Eel, Electric Eel, Barracuda) and vertical creatures
- * (Seahorse, Jellyfish, Kraken Tentacle) are never squashed or stretched.
+ * so elongated creatures (Moray Eel, Electric Eel, Barracuda, Sea-Dragon) and vertical/winged creatures
+ * (Seahorse, Jellyfish, Kraken Tentacle, Valkyrie Shark) are never squashed or stretched.
  */
 function drawNaturalAspectFrame(
   ctx: CanvasRenderingContext2D,
@@ -73,8 +55,7 @@ function drawNaturalAspectFrame(
 }
 
 /**
- * Draw an evolution organ sprite from the 4x4 SpriteSheetManager at local coordinates (0, 0).
- * Used both on the live shark skeleton and inside the Evolution Modal 3-Choice cards.
+ * Legacy helper kept for OrganCanvasPreview compatibility
  */
 export function drawOrganPart(
   ctx: CanvasRenderingContext2D,
@@ -88,61 +69,17 @@ export function drawOrganPart(
 
   ctx.save();
   const sway = Math.sin(swimPhase * 2) * 0.08;
-
-  switch (organ.slot) {
-    case 'JAWS': {
-      // Pitch and scale up slightly during bite snap
-      const snapAngle = sway * 0.5 - biteAnim * 0.18;
-      const snapScale = 1 + biteAnim * 0.18;
-      ctx.rotate(snapAngle);
-      ctx.scale(snapScale, snapScale);
-      drawNaturalAspectFrame(ctx, frame, 50, 10, 2);
-      break;
-    }
-
-    case 'DORSAL': {
-      ctx.rotate(sway * 0.4);
-      drawNaturalAspectFrame(ctx, frame, 48, 0, -8);
-      break;
-    }
-
-    case 'TAIL': {
-      const tailWag = Math.sin(swimPhase * 1.6) * 0.24;
-      const boostScale = isBoosting ? 1.18 : 1.0;
-      ctx.rotate(tailWag);
-      ctx.scale(boostScale, boostScale);
-      drawNaturalAspectFrame(ctx, frame, 50, -10, 0);
-      break;
-    }
-
-    case 'ARMOR': {
-      ctx.rotate(sway * 0.2);
-      drawNaturalAspectFrame(ctx, frame, 48, 0, 0);
-      break;
-    }
-
-    case 'AURA': {
-      // Orbiting devour/gene icons around the shark
-      for (let i = 0; i < 3; i++) {
-        const orbitAngle = swimPhase * 0.85 + (i * Math.PI * 2) / 3;
-        const ox = Math.cos(orbitAngle) * 56;
-        const oy = Math.sin(orbitAngle) * 56;
-        ctx.save();
-        ctx.translate(ox, oy);
-        ctx.rotate(Math.sin(swimPhase + i) * 0.2);
-        drawNaturalAspectFrame(ctx, frame, 30, 0, 0);
-        ctx.restore();
-      }
-      break;
-    }
-  }
-
+  const boostScale = isBoosting ? 1.12 : 1.0;
+  ctx.rotate(sway * 0.4 - biteAnim * 0.1);
+  ctx.scale(boostScale, boostScale);
+  drawNaturalAspectFrame(ctx, frame, 48, 0, 0);
   ctx.restore();
 }
 
 /**
- * Draw the player's shark and all mounted organs using the sliced sprites from SpriteSheetManager,
- * while preserving sinusoidal swimming wave deformation, upright dorsal orientation, and i-frame feedback.
+ * Draw the player's evolved Shark Form (1 of 48 forms from /assets/aistudio/sharks_ec921c3b.png),
+ * preserving natural aspect ratio, sinusoidal swimming wave deformation, upright dorsal orientation,
+ * lineage aura, and Morph Breakthrough shockwave feedback.
  */
 export function drawSharkWithOrgans(
   ctx: CanvasRenderingContext2D,
@@ -159,11 +96,34 @@ export function drawSharkWithOrgans(
     frenzyTimer,
     hitFlashTimer,
     invulnerableTimer = 0,
-    equipped,
+    sharkFormId = 'shark_00_clown_fry',
+    morphFlashTimer = 0,
   } = params;
+
+  const sharkForm = getSharkFormById(sharkFormId);
 
   ctx.save();
   ctx.translate(x, y);
+
+  // Morph Breakthrough Shockwave (when evolving mid-run into a higher shark form)
+  if (morphFlashTimer > 0) {
+    const progress = 1 - Math.min(1, morphFlashTimer / 0.85);
+    const waveR = 36 + progress * 155;
+    ctx.save();
+    ctx.strokeStyle = sharkForm.glowColor;
+    ctx.lineWidth = Math.max(1.5, (1 - progress) * 7);
+    ctx.globalAlpha = Math.max(0, 1 - progress);
+    ctx.beginPath();
+    ctx.arc(0, 0, waveR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#fde047';
+    ctx.lineWidth = Math.max(1, (1 - progress) * 4);
+    ctx.beginPath();
+    ctx.arc(0, 0, waveR * 0.68, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 
   // Normalize angle to [-PI, PI] and keep dorsal fin strictly upright when swimming left
   const normAngle = Math.atan2(Math.sin(angle), Math.cos(angle));
@@ -189,25 +149,38 @@ export function drawSharkWithOrgans(
     ctx.lineWidth = 2.5;
     ctx.setLineDash([7, 5]);
     ctx.beginPath();
-    ctx.arc(0, 0, 60, 0, Math.PI * 2);
+    ctx.arc(0, 0, 58, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
   }
 
-  // Sinusoidal swimming physics
-  const bodyRock = Math.sin(swimPhase) * 0.065;
-  const tailSwayY = Math.sin(swimPhase) * 6.5;
-  const midSwayY = Math.sin(swimPhase - 0.7) * 3.0;
+  // Sinusoidal swimming physics + bite lunge
+  const bodyRock = Math.sin(swimPhase) * 0.062;
+  const midSwayY = Math.sin(swimPhase - 0.7) * 2.6;
+  const lungeX = biteAnim * 7.5;
   const stretchX =
-    1 + Math.sin(swimPhase * 2) * 0.025 + (isBoosting ? 0.05 : 0) + biteAnim * 0.04;
-  const squashY = 1 - Math.sin(swimPhase * 2) * 0.02 + biteAnim * 0.06;
+    1 +
+    Math.sin(swimPhase * 2) * 0.026 +
+    (isBoosting ? 0.055 : 0) +
+    biteAnim * 0.05;
+  const squashY = 1 - Math.sin(swimPhase * 2) * 0.022 + biteAnim * 0.055;
 
   ctx.rotate(bodyRock);
 
-  // 1. AURA slot (behind shark body)
-  if (equipped.AURA) {
-    drawOrganPart(ctx, equipped.AURA, swimPhase, biteAnim, isBoosting);
+  // High-Generation Lineage Halo (Generation IV~VI sharks emit a subtle ambient domain ring)
+  if (sharkForm.generation >= 4 || isBoosting) {
+    const auraPulse = 0.5 + 0.5 * Math.sin(swimPhase * 3.2);
+    ctx.save();
+    ctx.strokeStyle = sharkForm.glowColor;
+    ctx.globalAlpha = isBoosting ? 0.48 : 0.22 + (sharkForm.generation - 4) * 0.06;
+    ctx.lineWidth = isBoosting ? 2.6 : 1.8;
+    ctx.setLineDash([10, 6]);
+    ctx.beginPath();
+    ctx.arc(-4, 0, 52 + auraPulse * 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 
   // Golden Frenzy Halo if active
@@ -222,50 +195,19 @@ export function drawSharkWithOrgans(
     ctx.restore();
   }
 
-  // 2. TAIL slot mounted at rear caudal peduncle (-44, tailSwayY)
-  if (equipped.TAIL) {
-    ctx.save();
-    ctx.translate(-44, tailSwayY);
-    drawOrganPart(ctx, equipped.TAIL, swimPhase, biteAnim, isBoosting);
-    ctx.restore();
-  }
-
-  // 3. DORSAL slot mounted on top spine (-6, -24 + midSwayY * 0.4)
-  if (equipped.DORSAL) {
-    ctx.save();
-    ctx.translate(-6, -24 + midSwayY * 0.4);
-    drawOrganPart(ctx, equipped.DORSAL, swimPhase, biteAnim, isBoosting);
-    ctx.restore();
-  }
-
-  // 4. Base Shark Body Sprite (Frame [0, 0]: BASE_SHARK)
-  const sharkFrame = spriteSheetManager.getFrame('BASE_SHARK');
+  // Pure 48-Form Shark Evolution Body Sprite (No bolted-on external clutter!)
+  const sharkFrame = spriteSheetManager.getSharkFormFrame(sharkForm.spriteKey);
   ctx.save();
+  ctx.translate(lungeX, 0);
   ctx.scale(stretchX, squashY);
-  if (hitFlashTimer > 0) {
+  if (hitFlashTimer > 0 || morphFlashTimer > 0.55) {
     ctx.filter = 'brightness(1.85) contrast(1.2)';
   } else if (frenzyTimer > 0) {
     ctx.filter = 'sepia(0.85) saturate(3.5) brightness(1.15)';
   }
-  drawCenteredFrame(ctx, sharkFrame, 118, 68, 0, midSwayY * 0.25);
+  drawNaturalAspectFrame(ctx, sharkFrame, 96, 0, midSwayY * 0.25);
   ctx.filter = 'none';
   ctx.restore();
-
-  // 5. ARMOR slot mounted across mid-torso (-6, 2 + midSwayY * 0.3)
-  if (equipped.ARMOR) {
-    ctx.save();
-    ctx.translate(-6, 2 + midSwayY * 0.3);
-    drawOrganPart(ctx, equipped.ARMOR, swimPhase, biteAnim, isBoosting);
-    ctx.restore();
-  }
-
-  // 6. JAWS slot mounted at snout/mandible (32, 4)
-  if (equipped.JAWS) {
-    ctx.save();
-    ctx.translate(32, 4);
-    drawOrganPart(ctx, equipped.JAWS, swimPhase, biteAnim, isBoosting);
-    ctx.restore();
-  }
 
   ctx.restore();
 }
@@ -297,8 +239,10 @@ export function drawPreyEntity(
   sharkBiteTier: number,
   frenzyActive: boolean,
   targetPreyId?: string,
-  isBoosting: boolean = false,
-  relativePreyScale: number = 1.0
+  _isBoosting: boolean = false,
+  relativePreyScale: number = 1.0,
+  sharkScale: number = 1.0,
+  canEatMines: boolean = false
 ): void {
   const {
     config,
@@ -312,20 +256,26 @@ export function drawPreyEntity(
     isInflated,
     mutationVariant = 'NONE',
   } = prey;
+  const effectiveTier = getEffectivePreyTier(config, mutationVariant);
+  const canEatByTier = config.isHazard
+    ? frenzyActive || canEatMines
+    : frenzyActive || sharkBiteTier >= effectiveTier;
+  const needsBoostNow = false;
+  const canEat = canEatByTier;
   const visualScale = getPreyRelativeVisualScale(
     config,
-    { biteTier: sharkBiteTier, relativePreyScale },
-    mutationVariant
+    {
+      biteTier: sharkBiteTier,
+      relativePreyScale,
+      scale: sharkScale,
+      canEatMines,
+    },
+    mutationVariant,
+    frenzyActive
   );
-  const r = config.radius * visualScale * (isInflated ? 1.32 : 1.0);
-  const effectiveTier = getEffectivePreyTier(config, mutationVariant);
-  const requiresBoostArmorBreak =
-    (mutationVariant === 'ABYSS_BEHEMOTH' && config.tier >= 7) ||
-    Boolean(config.isBoss);
-  const canEatByTier = !config.isHazard && (frenzyActive || sharkBiteTier >= effectiveTier);
-  const needsBoostNow =
-    canEatByTier && requiresBoostArmorBreak && !frenzyActive && !isBoosting;
-  const canEat = canEatByTier && !needsBoostNow;
+  // Keep inflated edible pufferfish strictly smaller than the shark (<= 0.72x shark size), while inedible puffers inflate to look even more menacing
+  const inflateMult = isInflated ? (canEat ? 1.12 : 1.24) : 1.0;
+  const r = config.radius * visualScale * inflateMult;
   const isBountyTarget = Boolean(targetPreyId && config.id === targetPreyId);
 
   ctx.save();

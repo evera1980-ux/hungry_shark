@@ -231,11 +231,16 @@ export class EcosystemSpawner {
     const vy = (rng() - 0.5) * 24;
     const headingAngle = moveDir > 0 ? 0 : Math.PI;
 
-    // 若抽中小型群居鱼 (SCHOOL_FLEE) 或 T1/T2 浅海鱼，建立 2~3 条伴游鱼编队锚点
+    // 仅对单一个体的小型 Tier 1 鱼种建立 2 条伴游鱼编队（本身已经是多鱼群贴图的物种以及 T2+ 大体型鱼不重叠扎堆）
+    const isMultiFishSprite =
+      chosenTier.id === 'gene_jelly' ||
+      chosenTier.id === 'neon_tetra_school' ||
+      chosenTier.id === 'silver_barracuda';
     if (
-      (chosenTier.behavior === 'SCHOOL_FLEE' || chosenTier.tier <= 2) &&
+      chosenTier.tier === 1 &&
+      !isMultiFishSprite &&
       !chosenTier.isHazard &&
-      rng() < 0.65
+      rng() < 0.55
     ) {
       this.schoolClusterAnchor = {
         config: chosenTier,
@@ -244,7 +249,7 @@ export class EcosystemSpawner {
         vx,
         vy,
         angle: headingAngle,
-        remainingMates: chosenTier.tier === 1 ? 3 : 2,
+        remainingMates: 2,
       };
     }
 
@@ -308,7 +313,7 @@ export class EcosystemSpawner {
         ? [0, 0, 12, 18, 22, 20, 16, 12]
         : depth > 520
         ? [0, 0, 32, 30, 24, 14, 0, 0]
-        : [40, 34, 18, 8, 0, 0, 0, 0];
+        : [54, 24, 15, 7, 0, 0, 0, 0];
 
     const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
     let roll = rng() * totalWeight;

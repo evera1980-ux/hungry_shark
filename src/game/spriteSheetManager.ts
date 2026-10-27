@@ -1,3 +1,5 @@
+import type { SharkSpriteKey } from './sharkEvolutionConfig';
+
 export type PrimarySpriteFrameKey =
   | 'BASE_SHARK'      // Row 0, Col 0 (0)
   | 'MECHA_JAWS'      // Row 0, Col 1 (1)
@@ -57,7 +59,10 @@ export type Fish2SpriteKey =
   | 'FISH2_MEG_TOOTH'
   | 'FISH2_PLASMA_CORE';
 
-export type SpriteFrameKey = PrimarySpriteFrameKey | Fish2SpriteKey;
+export type SpriteFrameKey =
+  | PrimarySpriteFrameKey
+  | Fish2SpriteKey
+  | SharkSpriteKey;
 
 export const SPRITE_GRID_MAP: Record<PrimarySpriteFrameKey, [number, number]> = {
   BASE_SHARK: [0, 0],
@@ -194,24 +199,65 @@ export const FISH2_CELL_BOUNDS: Record<
   FISH2_PLASMA_CORE: [0.822, 0.832, 1.0, 1.0],
 };
 
+/**
+ * Exact zero-pixel whitespace valley bounds for the 48 Shark Evolution Forms (8 cols x 6 rows)
+ * in /assets/aistudio/sharks_ec921c3b.png (1376x768)
+ */
+const SHARK_ROW_Y_BOUNDS = [0, 0.1185, 0.2474, 0.4154, 0.599, 0.8047, 1.0];
+const SHARK_ROW_X_SPLITS: number[][] = [
+  [0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1],
+  [0, 0.125, 0.2536, 0.375, 0.5065, 0.6352, 0.7565, 0.875, 1],
+  [0, 0.1323, 0.2645, 0.3939, 0.5203, 0.6374, 0.7587, 0.8765, 1],
+  [0, 0.1366, 0.2674, 0.3917, 0.5189, 0.641, 0.7587, 0.8779, 1],
+  [0, 0.1374, 0.2696, 0.3903, 0.5167, 0.6366, 0.7594, 0.8779, 1],
+  [0, 0.1424, 0.2733, 0.3917, 0.5203, 0.6366, 0.758, 0.8735, 1],
+];
+
+export const SHARK_GRID_MAP: Record<SharkSpriteKey, [number, number]> =
+  {} as Record<SharkSpriteKey, [number, number]>;
+export const SHARK_CELL_BOUNDS: Record<
+  SharkSpriteKey,
+  [number, number, number, number]
+> = {} as Record<SharkSpriteKey, [number, number, number, number]>;
+
+for (let r = 0; r < 6; r++) {
+  for (let c = 0; c < 8; c++) {
+    const idx = r * 8 + c;
+    const key = `SHARK_FORM_${String(idx).padStart(2, '0')}` as SharkSpriteKey;
+    SHARK_GRID_MAP[key] = [r, c];
+    SHARK_CELL_BOUNDS[key] = [
+      SHARK_ROW_X_SPLITS[r][c],
+      SHARK_ROW_Y_BOUNDS[r],
+      SHARK_ROW_X_SPLITS[r][c + 1],
+      SHARK_ROW_Y_BOUNDS[r + 1],
+    ];
+  }
+}
+
 export class SpriteSheetManager {
   public frames: Partial<Record<SpriteFrameKey, HTMLCanvasElement>> = {};
   public rawGridFrames: HTMLCanvasElement[] = [];
   public fish2GridFrames: HTMLCanvasElement[] = [];
+  public sharksGridFrames: HTMLCanvasElement[] = [];
   public loaded: boolean = false;
   public fish2Loaded: boolean = false;
+  public sharksLoaded: boolean = false;
   private loadingPromise: Promise<void> | null = null;
 
   /**
-   * Loads both the primary 4x4 sprite sheet (/assets/aistudio/fish_24bdaa5a.png)
-   * and the extended 6x5 target fish sprite sheet (/assets/aistudio/fish2_fc857cfa.png),
-   * removing pure white backgrounds via offscreen Canvas getImageData and slicing tight transparent frames.
+   * Loads:
+   * 1. Primary 4x4 sprite sheet (/assets/aistudio/fish_24bdaa5a.png)
+   * 2. Extended 6x5 target fish sprite sheet (/assets/aistudio/fish2_fc857cfa.png)
+   * 3. 48-Shark Evolution Matrix 8x6 sprite sheet (/assets/aistudio/sharks_ec921c3b.png)
    */
   public load(
     primaryUrl: string = '/assets/aistudio/fish_24bdaa5a.png',
-    fish2Url: string = '/assets/aistudio/fish2_fc857cfa.png'
+    fish2Url: string = '/assets/aistudio/fish2_fc857cfa.png',
+    sharksUrl: string = '/assets/aistudio/sharks_ec921c3b.png'
   ): Promise<void> {
-    if (this.loaded && this.fish2Loaded) return Promise.resolve();
+    if (this.loaded && this.fish2Loaded && this.sharksLoaded) {
+      return Promise.resolve();
+    }
     if (this.loadingPromise) return this.loadingPromise;
     if (typeof Image === 'undefined' || typeof document === 'undefined') {
       return Promise.resolve();
@@ -255,7 +301,21 @@ export class SpriteSheetManager {
       img2.src = fish2Url;
     });
 
-    this.loadingPromise = Promise.all([loadPrimary, loadFish2]).then(() => undefined);
+    const loadSharks = new Promise<void>((resolve) => {
+      const imgSharks = new Image();
+      imgSharks.crossOrigin = 'anonymous';
+      imgSharks.onload = () => {
+        this.processAndSliceSharksImage(imgSharks);
+        this.sharksLoaded = true;
+        resolve();
+      };
+      imgSharks.onerror = () => resolve();
+      imgSharks.src = sharksUrl;
+    });
+
+    this.loadingPromise = Promise.all([loadPrimary, loadFish2, loadSharks]).then(
+      () => undefined
+    );
     return this.loadingPromise;
   }
 
@@ -407,8 +467,39 @@ export class SpriteSheetManager {
     }
   }
 
+  private processAndSliceSharksImage(img: HTMLImageElement): void {
+    const sheetCanvas = this.createChromaKeyCanvas(img);
+    if (!sheetCanvas) return;
+    const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
+    if (!sheetCtx) return;
+
+    this.sharksGridFrames = [];
+    const orderedSharkKeys = Object.keys(SHARK_GRID_MAP) as SharkSpriteKey[];
+
+    for (const key of orderedSharkKeys) {
+      const frameCanvas = this.sliceBoundedFrame(
+        sheetCanvas,
+        sheetCtx,
+        SHARK_CELL_BOUNDS[key]
+      );
+      this.frames[key] = frameCanvas;
+      this.sharksGridFrames.push(frameCanvas);
+    }
+  }
+
   public getFrame(key: SpriteFrameKey): HTMLCanvasElement | undefined {
     return this.frames[key];
+  }
+
+  public getSharkFormFrame(
+    keyOrIndex: SharkSpriteKey | number
+  ): HTMLCanvasElement | undefined {
+    if (typeof keyOrIndex === 'number') {
+      const clamped = Math.max(0, Math.min(47, Math.floor(keyOrIndex)));
+      const key = `SHARK_FORM_${String(clamped).padStart(2, '0')}` as SharkSpriteKey;
+      return this.frames[key] ?? this.frames.BASE_SHARK;
+    }
+    return this.frames[keyOrIndex] ?? this.frames.BASE_SHARK;
   }
 
   public getOrganFrame(organId: string): HTMLCanvasElement | undefined {
@@ -434,7 +525,6 @@ export class SpriteSheetManager {
         return this.frames.EVO_TAIL;
       case 'mecha_aura':
       case 'abyss_aura':
-      case 'magma_aura':
         return this.frames.DEVOUR_FX;
       default:
         return this.frames.MECHA_DORSAL;
@@ -476,4 +566,3 @@ export class SpriteSheetManager {
 }
 
 export const spriteSheetManager = new SpriteSheetManager();
-

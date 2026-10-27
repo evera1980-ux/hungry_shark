@@ -4,12 +4,23 @@ import { I18N, translate } from './i18n';
 import { GAME_CONFIG } from './config';
 import {
   computeSharkStats,
+  computeEvolvedSharkStats,
   resolvePreyEncounter,
   addEvolutionProgress,
   pickEvolutionChoices,
   getMaxMechaLoadout,
   getDepthZone,
 } from './rules';
+import {
+  createDefaultMetaSave,
+  evaluateSharkUnlock,
+  getGlobalAtlasBonuses,
+  getNextEvolutionTarget,
+  getSharkFormById,
+  getSharkUpgradeCost,
+  SHARK_EVOLUTION_FORMS,
+} from './sharkEvolutionConfig';
+import { SHARK_CELL_BOUNDS, SHARK_GRID_MAP } from './spriteSheetManager';
 
 test('I18N dictionary has complete and matching keys in both zh and en', () => {
   const zhKeys = Object.keys(I18N.zh).sort();
@@ -368,9 +379,158 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   }
 });
 
+test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgrade scaling, and evolved stats', () => {
+  // 1. Verify all 48 shark forms and sprite grid bounds are complete and strictly ordered
+  assert.equal(SHARK_EVOLUTION_FORMS.length, 48);
+  assert.equal(Object.keys(SHARK_GRID_MAP).length, 48);
+  assert.equal(Object.keys(SHARK_CELL_BOUNDS).length, 48);
 
+  for (let i = 0; i < 48; i++) {
+    const form = SHARK_EVOLUTION_FORMS[i];
+    assert.equal(form.index, i);
+    assert.equal(form.row, Math.floor(i / 8));
+    assert.equal(form.col, i % 8);
+    assert.equal(form.generation, Math.floor(i / 8) + 1);
+    const key = `SHARK_FORM_${String(i).padStart(2, '0')}`;
+    const bounds = SHARK_CELL_BOUNDS[key as keyof typeof SHARK_CELL_BOUNDS];
+    assert.ok(bounds, `Missing SHARK_CELL_BOUNDS for ${key}`);
+    assert.ok(bounds[0] >= 0 && bounds[2] > bounds[0] && bounds[2] <= 1.0);
+    assert.ok(bounds[1] >= 0 && bounds[3] > bounds[1] && bounds[3] <= 1.0);
+  }
 
+  // 2. Verify Triple-Gate Unlock Evaluation on Shark #1 (Tiger Pup)
+  const save = createDefaultMetaSave();
+  save.bankedCoins = 0;
+  save.bankedGenes = 0;
+  assert.equal(save.selectedSharkId, 'shark_00_clown_fry');
+  const nextTarget = getNextEvolutionTarget('shark_00_clown_fry', save);
+  assert.equal(nextTarget?.id, 'shark_01_lemon_pup');
 
+  const lemonForm = getSharkFormById('shark_01_lemon_pup');
+  // Initially locked because parent is Lv.1 (needs Lv.2), in-run level is 1 (needs Lv.2), and coins/genes are 0
+  const initialEval = evaluateSharkUnlock(lemonForm, save, 0, 0, 1, 150);
+  assert.equal(initialEval.alreadyUnlocked, false);
+  assert.equal(initialEval.parentMet, false);
+  assert.equal(initialEval.levelMet, false);
+  assert.equal(initialEval.canUnlockNow, false);
 
+  // Upgrade parent (#0 Clown Fry) to Lv.2, reach In-Run Lv.2, Depth 180m, and bank 100 Coins + 25 Genes
+  save.sharkUpgradeLevels['shark_00_clown_fry'] = 2;
+  save.bankedCoins = 100;
+  save.bankedGenes = 25;
+  const readyEval = evaluateSharkUnlock(lemonForm, save, 0, 0, 2, 180);
+  assert.equal(readyEval.parentMet, true);
+  assert.equal(readyEval.levelMet, true);
+  assert.equal(readyEval.depthMet, true);
+  assert.equal(readyEval.coinsMet, true);
+  assert.equal(readyEval.genesMet, true);
+  assert.equal(readyEval.canUnlockNow, true);
 
+  // 3. Verify Body Upgrade Cost & Stat Scaling (Lv.1 -> Lv.5 -> Lv.10)
+  const clownForm = getSharkFormById('shark_00_clown_fry');
+  const costLv1 = getSharkUpgradeCost(clownForm, 1);
+  const costLv5 = getSharkUpgradeCost(clownForm, 5);
+  assert.ok(costLv5 > costLv1, 'Body upgrade cost must scale progressively with level');
 
+  const statsLv1 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false, 1.0, 1);
+  const statsLv5 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 5, false, 1.0, 1);
+  const statsLv10 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 10, false, 1.0, 1);
+
+  assert.ok(statsLv5.maxHp > statsLv1.maxHp, 'Body upgrade Lv.5 increases Max HP');
+  assert.ok(statsLv10.moveSpeed > statsLv5.moveSpeed, 'Body upgrade Lv.10 increases Swim Speed');
+  assert.equal(statsLv5.biteTier, statsLv1.biteTier + 1, 'Body upgrade Lv.5 grants +1 Bite Tier breakthrough');
+  assert.equal(statsLv10.biteTier, statsLv1.biteTier + 2, 'Body upgrade Lv.10 grants +2 total Bite Tier breakthrough');
+
+  // 4. Verify Tier VI Cosmic Apex Form (#47 Omega Devourer) has canEatMines and massive stats while keeping relativePreyScale shrinking
+  const omegaStats = computeEvolvedSharkStats(8, 'shark_47_omega_devourer', 10, false, 1.0, 48);
+  assert.equal(omegaStats.canEatMines, true);
+  assert.equal(omegaStats.biteTier, 8);
+  assert.ok(omegaStats.maxHp > 1500, 'Tier VI Omega Devourer at Lv.10 has massive HP pool');
+  assert.ok(omegaStats.scale <= 1.28, 'Shark screen size stays bounded <= 1.28 so vision is never blocked');
+  assert.ok(omegaStats.relativePreyScale < statsLv1.relativePreyScale, 'Higher generation + in-run level shrinks surrounding prey');
+
+  // Verify canEatMines allows devouring Naval Mines even outside of Gold Frenzy!
+  const tier6Mine = GAME_CONFIG.preyTiers[5];
+  const omegaMineOutcome = resolvePreyEncounter(omegaStats, tier6Mine, false, false, 'NONE', 1.0);
+  assert.equal(omegaMineOutcome.canDevour, true, 'Shark with canEatMines (Tier V+ Mecha/Omega) devours naval mines safely');
+
+  // 5. Verify Global Atlas Collection Bonus scales with unlocked count
+  const bonus1 = getGlobalAtlasBonuses(save);
+  const fullSave = createDefaultMetaSave();
+  fullSave.unlockedSharkIds = SHARK_EVOLUTION_FORMS.map((f) => f.id);
+  const bonus48 = getGlobalAtlasBonuses(fullSave);
+  assert.ok(bonus48.hpMultiplier > bonus1.hpMultiplier);
+  assert.ok(bonus48.rewardMultiplier > bonus1.rewardMultiplier);
+});
+
+test('Visual Size vs. Devourability Contract: every fish smaller than the player shark is directly swallowed, and every fish equal/larger deals damage', () => {
+  const sharkFormsToTest = [
+    { id: 'shark_00_clown_fry', inRunLv: 1, upgLv: 1, frenzy: false },
+    { id: 'shark_05_mako_spear', inRunLv: 3, upgLv: 5, frenzy: false },
+    { id: 'shark_16_basking_filter', inRunLv: 5, upgLv: 6, frenzy: false },
+    { id: 'shark_25_bio_venom', inRunLv: 7, upgLv: 8, frenzy: false },
+    { id: 'shark_47_omega_devourer', inRunLv: 10, upgLv: 10, frenzy: false },
+    { id: 'shark_00_clown_fry', inRunLv: 1, upgLv: 1, frenzy: true },
+  ];
+
+  const variants = ['NONE', 'GOLDEN_MUTANT', 'ABYSS_BEHEMOTH'] as const;
+
+  for (const cfg of sharkFormsToTest) {
+    const sharkStats = computeEvolvedSharkStats(
+      cfg.inRunLv,
+      cfg.id,
+      cfg.upgLv,
+      cfg.frenzy,
+      1.0,
+      10
+    );
+    const sharkDrawSize = 96 * sharkStats.scale;
+
+    for (const prey of GAME_CONFIG.preyTiers) {
+      for (const variant of variants) {
+        const visualScale = getPreyRelativeVisualScale(
+          prey,
+          sharkStats,
+          variant,
+          cfg.frenzy
+        );
+        const preyDrawSize = prey.radius * visualScale * 2.25;
+        // Test non-boosting direct contact!
+        const outcome = resolvePreyEncounter(
+          sharkStats,
+          prey,
+          cfg.frenzy,
+          false,
+          variant,
+          1.0
+        );
+
+        if (preyDrawSize < sharkDrawSize) {
+          assert.equal(
+            outcome.canDevour,
+            true,
+            `Prey ${prey.id} (${variant}) with drawSize=${preyDrawSize.toFixed(1)} < sharkDrawSize=${sharkDrawSize.toFixed(1)} MUST be directly devourable without boosting!`
+          );
+          assert.ok(
+            preyDrawSize <= sharkDrawSize * 0.66,
+            `Edible prey ${prey.id} drawSize=${preyDrawSize.toFixed(1)} must be unmistakably smaller (<=66%) than sharkDrawSize=${sharkDrawSize.toFixed(1)}`
+          );
+        } else {
+          assert.equal(
+            outcome.canDevour,
+            false,
+            `Prey ${prey.id} (${variant}) with drawSize=${preyDrawSize.toFixed(1)} >= sharkDrawSize=${sharkDrawSize.toFixed(1)} MUST deal damage on contact!`
+          );
+          assert.ok(
+            outcome.hpDelta < 0,
+            `Dangerous prey ${prey.id} must reduce shark HP on contact`
+          );
+          assert.ok(
+            preyDrawSize >= sharkDrawSize * 1.15,
+            `Dangerous prey ${prey.id} drawSize=${preyDrawSize.toFixed(1)} must be visibly larger (>=115%) than sharkDrawSize=${sharkDrawSize.toFixed(1)}`
+          );
+        }
+      }
+    }
+  }
+});

@@ -7,6 +7,7 @@ import {
   PreyTierConfig,
 } from './config';
 import type { PreyMutationVariant } from './infiniteProgressionManager';
+import { getSharkFormById } from './sharkEvolutionConfig';
 
 export type EquippedOrgansMap = Partial<Record<OrganSlotId, OrganConfig>>;
 export type OrganStarsMap = Partial<Record<OrganSlotId, number>>;
@@ -28,6 +29,11 @@ export interface ComputedSharkStats {
   devourHealMultiplier: number;
   frenzyDurationBonus: number;
   totalOrganStars: number;
+  sharkFormId?: string;
+  upgradeLevel?: number;
+  scoreMultiplier?: number;
+  rewardMultiplier?: number;
+  canEatMines?: boolean;
 }
 
 export function getXpRequiredForLevel(level: number): number {
@@ -50,35 +56,71 @@ export function getOrganRerollCost(rerollCount: number): number {
   return 8 + Math.max(0, rerollCount) * 4;
 }
 
+export const SHARK_BASE_DRAW_SIZE = 96;
+export const PREY_RADIUS_TO_DRAW_SIZE = 2.25;
+export const SHARK_EQUIVALENT_RADIUS =
+  SHARK_BASE_DRAW_SIZE / PREY_RADIUS_TO_DRAW_SIZE; // 42.6667
+
 export function getEffectivePreyTier(
   prey: PreyTierConfig,
   mutationVariant: PreyMutationVariant = 'NONE'
 ): number {
   if (mutationVariant === 'ABYSS_BEHEMOTH') {
-    return prey.tier + 1;
+    return Math.min(8, prey.tier + 1);
   }
   return prey.tier;
 }
 
 /**
- * Computes the visual & hitbox scale of a prey entity relative to the shark's current growth.
- * Instead of letting the shark balloon and block the screen, other fish shrink progressively
- * as the shark levels up—and outclassed lower-tier fish shrink even further into bite-sized minnows.
+ * Computes the visual & hitbox scale of a prey entity relative to the shark's current on-screen size.
+ * Core visual-gameplay contract:
+ * 1. Any prey that can be directly swallowed (`canDevourDirectly === true`) is rendered STRICTLY SMALLER
+ *    than the player's shark on screen (`preyDrawSize <= 0.64 * sharkDrawSize`), and shrinks progressively
+ *    as the shark's biteTier and in-run level (`relativePreyScale`) increase.
+ * 2. Any prey/hazard that deals damage on contact (`canDevourDirectly === false`) is rendered EQUAL TO OR
+ *    LARGER than the player's shark on screen (`preyDrawSize >= 1.18 * sharkDrawSize`), scaling up with tier gap.
  */
 export function getPreyRelativeVisualScale(
   prey: PreyTierConfig,
-  sharkStats: Pick<ComputedSharkStats, 'biteTier' | 'relativePreyScale'>,
-  mutationVariant: PreyMutationVariant = 'NONE'
+  sharkStats: Pick<ComputedSharkStats, 'biteTier' | 'relativePreyScale'> &
+    Partial<Pick<ComputedSharkStats, 'scale' | 'canEatMines'>>,
+  mutationVariant: PreyMutationVariant = 'NONE',
+  frenzyActive: boolean = false
 ): number {
+  const sharkScale = sharkStats.scale ?? 1.0;
   const baseRel = sharkStats.relativePreyScale ?? 1.0;
-  const tierDiff = Math.max(0, sharkStats.biteTier - prey.tier);
-  const outclassedShrink = prey.isHazard
-    ? 1.0
-    : Math.max(0.72, 1.0 - tierDiff * 0.06);
-  const behemothBoost = mutationVariant === 'ABYSS_BEHEMOTH' ? 1.24 : 1.0;
-  return Number(
-    Math.max(0.34, Math.min(1.35, baseRel * outclassedShrink * behemothBoost)).toFixed(3)
+  const effectiveTier = getEffectivePreyTier(prey, mutationVariant);
+  const effectiveBiteTier = frenzyActive ? 8 : sharkStats.biteTier;
+
+  const canDevourDirectly = prey.isHazard
+    ? frenzyActive || Boolean(sharkStats.canEatMines)
+    : frenzyActive || effectiveBiteTier >= effectiveTier;
+
+  // Scale factor at which `prey.radius * visualScale * 2.25 === 96 * sharkScale` (exact 1:1 visual parity with player shark)
+  const sharkParityScale =
+    (SHARK_EQUIVALENT_RADIUS * sharkScale) / Math.max(1, prey.radius);
+
+  if (canDevourDirectly) {
+    // Edible fish: strictly smaller than the player's shark (<= 64% of shark's linear size)
+    const tierDiff = Math.max(0, effectiveBiteTier - effectiveTier);
+    const tierRatio = Math.max(0.18, 0.64 * Math.pow(0.79, tierDiff));
+    const levelShrink = 0.64 + 0.36 * baseRel;
+    const targetSharkRatio = Math.max(
+      0.16,
+      Math.min(0.64, tierRatio * levelShrink)
+    );
+    return Number((sharkParityScale * targetSharkRatio).toFixed(3));
+  }
+
+  // Inedible / dangerous fish: strictly equal to or larger than the player's shark (>= 118% of shark's linear size)
+  const overTier = Math.max(1, effectiveTier - effectiveBiteTier);
+  const behemothExtra = mutationVariant === 'ABYSS_BEHEMOTH' ? 0.12 : 0;
+  const bossExtra = prey.isBoss ? 0.14 : 0;
+  const targetDangerRatio = Math.min(
+    1.95,
+    1.18 + (overTier - 1) * 0.17 + behemothExtra + bossExtra
   );
+  return Number((sharkParityScale * targetDangerRatio).toFixed(3));
 }
 
 export function computeSharkStats(
@@ -211,6 +253,159 @@ export function computeSharkStats(
   };
 }
 
+/**
+ * Computes stats for the 48-Form Shark Evolution System (combining Shark Form Generation,
+ * Persistent Coin Upgrade Level 1..10, In-Run Level, and Global Atlas Collection Bonuses).
+ */
+export function computeEvolvedSharkStats(
+  inRunLevel: number,
+  sharkFormId: string,
+  upgradeLevel: number = 1,
+  frenzyActive: boolean = false,
+  globalDifficultyMultiplier: number = 1.0,
+  unlockedCount: number = 1
+): ComputedSharkStats {
+  const form = getSharkFormById(sharkFormId);
+  const upLv = Math.max(1, Math.min(10, upgradeLevel));
+  const extraUnlocked = Math.max(0, unlockedCount - 1);
+
+  // Global Atlas collection bonuses
+  const collectionHpMult = 1 + extraUnlocked * 0.02;
+  const collectionSpeedBonus = extraUnlocked * 0.008;
+  const collectionRewardMult = 1 + extraUnlocked * 0.025;
+
+  // Upgrade level (1..10) bonuses on the current shark form
+  const upgradeHpMult = 1 + (upLv - 1) * 0.08;
+  const upgradeSpeedBonus = (upLv - 1) * 0.022;
+  const upgradeDrainRed = (upLv - 1) * 0.015;
+  const upgradeBoostRed = (upLv - 1) * 0.018;
+  const upgradeBiteBonus = upLv >= 10 ? 2 : upLv >= 5 ? 1 : 0;
+
+  // In-run level Bite Tier growth (capped by generation ceiling so evolving to higher generations unlocks higher prey tiers!)
+  const inRunBiteBonus =
+    form.index === 0 && inRunLevel >= 2
+      ? 1 + Math.floor((inRunLevel - 2) / 3)
+      : Math.floor((inRunLevel - 1) / 3);
+  const genMaxBiteTier = Math.min(8, form.baseBiteTier + 2);
+  const rawBiteTier = Math.min(
+    genMaxBiteTier,
+    form.baseBiteTier + upgradeBiteBonus + inRunBiteBonus
+  );
+  const biteTier = frenzyActive ? 8 : Math.min(8, rawBiteTier);
+
+  // Non-obstructive shark scale (1.0 -> 1.28) + progressive relative prey shrinking (1.0 -> 0.40)
+  const scale = Number(
+    Math.min(
+      1.28,
+      1.0 + (inRunLevel - 1) * 0.028 + form.row * 0.025 + (upLv - 1) * 0.006
+    ).toFixed(3)
+  );
+  const growthIndex =
+    (inRunLevel - 1) * 0.12 + form.row * 0.14 + (upLv - 1) * 0.02;
+  const relativePreyScale = Number(
+    Math.max(0.4, 1.0 / (1 + growthIndex)).toFixed(3)
+  );
+  const cameraZoom = Number(
+    Math.max(0.88, 1.0 / (1 + (scale - 1) * 0.42)).toFixed(3)
+  );
+
+  const hpDrainReduction = Math.min(
+    0.58,
+    form.hpDrainReduction + upgradeDrainRed
+  );
+  const boostCostReduction = Math.min(
+    0.68,
+    form.boostCostReduction + upgradeBoostRed
+  );
+
+  const totalSpeedBonus =
+    form.speedBonus + upgradeSpeedBonus + collectionSpeedBonus + (inRunLevel - 1) * 0.028;
+  const baseSpeed = GAME_CONFIG.world.baseSharkSpeed * (1 + totalSpeedBonus);
+  const moveSpeed = Math.round(frenzyActive ? baseSpeed * 1.35 : baseSpeed);
+  const boostSpeed = Math.round(
+    moveSpeed * GAME_CONFIG.world.boostSpeedMultiplier
+  );
+
+  const metabolicBaseDrain =
+    (GAME_CONFIG.world.baseHpDrainPerSec + (inRunLevel - 1) * 0.65) *
+    (1 + Math.max(0, globalDifficultyMultiplier - 1.0) * 0.52);
+  const hpDrainPerSec = frenzyActive
+    ? 0
+    : Number((metabolicBaseDrain * (1 - hpDrainReduction)).toFixed(2));
+
+  const boostDrainPerSec = frenzyActive
+    ? 0
+    : Number(
+        (
+          GAME_CONFIG.world.baseBoostDrainPerSec *
+          (1 - boostCostReduction)
+        ).toFixed(2)
+      );
+
+  const magnetRadius = Math.round(
+    (GAME_CONFIG.world.baseMagnetRadius +
+      form.magnetBonus +
+      (upLv - 1) * 8 +
+      (inRunLevel - 1) * 10) *
+      (frenzyActive ? 1.35 : 1.0)
+  );
+
+  const maxHp = Math.round(
+    (form.baseHp + (inRunLevel - 1) * 16) * upgradeHpMult * collectionHpMult
+  );
+  const maxEnergy = Math.round(
+    form.baseEnergy + (upLv - 1) * 5 + (inRunLevel - 1) * 4
+  );
+
+  const activeSynergy: FactionId | null =
+    form.lineage === 'CYBER_MECHA'
+      ? 'MECHA'
+      : form.lineage === 'ELDER_ABYSS'
+      ? 'ABYSS'
+      : form.lineage === 'ELEMENTAL_CORE'
+      ? 'MAGMA'
+      : null;
+
+  const frenzyDurationBonus =
+    form.id === 'shark_43_solar_supernova'
+      ? 4.0
+      : form.id === 'shark_33_hellfire_behemoth'
+      ? 2.5
+      : form.lineage === 'ELEMENTAL_CORE'
+      ? 1.0 + form.row * 0.3
+      : 0;
+
+  // Bio-Radioactive Venom Shark (#25) and Generation VI Cosmic Elder Gods can crunch mines directly
+  const canEatMines =
+    form.id === 'shark_25_bio_venom' || form.generation >= 6;
+
+  return {
+    level: inRunLevel,
+    scale,
+    relativePreyScale,
+    cameraZoom,
+    maxHp,
+    maxEnergy,
+    moveSpeed,
+    boostSpeed,
+    biteTier,
+    hpDrainPerSec,
+    boostDrainPerSec,
+    magnetRadius,
+    activeSynergy,
+    devourHealMultiplier: form.devourHealMult,
+    frenzyDurationBonus,
+    totalOrganStars: upLv,
+    sharkFormId: form.id,
+    upgradeLevel: upLv,
+    scoreMultiplier: form.scoreMult,
+    rewardMultiplier: Number(
+      (collectionRewardMult * (1 + form.row * 0.12)).toFixed(2)
+    ),
+    canEatMines,
+  };
+}
+
 export interface EncounterOutcome {
   canDevour: boolean;
   hpDelta: number;
@@ -233,15 +428,19 @@ export function resolvePreyEncounter(
 ): EncounterOutcome {
   const effectiveTier = getEffectivePreyTier(prey, mutationVariant);
 
-  // T7+ Abyss Behemoths and T8 Bosses have reinforced armor: outside of Frenzy, the shark must both meet the tier requirement AND actively Boost to crunch through!
+  // In 48-Shark Evolution mode (sharkFormId defined), any fish smaller than the shark (effectiveTier <= biteTier) is directly devourable on contact.
+  // Legacy organ mode (!sharkFormId) retains the boost armor-break requirement for unit test compatibility.
   const requiresBoostArmorBreak =
-    (mutationVariant === 'ABYSS_BEHEMOTH' && prey.tier >= 7) || Boolean(prey.isBoss);
+    !sharkStats.sharkFormId &&
+    ((mutationVariant === 'ABYSS_BEHEMOTH' && prey.tier >= 7) || Boolean(prey.isBoss));
   const predatorGate = requiresBoostArmorBreak
     ? frenzyActive || (sharkStats.biteTier >= Math.min(8, effectiveTier) && isBoosting)
     : sharkStats.biteTier >= effectiveTier;
 
-  // Deep-sea hazards (Naval Mines, Toxic Slime, Plasma Core) ALWAYS explode on contact unless Gold Frenzy is active!
-  const canDevour = prey.isHazard ? frenzyActive : frenzyActive || predatorGate;
+  // Deep-sea hazards (Naval Mines, Toxic Slime, Plasma Core) ALWAYS explode on contact unless Gold Frenzy is active or shark has Bio-Venom / Elder God Mine Immunity!
+  const canDevour = prey.isHazard
+    ? frenzyActive || Boolean(sharkStats.canEatMines)
+    : frenzyActive || predatorGate;
 
   if (canDevour) {
     const isCrit =

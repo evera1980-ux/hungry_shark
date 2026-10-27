@@ -9,27 +9,33 @@ import { detectDefaultLang, Lang, translate } from './game/i18n';
 import {
   FactionId,
   GAME_CONFIG,
-  OrganConfig,
-  OrganSlotId,
   PreyTierConfig,
 } from './game/config';
 import {
   addEvolutionProgress,
   ComputedSharkStats,
-  computeSharkStats,
-  EquippedOrgansMap,
+  computeEvolvedSharkStats,
   getDepthZone,
   getEffectivePreyTier,
   getGeneSurgeCost,
   getGoldOverdriveCost,
-  getMaxMechaLoadout,
-  getOrganRerollCost,
   getPreyRelativeVisualScale,
   getXpRequiredForLevel,
-  OrganStarsMap,
-  pickEvolutionChoices,
   resolvePreyEncounter,
 } from './game/rules';
+import {
+  evaluateSharkUnlock,
+  GENERATION_NAMES,
+  getGlobalAtlasBonuses,
+  getNextEvolutionTarget,
+  getSharkFormById,
+  getSharkUpgradeCost,
+  LINEAGE_META,
+  loadSharkMetaSave,
+  saveSharkMetaSave,
+  SHARK_EVOLUTION_FORMS,
+  SharkMetaSaveData,
+} from './game/sharkEvolutionConfig';
 import { soundFX } from './game/audio';
 import { adManager, AdPlacement } from './game/adManager';
 import {
@@ -38,7 +44,8 @@ import {
   drawSharkWithOrgans,
   PreyEntity,
 } from './game/canvasRenderer';
-import { OrganCanvasPreview } from './components/OrganCanvasPreview';
+import { SharkEvolutionAtlasModal } from './components/SharkEvolutionAtlasModal';
+import { SharkFormCanvasPreview } from './components/SharkFormCanvasPreview';
 import { downloadStandaloneSingleFileHtml } from './game/singleFileExporter';
 import { spriteSheetManager } from './game/spriteSheetManager';
 import { parallaxBackground } from './game/parallaxBackground';
@@ -99,17 +106,16 @@ interface RunSummarySnapshot {
   maxDepth: number;
   preyEaten: number;
   level: number;
-  coins: number;
-  genes: number;
-  organsCount: number;
+  coinsEarned: number;
+  genesEarned: number;
+  unlockedFormsCount: number;
+  activeSharkId: string;
 }
 
 const MAX_PARTICLES = 220;
 const MAX_PICKUPS = 65;
 const MAX_FLOAT_TEXTS = 36;
 const TARGET_PREY_COUNT = 54;
-
-const ALL_SLOTS: OrganSlotId[] = ['JAWS', 'DORSAL', 'TAIL', 'ARMOR', 'AURA'];
 
 export default function App() {
   const [lang, setLang] = useState<Lang>(() => detectDefaultLang());
@@ -134,15 +140,17 @@ export default function App() {
   });
   const gameStateRef = useRef<GameState>(gameState);
 
-  // Sub-modals inside gameplay / gameover
-  const [evoChoices, setEvoChoices] = useState<OrganConfig[] | null>(null);
-  const evoChoicesRef = useRef<OrganConfig[] | null>(null);
-  evoChoicesRef.current = evoChoices;
+  // Persistent Cross-Run Shark Evolution & Upgrade Save Data
+  const [metaSave, setMetaSave] = useState<SharkMetaSaveData>(() =>
+    loadSharkMetaSave()
+  );
+  const metaSaveRef = useRef<SharkMetaSaveData>(metaSave);
+  metaSaveRef.current = metaSave;
 
-  // Non-interrupting Evolution Queue & Auto-Evolve toggle
-  const [autoEvolve, setAutoEvolve] = useState<boolean>(false);
-  const autoEvolveRef = useRef<boolean>(false);
-  autoEvolveRef.current = autoEvolve;
+  // 48-Shark Evolution Atlas Modal visibility
+  const [showAtlasModal, setShowAtlasModal] = useState<boolean>(false);
+  const showAtlasModalRef = useRef<boolean>(false);
+  showAtlasModalRef.current = showAtlasModal;
 
   const [reviveOffered, setReviveOffered] = useState<boolean>(true);
   const [runSnapshot, setRunSnapshot] = useState<RunSummarySnapshot>({
@@ -150,9 +158,10 @@ export default function App() {
     maxDepth: 120,
     preyEaten: 0,
     level: 1,
-    coins: 0,
-    genes: 0,
-    organsCount: 0,
+    coinsEarned: 0,
+    genesEarned: 0,
+    unlockedFormsCount: 1,
+    activeSharkId: 'shark_00_clown_fry',
   });
 
   // Simulated Rewarded Ad Overlay state
@@ -164,51 +173,69 @@ export default function App() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
 
   // Discrete HUD state (throttled updates so React never reconciles at 60Hz unnecessarily)
-  const [hudState, setHudState] = useState({
-    hp: 100,
-    maxHp: 100,
-    energy: 100,
-    maxEnergy: 100,
-    level: 1,
-    xp: 0,
-    xpToNext: getXpRequiredForLevel(1),
-    score: 0,
-    genes: 0,
-    coins: 0,
-    depth: 120,
-    zoneKey: 'zone_shallow',
-    biteTier: 2,
-    frenzyTimer: 0,
-    trialActive: false,
-    targetFishNameKey: 'prey_blue_tang_name',
-    targetFishProgress: 0,
-    targetFishRequired: 2,
-    activeSynergy: null as FactionId | null,
-    goldOverdriveCost: getGoldOverdriveCost(0),
-    geneSurgeCost: getGeneSurgeCost(1, 0),
-    rerollCost: getOrganRerollCost(0),
-    pendingEvoCount: 0,
-    comboCount: 0,
-    comboMultiplier: 1.0,
-    goldenMutantCharge: 0,
-    goldenMutantRequired: 8,
-    frenzyCooldown: 12,
+  const [hudState, setHudState] = useState(() => {
+    const initialSave = loadSharkMetaSave();
+    const activeForm = getSharkFormById(initialSave.selectedSharkId);
+    const activeUpg = initialSave.sharkUpgradeLevels[activeForm.id] ?? 1;
+    const nextEvo = getNextEvolutionTarget(activeForm.id, initialSave);
+    const nextEval = nextEvo
+      ? evaluateSharkUnlock(
+          nextEvo,
+          initialSave,
+          0,
+          0,
+          initialSave.bestInRunLevel,
+          initialSave.bestDepthReached
+        )
+      : null;
+    const upgCost = getSharkUpgradeCost(activeForm, activeUpg);
+    return {
+      hp: 100,
+      maxHp: 100,
+      energy: 100,
+      maxEnergy: 100,
+      level: 1,
+      xp: 0,
+      xpToNext: getXpRequiredForLevel(1),
+      score: 0,
+      genes: initialSave.bankedGenes,
+      coins: initialSave.bankedCoins,
+      depth: 120,
+      zoneKey: 'zone_shallow',
+      biteTier: activeForm.baseBiteTier,
+      frenzyTimer: 0,
+      trialActive: false,
+      targetFishNameKey: 'prey_blue_tang_name',
+      targetFishProgress: 0,
+      targetFishRequired: 2,
+      activeSynergy: null as FactionId | null,
+      goldOverdriveCost: getGoldOverdriveCost(0),
+      geneSurgeCost: getGeneSurgeCost(1, 0),
+      comboCount: 0,
+      comboMultiplier: 1.0,
+      goldenMutantCharge: 0,
+      goldenMutantRequired: 8,
+      frenzyCooldown: 12,
+      activeSharkId: activeForm.id,
+      activeUpgradeLevel: activeUpg,
+      unlockedFormsCount: initialSave.unlockedSharkIds.length,
+      nextEvoTargetId: nextEvo?.id ?? null,
+      canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
+      canUpgradeBodyNow: activeUpg < 10 && initialSave.bankedCoins >= upgCost,
+      bodyUpgradeCost: upgCost,
+    };
   });
-
-  const [equippedOrgans, setEquippedOrgans] = useState<EquippedOrgansMap>({});
-  const equippedRef = useRef<EquippedOrgansMap>({});
-
-  const [organStars, setOrganStars] = useState<OrganStarsMap>({});
-  const organStarsRef = useRef<OrganStarsMap>({});
 
   const economyUsesRef = useRef<{
     goldOverdriveCount: number;
     geneSurgeCount: number;
-    rerollCount: number;
+    runStartCoins: number;
+    runStartGenes: number;
   }>({
     goldOverdriveCount: 0,
     geneSurgeCount: 0,
-    rerollCount: 0,
+    runStartCoins: 0,
+    runStartGenes: 0,
   });
 
   // DOM refs for smooth 60fps bar transforms without React re-renders
@@ -253,11 +280,12 @@ export default function App() {
       invulnerableTimer: number;
       cameraShakeTrauma: number;
       trialActive: boolean;
-      pendingEvoCount: number;
       comboCount: number;
       comboTimer: number;
       reachedTwilight: boolean;
       reachedAbyss: boolean;
+      sharkFormId: string;
+      morphFlashTimer: number;
       stats: ComputedSharkStats;
     };
     camera: {
@@ -308,8 +336,8 @@ export default function App() {
       level: 1,
       xp: 0,
       score: 0,
-      genes: 0,
-      coins: 0,
+      genes: metaSave.bankedGenes,
+      coins: metaSave.bankedCoins,
       maxDepthReached: 220,
       preyEatenCount: 0,
       frenzyTimer: 0,
@@ -318,12 +346,20 @@ export default function App() {
       invulnerableTimer: 0,
       cameraShakeTrauma: 0,
       trialActive: false,
-      pendingEvoCount: 0,
       comboCount: 0,
       comboTimer: 0,
       reachedTwilight: false,
       reachedAbyss: false,
-      stats: computeSharkStats(1, {}, false),
+      sharkFormId: metaSave.selectedSharkId,
+      morphFlashTimer: 0,
+      stats: computeEvolvedSharkStats(
+        1,
+        metaSave.selectedSharkId,
+        metaSave.sharkUpgradeLevels[metaSave.selectedSharkId] ?? 1,
+        false,
+        1.0,
+        metaSave.unlockedSharkIds.length
+      ),
     },
     camera: {
       x: 0,
@@ -405,7 +441,8 @@ export default function App() {
   useEffect(() => {
     spriteSheetManager.load(
       '/assets/aistudio/fish_24bdaa5a.png',
-      '/assets/aistudio/fish2_fc857cfa.png'
+      '/assets/aistudio/fish2_fc857cfa.png',
+      '/assets/aistudio/sharks_ec921c3b.png'
     );
     parallaxBackground.load('/assets/aistudio/ocean_bg_a7a0ef52.png');
     adManager.registerBrowserSimulator((placement, onReward, onCancel) => {
@@ -518,7 +555,7 @@ export default function App() {
   // Pick an edible Target Fish species strictly native to the current ocean depth zone
   const rollTargetBountyConfig = useCallback(
     (maxBiteTier: number, currentDepth: number, excludeId?: string): PreyTierConfig => {
-      const effectiveMaxTier = currentDepth > 500 ? Math.max(3, maxBiteTier) : Math.max(2, maxBiteTier);
+      const effectiveMaxTier = currentDepth > 500 ? Math.max(3, maxBiteTier) : Math.max(1, maxBiteTier);
       const edible = GAME_CONFIG.preyTiers.filter(
         (p) =>
           p.tier <= effectiveMaxTier &&
@@ -609,32 +646,63 @@ export default function App() {
     []
   );
 
+  // Helper to recompute shark stats from current form, upgrade level, and unlocked atlas collection count
+  const recomputeSharkStats = useCallback(
+    (
+      inRunLevel: number,
+      frenzyActive: boolean,
+      sharkFormIdOverride?: string,
+      saveOverride?: SharkMetaSaveData
+    ): ComputedSharkStats => {
+      const save = saveOverride ?? metaSaveRef.current;
+      const formId =
+        sharkFormIdOverride ??
+        simRef.current.shark.sharkFormId ??
+        save.selectedSharkId;
+      const upgLevel = simRef.current.shark.trialActive
+        ? 10
+        : save.sharkUpgradeLevels[formId] ?? 1;
+      const unlockedCount = save.unlockedSharkIds.length;
+      return computeEvolvedSharkStats(
+        inRunLevel,
+        formId,
+        upgLevel,
+        frenzyActive,
+        infiniteProgressionManager.globalDifficultyMultiplier,
+        unlockedCount
+      );
+    },
+    []
+  );
+
   // Initialize or reset a run
   const startNewRun = useCallback(
     (withMaxMechaTrial: boolean = false) => {
       const sim = simRef.current;
-      const initialOrgans = withMaxMechaTrial ? getMaxMechaLoadout() : {};
-      const initialStars: OrganStarsMap = withMaxMechaTrial
-        ? { JAWS: 1, DORSAL: 1, TAIL: 1, ARMOR: 1, AURA: 1 }
-        : {};
-      equippedRef.current = initialOrgans;
-      organStarsRef.current = initialStars;
-      setEquippedOrgans({ ...initialOrgans });
-      setOrganStars({ ...initialStars });
+      const save = metaSaveRef.current;
+      const chosenSharkId = withMaxMechaTrial
+        ? 'shark_45_mecha_leviathan'
+        : save.selectedSharkId;
+      const chosenUpgLevel = withMaxMechaTrial
+        ? 10
+        : save.sharkUpgradeLevels[chosenSharkId] ?? 1;
+      const unlockedCount = save.unlockedSharkIds.length;
 
       economyUsesRef.current = {
         goldOverdriveCount: 0,
         geneSurgeCount: 0,
-        rerollCount: 0,
+        runStartCoins: save.bankedCoins,
+        runStartGenes: save.bankedGenes,
       };
 
-      const initialLevel = withMaxMechaTrial ? 3 : 1;
-      const stats = computeSharkStats(
+      const initialLevel = withMaxMechaTrial ? 5 : 1;
+      const stats = computeEvolvedSharkStats(
         initialLevel,
-        initialOrgans,
-        false,
-        initialStars,
-        1.0
+        chosenSharkId,
+        chosenUpgLevel,
+        withMaxMechaTrial,
+        1.0,
+        unlockedCount
       );
 
       sim.shark = {
@@ -652,21 +720,22 @@ export default function App() {
         level: initialLevel,
         xp: 0,
         score: 0,
-        genes: 0,
-        coins: 0,
+        genes: save.bankedGenes,
+        coins: save.bankedCoins,
         maxDepthReached: 220,
         preyEatenCount: 0,
-        frenzyTimer: withMaxMechaTrial ? 4.0 : 0,
+        frenzyTimer: withMaxMechaTrial ? 4.5 : 0,
         hitFlashTimer: 0,
         hitstopTimer: 0,
-        invulnerableTimer: 0,
+        invulnerableTimer: 1.8,
         cameraShakeTrauma: 0,
         trialActive: withMaxMechaTrial,
-        pendingEvoCount: 0,
         comboCount: 0,
         comboTimer: 0,
         reachedTwilight: false,
         reachedAbyss: false,
+        sharkFormId: chosenSharkId,
+        morphFlashTimer: withMaxMechaTrial ? 1.0 : 0.45,
         stats,
       };
 
@@ -712,7 +781,6 @@ export default function App() {
           [540, ecosystemSpawner.spawnRadius],
           0
         );
-        // Ensure the first 2 off-screen spawns are the active Target Bounty species within its natural depth habitat
         if (i < 2) {
           spawned.config = firstTargetConfig;
           spawned.y = Math.max(
@@ -721,25 +789,27 @@ export default function App() {
           );
         }
       }
-      // Guarantee 6 edible Tier 1 & Tier 2 reef fish in upper/lower shallow lanes so the player sees a lively reef immediately without auto-triggering a modal on frame 1
+      // Guarantee 6 immediately edible shallow reef fish in front of the shark so the opening hunt is lively and safe
       const starterShowcaseIds = [
         'neon_tetra_school',
         'regal_blue_tang',
+        'jellyfish_swarm',
+        'neon_tetra_school',
+        'regal_blue_tang',
         'coral_clownfish',
-        'rainbow_seahorse',
-        'striped_butterflyfish',
-        'reef_hermit_crab',
       ];
       for (let i = 0; i < 6; i++) {
-        const tierConfig =
+        const candidate =
           GAME_CONFIG.preyTiers.find((p) => p.id === starterShowcaseIds[i]) ??
-          GAME_CONFIG.preyTiers[i % 2];
+          GAME_CONFIG.preyTiers[0];
+        const tierConfig =
+          candidate.tier <= stats.biteTier ? candidate : GAME_CONFIG.preyTiers[0];
         sim.preyList.push({
           uid: sim.nextPreyUid++,
           config: tierConfig,
-          x: 260 + i * 130,
-          y: i % 2 === 0 ? 135 : 305,
-          vx: 45,
+          x: 220 + i * 115,
+          y: i % 2 === 0 ? 155 : 265,
+          vx: 42,
           vy: 0,
           angle: 0,
           phase: i,
@@ -749,7 +819,21 @@ export default function App() {
         });
       }
 
-      setEvoChoices(null);
+      const activeForm = getSharkFormById(chosenSharkId);
+      const nextEvo = getNextEvolutionTarget(chosenSharkId, save);
+      const nextEval = nextEvo
+        ? evaluateSharkUnlock(
+            nextEvo,
+            save,
+            0,
+            0,
+            Math.max(save.bestInRunLevel, initialLevel),
+            Math.max(save.bestDepthReached, 220)
+          )
+        : null;
+      const upgCost = getSharkUpgradeCost(activeForm, chosenUpgLevel);
+
+      setShowAtlasModal(false);
       setReviveOffered(true);
       setHudState({
         hp: stats.maxHp,
@@ -760,12 +844,12 @@ export default function App() {
         xp: 0,
         xpToNext: getXpRequiredForLevel(initialLevel),
         score: 0,
-        genes: 0,
-        coins: 0,
+        genes: save.bankedGenes,
+        coins: save.bankedCoins,
         depth: 220,
         zoneKey: 'zone_shallow',
         biteTier: stats.biteTier,
-        frenzyTimer: withMaxMechaTrial ? 4 : 0,
+        frenzyTimer: withMaxMechaTrial ? 4.5 : 0,
         trialActive: withMaxMechaTrial,
         targetFishNameKey: firstTargetConfig.nameKey,
         targetFishProgress: 0,
@@ -773,21 +857,32 @@ export default function App() {
         activeSynergy: stats.activeSynergy,
         goldOverdriveCost: getGoldOverdriveCost(0),
         geneSurgeCost: getGeneSurgeCost(initialLevel, 0),
-        rerollCost: getOrganRerollCost(0),
-        pendingEvoCount: 0,
         comboCount: 0,
         comboMultiplier: 1.0,
         goldenMutantCharge: 0,
         goldenMutantRequired: infiniteProgressionManager.goldenMutantRequired,
         frenzyCooldown: 12,
+        activeSharkId: chosenSharkId,
+        activeUpgradeLevel: chosenUpgLevel,
+        unlockedFormsCount: unlockedCount,
+        nextEvoTargetId: nextEvo?.id ?? null,
+        canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
+        canUpgradeBodyNow: chosenUpgLevel < 10 && save.bankedCoins >= upgCost,
+        bodyUpgradeCost: upgCost,
       });
 
       if (withMaxMechaTrial) {
         soundFX.playEvolution();
-        spawnFloatText(0, 180, 'float_trial_start', '+5 MECHA', '#38bdf8', 1.25);
+        spawnFloatText(
+          0,
+          180,
+          'float_trial_start',
+          '#46 MECHA LEVIATHAN',
+          '#38bdf8',
+          1.25
+        );
       }
 
-      // Immediately update state and blur any focused button
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
@@ -804,190 +899,207 @@ export default function App() {
     }
   }, [gameState, startNewRun]);
 
-  // Smart Auto-Evolution helper: mounts/upgrades the highest-priority organ on the fly without opening any modal!
-  const autoMountBestOrgan = useCallback(() => {
-    const sim = simRef.current;
-    const candidates = pickEvolutionChoices(equippedRef.current);
-    if (candidates.length === 0) return;
-
-    // Priority: 1. Empty JAWS slot -> 2. Any empty slot -> 3. Organ matching current dominant faction
-    const chosen =
-      candidates.find((c) => c.slot === 'JAWS' && !equippedRef.current.JAWS) ??
-      candidates.find((c) => !equippedRef.current[c.slot]) ??
-      candidates[0];
-
-    const hadSlot = Boolean(equippedRef.current[chosen.slot]);
-    const nextStar = hadSlot ? (organStarsRef.current[chosen.slot] ?? 1) + 1 : 1;
-
-    const nextEquipped: EquippedOrgansMap = {
-      ...equippedRef.current,
-      [chosen.slot]: chosen,
-    };
-    const nextStars: OrganStarsMap = {
-      ...organStarsRef.current,
-      [chosen.slot]: nextStar,
-    };
-    equippedRef.current = nextEquipped;
-    organStarsRef.current = nextStars;
-    setEquippedOrgans(nextEquipped);
-    setOrganStars(nextStars);
-
-    sim.shark.stats = computeSharkStats(
-      sim.shark.level,
-      nextEquipped,
-      sim.shark.frenzyTimer > 0,
-      nextStars,
-      infiniteProgressionManager.globalDifficultyMultiplier
-    );
-    sim.shark.hp = Math.min(sim.shark.stats.maxHp, sim.shark.hp + 20);
-    spawnFloatText(
-      sim.shark.x,
-      sim.shark.y - 38,
-      chosen.nameKey,
-      nextStar > 1 ? `⚡★${nextStar}` : '⚡+EVO',
-      chosen.primaryColor,
-      1.22
-    );
-  }, [spawnFloatText]);
-
-  // Open queued Evolution Modal at the player's convenience (via HUD button or [E] key)
-  const handleOpenPendingEvo = useCallback(() => {
-    const sim = simRef.current;
-    if (sim.shark.pendingEvoCount <= 0 || evoChoicesRef.current) return;
-    setEvoChoices(pickEvolutionChoices(equippedRef.current));
-  }, []);
-
-  // Toggle Auto-Evolve: if turning ON while pending points or modal exist, auto-mount all pending points immediately!
-  const handleToggleAutoEvolve = useCallback(() => {
-    const nextVal = !autoEvolveRef.current;
-    autoEvolveRef.current = nextVal;
-    setAutoEvolve(nextVal);
-    if (nextVal) {
+  // Upgrade any unlocked shark form's body level (Lv.1 -> Lv.10) using Coins
+  const handleUpgradeSharkForm = useCallback(
+    (sharkId: string) => {
       const sim = simRef.current;
-      const totalToApply =
-        sim.shark.pendingEvoCount + (evoChoicesRef.current && sim.shark.pendingEvoCount === 0 ? 1 : 0);
-      sim.shark.pendingEvoCount = 0;
-      setEvoChoices(null);
-      for (let i = 0; i < totalToApply; i++) {
-        autoMountBestOrgan();
+      const save = metaSaveRef.current;
+      if (!save.unlockedSharkIds.includes(sharkId)) return;
+      const curLv = save.sharkUpgradeLevels[sharkId] ?? 1;
+      if (curLv >= 10) return;
+      const form = getSharkFormById(sharkId);
+      const cost = getSharkUpgradeCost(form, curLv);
+      if (save.bankedCoins < cost) return;
+
+      const nextLv = curLv + 1;
+      const nextSave: SharkMetaSaveData = {
+        ...save,
+        bankedCoins: save.bankedCoins - cost,
+        sharkUpgradeLevels: {
+          ...save.sharkUpgradeLevels,
+          [sharkId]: nextLv,
+        },
+      };
+      metaSaveRef.current = nextSave;
+      saveSharkMetaSave(nextSave);
+      setMetaSave(nextSave);
+
+      sim.shark.coins = nextSave.bankedCoins;
+      if (sim.shark.sharkFormId === sharkId && !sim.shark.trialActive) {
+        sim.shark.stats = recomputeSharkStats(
+          sim.shark.level,
+          sim.shark.frenzyTimer > 0,
+          sharkId,
+          nextSave
+        );
+        sim.shark.hp = Math.min(
+          sim.shark.stats.maxHp,
+          sim.shark.hp + Math.round(sim.shark.stats.maxHp * 0.25)
+        );
+        sim.shark.morphFlashTimer = 0.65;
+        spawnFloatText(
+          sim.shark.x,
+          sim.shark.y - 38,
+          'float_evo_ready',
+          `${langRef.current === 'zh' ? form.nameZh : form.nameEn} Lv.${nextLv}!`,
+          LINEAGE_META[form.lineage].badgeColor,
+          1.22
+        );
       }
-      setHudState((prev) => ({ ...prev, pendingEvoCount: 0 }));
-    }
-  }, [autoMountBestOrgan]);
-
-  // Mount a single selected organ from Evolution Modal (upgrades Star Level if slot is already occupied)
-  const handleSelectSingleOrgan = useCallback(
-    (organ: OrganConfig) => {
-      const sim = simRef.current;
-      const hadSlot = Boolean(equippedRef.current[organ.slot]);
-      const nextStar = hadSlot ? (organStarsRef.current[organ.slot] ?? 1) + 1 : 1;
-
-      const nextEquipped: EquippedOrgansMap = {
-        ...equippedRef.current,
-        [organ.slot]: organ,
-      };
-      const nextStars: OrganStarsMap = {
-        ...organStarsRef.current,
-        [organ.slot]: nextStar,
-      };
-      equippedRef.current = nextEquipped;
-      organStarsRef.current = nextStars;
-      setEquippedOrgans(nextEquipped);
-      setOrganStars(nextStars);
-
-      sim.shark.pendingEvoCount = Math.max(0, sim.shark.pendingEvoCount - 1);
-      sim.shark.stats = computeSharkStats(
-        sim.shark.level,
-        nextEquipped,
-        sim.shark.frenzyTimer > 0,
-        nextStars,
-        infiniteProgressionManager.globalDifficultyMultiplier
-      );
-      sim.shark.hp = Math.min(sim.shark.stats.maxHp, sim.shark.hp + 25);
       soundFX.playEvolution();
-      spawnFloatText(
-        sim.shark.x,
-        sim.shark.y - 35,
-        organ.nameKey,
-        nextStar > 1 ? `★${nextStar} EVO!` : '+EVO',
-        organ.primaryColor,
-        1.2
-      );
-      setHudState((prev) => ({
-        ...prev,
-        pendingEvoCount: sim.shark.pendingEvoCount,
-      }));
-      if (sim.shark.pendingEvoCount > 0 && !autoEvolveRef.current) {
-        setEvoChoices(pickEvolutionChoices(nextEquipped));
-      } else {
-        setEvoChoices(null);
-      }
     },
-    [spawnFloatText]
+    [recomputeSharkStats, spawnFloatText]
   );
 
-  // Ad Placement 1: Watch Ad to Claim All 3 Evolution Organs
-  const handleClaimAllThreeOrgansAd = useCallback(() => {
-    const choices = evoChoicesRef.current;
-    if (!choices || choices.length === 0) return;
-
-    adManager.showRewardedVideoAd('EVO_CLAIM_ALL', () => {
+  // Switch active deployed shark form to an already-unlocked form
+  const handleSelectActiveSharkForm = useCallback(
+    (sharkId: string) => {
       const sim = simRef.current;
-      const nextEquipped: EquippedOrgansMap = { ...equippedRef.current };
-      const nextStars: OrganStarsMap = { ...organStarsRef.current };
-      for (const organ of choices) {
-        const hadSlot = Boolean(nextEquipped[organ.slot]);
-        nextEquipped[organ.slot] = organ;
-        nextStars[organ.slot] = hadSlot ? (nextStars[organ.slot] ?? 1) + 1 : 1;
-      }
-      equippedRef.current = nextEquipped;
-      organStarsRef.current = nextStars;
-      setEquippedOrgans(nextEquipped);
-      setOrganStars(nextStars);
+      const save = metaSaveRef.current;
+      if (!save.unlockedSharkIds.includes(sharkId)) return;
 
-      sim.shark.pendingEvoCount = Math.max(0, sim.shark.pendingEvoCount - 1);
-      sim.shark.stats = computeSharkStats(
+      const nextSave: SharkMetaSaveData = {
+        ...save,
+        selectedSharkId: sharkId,
+      };
+      metaSaveRef.current = nextSave;
+      saveSharkMetaSave(nextSave);
+      setMetaSave(nextSave);
+
+      sim.shark.trialActive = false;
+      sim.shark.sharkFormId = sharkId;
+      sim.shark.morphFlashTimer = 0.85;
+      sim.shark.stats = recomputeSharkStats(
         sim.shark.level,
-        nextEquipped,
         sim.shark.frenzyTimer > 0,
-        nextStars,
-        infiniteProgressionManager.globalDifficultyMultiplier
+        sharkId,
+        nextSave
       );
-      sim.shark.hp = sim.shark.stats.maxHp;
-      sim.shark.energy = sim.shark.stats.maxEnergy;
+      sim.shark.hp = Math.min(sim.shark.stats.maxHp, sim.shark.hp);
+      const form = getSharkFormById(sharkId);
       soundFX.playEvolution();
       spawnFloatText(
         sim.shark.x,
-        sim.shark.y - 45,
-        'float_all_three',
-        '+3 ORGANS!',
-        '#fde047',
-        1.35
+        sim.shark.y - 42,
+        'float_evo_ready',
+        `#${form.index + 1} ${langRef.current === 'zh' ? form.nameZh : form.nameEn}`,
+        LINEAGE_META[form.lineage].badgeColor,
+        1.25
       );
-      setHudState((prev) => ({
-        ...prev,
-        pendingEvoCount: sim.shark.pendingEvoCount,
-      }));
-      if (sim.shark.pendingEvoCount > 0 && !autoEvolveRef.current) {
-        setEvoChoices(pickEvolutionChoices(nextEquipped));
-      } else {
-        setEvoChoices(null);
+    },
+    [recomputeSharkStats, spawnFloatText]
+  );
+
+  // Unlock a new shark form via Triple-Gate (Parent Upgrade + Level/Depth + Coins & Genes) & immediately Morph into it!
+  const handleUnlockAndSelectSharkForm = useCallback(
+    (sharkId: string) => {
+      const sim = simRef.current;
+      const save = metaSaveRef.current;
+      const form = getSharkFormById(sharkId);
+      const evalStatus = evaluateSharkUnlock(
+        form,
+        save,
+        0,
+        0,
+        Math.max(save.bestInRunLevel, sim.shark.level),
+        Math.max(save.bestDepthReached, Math.round(sim.shark.maxDepthReached))
+      );
+      if (!evalStatus.canUnlockNow) return;
+
+      const nextUnlocked = save.unlockedSharkIds.includes(sharkId)
+        ? save.unlockedSharkIds
+        : [...save.unlockedSharkIds, sharkId];
+      const nextSave: SharkMetaSaveData = {
+        ...save,
+        bankedCoins: save.bankedCoins - form.unlockCoins,
+        bankedGenes: save.bankedGenes - form.unlockGenes,
+        selectedSharkId: sharkId,
+        unlockedSharkIds: nextUnlocked,
+        sharkUpgradeLevels: {
+          ...save.sharkUpgradeLevels,
+          [sharkId]: Math.max(1, save.sharkUpgradeLevels[sharkId] ?? 1),
+        },
+      };
+      metaSaveRef.current = nextSave;
+      saveSharkMetaSave(nextSave);
+      setMetaSave(nextSave);
+
+      sim.shark.trialActive = false;
+      sim.shark.coins = nextSave.bankedCoins;
+      sim.shark.genes = nextSave.bankedGenes;
+      sim.shark.sharkFormId = sharkId;
+      sim.shark.morphFlashTimer = 1.0;
+      sim.shark.frenzyTimer = Math.max(sim.shark.frenzyTimer, 3.2);
+      sim.shark.invulnerableTimer = Math.max(sim.shark.invulnerableTimer, 1.5);
+      sim.shark.cameraShakeTrauma = Math.max(sim.shark.cameraShakeTrauma, 0.55);
+      sim.shark.stats = recomputeSharkStats(
+        sim.shark.level,
+        true,
+        sharkId,
+        nextSave
+      );
+      sim.shark.hp = sim.shark.stats.maxHp;
+      sim.shark.ghostHp = sim.shark.stats.maxHp;
+      sim.shark.energy = sim.shark.stats.maxEnergy;
+
+      // Emit celebratory evolution burst particles
+      const lineageAccent = LINEAGE_META[form.lineage].badgeColor;
+      for (let i = 0; i < 24; i++) {
+        const ang = (i * Math.PI * 2) / 24;
+        const spd = 110 + Math.random() * 140;
+        spawnParticle(
+          sim.shark.x,
+          sim.shark.y,
+          Math.cos(ang) * spd,
+          Math.sin(ang) * spd,
+          5 + Math.random() * 5,
+          0.75,
+          i % 2 === 0 ? lineageAccent : '#fde047',
+          i % 3 === 0 ? 'DNA' : 'SPARK'
+        );
       }
-    });
-  }, [spawnFloatText]);
+
+      soundFX.playEvolution();
+      spawnFloatText(
+        sim.shark.x,
+        sim.shark.y - 48,
+        'float_evo_ready',
+        `⚡ ${langRef.current === 'zh' ? form.nameZh : form.nameEn}!`,
+        '#fde047',
+        1.38
+      );
+    },
+    [recomputeSharkStats, spawnFloatText, spawnParticle]
+  );
+
+  // In-Run 1-Click Breakthrough Morph button (if next form is ready, evolve on the spot; otherwise open Atlas)
+  const handleInRunBreakthroughOrAtlas = useCallback(() => {
+    const sim = simRef.current;
+    const save = metaSaveRef.current;
+    const nextEvo = getNextEvolutionTarget(sim.shark.sharkFormId, save);
+    if (nextEvo) {
+      const evalStatus = evaluateSharkUnlock(
+        nextEvo,
+        save,
+        0,
+        0,
+        Math.max(save.bestInRunLevel, sim.shark.level),
+        Math.max(save.bestDepthReached, Math.round(sim.shark.maxDepthReached))
+      );
+      if (evalStatus.canUnlockNow) {
+        handleUnlockAndSelectSharkForm(nextEvo.id);
+        return;
+      }
+    }
+    setShowAtlasModal(true);
+  }, [handleUnlockAndSelectSharkForm]);
 
   // Ad Placement 2: Watch Ad on Death for Full HP + 8s Gold Frenzy Magnet Revive
   const handleReviveWithFrenzyAd = useCallback(() => {
     adManager.showRewardedVideoAd('REVIVE_FRENZY', () => {
       const sim = simRef.current;
       infiniteProgressionManager.addFrenzyStack();
-      sim.shark.stats = computeSharkStats(
-        sim.shark.level,
-        equippedRef.current,
-        true,
-        organStarsRef.current,
-        infiniteProgressionManager.globalDifficultyMultiplier
-      );
+      sim.shark.stats = recomputeSharkStats(sim.shark.level, true);
       sim.shark.frenzyTimer =
         GAME_CONFIG.world.frenzyDuration + sim.shark.stats.frenzyDurationBonus;
       sim.shark.hp = sim.shark.stats.maxHp;
@@ -1007,21 +1119,20 @@ export default function App() {
       document.body.dataset.state = 'playing';
       setGameState('playing');
     });
-  }, [spawnFloatText]);
+  }, [recomputeSharkStats, spawnFloatText]);
 
-  // Ad Placement 3: Title Screen Trial Max Mecha Shark
+  // Ad Placement 3: Title Screen Trial Tier VI Cosmic Mecha Leviathan Shark
   const handleTrialMaxMechaAd = useCallback(() => {
     adManager.showRewardedVideoAd('TRIAL_MAX_MECHA', () => {
       startNewRun(true);
     });
   }, [startNewRun]);
 
-  // Ad Placement 4: Top HUD Gene Supply Drop
+  // Ad Placement 4: Top HUD Gene & Coin Supply Drop (Accelerates Shark Evolution!)
   const handleGeneSupplyDropAd = useCallback(() => {
     adManager.showRewardedVideoAd('GENE_SUPPLY_DROP', () => {
       const sim = simRef.current;
       soundFX.playEvolution();
-      // Burst of gold coins & DNA crystals around the shark + immediate 3-choice Evolution modal
       for (let i = 0; i < 14; i++) {
         const ang = (i * Math.PI * 2) / 14;
         const spd = 90 + Math.random() * 90;
@@ -1031,20 +1142,27 @@ export default function App() {
           Math.cos(ang) * spd,
           Math.sin(ang) * spd,
           i % 2 === 0 ? 'DNA_CRYSTAL' : 'COIN',
-          5
+          6
         );
       }
       spawnFloatText(
         sim.shark.x,
         sim.shark.y - 45,
         'float_supply_drop',
-        '+50 GENES',
+        '+60 🧬 · +80 🪙',
         '#4ade80',
         1.3
       );
-      sim.shark.genes += 50;
-      sim.shark.coins += 35;
-      setEvoChoices(pickEvolutionChoices(equippedRef.current));
+      const nextSave: SharkMetaSaveData = {
+        ...metaSaveRef.current,
+        bankedGenes: metaSaveRef.current.bankedGenes + 60,
+        bankedCoins: metaSaveRef.current.bankedCoins + 80,
+      };
+      metaSaveRef.current = nextSave;
+      saveSharkMetaSave(nextSave);
+      setMetaSave(nextSave);
+      sim.shark.genes = nextSave.bankedGenes;
+      sim.shark.coins = nextSave.bankedCoins;
     });
   }, [spawnFloatText, spawnPickup]);
 
@@ -1052,17 +1170,21 @@ export default function App() {
   const handleGoldOverdrive = useCallback(() => {
     const sim = simRef.current;
     const shark = sim.shark;
+    const save = metaSaveRef.current;
     const cost = getGoldOverdriveCost(economyUsesRef.current.goldOverdriveCount);
-    if (shark.coins < cost) return;
-    shark.coins -= cost;
+    if (save.bankedCoins < cost) return;
+
+    const nextSave: SharkMetaSaveData = {
+      ...save,
+      bankedCoins: save.bankedCoins - cost,
+    };
+    metaSaveRef.current = nextSave;
+    saveSharkMetaSave(nextSave);
+    setMetaSave(nextSave);
+
+    shark.coins = nextSave.bankedCoins;
     economyUsesRef.current.goldOverdriveCount += 1;
-    shark.stats = computeSharkStats(
-      shark.level,
-      equippedRef.current,
-      true,
-      organStarsRef.current,
-      infiniteProgressionManager.globalDifficultyMultiplier
-    );
+    shark.stats = recomputeSharkStats(shark.level, true, shark.sharkFormId, nextSave);
     shark.frenzyTimer = Math.max(
       shark.frenzyTimer,
       4.5 + shark.stats.frenzyDurationBonus
@@ -1089,23 +1211,33 @@ export default function App() {
         economyUsesRef.current.goldOverdriveCount
       ),
     }));
-  }, [spawnFloatText]);
+  }, [recomputeSharkStats, spawnFloatText]);
 
-  // P2-2 In-Run Economy Action 2: Spend Dynamic Gene Shards for Mutation Surge (+45% Evolution XP & instant Level-Up check)
+  // P2-2 In-Run Economy Action 2: Spend Dynamic Gene Shards for Mutation Surge (+55% Evolution XP & instant Level-Up check)
   const handleGeneSurge = useCallback(() => {
     const sim = simRef.current;
     const shark = sim.shark;
+    const save = metaSaveRef.current;
     const cost = getGeneSurgeCost(
       shark.level,
       economyUsesRef.current.geneSurgeCount
     );
-    if (shark.genes < cost) return;
-    shark.genes -= cost;
+    if (save.bankedGenes < cost) return;
+
+    const nextSave: SharkMetaSaveData = {
+      ...save,
+      bankedGenes: save.bankedGenes - cost,
+    };
+    metaSaveRef.current = nextSave;
+    saveSharkMetaSave(nextSave);
+    setMetaSave(nextSave);
+
+    shark.genes = nextSave.bankedGenes;
     economyUsesRef.current.geneSurgeCount += 1;
     const xpReq = getXpRequiredForLevel(shark.level);
-    const bonusXp = Math.ceil(xpReq * 0.45);
+    const bonusXp = Math.ceil(xpReq * 0.55);
     shark.xp += bonusXp;
-    shark.hp = Math.min(shark.stats.maxHp, shark.hp + 20);
+    shark.hp = Math.min(shark.stats.maxHp, shark.hp + 25);
     soundFX.playEvolution();
     spawnFloatText(
       shark.x,
@@ -1118,23 +1250,25 @@ export default function App() {
     if (shark.xp >= xpReq) {
       shark.xp -= xpReq;
       shark.level += 1;
-      shark.stats = computeSharkStats(
+      shark.stats = recomputeSharkStats(
         shark.level,
-        equippedRef.current,
         shark.frenzyTimer > 0,
-        organStarsRef.current,
-        infiniteProgressionManager.globalDifficultyMultiplier
+        shark.sharkFormId,
+        nextSave
       );
       shark.hp = Math.min(
         shark.stats.maxHp,
         shark.hp + Math.round(shark.stats.maxHp * 0.35)
       );
-      if (autoEvolveRef.current) {
-        autoMountBestOrgan();
-      } else {
-        shark.pendingEvoCount += 1;
-        setEvoChoices(pickEvolutionChoices(equippedRef.current));
-      }
+      shark.morphFlashTimer = Math.max(shark.morphFlashTimer, 0.45);
+      spawnFloatText(
+        shark.x,
+        shark.y - 52,
+        'float_evo_ready',
+        `LV.${shark.level}!`,
+        '#38bdf8',
+        1.25
+      );
     }
     setHudState((prev) => ({
       ...prev,
@@ -1147,25 +1281,8 @@ export default function App() {
         shark.level,
         economyUsesRef.current.geneSurgeCount
       ),
-      pendingEvoCount: shark.pendingEvoCount,
     }));
-  }, [autoMountBestOrgan, spawnFloatText]);
-
-  // P2-2 In-Run Economy Action 3: Spend Dynamic Gene Shards inside Evolution Modal to Reroll 3 Organ Choices
-  const handleRerollOrgans = useCallback(() => {
-    const sim = simRef.current;
-    const cost = getOrganRerollCost(economyUsesRef.current.rerollCount);
-    if (sim.shark.genes < cost) return;
-    sim.shark.genes -= cost;
-    economyUsesRef.current.rerollCount += 1;
-    soundFX.playCoin();
-    setEvoChoices(pickEvolutionChoices(equippedRef.current));
-    setHudState((prev) => ({
-      ...prev,
-      genes: sim.shark.genes,
-      rerollCost: getOrganRerollCost(economyUsesRef.current.rerollCount),
-    }));
-  }, []);
+  }, [recomputeSharkStats, spawnFloatText]);
 
   // Keyboard Listeners (WASD / Arrows / Space / E / P / M / Enter)
   useEffect(() => {
@@ -1173,28 +1290,37 @@ export default function App() {
       // If simulated ad is open, ignore game keys
       if (simAdRef.current?.active) return;
 
+      if (e.code === 'Escape' && showAtlasModalRef.current) {
+        e.preventDefault();
+        setShowAtlasModal(false);
+        return;
+      }
+
       if (gameStateRef.current === 'title') {
-        if (e.code === 'Enter' || e.code === 'Space') {
+        if ((e.code === 'Enter' || e.code === 'Space') && !showAtlasModalRef.current) {
           e.preventDefault();
           startNewRun(false);
+        } else if (e.code === 'KeyE') {
+          e.preventDefault();
+          setShowAtlasModal((prev) => !prev);
         }
         return;
       }
 
       if (e.code === 'KeyE') {
-        if (
-          gameStateRef.current === 'playing' &&
-          !evoChoicesRef.current &&
-          simRef.current.shark.pendingEvoCount > 0
-        ) {
+        if (gameStateRef.current === 'playing') {
           e.preventDefault();
-          setEvoChoices(pickEvolutionChoices(equippedRef.current));
+          if (showAtlasModalRef.current) {
+            setShowAtlasModal(false);
+          } else {
+            handleInRunBreakthroughOrAtlas();
+          }
         }
         return;
       }
 
       if (e.code === 'KeyP' || e.code === 'Escape') {
-        if (evoChoicesRef.current) return;
+        if (showAtlasModalRef.current) return;
         e.preventDefault();
         setGameState((prev) => {
           if (prev === 'playing') return 'paused';
@@ -1242,7 +1368,7 @@ export default function App() {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [startNewRun]);
+  }, [handleInRunBreakthroughOrAtlas, startNewRun]);
 
   // Main 60 FPS Canvas 2D Simulation & Render Loop
   useEffect(() => {
@@ -1272,14 +1398,16 @@ export default function App() {
       const isPausedOrOverlay =
         gameStateRef.current === 'paused' ||
         gameStateRef.current === 'gameover' ||
-        Boolean(evoChoicesRef.current) ||
+        Boolean(showAtlasModalRef.current) ||
         Boolean(simAdRef.current?.active);
 
       // ==================== 1. UPDATE SIMULATION ====================
       if (gameStateRef.current === 'title') {
-        // Title Screen Live World Camera Tour / Hero Patrol
+        // Title Screen Live World Camera Tour / Hero Patrol with Active Deployed Shark Form
+        shark.sharkFormId = metaSaveRef.current.selectedSharkId;
         shark.swimPhase += dt * 7.5;
         shark.biteAnim = Math.max(0, shark.biteAnim - dt * 3);
+        shark.morphFlashTimer = Math.max(0, shark.morphFlashTimer - dt * 1.4);
         const tSec = now * 0.0008;
         const targetX = Math.cos(tSec) * 280;
         const targetY = 260 + Math.sin(tSec * 2) * 85;
@@ -1313,6 +1441,9 @@ export default function App() {
         if (shark.hitFlashTimer > 0) {
           shark.hitFlashTimer = Math.max(0, shark.hitFlashTimer - dt);
         }
+        if (shark.morphFlashTimer > 0) {
+          shark.morphFlashTimer = Math.max(0, shark.morphFlashTimer - dt * 1.4);
+        }
         if (shark.invulnerableTimer > 0) {
           shark.invulnerableTimer = Math.max(0, shark.invulnerableTimer - dt);
         }
@@ -1328,13 +1459,7 @@ export default function App() {
         if (shark.frenzyTimer > 0) {
           shark.frenzyTimer = Math.max(0, shark.frenzyTimer - dt);
           if (shark.frenzyTimer === 0) {
-            shark.stats = computeSharkStats(
-              shark.level,
-              equippedRef.current,
-              false,
-              organStarsRef.current,
-              infiniteProgressionManager.globalDifficultyMultiplier
-            );
+            shark.stats = recomputeSharkStats(shark.level, false);
           }
         }
 
@@ -1372,7 +1497,6 @@ export default function App() {
         const inputMag = Math.hypot(inputX, inputY);
         if (inputMag > 0.08) {
           shark.targetAngle = Math.atan2(inputY, inputX);
-          // Smooth angular interpolation
           let diff = shark.targetAngle - shark.angle;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
@@ -1393,7 +1517,6 @@ export default function App() {
             shark.energy - shark.stats.boostDrainPerSec * simDt
           );
           soundFX.playBoostPulse();
-          // Emit vibrant tail flame / bubble particles
           if (Math.random() < 0.75) {
             const tailX = shark.x - Math.cos(shark.angle) * 44 * shark.stats.scale;
             const tailY = shark.y - Math.sin(shark.angle) * 44 * shark.stats.scale;
@@ -1409,7 +1532,6 @@ export default function App() {
             );
           }
         } else {
-          // Sea-surface breather bonus: swimming near the sunlit surface (y < 48m) accelerates boost recovery
           const surfaceBreatherBonus = shark.y < 48 ? 18 : 0;
           shark.energy = Math.min(
             shark.stats.maxEnergy,
@@ -1433,8 +1555,6 @@ export default function App() {
         shark.y += shark.vy * simDt;
 
         // 模块 A：无限世界与动态边界控制器 (InfiniteWorldManager)
-        // 1. 无限横向循环逻辑 ([-worldWidth/2, +worldWidth/2] 自动传送 + 相机无缝同步)
-        // 2. 垂直方向向下无边界跟随 (海面 Y=0，向下深渊无限延伸)
         infiniteWorldManager.update(dt, shark, sim.camera);
         sim.camera.zoom +=
           (shark.stats.cameraZoom - sim.camera.zoom) * Math.min(1, dt * 3.5);
@@ -1444,7 +1564,7 @@ export default function App() {
           Math.round(shark.y)
         );
 
-        // Depth Zone Milestone Notifications (First time crossing into Twilight 520m & Cthulhu Abyss 1150m)
+        // Depth Zone Milestone Notifications
         if (!shark.reachedTwilight && shark.y >= 520) {
           shark.reachedTwilight = true;
           spawnFloatText(
@@ -1485,21 +1605,16 @@ export default function App() {
         }
 
         // 模块 C：让游戏永远玩下去的数值膨胀系统 (InfiniteProgressionManager)
-        // 每过 60 秒，全球难度（敌人生命值、体型、攻击性、分值回报、深海代谢消耗）提升 10%
         const prevDiff = infiniteProgressionManager.globalDifficultyMultiplier;
         infiniteProgressionManager.update(simDt);
         if (infiniteProgressionManager.globalDifficultyMultiplier !== prevDiff) {
-          shark.stats = computeSharkStats(
+          shark.stats = recomputeSharkStats(
             shark.level,
-            equippedRef.current,
-            shark.frenzyTimer > 0,
-            organStarsRef.current,
-            infiniteProgressionManager.globalDifficultyMultiplier
+            shark.frenzyTimer > 0
           );
         }
 
-        // If the shark dives or ascends outside the current Target Bounty species' natural depth habitat,
-        // automatically switch the bounty target to a native species of the current depth zone!
+        // Switch bounty target to a native species of the current depth zone if shark leaves habitat
         if (
           shark.y < sim.targetBounty.preyConfig.minDepth - 140 ||
           shark.y > sim.targetBounty.preyConfig.maxDepth + 140
@@ -1518,7 +1633,6 @@ export default function App() {
         }
 
         // 模块 B：生态鱼群智能刷新与回收池 (EcosystemSpawner)
-        // 维持同屏 maxActivePreys=50，回收距离超出 spawnRadius*1.5 的鱼，并在视野外生成严格符合水深栖息带的鱼群
         ecosystemSpawner.update(
           simDt,
           sim.preyList,
@@ -1534,6 +1648,7 @@ export default function App() {
         const frontBodyX = shark.x + Math.cos(shark.angle) * 10 * shark.stats.scale;
         const frontBodyY = shark.y + Math.sin(shark.angle) * 10 * shark.stats.scale;
         const mouthRadius = 28 * shark.stats.scale;
+        const atlasBonus = getGlobalAtlasBonuses(metaSaveRef.current);
 
         // Update Prey AI, Jaw Suction Assist & Check Mouth Devour Collision
         for (let i = sim.preyList.length - 1; i >= 0; i--) {
@@ -1544,26 +1659,26 @@ export default function App() {
           const visualPreyScale = getPreyRelativeVisualScale(
             prey.config,
             shark.stats,
-            prey.mutationVariant
+            prey.mutationVariant,
+            shark.frenzyTimer > 0
           );
           const effectivePreyTier = getEffectivePreyTier(
             prey.config,
             prey.mutationVariant
           );
-          const requiresBoostArmorBreak =
-            (prey.mutationVariant === 'ABYSS_BEHEMOTH' && prey.config.tier >= 7) ||
-            Boolean(prey.config.isBoss);
           const canEatNow =
-            (shark.frenzyTimer > 0 ||
-              (shark.stats.biteTier >= effectivePreyTier &&
-                (!requiresBoostArmorBreak || isBoosting))) &&
-            !prey.config.isHazard;
-          // Generous jaw suction & bite floor (0.78x) on shrunk edible fish so eating tiny minnows stays effortless
-          const eatHitScale = Math.max(visualPreyScale, 0.78);
-          const suctionRadius =
-            mouthRadius * 2.15 + prey.config.radius * eatHitScale;
+            (shark.frenzyTimer > 0 || shark.stats.biteTier >= effectivePreyTier) &&
+            (!prey.config.isHazard || Boolean(shark.stats.canEatMines));
+          const renderedPreyRadius = prey.config.radius * visualPreyScale;
+          // Generous jaw suction & bite floor on shrunk edible fish so eating tiny minnows stays effortless
+          const eatHitRadius = Math.max(
+            renderedPreyRadius,
+            18 * shark.stats.scale
+          );
+          const suctionRadius = mouthRadius * 2.15 + eatHitRadius;
           const distToMouthPre = Math.hypot(mouthX - prey.x, mouthY - prey.y);
-          const inJawSuctionZone = canEatNow && distToMouthPre < suctionRadius;
+          const inJawSuctionZone =
+            canEatNow && !prey.config.isHazard && distToMouthPre < suctionRadius;
 
           // Distinct AI Behavior Policies per Prey Archetype
           switch (prey.config.behavior) {
@@ -1572,7 +1687,6 @@ export default function App() {
               break;
             }
             case 'SCHOOL_FLEE': {
-              // Suppress last-pixel panic scatter once inside the shark's jaw suction zone
               if (
                 distToShark < 240 &&
                 shark.stats.biteTier >= effectivePreyTier &&
@@ -1604,7 +1718,6 @@ export default function App() {
               if (prey.telegraphTimer > 0) {
                 prey.telegraphTimer -= simDt;
                 if (prey.telegraphTimer <= 0) {
-                  // Lunge toward shark
                   const atkAngle = Math.atan2(shark.y - prey.y, shark.x - prey.x);
                   prey.vx = Math.cos(atkAngle) * prey.config.baseSpeed * 1.85;
                   prey.vy = Math.sin(atkAngle) * prey.config.baseSpeed * 1.85;
@@ -1626,7 +1739,6 @@ export default function App() {
             case 'KRAKEN_BOSS': {
               if (distToShark < 420) {
                 const dirAngle = Math.atan2(shark.y - prey.y, shark.x - prey.x);
-                // Abyss Behemoths and Bosses aggressively hunt the shark outside of Gold Frenzy!
                 const isAggressiveApex =
                   prey.config.isBoss ||
                   prey.mutationVariant === 'ABYSS_BEHEMOTH' ||
@@ -1655,7 +1767,7 @@ export default function App() {
             shark.biteAnim = Math.max(shark.biteAnim, 0.35 * pullRatio);
           }
 
-          // Golden Frenzy Magnet only gently pulls nearby small T1~T2 fish (prevents screen-wide vacuum snowballing)
+          // Golden Frenzy Magnet gently pulls nearby small T1~T2 fish
           if (
             shark.frenzyTimer > 0 &&
             prey.config.tier <= 2 &&
@@ -1681,15 +1793,15 @@ export default function App() {
             prey.vy = -Math.abs(prey.vy) * 0.65;
           }
 
-          // Check collision with Shark Mouth / Front-Body (using visualPreyScale for hazards and generous eatHitScale for edible prey)
+          // Check collision with Shark Mouth / Front-Body
           const distToMouth = Math.hypot(mouthX - prey.x, mouthY - prey.y);
           const distToFrontBody = Math.hypot(frontBodyX - prey.x, frontBodyY - prey.y);
           const effectiveHitDist = canEatNow
             ? Math.min(distToMouth, distToFrontBody * 0.95)
             : distToMouth;
           const hitThreshold = canEatNow
-            ? mouthRadius * 1.18 + prey.config.radius * eatHitScale * 1.02
-            : mouthRadius * 0.92 + prey.config.radius * visualPreyScale * 0.92;
+            ? mouthRadius * 1.18 + eatHitRadius * 1.02
+            : mouthRadius * 0.84 + renderedPreyRadius * 0.72;
 
           if (effectiveHitDist < hitThreshold) {
             const outcome = resolvePreyEncounter(
@@ -1702,7 +1814,7 @@ export default function App() {
             );
 
             if (outcome.canDevour) {
-              // Devour! Build Feeding Combo Chain + Restore Boost Energy on every kill (veteran hunt-to-boost flow!)
+              // Devour! Build Feeding Combo Chain + Restore Boost Energy on every kill
               shark.comboCount += 1;
               shark.comboTimer = 3.2;
               const comboMult = Number(
@@ -1735,33 +1847,40 @@ export default function App() {
                 Math.round(outcome.scoreGain * rewardScale)
               );
 
+              const earnedGenes = Math.max(
+                1,
+                Math.round(
+                  outcome.geneGain *
+                    (variant === 'ABYSS_BEHEMOTH' ? 2.5 : 1.0) *
+                    atlasBonus.rewardMultiplier
+                )
+              );
+              const earnedCoins = Math.max(
+                1,
+                Math.round(
+                  outcome.coinGain *
+                    (variant === 'GOLDEN_MUTANT' ? 3.0 : 1.0) *
+                    atlasBonus.rewardMultiplier
+                )
+              );
+
               shark.biteAnim = 1.0;
               shark.hp = Math.min(
                 shark.stats.maxHp,
                 shark.hp + Math.round(outcome.hpDelta * (prey.scaleMultiplier ?? 1.0))
               );
               shark.score += finalScoreGain;
-              shark.genes += Math.round(
-                outcome.geneGain * (variant === 'ABYSS_BEHEMOTH' ? 2.5 : 1.0)
-              );
-              shark.coins += Math.round(
-                outcome.coinGain * (variant === 'GOLDEN_MUTANT' ? 3.0 : 1.0)
-              );
+              shark.genes += earnedGenes;
+              shark.coins += earnedCoins;
               shark.preyEatenCount += 1;
 
-              // Requires devouring 8 true Golden Mutants outside of Frenzy + passing the 12s initial / 25s post-frenzy cooldown!
+              // Requires devouring 8 true Golden Mutants outside of Frenzy + passing cooldown
               if (
                 variant === 'GOLDEN_MUTANT' &&
                 shark.frenzyTimer <= 0 &&
                 infiniteProgressionManager.registerGoldenMutantDevoured()
               ) {
-                shark.stats = computeSharkStats(
-                  shark.level,
-                  equippedRef.current,
-                  true,
-                  organStarsRef.current,
-                  infiniteProgressionManager.globalDifficultyMultiplier
-                );
+                shark.stats = recomputeSharkStats(shark.level, true);
                 shark.frenzyTimer = 3.6 + shark.stats.frenzyDurationBonus;
               }
               if (prey.config.tier >= 4) {
@@ -1771,7 +1890,7 @@ export default function App() {
 
               soundFX.playBite(prey.config.tier);
 
-              // Compliant Green Slime Bubbles & DNA Crystals Burst (Zero red blood!)
+              // Compliant Green Slime Bubbles & DNA Crystals Burst
               const burstCount = 10 + prey.config.tier * 2;
               for (let b = 0; b < burstCount; b++) {
                 const ang = (b * Math.PI * 2) / burstCount + Math.random() * 0.4;
@@ -1798,7 +1917,7 @@ export default function App() {
                   Math.cos(ang) * 95,
                   Math.sin(ang) * 95,
                   d % 2 === 0 ? 'COIN' : 'DNA_CRYSTAL',
-                  prey.config.tier * 2
+                  Math.max(2, Math.round(prey.config.tier * 2 * atlasBonus.rewardMultiplier))
                 );
               }
 
@@ -1821,8 +1940,8 @@ export default function App() {
                     350 * prey.config.tier
                   );
                   shark.score += bountyBonusScore;
-                  shark.genes += 12;
-                  shark.coins += 18;
+                  shark.genes += Math.round(14 * atlasBonus.rewardMultiplier);
+                  shark.coins += Math.round(22 * atlasBonus.rewardMultiplier);
                   spawnFloatText(
                     shark.x,
                     shark.y - 38,
@@ -1843,7 +1962,6 @@ export default function App() {
                   };
                   ecosystemSpawner.activeTargetPreyId = nextTarget.id;
 
-                  // Immediately assign 2 off-screen fish to the new Target Bounty species within its natural depth habitat
                   let assignedBountyCount = 0;
                   for (let k = 0; k < sim.preyList.length && assignedBountyCount < 2; k++) {
                     const candidate = sim.preyList[k];
@@ -1861,7 +1979,7 @@ export default function App() {
                 }
               }
 
-              // Evolution XP check
+              // Seamless In-Run Level-Up (Never interrupts hunting with a modal!)
               const prog = addEvolutionProgress(
                 shark.level,
                 shark.xp,
@@ -1870,37 +1988,27 @@ export default function App() {
               shark.level = prog.level;
               shark.xp = prog.xp;
               if (prog.leveledUpCount > 0) {
-                shark.stats = computeSharkStats(
+                shark.stats = recomputeSharkStats(
                   shark.level,
-                  equippedRef.current,
-                  shark.frenzyTimer > 0,
-                  organStarsRef.current,
-                  infiniteProgressionManager.globalDifficultyMultiplier
+                  shark.frenzyTimer > 0
                 );
-                // Leveling up restores 35% of maxHp instead of 100% full heal
                 shark.hp = Math.min(
                   shark.stats.maxHp,
                   shark.hp + Math.round(shark.stats.maxHp * 0.35)
                 );
+                shark.morphFlashTimer = Math.max(shark.morphFlashTimer, 0.45);
                 soundFX.playEvolution();
-                if (autoEvolveRef.current) {
-                  for (let e = 0; e < prog.leveledUpCount; e++) {
-                    autoMountBestOrgan();
-                  }
-                } else {
-                  shark.pendingEvoCount += prog.leveledUpCount;
-                  spawnFloatText(
-                    shark.x,
-                    shark.y - 44,
-                    'float_evo_ready',
-                    `LV.${shark.level}`,
-                    '#38bdf8',
-                    1.24
-                  );
-                }
+                spawnFloatText(
+                  shark.x,
+                  shark.y - 44,
+                  'float_evo_ready',
+                  `LV.${shark.level} (+HP/体型!)`,
+                  '#38bdf8',
+                  1.24
+                );
               }
 
-              // Recycle devoured prey into EcosystemSpawner pool and respawn off-screen with Infinite Scaling
+              // Recycle devoured prey into EcosystemSpawner pool and respawn off-screen
               ecosystemSpawner.recycleAndRespawn(
                 sim.preyList,
                 i,
@@ -1913,7 +2021,6 @@ export default function App() {
               // Oversized Prey or Active Mine Hazard -> Respect 0.55s Invulnerability Frames (i-frames)
               const bounceAngle = Math.atan2(shark.y - prey.y, shark.x - prey.x);
               if (shark.invulnerableTimer > 0) {
-                // Gently separate during i-frames without taking repeated multi-frame damage
                 shark.x += Math.cos(bounceAngle) * 10;
                 shark.y += Math.sin(bounceAngle) * 10;
                 continue;
@@ -1943,7 +2050,6 @@ export default function App() {
               );
 
               if (prey.config.isHazard) {
-                // Mine explodes into green/amber plasma sparks, recycles to pool & respawns off-screen
                 for (let b = 0; b < 16; b++) {
                   const ang = (b * Math.PI * 2) / 16;
                   spawnParticle(
@@ -2010,7 +2116,7 @@ export default function App() {
             continue;
           }
           p.x += p.vx * dt;
-          p.y += p.vy * dt - 18 * dt; // Buoyant upward drift underwater
+          p.y += p.vy * dt - 18 * dt;
           p.vx *= 0.95;
           p.vy *= 0.95;
         }
@@ -2052,26 +2158,91 @@ export default function App() {
           xpBarFillRef.current.style.transform = `scaleX(${xpPct / 100})`;
         }
 
-        // Check Defeat Condition (HP <= 0)
+        // Check Defeat Condition (HP <= 0) -> Persist all earned Coins, Genes, and Records!
         if (shark.hp <= 0) {
           soundFX.playHit();
+          const curSave = metaSaveRef.current;
+          const settledSave: SharkMetaSaveData = {
+            ...curSave,
+            bankedCoins: shark.coins,
+            bankedGenes: shark.genes,
+            bestInRunLevel: Math.max(curSave.bestInRunLevel, shark.level),
+            bestDepthReached: Math.max(
+              curSave.bestDepthReached,
+              Math.round(shark.maxDepthReached)
+            ),
+            totalRunsPlayed: curSave.totalRunsPlayed + 1,
+          };
+          metaSaveRef.current = settledSave;
+          saveSharkMetaSave(settledSave);
+          setMetaSave(settledSave);
+
           setRunSnapshot({
             score: Math.round(shark.score),
             maxDepth: Math.round(shark.maxDepthReached),
             preyEaten: shark.preyEatenCount,
             level: shark.level,
-            coins: shark.coins,
-            genes: shark.genes,
-            organsCount: Object.keys(equippedRef.current).length,
+            coinsEarned: Math.max(
+              0,
+              shark.coins - economyUsesRef.current.runStartCoins
+            ),
+            genesEarned: Math.max(
+              0,
+              shark.genes - economyUsesRef.current.runStartGenes
+            ),
+            unlockedFormsCount: settledSave.unlockedSharkIds.length,
+            activeSharkId: shark.sharkFormId,
           });
           document.body.dataset.state = 'gameover';
           setGameState('gameover');
         }
 
-        // Throttled HUD Integer Sync (every 120ms)
+        // Throttled HUD Integer & Persistent Meta-Save Sync (every 120ms)
         if (now - sim.lastHudSyncTime > 120) {
           sim.lastHudSyncTime = now;
+          const curSave = metaSaveRef.current;
+          const nextBestLv = Math.max(curSave.bestInRunLevel, shark.level);
+          const nextBestDepth = Math.max(
+            curSave.bestDepthReached,
+            Math.round(shark.maxDepthReached)
+          );
+          let activeSave = curSave;
+          if (
+            curSave.bankedCoins !== shark.coins ||
+            curSave.bankedGenes !== shark.genes ||
+            curSave.bestInRunLevel !== nextBestLv ||
+            curSave.bestDepthReached !== nextBestDepth
+          ) {
+            activeSave = {
+              ...curSave,
+              bankedCoins: shark.coins,
+              bankedGenes: shark.genes,
+              bestInRunLevel: nextBestLv,
+              bestDepthReached: nextBestDepth,
+            };
+            metaSaveRef.current = activeSave;
+            saveSharkMetaSave(activeSave);
+            setMetaSave(activeSave);
+          }
+
+          const activeForm = getSharkFormById(shark.sharkFormId);
+          const activeUpg = shark.trialActive
+            ? 10
+            : activeSave.sharkUpgradeLevels[shark.sharkFormId] ?? 1;
+          const nextEvo = getNextEvolutionTarget(shark.sharkFormId, activeSave);
+          const nextEval = nextEvo
+            ? evaluateSharkUnlock(
+                nextEvo,
+                activeSave,
+                0,
+                0,
+                nextBestLv,
+                nextBestDepth
+              )
+            : null;
+          const upgCost = getSharkUpgradeCost(activeForm, activeUpg);
           const currentZone = getDepthZone(shark.y);
+
           setHudState({
             hp: Math.ceil(shark.hp),
             maxHp: shark.stats.maxHp,
@@ -2099,8 +2270,6 @@ export default function App() {
               shark.level,
               economyUsesRef.current.geneSurgeCount
             ),
-            rerollCost: getOrganRerollCost(economyUsesRef.current.rerollCount),
-            pendingEvoCount: shark.pendingEvoCount,
             comboCount: shark.comboCount,
             comboMultiplier: Number(
               (1 + Math.min(1.0, Math.max(0, shark.comboCount - 1) * 0.08)).toFixed(2)
@@ -2108,6 +2277,14 @@ export default function App() {
             goldenMutantCharge: infiniteProgressionManager.goldenMutantCharge,
             goldenMutantRequired: infiniteProgressionManager.goldenMutantRequired,
             frenzyCooldown: Math.ceil(infiniteProgressionManager.frenzyCooldownTimer),
+            activeSharkId: shark.sharkFormId,
+            activeUpgradeLevel: activeUpg,
+            unlockedFormsCount: activeSave.unlockedSharkIds.length,
+            nextEvoTargetId: nextEvo?.id ?? null,
+            canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
+            canUpgradeBodyNow:
+              !shark.trialActive && activeUpg < 10 && activeSave.bankedCoins >= upgCost,
+            bodyUpgradeCost: upgCost,
           });
         }
       }
@@ -2120,7 +2297,7 @@ export default function App() {
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // 3-Tier Seamless Parallax Background (0.4x horizontal modulo scroll + depth cross-fade + God rays + rising bubbles)
+      // 3-Tier Seamless Parallax Background
       parallaxBackground.render(
         ctx,
         sim.camera.x,
@@ -2141,12 +2318,11 @@ export default function App() {
       ctx.scale(sim.camera.zoom, sim.camera.zoom);
       ctx.translate(-sim.camera.x, -sim.camera.y);
 
-      // Dynamic phase-locked horizontal span around camera.x (120px is a multiple of 60px wave step & 24px dash period)
       const halfSpanX = Math.ceil(viewW / Math.max(0.35, sim.camera.zoom)) + 480;
       const surfStart = Math.floor((sim.camera.x - halfSpanX) / 120) * 120;
       const surfEnd = Math.ceil((sim.camera.x + halfSpanX) / 120) * 120;
 
-      // P2-1 Vivid Sunlit Sea Surface & Animated Dual Wave Crests at y = 0..32
+      // Vivid Sunlit Sea Surface & Animated Dual Wave Crests
       const skySurfGrad = ctx.createLinearGradient(0, -180, 0, 32);
       skySurfGrad.addColorStop(0, 'rgba(186, 230, 253, 0.36)');
       skySurfGrad.addColorStop(0.75, 'rgba(125, 211, 252, 0.22)');
@@ -2154,7 +2330,6 @@ export default function App() {
       ctx.fillStyle = skySurfGrad;
       ctx.fillRect(surfStart, -180, surfEnd - surfStart, 212);
 
-      // Secondary deeper wave ribbon
       ctx.strokeStyle = 'rgba(56, 189, 248, 0.42)';
       ctx.lineWidth = 6;
       ctx.beginPath();
@@ -2165,7 +2340,6 @@ export default function App() {
       }
       ctx.stroke();
 
-      // Primary sunlit foam wave crest at y = 14
       ctx.strokeStyle = 'rgba(224, 242, 254, 0.85)';
       ctx.lineWidth = 3.5;
       ctx.beginPath();
@@ -2176,7 +2350,6 @@ export default function App() {
       }
       ctx.stroke();
 
-      // Zone Depth Boundary Lines (Subtle diegetic depth markers, phase-locked to 24px dash cycle)
       for (const z of GAME_CONFIG.zones) {
         if (z.minDepth > 0) {
           ctx.strokeStyle = 'rgba(148, 163, 184, 0.14)';
@@ -2190,7 +2363,7 @@ export default function App() {
         }
       }
 
-      // P2-2 Render Distinct 3D Spinning Gold Coins & Faceted DNA Crystals
+      // Render 3D Spinning Gold Coins & Faceted DNA Crystals
       for (const pk of sim.pickups) {
         if (!pk.active) continue;
         ctx.save();
@@ -2199,14 +2372,12 @@ export default function App() {
 
         if (pk.kind === 'COIN') {
           const spinScaleX = 0.35 + Math.abs(Math.cos(pk.phase * 0.85)) * 0.65;
-          // Soft golden aura
           ctx.fillStyle = 'rgba(250, 204, 21, 0.22)';
           ctx.beginPath();
           ctx.arc(0, 0, 16, 0, Math.PI * 2);
           ctx.fill();
 
           ctx.scale(spinScaleX, 1);
-          // Outer gold coin rim
           ctx.fillStyle = '#f59e0b';
           ctx.strokeStyle = '#fef08a';
           ctx.lineWidth = 2;
@@ -2215,17 +2386,14 @@ export default function App() {
           ctx.fill();
           ctx.stroke();
 
-          // Inner bright gold face
           ctx.fillStyle = '#fde047';
           ctx.beginPath();
           ctx.arc(0, 0, 7.5, 0, Math.PI * 2);
           ctx.fill();
 
-          // Center emblem bar
           ctx.fillStyle = '#b45309';
           ctx.fillRect(-2, -4.5, 4, 9);
         } else {
-          // DNA_CRYSTAL: Faceted glowing emerald-cyan crystal shard
           const rot = Math.sin(pk.phase * 0.6) * 0.22;
           ctx.rotate(rot);
 
@@ -2234,7 +2402,6 @@ export default function App() {
           ctx.arc(0, 0, 17, 0, Math.PI * 2);
           ctx.fill();
 
-          // Outer diamond crystal
           ctx.fillStyle = '#10b981';
           ctx.strokeStyle = '#a7f3d0';
           ctx.lineWidth = 1.8;
@@ -2247,7 +2414,6 @@ export default function App() {
           ctx.fill();
           ctx.stroke();
 
-          // Inner bioluminescent core facet
           ctx.fillStyle = '#6ee7b7';
           ctx.beginPath();
           ctx.moveTo(0, -7);
@@ -2287,12 +2453,14 @@ export default function App() {
             shark.frenzyTimer > 0,
             sim.targetBounty.preyConfig.id,
             isBoosting,
-            shark.stats.relativePreyScale
+            shark.stats.relativePreyScale,
+            shark.stats.scale,
+            Boolean(shark.stats.canEatMines)
           );
         }
       }
 
-      // Render Player's Articulated Shark + Mounted Evolution Organs
+      // Render Player's Evolved Shark Form (from 48-shark evolution matrix)
       drawSharkWithOrgans(ctx, {
         x: shark.x,
         y: shark.y,
@@ -2304,7 +2472,8 @@ export default function App() {
         frenzyTimer: shark.frenzyTimer,
         hitFlashTimer: shark.hitFlashTimer,
         invulnerableTimer: shark.invulnerableTimer,
-        equipped: equippedRef.current,
+        sharkFormId: shark.sharkFormId,
+        morphFlashTimer: shark.morphFlashTimer,
       });
 
       // Render Compliant Green Slime Bubbles & Devour FX Sprite Particles
@@ -2408,7 +2577,7 @@ export default function App() {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
     };
-  }, [createPreyEntity, spawnFloatText, spawnParticle, spawnPickup]);
+  }, [createPreyEntity, recomputeSharkStats, spawnFloatText, spawnParticle, spawnPickup]);
 
   // Full-Canvas Direct Pointer Steering & Right-Click Boost Handlers (P0-4)
   const handleCanvasPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -2499,6 +2668,17 @@ export default function App() {
     setIsMuted(muted);
   };
 
+  const titleSharkForm = getSharkFormById(metaSave.selectedSharkId);
+  const titleSharkUpg = metaSave.sharkUpgradeLevels[titleSharkForm.id] ?? 1;
+  const unlockedTotalCount = metaSave.unlockedSharkIds.length;
+  const activeHudSharkForm = getSharkFormById(hudState.activeSharkId);
+  const activeLineageMeta = LINEAGE_META[activeHudSharkForm.lineage];
+  const nextEvoTargetForm = hudState.nextEvoTargetId
+    ? getSharkFormById(hudState.nextEvoTargetId)
+    : null;
+  const titleGenInfo =
+    GENERATION_NAMES[titleSharkForm.generation - 1] ?? GENERATION_NAMES[0];
+
   return (
     <main className="relative w-screen h-screen overflow-hidden select-none bg-slate-950">
       {/* Isolated Full-Viewport 60 FPS Canvas 2D Ocean World */}
@@ -2581,81 +2761,93 @@ export default function App() {
           >
             <div className="h-2 sm:h-4" />
 
-            {/* Centerpiece SVG Emblem + Primary Start & Trial Max Mecha Ad CTA */}
+            {/* Centerpiece Emblem + Deployed Shark Card + Primary CTAs */}
             <motion.div
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.94, y: -14 }}
               transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-              className="landscape-title-wrap max-w-2xl mx-auto flex flex-col items-center text-center pointer-events-auto -mt-4 md:-mt-10"
+              className="landscape-title-wrap max-w-2xl mx-auto flex flex-col items-center text-center pointer-events-auto -mt-2 md:-mt-6"
             >
-              {/* Bespoke Inline SVG Shark Fin & DNA Crest Emblem */}
-              <svg
-                viewBox="0 0 180 76"
-                className="landscape-title-emblem w-28 h-12 sm:w-36 sm:h-16 mb-1.5 sm:mb-2 overflow-visible animate-float-emblem"
-                aria-hidden="true"
+              {/* Active Shark Form & Persistent Bank Status Strip */}
+              <div
+                onClick={() => setShowAtlasModal(true)}
+                className="mb-2 sm:mb-3 px-3 py-1.5 rounded-2xl bg-slate-900/92 border border-sky-400/40 hover:border-sky-300 flex items-center gap-2.5 sm:gap-3.5 shadow-lg cursor-pointer transition-all"
               >
-                <defs>
-                  <linearGradient id="crestGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#38bdf8" />
-                    <stop offset="50%" stopColor="#2dd4bf" />
-                    <stop offset="100%" stopColor="#a855f7" />
-                  </linearGradient>
-                </defs>
-                <path
-                  d="M25 62 Q70 52 92 10 Q96 36 116 54 Q138 58 156 62 Z"
-                  fill="url(#crestGrad)"
-                  stroke="#e0f2fe"
-                  strokeWidth="2.5"
+                <SharkFormCanvasPreview
+                  sharkId={titleSharkForm.id}
+                  width={54}
+                  height={36}
+                  animate={true}
                 />
-                <circle cx="92" cy="42" r="6" fill="#fde047" />
-                <path
-                  d="M16 66 Q90 54 164 66"
-                  fill="none"
-                  stroke="#38bdf8"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                />
-              </svg>
+                <div className="text-left">
+                  <div className="text-[10px] font-mono-num text-sky-300 font-bold">
+                    {lang === 'zh' ? titleGenInfo.nameZh : titleGenInfo.nameEn}{' '}
+                    · Lv.{titleSharkUpg}/10
+                  </div>
+                  <div className="font-display font-extrabold text-xs sm:text-sm text-white">
+                    #{String(titleSharkForm.index + 1).padStart(2, '0')}{' '}
+                    {lang === 'zh' ? titleSharkForm.nameZh : titleSharkForm.nameEn}
+                  </div>
+                </div>
+                <div className="h-6 w-px bg-slate-800" />
+                <div className="flex items-center gap-2.5 text-xs font-mono-num font-bold">
+                  <span className="text-amber-300">🪙 {metaSave.bankedCoins}</span>
+                  <span className="text-emerald-300">🧬 {metaSave.bankedGenes}</span>
+                </div>
+              </div>
 
               <h1
-                className="font-display font-extrabold text-white tracking-tight hud-stroke mb-1 sm:mb-2"
+                className="font-display font-extrabold text-white tracking-tight hud-stroke mb-1 sm:mb-1.5"
                 style={{
-                  fontSize: 'clamp(1.75rem, 3.8vw, 3.35rem)',
+                  fontSize: 'clamp(1.65rem, 3.6vw, 3.2rem)',
                   textWrap: 'balance',
                 }}
               >
                 {t('game_title')}
               </h1>
 
-              <p className="text-sky-200/90 text-xs sm:text-sm md:text-base font-medium mb-3.5 sm:mb-5 max-w-md">
-                {t('game_subtitle')}
+              <p className="text-sky-200/90 text-xs sm:text-sm md:text-base font-medium mb-3 sm:mb-4 max-w-md">
+                {lang === 'zh'
+                  ? '48阶鲨鱼本体进化 · 跨局基因与金币养成 · 无缝深海吞噬'
+                  : '48-Form Shark Body Evolution · Persistent Coins & Genes · Seamless Hunting'}
               </p>
 
-              {/* Primary Actions (<= 3 menu actions total, horizontal on mobile landscape) */}
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-3.5 w-full">
+              {/* Primary Actions (3 buttons, horizontal on mobile landscape) */}
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 w-full">
                 <button
                   type="button"
                   data-start="true"
+                  data-testid="start-game-btn"
                   onClick={() => startNewRun(false)}
-                  className="game-btn-spring w-full sm:w-auto px-7 py-2.5 sm:py-3.5 rounded-xl font-display font-extrabold text-sm sm:text-base md:text-lg text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
+                  className="game-btn-spring w-full sm:w-auto px-6 py-2.5 sm:py-3 rounded-xl font-display font-extrabold text-sm sm:text-base md:text-lg text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
                 >
                   ▶ {t('btn_start')}
                 </button>
 
                 <button
                   type="button"
-                  onClick={handleTrialMaxMechaAd}
-                  className="game-btn-spring w-full sm:w-auto px-5 py-2.5 sm:py-3.5 rounded-xl font-display font-bold text-xs sm:text-sm md:text-base text-amber-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
+                  data-testid="open-atlas-btn"
+                  onClick={() => setShowAtlasModal(true)}
+                  className="game-btn-spring w-full sm:w-auto px-5 py-2.5 sm:py-3 rounded-xl font-display font-extrabold text-xs sm:text-sm md:text-base text-sky-950 bg-sky-400 hover:bg-sky-300 border border-white/60 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  {t('btn_trial_mecha')}
+                  🧬 {lang === 'zh' ? '鲨鱼进化图谱' : 'Evolution Atlas'} (
+                  {unlockedTotalCount}/48)
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleTrialMaxMechaAd}
+                  className="game-btn-spring w-full sm:w-auto px-4 py-2.5 sm:py-3 rounded-xl font-display font-bold text-xs sm:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  🎬 {lang === 'zh' ? '试驾 #46 机甲利维坦' : 'Trial #46 Mecha Leviathan'}
                 </button>
               </div>
 
               <button
                 type="button"
                 onClick={downloadStandaloneSingleFileHtml}
-                className="mt-2 sm:mt-3 px-4 py-1 text-[11px] sm:text-xs font-medium text-sky-300/85 hover:text-white underline underline-offset-4 cursor-pointer whitespace-nowrap transition-colors"
+                className="mt-2 sm:mt-2.5 px-4 py-1 text-[11px] sm:text-xs font-medium text-sky-300/85 hover:text-white underline underline-offset-4 cursor-pointer whitespace-nowrap transition-colors"
               >
                 ⬇ {t('btn_export_html')}
               </button>
@@ -2686,15 +2878,15 @@ export default function App() {
             transition={{ duration: 0.2 }}
             className="landscape-compact-pad fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-2 sm:p-3 md:p-4"
           >
-            {/* ==================== TOP PERIMETER RIBBON (ALWAYS SINGLE HORIZONTAL ROW ON LANDSCAPE & DESKTOP) ==================== */}
+            {/* ==================== TOP PERIMETER RIBBON ==================== */}
             <div className="flex items-start justify-between gap-1.5 sm:gap-2.5 w-full">
-              {/* 1. Top-Left Cluster: Compact Biometric & 5-Organ Socket Pod */}
+              {/* 1. Top-Left Cluster: Compact Biometric & Active Shark Form Pod */}
               <motion.div
                 initial={{ opacity: 0, x: -28, y: -10 }}
                 animate={{ opacity: 1, x: 0, y: 0 }}
                 exit={{ opacity: 0, x: -28, y: -10 }}
                 transition={{ type: 'spring', stiffness: 350, damping: 28 }}
-                className="landscape-hud-biometric game-hud-card flex flex-col gap-1 border border-sky-400/35 rounded-xl p-2 md:p-2.5 w-[198px] sm:w-[232px] md:w-[268px] pointer-events-auto shrink-0"
+                className="landscape-hud-biometric game-hud-card flex flex-col gap-1 border border-sky-400/35 rounded-xl p-2 md:p-2.5 w-[206px] sm:w-[238px] md:w-[274px] pointer-events-auto shrink-0"
               >
                 {/* Row 1: Vitality HP Bar with Delayed Damage Ghost Bar */}
                 <div>
@@ -2720,9 +2912,8 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Row 2: Side-by-Side Boost Energy & Evolution Level/XP (Saves 35% vertical height on mobile landscape!) */}
+                {/* Row 2: Side-by-Side Boost Energy & In-Run Level/XP */}
                 <div className="grid grid-cols-2 gap-1.5 pt-0.5">
-                  {/* Boost Energy Mini-Column */}
                   <div>
                     <div className="flex items-center justify-between text-[9px] md:text-[10px] font-bold mb-0.5">
                       <span className="text-sky-300 truncate">{t('hud_energy')}</span>
@@ -2737,7 +2928,6 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Evo Level & Bite Tier Mini-Column */}
                   <div>
                     <div className="flex items-center justify-between text-[9px] md:text-[10px] font-bold mb-0.5">
                       <span className="text-purple-300 truncate">
@@ -2757,41 +2947,42 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Row 3: 5 Modular Organ Sockets Strip */}
-                <div className="grid grid-cols-5 gap-1 pt-1 border-t border-slate-800/90 text-center">
-                  {ALL_SLOTS.map((slot) => {
-                    const mounted = equippedOrgans[slot];
-                    const star = organStars[slot] ?? 1;
-                    return (
-                      <div
-                        key={slot}
-                        title={
-                          mounted
-                            ? `${t(mounted.nameKey)} (★${star}): ${t(mounted.descKey)}`
-                            : t(`slot_${slot}`)
-                        }
-                        className={`py-0.5 rounded text-[8px] sm:text-[9px] font-mono-num font-bold border transition-all duration-200 truncate ${
-                          mounted
-                            ? 'bg-sky-950/95 border-sky-400 text-sky-200'
-                            : 'bg-slate-900/70 border-slate-800 text-slate-500'
-                        }`}
-                      >
-                        {slot}
-                        {mounted && star > 1 ? `★${star}` : ''}
+                {/* Row 3: Active Shark Form Badge & Quick Atlas Entry */}
+                <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800/90">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <SharkFormCanvasPreview
+                      sharkId={activeHudSharkForm.id}
+                      width={38}
+                      height={26}
+                    />
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-display font-extrabold text-white truncate leading-tight">
+                        #{String(activeHudSharkForm.index + 1).padStart(2, '0')}{' '}
+                        {lang === 'zh'
+                          ? activeHudSharkForm.nameZh
+                          : activeHudSharkForm.nameEn}
                       </div>
-                    );
-                  })}
-                </div>
-
-                {/* Optional Active 3-Piece Faction Synergy Strip */}
-                {hudState.activeSynergy && (
-                  <div className="px-1.5 py-0.5 rounded bg-purple-950/85 border border-purple-400/50 text-[9px] md:text-[10px] font-display font-bold text-purple-200 text-center truncate">
-                    {t(`synergy_${hudState.activeSynergy}`)}
+                      <div
+                        className="text-[8px] sm:text-[9px] font-mono-num font-bold truncate leading-tight"
+                        style={{ color: activeLineageMeta.badgeColor }}
+                      >
+                        {lang === 'zh' ? activeLineageMeta.nameZh : activeLineageMeta.nameEn}{' '}
+                        · Lv.{hudState.activeUpgradeLevel}/10
+                      </div>
+                    </div>
                   </div>
-                )}
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAtlasModal(true)}
+                    className="px-2 py-0.5 rounded-md bg-sky-500/20 hover:bg-sky-500/35 border border-sky-400/50 text-[9px] font-display font-bold text-sky-200 shrink-0 cursor-pointer"
+                  >
+                    🧬 {hudState.unlockedFormsCount}/48
+                  </button>
+                </div>
               </motion.div>
 
-              {/* 2. Top-Center Cluster: Single-Line Telemetry & Bounty Ribbon (Zero clipping & zero vertical wrapping!) */}
+              {/* 2. Top-Center Cluster: Single-Line Telemetry & Bounty Ribbon */}
               <motion.div
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -2799,7 +2990,7 @@ export default function App() {
                 transition={{ type: 'spring', stiffness: 340, damping: 28, delay: 0.02 }}
                 className="flex flex-col items-center gap-1 pointer-events-auto min-w-0 flex-1"
               >
-                <div className="game-hud-card border border-sky-500/25 rounded-xl px-3 py-1 sm:px-3.5 sm:py-1.5 flex items-center justify-center gap-2 sm:gap-3">
+                <div className="game-hud-card border border-sky-500/25 rounded-xl px-2.5 py-1 sm:px-3.5 sm:py-1.5 flex items-center justify-center gap-1.5 sm:gap-2.5">
                   {/* Score */}
                   <div className="shrink-0">
                     <div className="text-[8px] sm:text-[9px] uppercase tracking-wider text-slate-400 font-semibold leading-none mb-0.5">
@@ -2849,7 +3040,7 @@ export default function App() {
 
                   <div className="hidden xl:block h-5 w-px bg-slate-800 shrink-0" />
 
-                  {/* Target Bounty (Inline on wide xl desktop, compact sub-pill on mobile landscape/tablet) */}
+                  {/* Target Bounty */}
                   <div className="hidden xl:block shrink-0">
                     <div className="text-[8px] sm:text-[9px] uppercase tracking-wider text-cyan-300 font-semibold leading-none mb-0.5">
                       🎯 {t('hud_target_fish')}
@@ -2863,7 +3054,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Compact Sub-Ribbon Status Pills: Target Bounty (on <xl), Active Combo, Gold Frenzy Timer / Charge */}
+                {/* Compact Sub-Ribbon Status Pills */}
                 <div className="flex items-center justify-center gap-1.5 flex-wrap">
                   <div className="xl:hidden px-2 py-0.5 rounded-md bg-slate-950/90 border border-cyan-500/35 text-[10px] font-display font-bold text-cyan-200 whitespace-nowrap">
                     🎯 {t(hudState.targetFishNameKey)} ({hudState.targetFishProgress}/
@@ -2919,7 +3110,7 @@ export default function App() {
                 </div>
               </motion.div>
 
-              {/* 3. Top-Right Cluster: Unified Compact System Utility Bar (Works seamlessly on Mobile Landscape & Desktop) */}
+              {/* 3. Top-Right Cluster: Unified Compact System Utility Bar */}
               <motion.div
                 initial={{ opacity: 0, x: 28, y: -10 }}
                 animate={{ opacity: 1, x: 0, y: 0 }}
@@ -2967,7 +3158,7 @@ export default function App() {
 
             {/* ==================== BOTTOM PERIMETER ROW: LEFT THUMB JOYSTICK + RIGHT THUMB TACTICAL ARC ==================== */}
             <div className="flex items-end justify-between w-full pb-1 sm:pb-2 px-1 sm:px-2">
-              {/* Bottom-Left: Ergonomic Virtual Steering Joystick with Compass Reticle */}
+              {/* Bottom-Left: Ergonomic Virtual Steering Joystick */}
               <motion.div
                 initial={{ opacity: 0, y: 28, scale: 0.88 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -2982,7 +3173,6 @@ export default function App() {
                 onPointerCancel={handleJoystickPointerUp}
                 className="landscape-thumb-joy relative w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32 rounded-full bg-slate-950/70 border-2 border-sky-400/40 flex items-center justify-center pointer-events-auto cursor-grab active:cursor-grabbing touch-none shadow-lg"
               >
-                {/* Inner compass ring & directional ticks */}
                 <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-full border border-sky-400/20 pointer-events-none" />
                 <div className="absolute top-1.5 w-1 h-2 rounded-full bg-sky-400/35 pointer-events-none" />
                 <div className="absolute bottom-1.5 w-1 h-2 rounded-full bg-sky-400/35 pointer-events-none" />
@@ -2996,7 +3186,7 @@ export default function App() {
                 />
               </motion.div>
 
-              {/* Bottom-Right: Ergonomic Right-Thumb Tactical Cluster (Tactical Action Dock + Primary Boost Button) */}
+              {/* Bottom-Right: Ergonomic Right-Thumb Tactical Cluster */}
               <motion.div
                 initial={{ opacity: 0, y: 28, scale: 0.9 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -3004,34 +3194,51 @@ export default function App() {
                 transition={{ type: 'spring', stiffness: 340, damping: 26 }}
                 className="flex flex-col items-end gap-1.5 sm:gap-2 pointer-events-auto"
               >
-                {/* Upper Right-Thumb Row: Queued Evolution Awakening Button & Auto-Evo Toggle */}
-                <div className="flex items-center gap-1.5">
-                  {hudState.pendingEvoCount > 0 && !autoEvolve && (
+                {/* Upper Right-Thumb Row: In-Run Instant Morph Breakthrough / Quick Body Upgrade / Atlas Button */}
+                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                  {hudState.canBreakthroughNow && nextEvoTargetForm && (
                     <button
                       type="button"
-                      onClick={handleOpenPendingEvo}
-                      className="game-btn-spring px-3 py-1.5 rounded-xl font-display font-extrabold text-xs bg-sky-400 text-slate-950 border-2 border-white hover:bg-sky-300 shadow-lg cursor-pointer whitespace-nowrap animate-bounce"
+                      data-testid="inrun-breakthrough-btn"
+                      onClick={handleInRunBreakthroughOrAtlas}
+                      className="game-btn-spring px-3 py-1.5 rounded-xl font-display font-extrabold text-xs bg-emerald-400 text-slate-950 border-2 border-white hover:bg-emerald-300 shadow-lg cursor-pointer whitespace-nowrap animate-bounce"
                     >
-                      {t('btn_open_evo', { count: hudState.pendingEvoCount })}
+                      ⚡{' '}
+                      {lang === 'zh'
+                        ? `破茧进化：#${nextEvoTargetForm.index + 1} ${nextEvoTargetForm.nameZh}`
+                        : `Morph: #${nextEvoTargetForm.index + 1} ${nextEvoTargetForm.nameEn}`}
+                    </button>
+                  )}
+
+                  {hudState.canUpgradeBodyNow && (
+                    <button
+                      type="button"
+                      data-testid="inrun-upgrade-body-btn"
+                      onClick={() => handleUpgradeSharkForm(hudState.activeSharkId)}
+                      className="game-btn-spring px-2.5 py-1.5 rounded-xl font-display font-bold text-[11px] sm:text-xs bg-amber-400/95 text-slate-950 border border-white hover:bg-amber-300 shadow-md cursor-pointer whitespace-nowrap"
+                    >
+                      ⬆️{' '}
+                      {lang === 'zh'
+                        ? `躯体 Lv.${hudState.activeUpgradeLevel + 1} (🪙${hudState.bodyUpgradeCost})`
+                        : `Body Lv.${hudState.activeUpgradeLevel + 1} (🪙${hudState.bodyUpgradeCost})`}
                     </button>
                   )}
 
                   <button
                     type="button"
-                    onClick={handleToggleAutoEvolve}
-                    className={`game-btn-spring px-2.5 py-1.5 rounded-xl font-display font-bold text-[11px] sm:text-xs border whitespace-nowrap cursor-pointer transition-all ${
-                      autoEvolve
-                        ? 'bg-cyan-400 text-slate-950 border-white shadow-md'
-                        : 'bg-slate-950/90 text-slate-300 border-slate-700 hover:border-sky-400/50'
-                    }`}
+                    data-testid="hud-open-atlas-btn"
+                    onClick={() => setShowAtlasModal(true)}
+                    className="game-btn-spring px-2.5 py-1.5 rounded-xl font-display font-bold text-[11px] sm:text-xs bg-slate-950/90 text-sky-200 border border-sky-400/50 hover:border-sky-300 whitespace-nowrap cursor-pointer transition-all"
                   >
-                    {autoEvolve ? t('btn_auto_evo_on') : t('btn_auto_evo_off')}
+                    🧬{' '}
+                    {lang === 'zh'
+                      ? `进化图谱 (${hudState.unlockedFormsCount}/48)`
+                      : `Atlas (${hudState.unlockedFormsCount}/48)`}
                   </button>
                 </div>
 
                 {/* Lower Right-Thumb Row: 3 Tactical Abilities Docked Beside Primary Boost Button */}
                 <div className="flex items-end gap-2 sm:gap-2.5">
-                  {/* Right-Thumb Tactical Skill Column/Grid (Supply Drop, Gold Overdrive, Gene Surge) */}
                   <div className="flex flex-col sm:flex-row items-end sm:items-center gap-1.5">
                     <button
                       type="button"
@@ -3104,7 +3311,6 @@ export default function App() {
                         : 'bg-slate-950/90 text-sky-100 hover:bg-slate-900'
                     }`}
                   >
-                    {/* Live Radial Boost Energy Ring */}
                     <svg
                       viewBox="0 0 100 100"
                       className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
@@ -3157,126 +3363,21 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ==================== 3. EVOLUTION 3-CHOICE MODAL (LANDSCAPE-FIT 3-COLUMN GRID) ==================== */}
-      <AnimatePresence>
-        {evoChoices && (
-          <motion.div
-            key="evo-modal-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('evo_modal_title')}
-            className="fixed inset-0 z-40 flex items-center justify-center p-2 sm:p-4 bg-slate-950/92 pointer-events-auto"
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.88, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.92, y: 16 }}
-              transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-              className="landscape-modal-card w-full max-w-3xl max-h-[94dvh] overflow-y-auto bg-slate-900 border border-sky-500/45 rounded-2xl p-3.5 sm:p-5 md:p-6 shadow-2xl"
-            >
-              <div className="text-center mb-2.5 sm:mb-4">
-                <h2 className="font-display font-extrabold text-lg sm:text-2xl md:text-3xl text-white mb-0.5">
-                  🧬 {t('evo_modal_title')}
-                </h2>
-                <p className="text-[11px] sm:text-xs md:text-sm text-slate-300">
-                  {t('evo_modal_subtitle')}
-                </p>
-              </div>
-
-              {/* 3-Column Horizontal Grid on Mobile Landscape (sm:grid-cols-3) & Desktop */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3.5 mb-3.5 sm:mb-5 items-stretch">
-                {evoChoices.map((organ, idx) => {
-                  const hasSlot = Boolean(equippedOrgans[organ.slot]);
-                  const nextStar = hasSlot ? (organStars[organ.slot] ?? 1) + 1 : 1;
-                  return (
-                    <motion.div
-                      key={organ.id}
-                      initial={{ opacity: 0, y: 16, scale: 0.94 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      transition={{
-                        delay: idx * 0.05,
-                        type: 'spring',
-                        stiffness: 380,
-                        damping: 26,
-                      }}
-                      className="h-full flex flex-col justify-between bg-slate-950 border border-slate-800 hover:border-sky-400/60 rounded-xl p-2.5 sm:p-3.5 transition-colors"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between text-[10px] sm:text-xs text-slate-400 mb-1.5">
-                          <span>{t(`faction_${organ.faction}`)}</span>
-                          <span>·</span>
-                          <span>{t(`slot_${organ.slot}`)}</span>
-                        </div>
-
-                        {hasSlot && (
-                          <div className="mb-1.5 inline-block px-2 py-0.5 rounded bg-amber-500/20 border border-amber-400/50 text-[10px] font-display font-bold text-amber-300">
-                            {t('evo_star_upgrade', { star: nextStar })}
-                          </div>
-                        )}
-
-                        <div className="flex items-center gap-2.5 mb-2">
-                          <OrganCanvasPreview organ={organ} size={46} />
-                          <h3 className="font-display font-bold text-xs sm:text-sm md:text-base text-white leading-snug">
-                            {t(organ.nameKey)}
-                          </h3>
-                        </div>
-
-                        <p className="text-[11px] sm:text-xs text-slate-300 leading-snug mb-2.5 sm:mb-3.5">
-                          {t(organ.descKey)}
-                        </p>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => handleSelectSingleOrgan(organ)}
-                        className="game-btn-spring w-full py-2 px-3 rounded-lg font-display font-bold text-xs text-white bg-sky-600 hover:bg-sky-500 cursor-pointer whitespace-nowrap"
-                      >
-                        {t('evo_btn_select')}
-                      </button>
-                    </motion.div>
-                  );
-                })}
-              </div>
-
-              {/* Bottom Action Row: Claim All 3 Ad + Gene Reroll + 1-Click Auto-Evo */}
-              <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-2 sm:gap-2.5">
-                <button
-                  type="button"
-                  onClick={handleClaimAllThreeOrgansAd}
-                  className="game-btn-spring w-full sm:w-auto py-2.5 sm:py-3 px-5 rounded-xl font-display font-extrabold text-xs sm:text-sm text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer whitespace-nowrap"
-                >
-                  {t('evo_btn_claim_all')}
-                </button>
-
-                <button
-                  type="button"
-                  disabled={hudState.genes < hudState.rerollCost}
-                  onClick={handleRerollOrgans}
-                  className={`game-btn-spring w-full sm:w-auto py-2.5 sm:py-3 px-4 rounded-xl font-display font-bold text-xs border whitespace-nowrap transition-all ${
-                    hudState.genes >= hudState.rerollCost
-                      ? 'bg-emerald-950/90 text-emerald-200 border-emerald-400 hover:bg-emerald-900 cursor-pointer'
-                      : 'bg-slate-950/60 text-slate-500 border-slate-800 cursor-not-allowed'
-                  }`}
-                >
-                  {t('evo_btn_reroll', { cost: hudState.rerollCost })} ({hudState.genes})
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleToggleAutoEvolve}
-                  className="game-btn-spring w-full sm:w-auto py-2.5 px-3.5 rounded-xl font-display font-bold text-xs text-cyan-200 bg-cyan-950/80 border border-cyan-500/50 hover:bg-cyan-900 cursor-pointer whitespace-nowrap"
-                >
-                  {t('evo_btn_auto_enable')}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* ==================== 3. 48-SHARK EVOLUTION ATLAS & UPGRADE LAB MODAL ==================== */}
+      {showAtlasModal && (
+        <SharkEvolutionAtlasModal
+          lang={lang}
+          metaSave={metaSave}
+          liveRunCoins={0}
+          liveRunGenes={0}
+          liveRunLevel={hudState.level}
+          liveRunMaxDepth={Math.max(metaSave.bestDepthReached, hudState.depth)}
+          onClose={() => setShowAtlasModal(false)}
+          onSelectActiveShark={handleSelectActiveSharkForm}
+          onUpgradeShark={handleUpgradeSharkForm}
+          onUnlockShark={handleUnlockAndSelectSharkForm}
+        />
+      )}
 
       {/* ==================== 4. PAUSE MODAL (LANDSCAPE-FIT COMPACT LAYOUT) ==================== */}
       <AnimatePresence>
@@ -3303,32 +3404,40 @@ export default function App() {
                 {t('btn_pause')}
               </h2>
               <p className="text-xs text-slate-400 mb-3 sm:mb-4">
-                {t('stat_organs_equipped')}: {Object.keys(equippedOrgans).length} / 5
+                {lang === 'zh'
+                  ? `已解锁鲨鱼形态：${hudState.unlockedFormsCount} / 48`
+                  : `Unlocked Shark Forms: ${hudState.unlockedFormsCount} / 48`}
               </p>
 
-              {/* Equipped Organ Summary Grid (2 columns on landscape for compact height) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 mb-4 sm:mb-5 text-left">
-                {ALL_SLOTS.map((slot) => {
-                  const org = equippedOrgans[slot];
-                  const star = organStars[slot] ?? 1;
-                  return (
-                    <div
-                      key={slot}
-                      className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] sm:text-xs"
-                    >
-                      <span className="text-slate-400 font-semibold">
-                        {t(`slot_${slot}`)}
-                      </span>
-                      <span
-                        className={
-                          org ? 'text-sky-300 font-bold truncate ml-2' : 'text-slate-600'
-                        }
-                      >
-                        {org ? `${t(org.nameKey)} ★${star}` : '—'}
-                      </span>
+              {/* Active Shark Form Summary Card */}
+              <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 mb-4 text-left">
+                <div className="flex items-center gap-3">
+                  <SharkFormCanvasPreview
+                    sharkId={activeHudSharkForm.id}
+                    width={64}
+                    height={44}
+                  />
+                  <div>
+                    <div className="text-xs sm:text-sm font-display font-extrabold text-white">
+                      #{String(activeHudSharkForm.index + 1).padStart(2, '0')}{' '}
+                      {lang === 'zh'
+                        ? activeHudSharkForm.nameZh
+                        : activeHudSharkForm.nameEn}
                     </div>
-                  );
-                })}
+                    <div className="text-[11px] text-sky-300 font-mono-num">
+                      {lang === 'zh' ? '强化等级' : 'Body Level'} Lv.
+                      {hudState.activeUpgradeLevel}/10 · {lang === 'zh' ? '咬合' : 'Bite'} T
+                      {hudState.biteTier}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAtlasModal(true)}
+                  className="px-3 py-1.5 rounded-lg bg-sky-500 text-slate-950 font-display font-extrabold text-xs hover:bg-sky-400 cursor-pointer"
+                >
+                  🧬 {lang === 'zh' ? '进化图谱' : 'Atlas'}
+                </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -3424,10 +3533,12 @@ export default function App() {
                     🏆 {t('settlement_title')}
                   </h2>
                   <p className="text-xs text-slate-400 mb-3 sm:mb-4">
-                    {t('settlement_subtitle')}
+                    {lang === 'zh'
+                      ? `本局金币与基因已永久存入账户（当前储备：🪙 ${metaSave.bankedCoins} · 🧬 ${metaSave.bankedGenes}）`
+                      : `Run coins & genes permanently banked (Bank: 🪙 ${metaSave.bankedCoins} · 🧬 ${metaSave.bankedGenes})`}
                   </p>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 mb-4 sm:mb-5 text-left">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 mb-3.5 sm:mb-4 text-left">
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
                       <div className="text-[10px] text-slate-400 truncate">
                         {t('stat_final_score')}
@@ -3448,22 +3559,33 @@ export default function App() {
 
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
                       <div className="text-[10px] text-slate-400 truncate">
-                        {t('stat_prey_eaten')}
+                        {lang === 'zh' ? '本局收获资源' : 'Run Harvest'}
                       </div>
-                      <div className="font-display font-extrabold text-base sm:text-lg text-emerald-300 font-mono-num">
-                        {runSnapshot.preyEaten}
+                      <div className="font-display font-extrabold text-xs sm:text-sm text-amber-300 font-mono-num">
+                        +{runSnapshot.coinsEarned}🪙 · +{runSnapshot.genesEarned}🧬
                       </div>
                     </div>
 
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
                       <div className="text-[10px] text-slate-400 truncate">
-                        {t('stat_organs_equipped')}
+                        {lang === 'zh' ? '进化图谱进度' : 'Atlas Progress'}
                       </div>
                       <div className="font-display font-extrabold text-base sm:text-lg text-purple-300 font-mono-num">
-                        {runSnapshot.organsCount} / 5
+                        {runSnapshot.unlockedFormsCount} / 48
                       </div>
                     </div>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAtlasModal(true)}
+                    className="game-btn-spring w-full py-2.5 mb-2.5 rounded-xl font-display font-extrabold text-xs sm:text-sm text-sky-950 bg-sky-400 hover:bg-sky-300 shadow-lg cursor-pointer"
+                  >
+                    🧬{' '}
+                    {lang === 'zh'
+                      ? `打开鲨鱼进化图谱 / 强化躯体 (${metaSave.bankedCoins}🪙 · ${metaSave.bankedGenes}🧬)`
+                      : `Open Shark Evolution Atlas (${metaSave.bankedCoins}🪙 · ${metaSave.bankedGenes}🧬)`}
+                  </button>
 
                   <div className="flex flex-col sm:flex-row gap-2.5">
                     <button
@@ -3479,7 +3601,7 @@ export default function App() {
                       onClick={handleTrialMaxMechaAd}
                       className="game-btn-spring flex-1 py-3 rounded-xl font-display font-bold text-xs sm:text-sm text-amber-950 bg-amber-400 hover:bg-amber-300 cursor-pointer"
                     >
-                      {t('btn_trial_mecha')}
+                      🎬 {lang === 'zh' ? '试驾 #46 机甲利维坦' : 'Trial #46 Mecha Leviathan'}
                     </button>
                   </div>
                 </>
