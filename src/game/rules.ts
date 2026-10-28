@@ -489,11 +489,13 @@ export function resolvePreyEncounter(
       ? Math.max(2, Math.round(prey.xpValue * 0.22))
       : Math.max(3, Math.round(prey.xpValue * 0.55));
 
+    const scoreMult = sharkStats.scoreMultiplier ?? 1.0;
+
     return {
       canDevour: true,
       hpDelta: Math.round(prey.hpRestore * healMult),
       xpGain: dampedXpGain,
-      scoreGain: prey.scoreValue * mult,
+      scoreGain: Math.round(prey.scoreValue * mult * scoreMult),
       geneGain: prey.geneValue * mult,
       coinGain: prey.coinValue * mult,
       knockbackForce: 0,
@@ -620,4 +622,33 @@ export function getDepthZone(yWorld: number): OceanZoneConfig {
   }
   return GAME_CONFIG.zones[GAME_CONFIG.zones.length - 1];
 }
+
+export interface HuntingHeatBuff {
+  heatLevel: number; // 0..5
+  magnetRadiusBonus: number; // +0..+80 px
+  energyRegenBonus: number; // +0..+11 / sec
+}
+
+/**
+ * Maps current in-run score into a passive Hunting Heat level (Lv.0 .. Lv.5)
+ * scaled by the active shark's generation row (0..5).
+ * Provides wider pickup magnet radius and faster boost energy recovery without
+ * polluting the pickup pool or creating suicide-farming incentives.
+ */
+export function computeHuntingHeatBuff(
+  currentScore: number,
+  generationRow: number = 0
+): HuntingHeatBuff {
+  const cleanScore = Math.max(0, currentScore);
+  const rowScale = Math.pow(1.85, Math.max(0, Math.min(5, generationRow)));
+  const unitScore = 1200 * rowScale;
+  const rawLevel = Math.floor(Math.sqrt(cleanScore / unitScore));
+  const heatLevel = Math.max(0, Math.min(5, rawLevel));
+  return {
+    heatLevel,
+    magnetRadiusBonus: heatLevel * 16,
+    energyRegenBonus: Number((heatLevel * 2.2).toFixed(1)),
+  };
+}
+
 

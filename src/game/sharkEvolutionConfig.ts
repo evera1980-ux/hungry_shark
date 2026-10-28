@@ -100,6 +100,10 @@ export interface SharkMetaSaveData {
   bestInRunLevel: number;
   bestDepthReached: number;
   totalRunsPlayed: number;
+  /** Per-shark personal best score (non-trial runs only) */
+  sharkBestScores?: Record<string, number>;
+  /** Per-shark highest claimed mastery crown tier (0 = none, 1 = Bronze, 2 = Silver, 3 = Gold) */
+  sharkMasteryTiers?: Record<string, number>;
 }
 
 export const LINEAGE_META: Record<
@@ -1037,6 +1041,8 @@ export function createDefaultMetaSave(): SharkMetaSaveData {
     bestInRunLevel: 1,
     bestDepthReached: 220,
     totalRunsPlayed: 0,
+    sharkBestScores: {},
+    sharkMasteryTiers: {},
   };
 }
 
@@ -1068,6 +1074,14 @@ export function loadSharkMetaSave(): SharkMetaSaveData {
       bestInRunLevel: typeof parsed.bestInRunLevel === 'number' ? Math.max(1, parsed.bestInRunLevel) : 1,
       bestDepthReached: typeof parsed.bestDepthReached === 'number' ? Math.max(220, parsed.bestDepthReached) : 220,
       totalRunsPlayed: typeof parsed.totalRunsPlayed === 'number' ? Math.max(0, parsed.totalRunsPlayed) : 0,
+      sharkBestScores:
+        parsed.sharkBestScores && typeof parsed.sharkBestScores === 'object'
+          ? { ...parsed.sharkBestScores }
+          : {},
+      sharkMasteryTiers:
+        parsed.sharkMasteryTiers && typeof parsed.sharkMasteryTiers === 'object'
+          ? { ...parsed.sharkMasteryTiers }
+          : {},
     };
   } catch {
     return createDefaultMetaSave();
@@ -1083,16 +1097,184 @@ export function saveSharkMetaSave(data: SharkMetaSaveData): void {
   }
 }
 
+export interface SharkMasteryTierInfo {
+  tier: 1 | 2 | 3;
+  badgeIcon: '🥉' | '🥈' | '👑';
+  nameZh: string;
+  nameEn: string;
+  scoreThreshold: number;
+  geneReward: number;
+}
+
+/**
+ * Computes the 3 Mastery Crown thresholds and one-time first-clear Gene Shard rewards
+ * for a specific shark form based on its generation row (0..5) and column (0..7).
+ */
+export function getSharkMasteryConfig(
+  form: SharkFormConfig
+): [SharkMasteryTierInfo, SharkMasteryTierInfo, SharkMasteryTierInfo] {
+  const rowBaseScores = [3500, 8000, 18000, 38000, 75000, 140000];
+  const rowColSteps = [500, 1000, 2000, 4000, 7500, 12000];
+  const rowIdx = Math.max(0, Math.min(5, form.row));
+  const colIdx = Math.max(0, Math.min(7, form.col));
+
+  const bronzeScore = rowBaseScores[rowIdx] + colIdx * rowColSteps[rowIdx];
+  const silverScore = Math.round(bronzeScore * 2.4);
+  const goldScore = Math.round(bronzeScore * 5.0);
+
+  const bronzeGenes = 12 + rowIdx * 8 + Math.floor(colIdx / 2) * 2;
+  const silverGenes = 24 + rowIdx * 16 + colIdx * 2;
+  const goldGenes = 45 + rowIdx * 30 + colIdx * 4;
+
+  return [
+    {
+      tier: 1,
+      badgeIcon: '🥉',
+      nameZh: '铜冠·掠食者',
+      nameEn: 'Bronze Predator',
+      scoreThreshold: bronzeScore,
+      geneReward: bronzeGenes,
+    },
+    {
+      tier: 2,
+      badgeIcon: '🥈',
+      nameZh: '银冠·深海领主',
+      nameEn: 'Silver Overlord',
+      scoreThreshold: silverScore,
+      geneReward: silverGenes,
+    },
+    {
+      tier: 3,
+      badgeIcon: '👑',
+      nameZh: '金冠·深渊霸主',
+      nameEn: 'Gold Apex Monarch',
+      scoreThreshold: goldScore,
+      geneReward: goldGenes,
+    },
+  ];
+}
+
+export interface SharkMasterySettlementResult {
+  updatedSave: SharkMetaSaveData;
+  prevBestScore: number;
+  newBestScore: number;
+  isNewRecord: boolean;
+  prevCrownTier: number;
+  newCrownTier: number;
+  newlyUnlockedTiers: SharkMasteryTierInfo[];
+  genesAwarded: number;
+  nextThresholdScore: number | null;
+}
+
+/**
+ * Evaluates and settles a shark's single-run score against its 3 Mastery Crown tiers.
+ * - Strictly isolates Trial runs (trialActive === true never records best scores or claims crowns).
+ * - Awards one-time First-Clear Gene Shards ONLY for newly reached crown tiers (preventing suicide farming or inflation).
+ */
+export function settleSharkScoreMastery(
+  sharkFormId: string,
+  runScore: number,
+  trialActive: boolean,
+  save: SharkMetaSaveData
+): SharkMasterySettlementResult {
+  const form = getSharkFormById(sharkFormId);
+  const tiers = getSharkMasteryConfig(form);
+  const bestScoresMap = save.sharkBestScores ?? {};
+  const masteryMap = save.sharkMasteryTiers ?? {};
+
+  const prevBestScore = bestScoresMap[form.id] ?? 0;
+  const prevCrownTier = masteryMap[form.id] ?? 0;
+
+  if (trialActive) {
+    const nextTierInfo = tiers.find((t) => t.tier > prevCrownTier) ?? null;
+    return {
+      updatedSave: save,
+      prevBestScore,
+      newBestScore: prevBestScore,
+      isNewRecord: false,
+      prevCrownTier,
+      newCrownTier: prevCrownTier,
+      newlyUnlockedTiers: [],
+      genesAwarded: 0,
+      nextThresholdScore: nextTierInfo ? nextTierInfo.scoreThreshold : null,
+    };
+  }
+
+  const cleanScore = Math.max(0, Math.floor(runScore));
+  const newBestScore = Math.max(prevBestScore, cleanScore);
+  const isNewRecord = cleanScore > prevBestScore && cleanScore > 0;
+
+  let achievedTier = prevCrownTier;
+  const newlyUnlockedTiers: SharkMasteryTierInfo[] = [];
+  let genesAwarded = 0;
+
+  for (const tierInfo of tiers) {
+    if (cleanScore >= tierInfo.scoreThreshold && tierInfo.tier > prevCrownTier) {
+      achievedTier = Math.max(achievedTier, tierInfo.tier);
+      newlyUnlockedTiers.push(tierInfo);
+      genesAwarded += tierInfo.geneReward;
+    }
+  }
+
+  const nextTierInfo = tiers.find((t) => t.tier > achievedTier) ?? null;
+
+  if (!isNewRecord && newlyUnlockedTiers.length === 0) {
+    return {
+      updatedSave: save,
+      prevBestScore,
+      newBestScore,
+      isNewRecord: false,
+      prevCrownTier,
+      newCrownTier: prevCrownTier,
+      newlyUnlockedTiers: [],
+      genesAwarded: 0,
+      nextThresholdScore: nextTierInfo ? nextTierInfo.scoreThreshold : null,
+    };
+  }
+
+  const updatedSave: SharkMetaSaveData = {
+    ...save,
+    bankedGenes: save.bankedGenes + genesAwarded,
+    sharkBestScores: {
+      ...bestScoresMap,
+      [form.id]: newBestScore,
+    },
+    sharkMasteryTiers: {
+      ...masteryMap,
+      [form.id]: achievedTier,
+    },
+  };
+
+  return {
+    updatedSave,
+    prevBestScore,
+    newBestScore,
+    isNewRecord,
+    prevCrownTier,
+    newCrownTier: achievedTier,
+    newlyUnlockedTiers,
+    genesAwarded,
+    nextThresholdScore: nextTierInfo ? nextTierInfo.scoreThreshold : null,
+  };
+}
+
 export function getGlobalAtlasBonuses(save: SharkMetaSaveData): {
   unlockedCount: number;
+  totalMasteryCrowns: number;
   hpMultiplier: number;
   speedBonus: number;
   rewardMultiplier: number;
 } {
   const unlockedCount = Math.max(1, save.unlockedSharkIds.length);
   const extraCount = unlockedCount - 1;
+  const masteryMap = save.sharkMasteryTiers ?? {};
+  const totalMasteryCrowns = Object.values(masteryMap).reduce(
+    (sum, tier) => sum + Math.max(0, Math.min(3, tier || 0)),
+    0
+  );
   return {
     unlockedCount,
+    totalMasteryCrowns,
     hpMultiplier: Number((1 + extraCount * 0.02).toFixed(3)),
     speedBonus: Number((extraCount * 0.008).toFixed(3)),
     rewardMultiplier: Number((1 + extraCount * 0.025).toFixed(3)),

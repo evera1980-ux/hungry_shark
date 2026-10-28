@@ -5,6 +5,7 @@ import {
   GENERATION_NAMES,
   getGlobalAtlasBonuses,
   getSharkFormById,
+  getSharkMasteryConfig,
   getSharkUpgradeCost,
   getSharkUpgradeGeneCost,
   LINEAGE_META,
@@ -81,6 +82,11 @@ export const SharkEvolutionAtlasModal: React.FC<
   );
   const atlasBonuses = getGlobalAtlasBonuses(metaSave);
   const lineageInfo = LINEAGE_META[inspectedForm.lineage];
+  const inspectedMasteryTiers = getSharkMasteryConfig(inspectedForm);
+  const inspectedBestScore =
+    metaSave.sharkBestScores?.[inspectedForm.id] ?? 0;
+  const inspectedClaimedCrown =
+    metaSave.sharkMasteryTiers?.[inspectedForm.id] ?? 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-1.5 sm:p-3 overflow-y-auto">
@@ -98,6 +104,16 @@ export const SharkEvolutionAtlasModal: React.FC<
                 </span>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-sky-500/20 border border-sky-400/40 text-sky-300">
                   {atlasBonuses.unlockedCount} / 48
+                </span>
+                <span
+                  className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-amber-500/20 border border-amber-400/40 text-amber-300"
+                  title={
+                    lang === 'zh'
+                      ? '物种统治王冠收集进度（每只鲨鱼 3 阶皇冠）'
+                      : 'Species Mastery Crowns collected (3 tiers per shark)'
+                  }
+                >
+                  👑 {atlasBonuses.totalMasteryCrowns} / 144
                 </span>
               </h2>
               <p className="text-[10px] sm:text-xs text-slate-400">
@@ -201,10 +217,22 @@ export const SharkEvolutionAtlasModal: React.FC<
                               : 'bg-slate-950/75 border-slate-800/70 opacity-75 hover:opacity-100'
                           }`}
                         >
-                          {/* Top Mini Row: Index + Bite Tier */}
+                          {/* Top Mini Row: Index + Mastery Crown + Bite Tier */}
                           <div className="w-full flex items-center justify-between text-[9px] font-mono leading-none mb-0.5">
-                            <span className="text-slate-400">
+                            <span className="text-slate-400 flex items-center gap-0.5">
                               #{shark.index + 1}
+                              {(metaSave.sharkMasteryTiers?.[shark.id] ?? 0) >
+                                0 && (
+                                <span>
+                                  {(metaSave.sharkMasteryTiers?.[shark.id] ??
+                                    0) === 3
+                                    ? '👑'
+                                    : (metaSave.sharkMasteryTiers?.[shark.id] ??
+                                        0) === 2
+                                    ? '🥈'
+                                    : '🥉'}
+                                </span>
+                              )}
                             </span>
                             <span
                               className="px-1 py-0.5 rounded font-bold"
@@ -373,6 +401,74 @@ export const SharkEvolutionAtlasModal: React.FC<
                   <div className="font-mono font-black text-purple-300">
                     {inspectedForm.scoreMult}x
                   </div>
+                </div>
+              </div>
+
+              {/* Per-Shark Mastery Crowns & One-Time First-Clear Gene Rewards */}
+              <div className="rounded-xl bg-slate-950/85 border border-amber-400/25 p-2.5 space-y-1.5">
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="font-extrabold text-amber-300 flex items-center gap-1">
+                    <UiAtlasIcon iconKey="UI_ICON_SCORE_TROPHY" size={13} />
+                    <span>
+                      {lang === 'zh'
+                        ? '物种统治王冠 · 首通奖励'
+                        : 'Species Mastery · 1st-Clear Bonus'}
+                    </span>
+                  </span>
+                  <span className="font-mono text-slate-300">
+                    {lang === 'zh' ? '最高分' : 'Best'}:{' '}
+                    <strong className="text-amber-200">
+                      {inspectedBestScore.toLocaleString()}
+                    </strong>
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5">
+                  {inspectedMasteryTiers.map((mTier) => {
+                    const claimed = inspectedClaimedCrown >= mTier.tier;
+                    return (
+                      <div
+                        key={mTier.tier}
+                        className={`rounded-lg px-1.5 py-1 border text-center flex flex-col items-center justify-between ${
+                          claimed
+                            ? 'bg-emerald-950/45 border-emerald-400/55 text-emerald-200'
+                            : 'bg-slate-900/80 border-slate-800 text-slate-300'
+                        }`}
+                      >
+                        <div className="text-[10px] font-bold flex items-center gap-0.5 leading-tight">
+                          <span>{mTier.badgeIcon}</span>
+                          <span>
+                            {lang === 'zh'
+                              ? mTier.tier === 1
+                                ? '铜冠'
+                                : mTier.tier === 2
+                                ? '银冠'
+                                : '金冠'
+                              : mTier.tier === 1
+                              ? 'Bronze'
+                              : mTier.tier === 2
+                              ? 'Silver'
+                              : 'Gold'}
+                          </span>
+                        </div>
+                        <div className="text-[9px] font-mono text-slate-400 my-0.5">
+                          {mTier.scoreThreshold.toLocaleString()}
+                        </div>
+                        <div className="text-[9px] font-mono font-extrabold flex items-center gap-0.5">
+                          {claimed ? (
+                            <span className="text-emerald-400">
+                              ✓ {lang === 'zh' ? '已领' : 'DONE'}
+                            </span>
+                          ) : (
+                            <span className="text-emerald-300 flex items-center gap-0.5">
+                              +{mTier.geneReward}
+                              <UiAtlasIcon iconKey="UI_ICON_GENE" size={10} />
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

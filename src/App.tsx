@@ -15,6 +15,7 @@ import {
   addEvolutionProgress,
   ComputedSharkStats,
   computeEvolvedSharkStats,
+  computeHuntingHeatBuff,
   getDepthZone,
   getEffectivePreyTier,
   getGeneSurgeCost,
@@ -34,6 +35,7 @@ import {
   LINEAGE_META,
   loadSharkMetaSave,
   saveSharkMetaSave,
+  settleSharkScoreMastery,
   SHARK_EVOLUTION_FORMS,
   SharkMetaSaveData,
 } from './game/sharkEvolutionConfig';
@@ -112,6 +114,10 @@ interface RunSummarySnapshot {
   genesEarned: number;
   unlockedFormsCount: number;
   activeSharkId: string;
+  personalBestScore: number;
+  isNewRecord: boolean;
+  masteryGenesBonus: number;
+  masteryCrownTier: number;
 }
 
 const MAX_PARTICLES = 220;
@@ -164,6 +170,10 @@ export default function App() {
     genesEarned: 0,
     unlockedFormsCount: 1,
     activeSharkId: 'shark_00_clown_fry',
+    personalBestScore: 0,
+    isNewRecord: false,
+    masteryGenesBonus: 0,
+    masteryCrownTier: 0,
   });
 
   // Simulated Rewarded Ad Overlay state
@@ -230,6 +240,8 @@ export default function App() {
         initialSave.bankedGenes >= upgGeneCost,
       bodyUpgradeCost: upgCost,
       bodyUpgradeGeneCost: upgGeneCost,
+      heatLevel: 0,
+      masteryCrownTier: initialSave.sharkMasteryTiers?.[activeForm.id] ?? 0,
     };
   });
 
@@ -238,11 +250,15 @@ export default function App() {
     geneSurgeCount: number;
     runStartCoins: number;
     runStartGenes: number;
+    runStartBestScore: number;
+    runMasteryGenesAwarded: number;
   }>({
     goldOverdriveCount: 0,
     geneSurgeCount: 0,
     runStartCoins: 0,
     runStartGenes: 0,
+    runStartBestScore: 0,
+    runMasteryGenesAwarded: 0,
   });
 
   // DOM refs for smooth 60fps bar transforms without React re-renders
@@ -708,6 +724,8 @@ export default function App() {
         geneSurgeCount: 0,
         runStartCoins: save.bankedCoins,
         runStartGenes: save.bankedGenes,
+        runStartBestScore: save.sharkBestScores?.[chosenSharkId] ?? 0,
+        runMasteryGenesAwarded: 0,
       };
 
       const initialLevel = withMaxMechaTrial ? 5 : 1;
@@ -895,6 +913,8 @@ export default function App() {
           save.bankedGenes >= upgGeneCost,
         bodyUpgradeCost: upgCost,
         bodyUpgradeGeneCost: upgGeneCost,
+        heatLevel: 0,
+        masteryCrownTier: save.sharkMasteryTiers?.[chosenSharkId] ?? 0,
       });
 
       if (withMaxMechaTrial) {
@@ -1652,11 +1672,18 @@ export default function App() {
             );
           }
         } else {
+          const activeSharkForm = getSharkFormById(shark.sharkFormId);
+          const heatBuff = computeHuntingHeatBuff(
+            shark.score,
+            activeSharkForm.row
+          );
           const surfaceBreatherBonus = shark.y < 48 ? 18 : 0;
           shark.energy = Math.min(
             shark.stats.maxEnergy,
             shark.energy +
-              (GAME_CONFIG.world.baseBoostRegenPerSec + surfaceBreatherBonus) *
+              (GAME_CONFIG.world.baseBoostRegenPerSec +
+                surfaceBreatherBonus +
+                heatBuff.energyRegenBonus) *
                 simDt
           );
         }
@@ -2216,7 +2243,14 @@ export default function App() {
           }
         }
 
-        // Update Pickups (Magnet Pull toward Shark)
+        // Update Pickups (Magnet Pull toward Shark + Hunting Heat Magnet Bonus)
+        const activeFormForHeat = getSharkFormById(shark.sharkFormId);
+        const currentHeatBuff = computeHuntingHeatBuff(
+          shark.score,
+          activeFormForHeat.row
+        );
+        const effectiveMagnetRadius =
+          shark.stats.magnetRadius + currentHeatBuff.magnetRadiusBonus;
         for (const pk of sim.pickups) {
           if (!pk.active) continue;
           pk.phase += simDt * 4;
@@ -2224,9 +2258,9 @@ export default function App() {
           pk.vy *= 0.92;
 
           const dist = Math.hypot(shark.x - pk.x, shark.y - pk.y);
-          if (dist < shark.stats.magnetRadius) {
+          if (dist < effectiveMagnetRadius) {
             const pullAngle = Math.atan2(shark.y - pk.y, shark.x - pk.x);
-            const pullSpeed = 380 + (shark.stats.magnetRadius - dist) * 2.2;
+            const pullSpeed = 380 + (effectiveMagnetRadius - dist) * 2.2;
             pk.vx = Math.cos(pullAngle) * pullSpeed;
             pk.vy = Math.sin(pullAngle) * pullSpeed;
           }
@@ -2298,11 +2332,11 @@ export default function App() {
           xpBarFillRef.current.style.transform = `scaleX(${xpPct / 100})`;
         }
 
-        // Check Defeat Condition (HP <= 0) -> Persist all earned Coins, Genes, and Records!
+        // Check Defeat Condition (HP <= 0) -> Persist all earned Coins, Genes, and Per-Shark Mastery Records!
         if (shark.hp <= 0) {
           soundFX.playHit();
           const curSave = metaSaveRef.current;
-          const settledSave: SharkMetaSaveData = {
+          const preMasterySave: SharkMetaSaveData = {
             ...curSave,
             bankedCoins: shark.coins,
             bankedGenes: shark.genes,
@@ -2313,6 +2347,18 @@ export default function App() {
             ),
             totalRunsPlayed: curSave.totalRunsPlayed + 1,
           };
+          const finalMastery = settleSharkScoreMastery(
+            shark.sharkFormId,
+            shark.score,
+            shark.trialActive,
+            preMasterySave
+          );
+          if (finalMastery.genesAwarded > 0) {
+            shark.genes = finalMastery.updatedSave.bankedGenes;
+            economyUsesRef.current.runMasteryGenesAwarded +=
+              finalMastery.genesAwarded;
+          }
+          const settledSave = finalMastery.updatedSave;
           metaSaveRef.current = settledSave;
           saveSharkMetaSave(settledSave);
           setMetaSave(settledSave);
@@ -2332,6 +2378,14 @@ export default function App() {
             ),
             unlockedFormsCount: settledSave.unlockedSharkIds.length,
             activeSharkId: shark.sharkFormId,
+            personalBestScore: finalMastery.newBestScore,
+            isNewRecord:
+              !shark.trialActive &&
+              Math.round(shark.score) >
+                economyUsesRef.current.runStartBestScore &&
+              Math.round(shark.score) > 0,
+            masteryGenesBonus: economyUsesRef.current.runMasteryGenesAwarded,
+            masteryCrownTier: finalMastery.newCrownTier,
           });
           document.body.dataset.state = 'gameover';
           setGameState('gameover');
@@ -2360,6 +2414,39 @@ export default function App() {
               bestInRunLevel: nextBestLv,
               bestDepthReached: nextBestDepth,
             };
+          }
+
+          // Live Per-Shark Mastery Crown Evaluation (awards 1st-clear Gene bonus immediately upon crossing threshold!)
+          const liveMastery = settleSharkScoreMastery(
+            shark.sharkFormId,
+            shark.score,
+            shark.trialActive,
+            activeSave
+          );
+          if (liveMastery.genesAwarded > 0) {
+            shark.genes = liveMastery.updatedSave.bankedGenes;
+            economyUsesRef.current.runMasteryGenesAwarded +=
+              liveMastery.genesAwarded;
+            const topNewTier =
+              liveMastery.newlyUnlockedTiers[
+                liveMastery.newlyUnlockedTiers.length - 1
+              ];
+            soundFX.playEvolution();
+            spawnFloatText(
+              shark.x,
+              shark.y - 54,
+              'float_evo_ready',
+              `${topNewTier.badgeIcon} ${
+                langRef.current === 'zh'
+                  ? topNewTier.nameZh
+                  : topNewTier.nameEn
+              } (+${liveMastery.genesAwarded}🧬)`,
+              '#fde047',
+              1.35
+            );
+          }
+          if (liveMastery.updatedSave !== curSave || activeSave !== curSave) {
+            activeSave = liveMastery.updatedSave;
             metaSaveRef.current = activeSave;
             saveSharkMetaSave(activeSave);
             setMetaSave(activeSave);
@@ -2383,6 +2470,7 @@ export default function App() {
           const upgCost = getSharkUpgradeCost(activeForm, activeUpg);
           const upgGeneCost = getSharkUpgradeGeneCost(activeForm, activeUpg);
           const currentZone = getDepthZone(shark.y);
+          const hudHeat = computeHuntingHeatBuff(shark.score, activeForm.row);
 
           setHudState({
             hp: Math.ceil(shark.hp),
@@ -2432,6 +2520,8 @@ export default function App() {
               activeSave.bankedGenes >= upgGeneCost,
             bodyUpgradeCost: upgCost,
             bodyUpgradeGeneCost: upgGeneCost,
+            heatLevel: hudHeat.heatLevel,
+            masteryCrownTier: liveMastery.newCrownTier,
           });
         }
       }
@@ -3292,12 +3382,33 @@ export default function App() {
                 className="flex flex-wrap items-center justify-center gap-1 sm:gap-1.5 pointer-events-auto min-w-0"
               >
                 <div className="px-2.5 py-1 rounded-full bg-slate-950/55 backdrop-blur-xs border border-sky-400/25 flex items-center gap-2 sm:gap-3 shadow-sm">
-                  {/* Score */}
-                  <div className="flex items-center gap-1 shrink-0" title={t('hud_score')}>
+                  {/* Score + Mastery Crown + Hunting Heat */}
+                  <div
+                    className="flex items-center gap-1 shrink-0"
+                    title={
+                      lang === 'zh'
+                        ? `${t('hud_score')} · 狩猎热度 Lv.${hudState.heatLevel} (磁吸+${hudState.heatLevel * 16}px / 能量恢复+${(hudState.heatLevel * 2.2).toFixed(1)}/s)`
+                        : `${t('hud_score')} · Hunting Heat Lv.${hudState.heatLevel} (Magnet +${hudState.heatLevel * 16}px / Regen +${(hudState.heatLevel * 2.2).toFixed(1)}/s)`
+                    }
+                  >
                     <UiAtlasIcon iconKey="UI_ICON_SCORE_TROPHY" size={15} />
                     <span className="font-display font-extrabold text-xs sm:text-sm text-white font-mono-num hud-stroke leading-none">
                       {hudState.score}
                     </span>
+                    {hudState.masteryCrownTier > 0 && (
+                      <span className="text-[11px] leading-none">
+                        {hudState.masteryCrownTier === 3
+                          ? '👑'
+                          : hudState.masteryCrownTier === 2
+                          ? '🥈'
+                          : '🥉'}
+                      </span>
+                    )}
+                    {hudState.heatLevel > 0 && (
+                      <span className="px-1 py-0.2 rounded bg-orange-500/30 border border-orange-400/50 text-orange-200 font-mono-num font-black text-[8px] leading-none">
+                        H{hudState.heatLevel}
+                      </span>
+                    )}
                   </div>
 
                   {/* Genes */}
@@ -3925,11 +4036,29 @@ export default function App() {
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 mb-3.5 sm:mb-4 text-left">
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">
-                      <div className="text-[10px] text-slate-400 truncate">
-                        {t('stat_final_score')}
+                      <div className="text-[10px] text-slate-400 truncate flex items-center justify-between">
+                        <span>{t('stat_final_score')}</span>
+                        {runSnapshot.isNewRecord && (
+                          <span className="px-1 py-0.2 rounded bg-amber-400 text-slate-950 font-black text-[8px]">
+                            NEW!
+                          </span>
+                        )}
                       </div>
-                      <div className="font-display font-extrabold text-base sm:text-lg text-white font-mono-num">
-                        {runSnapshot.score}
+                      <div className="font-display font-extrabold text-base sm:text-lg text-white font-mono-num flex items-center gap-1">
+                        <span>{runSnapshot.score}</span>
+                        {runSnapshot.masteryCrownTier > 0 && (
+                          <span className="text-sm">
+                            {runSnapshot.masteryCrownTier === 3
+                              ? '👑'
+                              : runSnapshot.masteryCrownTier === 2
+                              ? '🥈'
+                              : '🥉'}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[9px] font-mono text-slate-400 truncate">
+                        {lang === 'zh' ? '该鲨鱼最高' : 'Shark PB'}:{' '}
+                        {runSnapshot.personalBestScore.toLocaleString()}
                       </div>
                     </div>
 
@@ -3956,6 +4085,12 @@ export default function App() {
                           <UiAtlasIcon iconKey="UI_ICON_GENE" size={13} />
                         </span>
                       </div>
+                      {runSnapshot.masteryGenesBonus > 0 && (
+                        <div className="text-[9px] font-mono font-bold text-amber-300 truncate mt-0.5">
+                          👑 {lang === 'zh' ? '含首通奖' : '1st-Clear'} +
+                          {runSnapshot.masteryGenesBonus}🧬
+                        </div>
+                      )}
                     </div>
 
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-2.5">

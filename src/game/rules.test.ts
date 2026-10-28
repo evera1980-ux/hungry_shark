@@ -5,6 +5,7 @@ import { GAME_CONFIG } from './config';
 import {
   computeSharkStats,
   computeEvolvedSharkStats,
+  computeHuntingHeatBuff,
   resolvePreyEncounter,
   addEvolutionProgress,
   pickEvolutionChoices,
@@ -17,8 +18,10 @@ import {
   getGlobalAtlasBonuses,
   getNextEvolutionTarget,
   getSharkFormById,
+  getSharkMasteryConfig,
   getSharkUpgradeCost,
   getSharkUpgradeGeneCost,
+  settleSharkScoreMastery,
   SHARK_EVOLUTION_FORMS,
 } from './sharkEvolutionConfig';
 import { SHARK_CELL_BOUNDS, SHARK_GRID_MAP } from './spriteSheetManager';
@@ -478,6 +481,44 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
   const bonus48 = getGlobalAtlasBonuses(fullSave);
   assert.ok(bonus48.hpMultiplier > bonus1.hpMultiplier);
   assert.ok(bonus48.rewardMultiplier > bonus1.rewardMultiplier);
+
+  // 6. Verify Per-Shark Mastery Crowns (Bronze/Silver/Gold), Trial Isolation, and One-Time First-Clear Gene Rewards
+  const masteryTiers = getSharkMasteryConfig(clownForm);
+  assert.equal(masteryTiers.length, 3);
+  assert.equal(masteryTiers[0].scoreThreshold, 3500);
+  assert.equal(masteryTiers[0].geneReward, 12);
+
+  // (a) Trial runs must NEVER record personal best scores or claim mastery crowns
+  const trialResult = settleSharkScoreMastery('shark_45_mecha_leviathan', 999999, true, save);
+  assert.equal(trialResult.genesAwarded, 0, 'Trial run must award 0 mastery genes');
+  assert.equal(trialResult.newCrownTier, 0, 'Trial run must not unlock mastery crowns');
+  assert.equal(trialResult.isNewRecord, false, 'Trial run must not set personal best score');
+
+  // (b) Reaching Bronze threshold (3500) on #01 Clown Fry awards 12 Genes once, and 0 on repeat runs
+  const bronzeSettle = settleSharkScoreMastery('shark_00_clown_fry', 4200, false, save);
+  assert.equal(bronzeSettle.newCrownTier, 1);
+  assert.equal(bronzeSettle.genesAwarded, 12);
+  assert.equal(bronzeSettle.isNewRecord, true);
+
+  const repeatBronze = settleSharkScoreMastery('shark_00_clown_fry', 4000, false, bronzeSettle.updatedSave);
+  assert.equal(repeatBronze.genesAwarded, 0, 'Repeating same mastery tier must not award duplicate genes');
+  assert.equal(repeatBronze.newCrownTier, 1);
+
+  // (c) Jumping from Bronze (1) directly to Gold (3) awards Silver + Gold genes together once
+  const goldSettle = settleSharkScoreMastery('shark_00_clown_fry', 20000, false, bronzeSettle.updatedSave);
+  assert.equal(goldSettle.newCrownTier, 3);
+  assert.equal(
+    goldSettle.genesAwarded,
+    masteryTiers[1].geneReward + masteryTiers[2].geneReward
+  );
+
+  // 7. Verify In-Run Hunting Heat Buff passive scaling
+  const heat0 = computeHuntingHeatBuff(0, 0);
+  const heatMax = computeHuntingHeatBuff(50000, 0);
+  assert.equal(heat0.heatLevel, 0);
+  assert.equal(heatMax.heatLevel, 5);
+  assert.equal(heatMax.magnetRadiusBonus, 80);
+  assert.equal(heatMax.energyRegenBonus, 11);
 });
 
 test('Visual Size vs. Devourability Contract + Gold Frenzy Size Preservation Exception', () => {
