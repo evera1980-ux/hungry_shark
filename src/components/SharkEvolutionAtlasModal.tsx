@@ -822,25 +822,34 @@ export const SharkEvolutionAtlasModal: React.FC<
 
                     {/* Row 2: Dedicated Full-Width Row for Level/Depth Gate + Coin/Gene Cost */}
                     <div className="w-full flex items-center justify-between gap-2 leading-none whitespace-nowrap">
-                      <div
-                        className={`flex items-center gap-1.5 ${
-                          unlockCheck.levelMet && unlockCheck.depthMet
-                            ? 'text-emerald-300'
-                            : 'text-rose-300'
-                        }`}
-                      >
-                        <span>
+                      <div className="flex items-center gap-1.5 font-mono font-bold">
+                        <span
+                          className={
+                            unlockCheck.levelMet
+                              ? 'text-emerald-300'
+                              : 'text-rose-300'
+                          }
+                        >
                           {`Lv.${inspectedForm.reqMaxInRunLevel}${
-                            inspectedForm.reqMaxDepth > 0
-                              ? ` · ${inspectedForm.reqMaxDepth}m`
-                              : ''
+                            unlockCheck.levelMet ? '✓' : `(${maxLvRecord})`
                           }`}
                         </span>
-                        <span className="font-mono font-bold text-[10px]">
-                          {unlockCheck.levelMet && unlockCheck.depthMet
-                            ? '✓'
-                            : `(Lv.${maxLvRecord})`}
-                        </span>
+                        {inspectedForm.reqMaxDepth > 0 && (
+                          <>
+                            <span className="text-slate-600">·</span>
+                            <span
+                              className={
+                                unlockCheck.depthMet
+                                  ? 'text-emerald-300'
+                                  : 'text-rose-300'
+                              }
+                            >
+                              {`${inspectedForm.reqMaxDepth}m${
+                                unlockCheck.depthMet ? '✓' : `(${maxDepthRecord}m)`
+                              }`}
+                            </span>
+                          </>
+                        )}
                       </div>
 
                       <div className="flex items-center gap-2.5 font-mono font-bold shrink-0">

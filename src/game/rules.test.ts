@@ -437,6 +437,35 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
   assert.equal(blacktipEval.bestParentIndex, 7);
   assert.equal(blacktipEval.bestParentNameZh, '重铆钢甲巡逻鲨');
 
+  // Verify Prehistoric Megalodon (#25 shark_24_megalodon, row=3, col=0) exact gates, dual-parent unlock paths, and row-wrap next target
+  const megalodonForm = getSharkFormById('shark_24_megalodon');
+  assert.equal(megalodonForm.index, 24);
+  assert.equal(megalodonForm.row, 3);
+  assert.equal(megalodonForm.col, 0);
+  assert.equal(megalodonForm.reqParentUpgradeLevel, 6);
+  assert.equal(megalodonForm.reqMaxInRunLevel, 10);
+  assert.equal(megalodonForm.reqMaxDepth, 850);
+  assert.equal(megalodonForm.unlockCoins, 3800);
+  assert.equal(megalodonForm.unlockGenes, 720);
+
+  // Row-wrap next target: when playing #24 Cthulhu Mindflayer Shark (row=2, col=7), next target is #25 Prehistoric Megalodon
+  const nextFromCthulhu = getNextEvolutionTarget('shark_23_mindflayer_shark', save);
+  assert.equal(nextFromCthulhu?.id, 'shark_24_megalodon');
+
+  // Dual-parent path: default displayed parent is #24 Cthulhu Mindflayer Shark (index 23), while either #24 at Lv.6 OR #17 Great White (row=2, col=0) at Lv.6 satisfies the parent gate
+  const megaSave = createDefaultMetaSave();
+  const megaInitialEval = evaluateSharkUnlock(megalodonForm, megaSave, 3800, 720, 10, 850);
+  assert.equal(megaInitialEval.bestParentId, 'shark_23_mindflayer_shark');
+  assert.equal(megaInitialEval.bestParentNameZh, '克苏鲁夺心章鱼鲨');
+  assert.equal(megaInitialEval.parentMet, false);
+
+  megaSave.unlockedSharkIds.push('shark_16_great_white');
+  megaSave.sharkUpgradeLevels['shark_16_great_white'] = 6;
+  const megaReadyEval = evaluateSharkUnlock(megalodonForm, megaSave, 3800, 720, 10, 850);
+  assert.equal(megaReadyEval.parentMet, true);
+  assert.equal(megaReadyEval.bestParentId, 'shark_16_great_white');
+  assert.equal(megaReadyEval.canUnlockNow, true);
+
   // Upgrade parent (#0 Clown Fry) to Lv.2, reach In-Run Lv.2, Depth 180m, and bank 100 Coins + 25 Genes
   save.sharkUpgradeLevels['shark_00_clown_fry'] = 2;
   save.bankedCoins = 100;

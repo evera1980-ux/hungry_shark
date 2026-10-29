@@ -1013,11 +1013,11 @@ export function getNextEvolutionTarget(
   save: SharkMetaSaveData
 ): SharkFormConfig | null {
   const current = getSharkFormById(currentFormId);
-  // 1. Check direct right neighbor in same generation (row, col + 1)
-  if (current.col < 7) {
-    const right = SHARK_EVOLUTION_FORMS[current.row * 8 + (current.col + 1)];
-    if (right && !save.unlockedSharkIds.includes(right.id)) {
-      return right;
+  // 1. Check immediate next form in the 48-shark sequence (covers right neighbor AND row-wrap e.g. #24 -> #25 Megalodon)
+  if (current.index + 1 < SHARK_EVOLUTION_FORMS.length) {
+    const nextSequential = SHARK_EVOLUTION_FORMS[current.index + 1];
+    if (nextSequential && !save.unlockedSharkIds.includes(nextSequential.id)) {
+      return nextSequential;
     }
   }
   // 2. Check direct vertical descendant in next generation (row + 1, col)
