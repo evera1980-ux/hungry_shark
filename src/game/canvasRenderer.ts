@@ -252,7 +252,6 @@ export function drawPreyEntity(
     vy,
     angle,
     phase,
-    telegraphTimer,
     isInflated,
     mutationVariant = 'NONE',
   } = prey;
@@ -260,9 +259,6 @@ export function drawPreyEntity(
   const canEatWithoutFrenzy = config.isHazard
     ? canEatMines
     : sharkBiteTier >= effectiveTier;
-  const canEatByTier = frenzyActive || canEatWithoutFrenzy;
-  const needsBoostNow = false;
-  const canEat = canEatByTier;
   const visualScale = getPreyRelativeVisualScale(
     config,
     {
@@ -278,72 +274,13 @@ export function drawPreyEntity(
   // Keep inflated edible pufferfish strictly smaller than the shark (<= 0.72x shark size), while giant puffers preserve their menacing size even during Gold Frenzy
   const inflateMult = isInflated ? (canEatWithoutFrenzy ? 1.12 : 1.24) : 1.0;
   const r = config.radius * visualScale * inflateMult;
-  const isBountyTarget = Boolean(targetPreyId && config.id === targetPreyId);
 
   ctx.save();
   ctx.translate(x, y);
 
-  // Active Target Fish Bounty Lock Reticle
-  if (isBountyTarget) {
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.9)';
-    ctx.lineWidth = 2.5;
-    ctx.setLineDash([8, 5]);
-    ctx.beginPath();
-    ctx.arc(0, 0, r + 9 + Math.sin(phase * 5) * 2.5, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
-  // Mutation Variant Aura (Golden Mutant / Abyss Behemoth)
-  if (mutationVariant === 'GOLDEN_MUTANT') {
-    ctx.strokeStyle = 'rgba(250, 204, 21, 0.78)';
-    ctx.lineWidth = 2.5;
-    ctx.setLineDash([6, 4]);
-    ctx.beginPath();
-    ctx.arc(0, 0, r + 5 + Math.sin(phase * 4) * 2, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  } else if (mutationVariant === 'ABYSS_BEHEMOTH') {
-    ctx.strokeStyle = 'rgba(192, 132, 252, 0.75)';
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, r + 6 + Math.cos(phase * 5) * 3, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  // Threat ring (crimson) vs Gold Frenzy giant-hunt highlight ring
-  if (needsBoostNow) {
-    ctx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
-    ctx.lineWidth = 2.2;
-    ctx.setLineDash([5, 4]);
-    ctx.beginPath();
-    ctx.arc(0, 0, r + 7 + Math.sin(phase * 6) * 2, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  } else if (!canEat || (config.isHazard && !canEatByTier)) {
-    ctx.strokeStyle =
-      telegraphTimer > 0 ? '#f43f5e' : 'rgba(244, 63, 94, 0.55)';
-    ctx.lineWidth = telegraphTimer > 0 ? 3 : 1.8;
-    ctx.beginPath();
-    ctx.arc(
-      0,
-      0,
-      r + 6 + (telegraphTimer > 0 ? Math.sin(phase * 10) * 4 : Math.sin(phase * 4) * 1.5),
-      0,
-      Math.PI * 2
-    );
-    ctx.stroke();
-  } else if (frenzyActive && !canEatWithoutFrenzy) {
-    // During Gold Frenzy, giant apex prey/hazards keep their massive size and glow with a golden feast ring!
-    ctx.strokeStyle = 'rgba(250, 204, 21, 0.85)';
-    ctx.lineWidth = 2.4;
-    ctx.setLineDash([7, 4]);
-    ctx.beginPath();
-    ctx.arc(0, 0, r + 6 + Math.sin(phase * 6) * 2.5, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-
+  // Pure natural creature rendering — no artificial outer circles or T{N} text labels!
+  // Visual Size === Devourability Contract guarantees edible fish are <= 64% of shark size
+  // and dangerous predators/hazards are >= 118% of shark size.
   ctx.save();
   // Upright swimming orientation: flip horizontally when moving left, and tilt along vertical trajectory
   // without ever flipping upside-down
@@ -383,50 +320,6 @@ export function drawPreyEntity(
     isInflated ? 1.16 : 1.0
   );
   ctx.restore();
-
-  // Tier indicator label on Tier 3+ prey/hazards, mutated variants, unedible threats, or active Bounty Target
-  if (
-    config.tier >= 3 ||
-    mutationVariant !== 'NONE' ||
-    isBountyTarget ||
-    !canEat
-  ) {
-    ctx.font = '700 11px "JetBrains Mono", monospace';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = !canEatByTier
-      ? '#fda4af'
-      : frenzyActive && !canEatWithoutFrenzy
-      ? '#fde047'
-      : needsBoostNow
-      ? '#fde047'
-      : isBountyTarget
-      ? '#38bdf8'
-      : mutationVariant === 'GOLDEN_MUTANT'
-      ? '#fde047'
-      : mutationVariant === 'ABYSS_BEHEMOTH'
-      ? '#e879f9'
-      : '#86efac';
-
-    const iconKey = !canEatByTier
-      ? 'UI_ICON_DANGER_SKULL'
-      : isBountyTarget
-      ? 'UI_ICON_BOUNTY_TARGET'
-      : null;
-    const iconFrame = iconKey
-      ? spriteSheetManager.getUiIconFrame(iconKey)
-      : undefined;
-
-    if (iconFrame) {
-      ctx.drawImage(iconFrame, -19, -r - 20, 14, 14);
-      ctx.fillText(`T${effectiveTier}`, 5, -r - 9);
-    } else {
-      const prefix =
-        mutationVariant === 'GOLDEN_MUTANT' || (frenzyActive && !canEatWithoutFrenzy)
-          ? '★'
-          : '';
-      ctx.fillText(`${prefix}T${effectiveTier}`, 0, -r - 8);
-    }
-  }
 
   ctx.restore();
 }
