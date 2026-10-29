@@ -105,26 +105,6 @@ export function drawSharkWithOrgans(
   ctx.save();
   ctx.translate(x, y);
 
-  // Morph Breakthrough Shockwave (when evolving mid-run into a higher shark form)
-  if (morphFlashTimer > 0) {
-    const progress = 1 - Math.min(1, morphFlashTimer / 0.85);
-    const waveR = 36 + progress * 155;
-    ctx.save();
-    ctx.strokeStyle = sharkForm.glowColor;
-    ctx.lineWidth = Math.max(1.5, (1 - progress) * 7);
-    ctx.globalAlpha = Math.max(0, 1 - progress);
-    ctx.beginPath();
-    ctx.arc(0, 0, waveR, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.strokeStyle = '#fde047';
-    ctx.lineWidth = Math.max(1, (1 - progress) * 4);
-    ctx.beginPath();
-    ctx.arc(0, 0, waveR * 0.68, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
-
   // Normalize angle to [-PI, PI] and keep dorsal fin strictly upright when swimming left
   const normAngle = Math.atan2(Math.sin(angle), Math.cos(angle));
   const isFacingLeft = Math.abs(normAngle) > Math.PI * 0.5;
@@ -140,19 +120,10 @@ export function drawSharkWithOrgans(
 
   ctx.scale(scale, scale);
 
-  // Invulnerability (i-frames) protective flicker & barrier ring after taking damage
+  // Invulnerability (i-frames) natural body flicker after taking damage (no outer circle)
   if (invulnerableTimer > 0) {
     const blinkOn = Math.floor(invulnerableTimer * 18) % 2 === 0;
     ctx.globalAlpha = blinkOn ? 0.55 : 0.92;
-    ctx.save();
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
-    ctx.lineWidth = 2.5;
-    ctx.setLineDash([7, 5]);
-    ctx.beginPath();
-    ctx.arc(0, 0, 58, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
   }
 
   // Sinusoidal swimming physics + bite lunge
@@ -168,34 +139,7 @@ export function drawSharkWithOrgans(
 
   ctx.rotate(bodyRock);
 
-  // High-Generation Lineage Halo (Generation IV~VI sharks emit a subtle ambient domain ring)
-  if (sharkForm.generation >= 4 || isBoosting) {
-    const auraPulse = 0.5 + 0.5 * Math.sin(swimPhase * 3.2);
-    ctx.save();
-    ctx.strokeStyle = sharkForm.glowColor;
-    ctx.globalAlpha = isBoosting ? 0.48 : 0.22 + (sharkForm.generation - 4) * 0.06;
-    ctx.lineWidth = isBoosting ? 2.6 : 1.8;
-    ctx.setLineDash([10, 6]);
-    ctx.beginPath();
-    ctx.arc(-4, 0, 52 + auraPulse * 5, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-  }
-
-  // Golden Frenzy Halo if active
-  if (frenzyTimer > 0) {
-    const fPulse = 0.5 + 0.5 * Math.sin(swimPhase * 4);
-    ctx.save();
-    ctx.strokeStyle = '#fde047';
-    ctx.lineWidth = 3.5;
-    ctx.beginPath();
-    ctx.arc(0, 0, 62 + fPulse * 8, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // Pure 48-Form Shark Evolution Body Sprite (No bolted-on external clutter!)
+  // Pure 48-Form Shark Evolution Body Sprite (No outer circles or bolted-on clutter!)
   const sharkFrame = spriteSheetManager.getSharkFormFrame(sharkForm.spriteKey);
   ctx.save();
   ctx.translate(lungeX, 0);

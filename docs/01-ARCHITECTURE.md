@@ -52,7 +52,7 @@
         ├── canvasRenderer.ts                  # 鲨鱼多段脊柱游动渲染、32 种猎物骨骼渲染、状态指示环与定制图标头标
         ├── parallaxBackground.ts              # 三层海洋深度视差背景、丁达尔光束、海床地形与深海发光浮游物
         ├── infiniteWorldManager.ts            # 无限水平环形世界与动态深海垂直下潜边界控制器
-        ├── ecosystemSpawner.ts                # 85% 原生深度带生态刷新器、鱼群 Boids 聚落与精英刷新
+        ├── ecosystemSpawner.ts                # 85% 原生深度带生态刷新器、浅滩新手安全区与咬合阶位感知刷新
         ├── infiniteProgressionManager.ts      # 无限局内难度递增、深渊变异词缀与狂暴叠层控制器
         ├── audio.ts                           # Web Audio API 程序化音效合成器（吞噬、升级、破甲、警报）
         ├── adManager.ts                       # 模拟激励视频广告管理器（复活狂暴、空投补给、试驾机甲利维坦）
@@ -104,13 +104,12 @@
 
 ---
 
-## 5. 生态刷新器与新手浅滩安全区 (`src/game/ecosystemSpawner.ts`)
+## 5. 生态刷新器与新手浅滩安全区 (`ecosystemSpawner.ts`)
 
-- **85% 原生深度带约束 + 浅滩安全区钳制**：当玩家处于阳光珊瑚浅滩（`sharkY <= 380m`）时，屏幕外向下预刷新的鱼群深度被严格钳制在 `<= 440m`，杜绝 `520m+` 暮光带掠食者在浅海玩家正下方提前刷出。
+- **85% 原生深度带约束 + 浅滩安全区钳制 (`ecosystemSpawner.ts`)**：当玩家处于阳光珊瑚浅滩（`sharkY <= 380m`）时，屏幕外向下预刷新的鱼群深度被严格钳制在 `<= 440m`，杜绝 `520m+` 暮光带掠食者在浅海玩家正下方提前刷出。
 - **动态咬合阶位感知权重（Bite-Tier-Aware Spawning）**：
-  - 新手保护期（教程进行中或 `T1` 开局前 20 秒）：浅滩刷新权重为 `T1: 84% / T2: 16% / T3+: 0%`，并自动过滤深水雷（`isHazard`）与主动追咬掠食者（`CHASE_ATTACK`），只保留温顺或受惊逃逸的猎物。
+  - 新手保护期（教程进行中或 `T1` 开局前 20 秒）：浅滩刷新权重为 `T1: 84% / T2: 16% / T3+: 0%`，并自动过滤深水雷（`isHazard`）与主动冲刺追咬掠食者（`EEL_CHARGER` / `SUB_PATROL`）。
   - 常规 `T1` 浅滩期：`T1: 76% / T2: 18% / T3: 6%`。
-  - `T2+` 浅滩进阶期：`T1: 54% / T2: 26% / T3: 14% / T4: 6%`。
 
 ---
 
@@ -118,7 +117,8 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
-| 2026-10-28 | 新增 3 步实操新手引导状态机（`EAT_SMALL_FISH` ➔ `HOLD_BOOST` ➔ `HANDS_ON_UPGRADE` + 新手补给礼包）、`ecosystemSpawner.ts` 浅滩安全区与咬合阶位感知权重，以及 3D 轮盘式进化图谱组件 | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/components/SharkEvolutionAtlasModal.tsx` |
+| 2026-10-28 | 新增 3 步实操新手引导状态机（`EAT_SMALL_FISH` ➔ `HOLD_BOOST` ➔ `HANDS_ON_UPGRADE` + 新手补给礼包）、`ecosystemSpawner.ts` 浅滩安全区与咬合阶位感知权重，以及底部罗盘弧形拨盘进化图谱组件 | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/components/SharkEvolutionAtlasModal.tsx` |
 | 2026-10-27 | 新增 `public/assets/aistudio/icons_f5128c12.png`（6×4 UI 图标图集）、`src/components/UiAtlasIcon.tsx` 及 `spriteSheetManager.ts` BFS 智能镂空抠图与缓存管线 | `src/game/spriteSheetManager.ts`, `src/components/UiAtlasIcon.tsx`, `src/App.tsx` |
 | 2026-10-26 | 建立完整的三层解耦架构文档、目录职责表与 `SharkMetaSaveData` 存档规范 | `src/App.tsx`, `src/game/*` |
+
 

@@ -423,8 +423,19 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
   const initialEval = evaluateSharkUnlock(lemonForm, save, 0, 0, 1, 150);
   assert.equal(initialEval.alreadyUnlocked, false);
   assert.equal(initialEval.parentMet, false);
+  assert.equal(initialEval.bestParentId, 'shark_00_clown_fry');
+  assert.equal(initialEval.bestParentIndex, 0);
+  assert.equal(initialEval.bestParentNameZh, '拟态小丑幼鲨');
+  assert.equal(initialEval.bestParentNameEn, 'Mimic Clown Fry');
   assert.equal(initialEval.levelMet, false);
   assert.equal(initialEval.canUnlockNow, false);
+
+  // Verify that for any shark k > 0 (e.g. #8 Blacktip Pelagic Shark), its default prerequisite parent is shark #(k-1) (#7 Steel-Plated Patrol Shark)
+  const blacktipForm = getSharkFormById('shark_08_blacktip_reef');
+  const blacktipEval = evaluateSharkUnlock(blacktipForm, save, 0, 0, 1, 150);
+  assert.equal(blacktipEval.bestParentId, 'shark_07_steel_patrol');
+  assert.equal(blacktipEval.bestParentIndex, 7);
+  assert.equal(blacktipEval.bestParentNameZh, '重铆钢甲巡逻鲨');
 
   // Upgrade parent (#0 Clown Fry) to Lv.2, reach In-Run Lv.2, Depth 180m, and bank 100 Coins + 25 Genes
   save.sharkUpgradeLevels['shark_00_clown_fry'] = 2;

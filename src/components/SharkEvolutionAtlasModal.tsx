@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Lang } from '../game/i18n';
 import {
   evaluateSharkUnlock,
-  GENERATION_NAMES,
   getGlobalAtlasBonuses,
   getSharkFormById,
   getSharkMasteryConfig,
@@ -29,6 +28,7 @@ interface SharkEvolutionAtlasModalProps {
 }
 
 const TOTAL_SHARKS = SHARK_EVOLUTION_FORMS.length; // 48
+const ARC_OFFSETS = [-3, -2, -1, 0, 1, 2, 3] as const;
 
 function wrapIndex(idx: number): number {
   return ((idx % TOTAL_SHARKS) + TOTAL_SHARKS) % TOTAL_SHARKS;
@@ -123,7 +123,6 @@ export const SharkEvolutionAtlasModal: React.FC<
   }, [onClose, stepCarousel]);
 
   const handleStagePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // Ignore clicks on explicit buttons inside the stage
     if ((e.target as HTMLElement).closest('button')) return;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -166,7 +165,6 @@ export const SharkEvolutionAtlasModal: React.FC<
     st.pointerId = null;
     setDragOffsetPx(0);
 
-    // Flick or drag threshold to spin the wheel
     if (Math.abs(dx) > 36 || Math.abs(velocity) > 0.35) {
       const steps =
         Math.abs(velocity) > 0.95 && Math.abs(dx) > 90
@@ -203,26 +201,6 @@ export const SharkEvolutionAtlasModal: React.FC<
       readyToEvolveSharks[(curIdx + 1) % readyToEvolveSharks.length];
     setDragOffsetPx(0);
     setActiveIndex(nextReady.index);
-  };
-
-  const handleSelectGeneration = (genNumber: number) => {
-    const startIdx = (genNumber - 1) * 8;
-    const rowSharks = SHARK_EVOLUTION_FORMS.slice(startIdx, startIdx + 8);
-    const curForm = SHARK_EVOLUTION_FORMS[activeIndex];
-    if (curForm.generation === genNumber) return;
-
-    const readyInRow = rowSharks.find((s) =>
-      readyToEvolveSharks.some((r) => r.id === s.id)
-    );
-    const activeInRow = rowSharks.find(
-      (s) => s.id === metaSave.selectedSharkId
-    );
-    const unlockedInRow = [...rowSharks]
-      .reverse()
-      .find((s) => metaSave.unlockedSharkIds.includes(s.id));
-    const pick = readyInRow ?? activeInRow ?? unlockedInRow ?? rowSharks[0];
-    setDragOffsetPx(0);
-    setActiveIndex(pick.index);
   };
 
   const inspectedForm = SHARK_EVOLUTION_FORMS[activeIndex];
@@ -266,77 +244,93 @@ export const SharkEvolutionAtlasModal: React.FC<
   const inspectedClaimedCrown =
     metaSave.sharkMasteryTiers?.[inspectedForm.id] ?? 0;
 
-  const currentGenMeta =
-    GENERATION_NAMES[inspectedForm.generation - 1] ?? GENERATION_NAMES[0];
-  const currentGenSharks = SHARK_EVOLUTION_FORMS.slice(
-    (inspectedForm.generation - 1) * 8,
-    (inspectedForm.generation - 1) * 8 + 8
-  );
+  // Responsive stage dimensions so the Arc Dial + Giant Aquarium stage fits 100% inside any mobile/desktop viewport
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const [stageSize, setStageSize] = useState<{ w: number; h: number }>({
+    w: 390,
+    h: 280,
+  });
 
-  // 5 visible wheel slots around the center spotlight: [-2, -1, 0, +1, +2]
-  const wheelOffsets = [-2, -1, 0, 1, 2];
-  const normalizedDrag = dragOffsetPx / 160; // -1.375 .. +1.375
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 40 && rect.height > 40) {
+        setStageSize({
+          w: Math.round(rect.width),
+          h: Math.round(rect.height),
+        });
+      }
+    };
+    updateSize();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(updateSize);
+      ro.observe(el);
+    }
+    window.addEventListener('resize', updateSize);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
+
+  const normalizedDrag = dragOffsetPx / 105; // smooth angular drag offset in slot units
+  const isCompactMobileStage = stageSize.w < 460 || stageSize.h < 275;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-1.5 sm:p-3 overflow-hidden select-none">
-      <div className="w-full max-w-6xl h-[96dvh] max-h-[96dvh] flex flex-col rounded-2xl bg-slate-900/95 border border-sky-400/35 shadow-[0_0_55px_rgba(14,165,233,0.3)] overflow-hidden">
-        {/* ==================== 1. TOP HEADER BAR ==================== */}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-1 sm:p-3 overflow-hidden select-none">
+      <div className="w-full max-w-6xl h-[97dvh] max-h-[97dvh] flex flex-col rounded-2xl bg-slate-900/95 border border-sky-400/35 shadow-[0_0_55px_rgba(14,165,233,0.3)] overflow-hidden">
+        {/* ==================== 1. SIMPLIFIED SINGLE-LINE HEADER BAR ==================== */}
         <div className="flex flex-wrap items-center justify-between gap-1.5 px-2.5 py-1.5 sm:px-4 sm:py-2 bg-slate-950/95 border-b border-slate-800/90 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <UiAtlasIcon
               iconKey="UI_BTN_MORPH_EVOLVE"
-              size={24}
+              size={20}
               className="shrink-0"
             />
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <h2 className="text-xs sm:text-base font-black text-white tracking-wide">
-                  {lang === 'zh'
-                    ? '深海巨鲨 48 形态进化轮盘'
-                    : '48-Form Shark Evolution Wheel'}
-                </h2>
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/20 border border-sky-400/40 text-sky-300 leading-none">
-                  {atlasBonuses.unlockedCount}/48
-                </span>
-                <span
-                  className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 border border-amber-400/40 text-amber-300 leading-none"
-                  title={
-                    lang === 'zh'
-                      ? '物种统治王冠收集进度（每只鲨鱼 3 阶皇冠）'
-                      : 'Species Mastery Crowns collected (3 tiers per shark)'
-                  }
-                >
-                  👑 {atlasBonuses.totalMasteryCrowns}/144
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-400 hidden sm:block">
-                {lang === 'zh'
-                  ? `全局图鉴加成：生命 x${atlasBonuses.hpMultiplier} · 游速 +${Math.round(atlasBonuses.speedBonus * 100)}% · 收益 x${atlasBonuses.rewardMultiplier}`
-                  : `Atlas Bonus: HP x${atlasBonuses.hpMultiplier} · Speed +${Math.round(atlasBonuses.speedBonus * 100)}% · Rewards x${atlasBonuses.rewardMultiplier}`}
-              </p>
-            </div>
+            <h2 className="text-sm sm:text-base font-black text-white tracking-wide">
+              {lang === 'zh' ? '进化' : 'Evolution'}
+            </h2>
+            <span
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-sky-500/20 border border-sky-400/40 text-sky-300 leading-none"
+              title={
+                lang === 'zh'
+                  ? `全局加成：生命 x${atlasBonuses.hpMultiplier} · 游速 +${Math.round(atlasBonuses.speedBonus * 100)}% · 收益 x${atlasBonuses.rewardMultiplier}`
+                  : `Bonus: HP x${atlasBonuses.hpMultiplier} · Speed +${Math.round(atlasBonuses.speedBonus * 100)}% · Rewards x${atlasBonuses.rewardMultiplier}`
+              }
+            >
+              {atlasBonuses.unlockedCount}/48
+            </span>
+            <span
+              className="px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 border border-amber-400/40 text-amber-300 leading-none"
+              title={lang === 'zh' ? '王冠收集进度' : 'Mastery Crowns'}
+            >
+              👑 {atlasBonuses.totalMasteryCrowns}/144
+            </span>
           </div>
 
           {/* Quick-Focus Buttons + Live Persistent Resource Bar + Close */}
-          <div className="flex items-center gap-1.5 sm:gap-2 ml-auto">
+          <div className="flex items-center gap-1 sm:gap-2 ml-auto">
             <button
               type="button"
               onClick={handleJumpToActive}
-              className={`px-2 py-1 rounded-lg text-[10px] font-extrabold border transition flex items-center gap-1 cursor-pointer shrink-0 ${
+              className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[10px] font-extrabold border transition flex items-center gap-1 cursor-pointer shrink-0 ${
                 isInspectedActive
                   ? 'bg-emerald-500/25 border-emerald-400 text-emerald-200'
                   : 'bg-slate-900 border-slate-700/80 text-slate-300 hover:border-emerald-400/60'
               }`}
             >
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-              <span>{lang === 'zh' ? '当前出战' : 'Active'}</span>
+              <span>{lang === 'zh' ? '出战中' : 'Active'}</span>
             </button>
 
             {readyToEvolveSharks.length > 0 && (
               <button
                 type="button"
                 onClick={handleJumpToReady}
-                className="px-2 py-1 rounded-lg text-[10px] font-extrabold bg-amber-500/25 border border-amber-400 text-amber-200 animate-pulse flex items-center gap-1 cursor-pointer shrink-0"
+                className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[10px] font-extrabold bg-amber-500/25 border border-amber-400 text-amber-200 animate-pulse flex items-center gap-1 cursor-pointer shrink-0"
               >
                 <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={12} />
                 <span>
@@ -347,114 +341,41 @@ export const SharkEvolutionAtlasModal: React.FC<
               </button>
             )}
 
-            <div className="flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-slate-900 border border-amber-400/35 text-[11px] sm:text-xs font-mono font-bold text-amber-300">
-              <UiAtlasIcon iconKey="UI_ICON_COIN" size={14} />
+            <div className="flex items-center gap-1 px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-slate-900 border border-amber-400/35 text-[10px] sm:text-xs font-mono font-bold text-amber-300">
+              <UiAtlasIcon iconKey="UI_ICON_COIN" size={13} />
               <span>{totalCoins.toLocaleString()}</span>
             </div>
-            <div className="flex items-center gap-1 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-slate-900 border border-emerald-400/35 text-[11px] sm:text-xs font-mono font-bold text-emerald-300">
-              <UiAtlasIcon iconKey="UI_ICON_GENE" size={14} />
+            <div className="flex items-center gap-1 px-1.5 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-slate-900 border border-emerald-400/35 text-[10px] sm:text-xs font-mono font-bold text-emerald-300">
+              <UiAtlasIcon iconKey="UI_ICON_GENE" size={13} />
               <span>{totalGenes.toLocaleString()}</span>
             </div>
 
             <button
               type="button"
               data-testid="close-atlas-btn"
+              aria-label={lang === 'zh' ? '关闭' : 'Close'}
               onClick={onClose}
-              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-600/70 transition cursor-pointer shrink-0"
+              className="px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs border border-slate-600/70 transition cursor-pointer shrink-0"
             >
-              ✕ {lang === 'zh' ? '关闭' : 'Close'}
+              ✕
             </button>
           </div>
         </div>
 
-        {/* ==================== 2. ADAPTIVE WHEEL + COMMAND DECK BODY ==================== */}
+        {/* ==================== 2. GIANT AQUARIUM + CONTINUOUS ARC DIAL & COMMAND DECK ==================== */}
         <div className="flex-1 min-h-0 atlas-split-container overflow-hidden">
-          {/* LEFT / TOP: G1~G6 6-Grid Bar + 3D Coverflow Wheel Carousel + 8-Slot Gen Indicator */}
-          <div className="flex-1 min-h-0 flex flex-col justify-between bg-gradient-to-b from-slate-950/90 via-sky-950/20 to-slate-950/90 overflow-hidden p-2 sm:p-3">
-            {/* Fixed 6-Column Generation Switcher (Zero Scrollbar!) */}
-            <div className="shrink-0 space-y-1">
-              <div className="grid grid-cols-6 gap-1 sm:gap-1.5">
-                {GENERATION_NAMES.map((genMeta, idx) => {
-                  const rowSharks = SHARK_EVOLUTION_FORMS.slice(
-                    idx * 8,
-                    idx * 8 + 8
-                  );
-                  const unlockedInGen = rowSharks.filter((s) =>
-                    metaSave.unlockedSharkIds.includes(s.id)
-                  ).length;
-                  const hasReadyInGen = rowSharks.some((s) =>
-                    readyToEvolveSharks.some((r) => r.id === s.id)
-                  );
-                  const isCurrentGen = inspectedForm.generation === genMeta.gen;
-
-                  return (
-                    <button
-                      key={genMeta.gen}
-                      type="button"
-                      onClick={() => handleSelectGeneration(genMeta.gen)}
-                      className={`relative py-1 sm:py-1.5 px-1 rounded-xl border transition flex flex-col items-center justify-center cursor-pointer ${
-                        isCurrentGen
-                          ? 'bg-sky-500/25 border-sky-400 text-white shadow-[0_0_14px_rgba(56,189,248,0.32)]'
-                          : 'bg-slate-900/85 border-slate-800/90 text-slate-400 hover:border-slate-600 hover:text-slate-200'
-                      }`}
-                    >
-                      <div className="flex items-center gap-1 leading-none">
-                        <span
-                          className="text-[11px] sm:text-xs font-black font-mono"
-                          style={{
-                            color: isCurrentGen ? '#ffffff' : genMeta.color,
-                          }}
-                        >
-                          G{genMeta.gen}
-                        </span>
-                        <span className="text-[9px] sm:text-[10px] font-mono opacity-85">
-                          {unlockedInGen}/8
-                        </span>
-                      </div>
-                      {hasReadyInGen && (
-                        <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-400 border border-slate-950 animate-pulse" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Active Generation Banner Subtitle */}
-              <div className="flex items-center justify-between px-1 text-[10px] sm:text-xs">
-                <span
-                  className="font-extrabold tracking-wide"
-                  style={{ color: currentGenMeta.color }}
-                >
-                  {lang === 'zh'
-                    ? currentGenMeta.nameZh
-                    : currentGenMeta.nameEn}
-                </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                  {lang === 'zh'
-                    ? '◀ 左右滑动轮盘 / 点击两侧卡片或箭头切换 ▶'
-                    : '◀ Swipe Wheel / Click Arrows or Side Cards ▶'}
-                </span>
-              </div>
-            </div>
-
-            {/* ==================== 3D COVERFLOW WHEEL STAGE ==================== */}
+          {/* LEFT / TOP: Giant Aquarium Spotlight + Continuous 48-Shark Curved Arc Dial */}
+          <div className="flex-1 min-h-0 flex flex-col justify-between bg-gradient-to-b from-slate-950/90 via-sky-950/20 to-slate-950/90 overflow-hidden px-2 py-1.5 sm:p-3">
             <div
+              ref={stageRef}
               onPointerDown={handleStagePointerDown}
               onPointerMove={handleStagePointerMove}
               onPointerUp={finishStagePointerDrag}
               onPointerCancel={finishStagePointerDrag}
               onWheel={handleStageWheel}
-              className="relative flex-1 min-h-[168px] flex items-center justify-center overflow-hidden touch-none cursor-grab active:cursor-grabbing my-1"
+              className="relative flex-1 min-h-[225px] flex items-center justify-center overflow-hidden touch-none cursor-grab active:cursor-grabbing"
             >
-              {/* Ambient Underwater Radial Spotlight Behind Center Shark */}
-              <div
-                className="pointer-events-none absolute w-56 h-56 sm:w-72 sm:h-72 rounded-full blur-3xl opacity-30 transition-colors duration-300"
-                style={{
-                  background: `radial-gradient(circle, ${inspectedForm.glowColor} 0%, transparent 70%)`,
-                }}
-              />
-
-              {/* Left Cyber Arrow Button (Non-Touch & Quick Step) */}
+              {/* Left Cyber Arrow Button */}
               <button
                 type="button"
                 data-testid="atlas-prev-btn"
@@ -463,14 +384,14 @@ export const SharkEvolutionAtlasModal: React.FC<
                   e.stopPropagation();
                   stepCarousel(-1);
                 }}
-                className="z-40 absolute left-1 sm:left-2.5 w-9 h-14 sm:w-11 sm:h-16 rounded-2xl bg-slate-900/90 hover:bg-sky-950/90 active:scale-90 border border-sky-400/45 hover:border-sky-300 text-sky-200 shadow-[0_0_20px_rgba(2,6,23,0.85)] flex items-center justify-center transition cursor-pointer"
+                className="z-40 absolute left-0.5 sm:left-2 w-7 h-11 sm:w-9 sm:h-14 rounded-2xl bg-slate-900/90 hover:bg-sky-950/90 active:scale-90 border border-sky-400/45 hover:border-sky-300 text-sky-200 shadow-[0_0_18px_rgba(2,6,23,0.85)] flex items-center justify-center transition cursor-pointer"
               >
-                <span className="text-lg sm:text-xl font-black select-none">
+                <span className="text-sm sm:text-lg font-black select-none">
                   ◀
                 </span>
               </button>
 
-              {/* Right Cyber Arrow Button (Non-Touch & Quick Step) */}
+              {/* Right Cyber Arrow Button */}
               <button
                 type="button"
                 data-testid="atlas-next-btn"
@@ -479,313 +400,265 @@ export const SharkEvolutionAtlasModal: React.FC<
                   e.stopPropagation();
                   stepCarousel(1);
                 }}
-                className="z-40 absolute right-1 sm:right-2.5 w-9 h-14 sm:w-11 sm:h-16 rounded-2xl bg-slate-900/90 hover:bg-sky-950/90 active:scale-90 border border-sky-400/45 hover:border-sky-300 text-sky-200 shadow-[0_0_20px_rgba(2,6,23,0.85)] flex items-center justify-center transition cursor-pointer"
+                className="z-40 absolute right-0.5 sm:right-2 w-7 h-11 sm:w-9 sm:h-14 rounded-2xl bg-slate-900/90 hover:bg-sky-950/90 active:scale-90 border border-sky-400/45 hover:border-sky-300 text-sky-200 shadow-[0_0_18px_rgba(2,6,23,0.85)] flex items-center justify-center transition cursor-pointer"
               >
-                <span className="text-lg sm:text-xl font-black select-none">
+                <span className="text-sm sm:text-lg font-black select-none">
                   ▶
                 </span>
               </button>
 
-              {/* 5-Card 3D Cylindrical Wheel Items: [-2, -1, 0, +1, +2] */}
-              <div className="relative w-full h-full flex items-center justify-center">
-                {wheelOffsets.map((relOffset) => {
-                  const targetIdx = wrapIndex(activeIndex + relOffset);
-                  const shark = SHARK_EVOLUTION_FORMS[targetIdx];
-                  const unlocked = metaSave.unlockedSharkIds.includes(shark.id);
-                  const isActive = metaSave.selectedSharkId === shark.id;
-                  const upLv = metaSave.sharkUpgradeLevels[shark.id] ?? 1;
-                  const check = evaluateSharkUnlock(
-                    shark,
-                    metaSave,
-                    liveRunCoins,
-                    liveRunGenes,
-                    liveRunLevel,
-                    liveRunMaxDepth
-                  );
-                  const crownTier =
-                    metaSave.sharkMasteryTiers?.[shark.id] ?? 0;
-                  const sharkLineage = LINEAGE_META[shark.lineage];
-                  const isCenter = relOffset === 0;
+              <div className="relative w-full h-full flex flex-col justify-between items-center py-1">
+                {/* Top 68%: Giant Deep-Sea Aquarium Spotlight for Selected Shark */}
+                <div className="relative flex-1 w-full flex flex-col items-center justify-center px-8">
+                  <div
+                    className="pointer-events-none absolute w-52 h-32 sm:w-64 sm:h-40 rounded-full blur-2xl opacity-35"
+                    style={{
+                      background: `radial-gradient(circle, ${inspectedForm.glowColor} 0%, transparent 72%)`,
+                    }}
+                  />
 
-                  // Continuous wheel kinematics with live finger drag offset
-                  const effectiveOffset = relOffset + normalizedDrag;
-                  const absOffset = Math.abs(effectiveOffset);
-                  const scale = Math.max(
-                    0.48,
-                    1 - absOffset * 0.25
-                  );
-                  const translateXPercent = effectiveOffset * 68;
-                  const translateY = Math.min(28, absOffset * absOffset * 7);
-                  const rotateDeg = effectiveOffset * 9;
-                  const opacity = Math.max(
-                    0,
-                    1 - Math.max(0, absOffset - 0.15) * 0.38
-                  );
-                  const zIndex = 30 - Math.round(absOffset * 10);
-
-                  return (
-                    <div
-                      key={shark.id}
-                      data-testid={
-                        isCenter
-                          ? `atlas-wheel-center-${shark.id}`
-                          : `atlas-wheel-side-${shark.id}`
-                      }
-                      onClick={() => {
-                        if (dragStateRef.current.hasMoved) return;
-                        if (relOffset !== 0) {
-                          stepCarousel(relOffset);
-                        }
-                      }}
+                  {/* Clean Lineage + Bite Tier Pill (No Serial Number) */}
+                  <div className="z-10 flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-950/85 border border-slate-700/80 text-[10px] font-mono">
+                    {inspectedClaimedCrown > 0 && (
+                      <span>
+                        {inspectedClaimedCrown === 3
+                          ? '👑'
+                          : inspectedClaimedCrown === 2
+                          ? '🥈'
+                          : '🥉'}
+                      </span>
+                    )}
+                    <UiAtlasIcon
+                      iconKey={getLineageUiIconKey(inspectedForm.lineage)}
+                      size={11}
+                    />
+                    <span className="text-slate-200 font-bold">
+                      {lang === 'zh' ? lineageInfo.nameZh : lineageInfo.nameEn}
+                    </span>
+                    <span
+                      className="px-1.5 py-0.5 rounded font-black text-[9px]"
                       style={{
-                        transform: `translate3d(${translateXPercent.toFixed(
-                          1
-                        )}%, ${translateY.toFixed(
-                          1
-                        )}px, 0) scale(${scale.toFixed(
-                          3
-                        )}) rotate(${rotateDeg.toFixed(1)}deg)`,
-                        opacity,
-                        zIndex,
-                        transition: dragStateRef.current.isDragging
-                          ? 'none'
-                          : 'transform 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease',
+                        backgroundColor: `${inspectedForm.primaryColor}35`,
+                        color: inspectedForm.glowColor,
                       }}
-                      className={`w-[218px] sm:w-[258px] rounded-2xl p-2.5 sm:p-3.5 border flex flex-col items-center justify-between select-none ${
-                        isCenter
-                          ? 'bg-slate-900/95 border-sky-400 shadow-[0_12px_36px_rgba(14,165,233,0.35)] cursor-default'
-                          : 'bg-slate-950/90 border-slate-700/80 hover:border-sky-400/60 cursor-pointer'
-                      }`}
                     >
-                      {/* Card Top Row: #Index + Gen + Lineage + Tier */}
-                      <div className="w-full flex items-center justify-between gap-1 text-[10px] sm:text-[11px] font-mono">
-                        <span className="font-black text-slate-300 flex items-center gap-1">
-                          <span>
-                            #{String(shark.index + 1).padStart(2, '0')} · G
-                            {shark.generation}
-                          </span>
-                          {crownTier > 0 && (
-                            <span>
-                              {crownTier === 3
-                                ? '👑'
-                                : crownTier === 2
-                                ? '🥈'
-                                : '🥉'}
-                            </span>
-                          )}
-                        </span>
+                      T{inspectedForm.baseBiteTier}
+                    </span>
+                  </div>
 
-                        <div className="flex items-center gap-1">
+                  {/* Giant Unobstructed Hero Shark Sprite */}
+                  <div className="z-10 my-0.5 flex items-center justify-center">
+                    <SharkFormCanvasPreview
+                      sharkId={inspectedForm.id}
+                      width={isCompactMobileStage ? 186 : 220}
+                      height={isCompactMobileStage ? 100 : 118}
+                      locked={!isInspectedUnlocked}
+                      animate={true}
+                    />
+                  </div>
+
+                  {/* Clean Shark Name + Status Pill (No Serial Number, No Subtitle Clutter) */}
+                  <div className="z-10 flex flex-col items-center text-center">
+                    <span className="text-base sm:text-lg font-black text-white tracking-wide">
+                      {lang === 'zh'
+                        ? inspectedForm.nameZh
+                        : inspectedForm.nameEn}
+                    </span>
+
+                    <div className="mt-0.5">
+                      {isInspectedActive ? (
+                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/25 border border-emerald-400/60 text-emerald-300 text-[10px] font-black">
+                          {lang === 'zh'
+                            ? `✓ 出战中 · Lv.${inspectedUpgradeLv}/10`
+                            : `✓ Active · Lv.${inspectedUpgradeLv}/10`}
+                        </span>
+                      ) : isInspectedUnlocked ? (
+                        <span className="px-2.5 py-0.5 rounded-full bg-sky-500/20 border border-sky-400/40 text-sky-300 text-[10px] font-mono font-bold">
+                          {lang === 'zh'
+                            ? `已解锁 · Lv.${inspectedUpgradeLv}/10`
+                            : `Unlocked · Lv.${inspectedUpgradeLv}/10`}
+                        </span>
+                      ) : unlockCheck.canUnlockNow ? (
+                        <span className="px-2.5 py-0.5 rounded-full bg-amber-500/30 border border-amber-400 text-amber-200 text-[10px] font-black animate-pulse">
+                          {lang === 'zh' ? '⚡ 可进化' : '⚡ Ready'}
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-300 text-[10px] font-mono font-bold inline-flex items-center gap-1">
+                          <UiAtlasIcon iconKey="UI_ICON_COIN" size={10} />
+                          {inspectedForm.unlockCoins.toLocaleString()}
+                          <span>·</span>
+                          <UiAtlasIcon iconKey="UI_ICON_GENE" size={10} />
+                          {inspectedForm.unlockGenes.toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom 32%: Continuous Curved Semi-Circular Compass Arc Dial */}
+                <div className="relative w-full h-[74px] sm:h-[84px] flex items-end justify-center overflow-visible">
+                  {/* Curved Arc Track SVG */}
+                  <svg
+                    viewBox="-200 -45 400 60"
+                    className="pointer-events-none absolute inset-0 w-full h-full"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M -175 10 Q 0 -42 175 10"
+                      fill="none"
+                      stroke="rgba(56, 189, 248, 0.4)"
+                      strokeWidth="2"
+                    />
+                    <path
+                      d="M -185 16 Q 0 -36 185 16"
+                      fill="none"
+                      stroke="rgba(56, 189, 248, 0.16)"
+                      strokeWidth="1.2"
+                      strokeDasharray="4 6"
+                    />
+                  </svg>
+
+                  {/* 7 Neighboring Sharks Along the Continuous 48-Shark Compass Arc */}
+                  <div className="relative w-full h-full flex items-center justify-center">
+                    {ARC_OFFSETS.map((relOffset) => {
+                      const sharkIdx = wrapIndex(activeIndex + relOffset);
+                      const shark = SHARK_EVOLUTION_FORMS[sharkIdx];
+                      const isArcCenter = relOffset === 0;
+                      const unlocked = metaSave.unlockedSharkIds.includes(
+                        shark.id
+                      );
+                      const isActive = metaSave.selectedSharkId === shark.id;
+
+                      const slotPos = relOffset + normalizedDrag;
+                      const maxHalfSpan = Math.min(
+                        168,
+                        Math.round(stageSize.w * 0.42)
+                      );
+                      const xPx = (slotPos / 3.4) * maxHalfSpan;
+                      const normalizedX = Math.min(1.2, Math.abs(slotPos) / 3.4);
+                      const yPx = -15 + normalizedX * normalizedX * 25;
+                      const rotDeg = slotPos * 7;
+                      const scale = isArcCenter
+                        ? 1.18
+                        : Math.max(0.75, 0.96 - Math.abs(slotPos) * 0.06);
+
+                      return (
+                        <div
+                          key={shark.id}
+                          data-testid={`atlas-card-${shark.id}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (dragStateRef.current.hasMoved) return;
+                            if (shark.index !== activeIndex) {
+                              setDragOffsetPx(0);
+                              setActiveIndex(shark.index);
+                            }
+                          }}
+                          style={{
+                            transform: `translate3d(${xPx.toFixed(
+                              1
+                            )}px, ${yPx.toFixed(
+                              1
+                            )}px, 0) rotate(${rotDeg.toFixed(
+                              1
+                            )}deg) scale(${scale.toFixed(2)})`,
+                            zIndex: isArcCenter
+                              ? 35
+                              : Math.round(25 - Math.abs(slotPos) * 3),
+                            transition: dragStateRef.current.isDragging
+                              ? 'none'
+                              : 'transform 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+                          }}
+                          className={`absolute w-11 h-11 sm:w-12 sm:h-12 rounded-xl border flex flex-col items-center justify-center gap-0.5 p-1 cursor-pointer select-none ${
+                            isArcCenter
+                              ? 'bg-sky-950/95 border-sky-300 shadow-[0_0_16px_rgba(56,189,248,0.8)] ring-1 ring-sky-300'
+                              : isActive
+                              ? 'bg-emerald-950/90 border-emerald-400/80'
+                              : unlocked
+                              ? 'bg-slate-900/95 border-slate-700 hover:border-sky-400/60'
+                              : 'bg-slate-950/90 border-slate-800 opacity-75'
+                          }`}
+                        >
+                          {isActive && (
+                            <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          )}
+                          <SharkFormCanvasPreview
+                            sharkId={shark.id}
+                            width={38}
+                            height={22}
+                            locked={!unlocked}
+                            animate={false}
+                          />
                           <span
-                            className="px-1.5 py-0.5 rounded-full font-bold text-[9px] flex items-center gap-0.5"
-                            style={{
-                              backgroundColor: `${sharkLineage.badgeColor}22`,
-                              color: sharkLineage.badgeColor,
-                              border: `1px solid ${sharkLineage.badgeColor}55`,
-                            }}
-                          >
-                            <UiAtlasIcon
-                              iconKey={getLineageUiIconKey(shark.lineage)}
-                              size={11}
-                            />
-                            <span>
-                              {lang === 'zh'
-                                ? sharkLineage.nameZh
-                                : sharkLineage.nameEn}
-                            </span>
-                          </span>
-                          <span
-                            className="px-1.5 py-0.5 rounded font-black text-[10px]"
-                            style={{
-                              backgroundColor: `${shark.primaryColor}33`,
-                              color: shark.glowColor,
-                            }}
+                            className="text-[8px] font-mono font-black leading-none"
+                            style={{ color: shark.glowColor }}
                           >
                             T{shark.baseBiteTier}
                           </span>
                         </div>
-                      </div>
-
-                      {/* Large Live Swimming Shark Sprite Preview */}
-                      <div className="my-1 sm:my-2 flex items-center justify-center">
-                        <SharkFormCanvasPreview
-                          sharkId={shark.id}
-                          width={176}
-                          height={98}
-                          locked={!unlocked}
-                          animate={isCenter}
-                        />
-                      </div>
-
-                      {/* Full Uncut Shark Name & Title (Never Truncated!) */}
-                      <div className="w-full text-center space-y-0.5">
-                        <div className="text-sm sm:text-base font-black text-white leading-tight break-words">
-                          {lang === 'zh' ? shark.nameZh : shark.nameEn}
-                        </div>
-                        <div
-                          className="text-[10px] sm:text-[11px] font-bold leading-tight break-words"
-                          style={{ color: shark.glowColor }}
-                        >
-                          {lang === 'zh' ? shark.titleZh : shark.titleEn}
-                        </div>
-                      </div>
-
-                      {/* Bottom Status Pill on Wheel Card */}
-                      <div className="mt-1.5 w-full flex items-center justify-center">
-                        {isActive ? (
-                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/25 border border-emerald-400/60 text-emerald-300 text-[10px] font-black">
-                            {lang === 'zh'
-                              ? `✓ 当前出战 · Lv.${upLv}/10`
-                              : `✓ ACTIVE · Lv.${upLv}/10`}
-                          </span>
-                        ) : unlocked ? (
-                          <span className="px-2.5 py-0.5 rounded-full bg-sky-500/20 border border-sky-400/40 text-sky-300 text-[10px] font-mono font-bold">
-                            {lang === 'zh'
-                              ? `已解锁 · 强化 Lv.${upLv}/10`
-                              : `Unlocked · Lv.${upLv}/10`}
-                          </span>
-                        ) : check.canUnlockNow ? (
-                          <span className="px-2.5 py-0.5 rounded-full bg-amber-500/30 border border-amber-400 text-amber-200 text-[10px] font-black flex items-center gap-1 animate-pulse">
-                            <UiAtlasIcon
-                              iconKey="UI_BTN_MORPH_EVOLVE"
-                              size={12}
-                            />
-                            {lang === 'zh'
-                              ? '满足条件 · 可立即进化'
-                              : 'READY TO EVOLVE'}
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-700 text-slate-400 text-[10px] font-mono font-bold flex items-center gap-1">
-                            <UiAtlasIcon iconKey="UI_ICON_COIN" size={11} />
-                            {shark.unlockCoins.toLocaleString()}
-                            <span className="text-slate-600">·</span>
-                            <UiAtlasIcon iconKey="UI_ICON_GENE" size={11} />
-                            {shark.unlockGenes.toLocaleString()}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Current Generation 8-Shark Quick Selector Strip (Zero Scrollbar, 8 Equal Slots) */}
-            <div className="shrink-0 pt-1">
-              <div className="grid grid-cols-8 gap-1 sm:gap-1.5">
-                {currentGenSharks.map((shark) => {
-                  const unlocked = metaSave.unlockedSharkIds.includes(shark.id);
-                  const isActive = metaSave.selectedSharkId === shark.id;
-                  const isCurrent = shark.index === activeIndex;
-                  const check = evaluateSharkUnlock(
-                    shark,
-                    metaSave,
-                    liveRunCoins,
-                    liveRunGenes,
-                    liveRunLevel,
-                    liveRunMaxDepth
-                  );
-                  return (
-                    <button
-                      key={shark.id}
-                      type="button"
-                      data-testid={`atlas-card-${shark.id}`}
-                      onClick={() => {
-                        setDragOffsetPx(0);
-                        setActiveIndex(shark.index);
-                      }}
-                      className={`py-1 px-0.5 rounded-lg border font-mono text-[10px] font-bold transition flex flex-col items-center justify-center cursor-pointer ${
-                        isCurrent
-                          ? 'bg-sky-500/30 border-sky-400 text-white shadow-[0_0_10px_rgba(56,189,248,0.35)] scale-105'
-                          : isActive
-                          ? 'bg-emerald-950/60 border-emerald-400/70 text-emerald-300'
-                          : unlocked
-                          ? 'bg-slate-900/90 border-slate-700 text-slate-300 hover:border-slate-500'
-                          : check.canUnlockNow
-                          ? 'bg-amber-950/60 border-amber-400 text-amber-200 animate-pulse'
-                          : 'bg-slate-950/80 border-slate-800/80 text-slate-500 hover:text-slate-300'
-                      }`}
-                    >
-                      <span>#{shark.index + 1}</span>
-                      <span
-                        className={`w-1.5 h-1.5 rounded-full mt-0.5 ${
-                          isActive
-                            ? 'bg-emerald-400'
-                            : unlocked
-                            ? 'bg-sky-400'
-                            : check.canUnlockNow
-                            ? 'bg-amber-400'
-                            : 'bg-slate-700'
-                        }`}
-                      />
-                    </button>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* ==================== RIGHT / BOTTOM: ZERO-SCROLL COMMAND DECK ==================== */}
-          <div className="atlas-inspector-panel p-2.5 sm:p-3.5 bg-slate-900/98 flex flex-col justify-between gap-2">
-            <div className="space-y-2">
-              {/* 1. Full Uncut Evolution Trait Box */}
-              <div className="rounded-xl bg-slate-950/90 border border-slate-800 px-3 py-2">
-                <div className="flex items-center justify-between gap-2 mb-1">
+          {/* ==================== RIGHT / BOTTOM: SIMPLIFIED COMMAND DECK ==================== */}
+          <div className="atlas-inspector-panel p-2 sm:p-3.5 bg-slate-900/98 flex flex-col justify-between gap-1.5">
+            <div className="space-y-1.5">
+              {/* 1. Concise Trait Box */}
+              <div className="rounded-xl bg-slate-950/90 border border-slate-800 px-2.5 py-1.5">
+                <div className="flex items-center justify-between gap-2 mb-0.5">
                   <span className="text-[10px] sm:text-[11px] font-extrabold text-sky-400 flex items-center gap-1">
                     <UiAtlasIcon
                       iconKey={getLineageUiIconKey(inspectedForm.lineage)}
-                      size={13}
+                      size={12}
                     />
-                    <span>
-                      {lang === 'zh'
-                        ? `${inspectedForm.nameZh} · 专属进化特性`
-                        : `${inspectedForm.nameEn} · Evolution Trait`}
-                    </span>
+                    <span>{lang === 'zh' ? '特性' : 'Trait'}</span>
                   </span>
-                  <span className="text-[10px] font-mono text-slate-400 shrink-0">
-                    {lang === 'zh' ? '最高纪录' : 'Records'}: Lv.{maxLvRecord} ·{' '}
-                    {maxDepthRecord}m
+                  <span className="text-[9px] sm:text-[10px] font-mono text-slate-400 shrink-0">
+                    Lv.{maxLvRecord} · {maxDepthRecord}m
                   </span>
                 </div>
-                <p className="text-xs text-slate-200 leading-relaxed">
+                <p className="text-[11px] sm:text-xs text-slate-200 leading-snug">
                   {lang === 'zh'
                     ? inspectedForm.traitZh
                     : inspectedForm.traitEn}
                 </p>
               </div>
 
-              {/* 2. Single-Row 4-Column Core Numerical Telemetry Strip */}
-              <div className="grid grid-cols-4 gap-1.5 text-center">
-                <div className="rounded-xl bg-slate-950/80 border border-slate-800/90 px-1.5 py-1.5">
-                  <div className="text-[10px] text-slate-400">
-                    {lang === 'zh' ? '咬合阶位' : 'Bite Tier'}
+              {/* 2. Single-Row 4-Column Core Stats */}
+              <div className="grid grid-cols-4 gap-1 text-center">
+                <div className="rounded-lg bg-slate-950/80 border border-slate-800/90 px-1 py-1">
+                  <div className="text-[9px] sm:text-[10px] text-slate-400 leading-none">
+                    {lang === 'zh' ? '咬合' : 'Bite'}
                   </div>
-                  <div className="font-mono font-black text-xs sm:text-sm text-amber-300 mt-0.5">
+                  <div className="font-mono font-black text-xs text-amber-300 mt-0.5 leading-tight">
                     T{inspectedForm.baseBiteTier}
-                    <span className="text-[10px] text-slate-400 ml-0.5">
+                    <span className="text-[9px] text-slate-400 ml-0.5">
                       →T{Math.min(8, inspectedForm.baseBiteTier + 2)}
                     </span>
                   </div>
                 </div>
 
-                <div className="rounded-xl bg-slate-950/80 border border-slate-800/90 px-1.5 py-1.5">
-                  <div className="text-[10px] text-slate-400">
-                    {lang === 'zh' ? '生命上限' : 'Max HP'}
+                <div className="rounded-lg bg-slate-950/80 border border-slate-800/90 px-1 py-1">
+                  <div className="text-[9px] sm:text-[10px] text-slate-400 leading-none">
+                    {lang === 'zh' ? '生命' : 'HP'}
                   </div>
-                  <div className="font-mono font-black text-xs sm:text-sm text-emerald-300 mt-0.5">
+                  <div className="font-mono font-black text-xs text-emerald-300 mt-0.5 leading-tight">
                     {Math.round(
                       inspectedForm.baseHp *
                         (1 + (inspectedUpgradeLv - 1) * 0.08)
-                    )}{' '}
-                    HP
+                    )}
                   </div>
                 </div>
 
-                <div className="rounded-xl bg-slate-950/80 border border-slate-800/90 px-1.5 py-1.5">
-                  <div className="text-[10px] text-slate-400">
-                    {lang === 'zh' ? '推进极速' : 'Swim Speed'}
+                <div className="rounded-lg bg-slate-950/80 border border-slate-800/90 px-1 py-1">
+                  <div className="text-[9px] sm:text-[10px] text-slate-400 leading-none">
+                    {lang === 'zh' ? '速度' : 'Speed'}
                   </div>
-                  <div className="font-mono font-black text-xs sm:text-sm text-sky-300 mt-0.5">
+                  <div className="font-mono font-black text-xs text-sky-300 mt-0.5 leading-tight">
                     +
                     {Math.round(
                       (inspectedForm.speedBonus +
@@ -796,49 +669,45 @@ export const SharkEvolutionAtlasModal: React.FC<
                   </div>
                 </div>
 
-                <div className="rounded-xl bg-slate-950/80 border border-slate-800/90 px-1.5 py-1.5">
-                  <div className="text-[10px] text-slate-400">
-                    {lang === 'zh' ? '得分倍率' : 'Score Mult'}
+                <div className="rounded-lg bg-slate-950/80 border border-slate-800/90 px-1 py-1">
+                  <div className="text-[9px] sm:text-[10px] text-slate-400 leading-none">
+                    {lang === 'zh' ? '倍率' : 'Score'}
                   </div>
-                  <div className="font-mono font-black text-xs sm:text-sm text-purple-300 mt-0.5">
+                  <div className="font-mono font-black text-xs text-purple-300 mt-0.5 leading-tight">
                     {inspectedForm.scoreMult}x
                   </div>
                 </div>
               </div>
 
-              {/* 3. Species Mastery Crowns & 1st-Clear Gene Bonus */}
-              <div className="rounded-xl bg-slate-950/85 border border-amber-400/25 px-2.5 py-2 space-y-1.5">
-                <div className="flex items-center justify-between text-[10px] sm:text-[11px]">
+              {/* 3. Mastery Crowns */}
+              <div className="rounded-xl bg-slate-950/85 border border-amber-400/25 px-2 py-1.5 space-y-1">
+                <div className="flex items-center justify-between text-[10px]">
                   <span className="font-extrabold text-amber-300 flex items-center gap-1">
-                    <UiAtlasIcon iconKey="UI_ICON_SCORE_TROPHY" size={13} />
-                    <span>
-                      {lang === 'zh'
-                        ? '物种统治王冠 · 首通基因奖励'
-                        : 'Species Mastery · 1st-Clear Bonus'}
-                    </span>
+                    <UiAtlasIcon iconKey="UI_ICON_SCORE_TROPHY" size={12} />
+                    <span>{lang === 'zh' ? '王冠奖励' : 'Mastery'}</span>
                   </span>
                   <span className="font-mono text-slate-300">
-                    {lang === 'zh' ? '最高分' : 'Best'}:{' '}
+                    {lang === 'zh' ? '最高' : 'Best'}:{' '}
                     <strong className="text-amber-200">
                       {inspectedBestScore.toLocaleString()}
                     </strong>
                   </span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-3 gap-1">
                   {inspectedMasteryTiers.map((mTier) => {
                     const claimed = inspectedClaimedCrown >= mTier.tier;
                     return (
                       <div
                         key={mTier.tier}
-                        className={`rounded-lg px-2 py-1 border flex items-center justify-between gap-1 ${
+                        className={`rounded-lg px-1.5 py-0.5 border flex items-center justify-between gap-1 ${
                           claimed
                             ? 'bg-emerald-950/45 border-emerald-400/55 text-emerald-200'
                             : 'bg-slate-900/80 border-slate-800 text-slate-300'
                         }`}
                       >
                         <div>
-                          <div className="text-[10px] font-bold flex items-center gap-0.5 leading-none">
+                          <div className="text-[9px] sm:text-[10px] font-bold flex items-center gap-0.5 leading-none">
                             <span>{mTier.badgeIcon}</span>
                             <span>
                               {lang === 'zh'
@@ -854,18 +723,18 @@ export const SharkEvolutionAtlasModal: React.FC<
                                 : 'Gold'}
                             </span>
                           </div>
-                          <div className="text-[9px] font-mono text-slate-400 leading-tight mt-0.5">
+                          <div className="text-[8px] sm:text-[9px] font-mono text-slate-400 leading-tight">
                             {mTier.scoreThreshold.toLocaleString()}
                           </div>
                         </div>
 
-                        <div className="text-[10px] font-mono font-extrabold shrink-0">
+                        <div className="text-[9px] sm:text-[10px] font-mono font-extrabold shrink-0">
                           {claimed ? (
                             <span className="text-emerald-400">✓</span>
                           ) : (
                             <span className="text-emerald-300 flex items-center gap-0.5">
                               +{mTier.geneReward}
-                              <UiAtlasIcon iconKey="UI_ICON_GENE" size={10} />
+                              <UiAtlasIcon iconKey="UI_ICON_GENE" size={9} />
                             </span>
                           )}
                         </div>
@@ -877,50 +746,56 @@ export const SharkEvolutionAtlasModal: React.FC<
 
               {/* 4. Triple-Gate Unlock Checklist (if Locked) */}
               {!isInspectedUnlocked && (
-                <div className="rounded-xl bg-slate-950/90 border border-amber-500/30 px-2.5 py-2">
-                  <div className="grid grid-cols-3 gap-1.5 text-[10px] sm:text-[11px]">
-                    {/* Gate 1: Parent Shark */}
-                    <div
-                      className={`rounded-lg px-2 py-1 border flex items-center justify-between ${
+                <div className="rounded-xl bg-slate-950/90 border border-amber-500/30 px-2 py-1">
+                  <div className="flex flex-wrap items-center gap-1 text-[10px] sm:text-[11px]">
+                    {/* Gate 1: Explicit Parent Shark Name & Required Level */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (unlockCheck.bestParentId) {
+                          setDragOffsetPx(0);
+                          setActiveIndex(unlockCheck.bestParentIndex);
+                        }
+                      }}
+                      title={
+                        lang === 'zh'
+                          ? `点击查看前置鲨鱼：${unlockCheck.bestParentNameZh}`
+                          : `Inspect prerequisite shark: ${unlockCheck.bestParentNameEn}`
+                      }
+                      className={`flex-[1.6] min-w-fit rounded-lg px-2 py-0.5 border flex items-center justify-between gap-1.5 whitespace-nowrap transition cursor-pointer ${
                         unlockCheck.parentMet
-                          ? 'bg-emerald-950/35 border-emerald-500/40 text-emerald-300'
-                          : 'bg-rose-950/30 border-rose-500/35 text-rose-300'
+                          ? 'bg-emerald-950/35 border-emerald-500/40 text-emerald-300 hover:border-emerald-400'
+                          : 'bg-rose-950/30 border-rose-500/35 text-rose-300 hover:border-rose-400'
                       }`}
                     >
-                      <span>
+                      <span className="font-bold">
                         {lang === 'zh'
-                          ? `前置≥Lv.${inspectedForm.reqParentUpgradeLevel}`
-                          : `Parent≥Lv.${inspectedForm.reqParentUpgradeLevel}`}
+                          ? `${unlockCheck.bestParentNameZh}≥Lv.${inspectedForm.reqParentUpgradeLevel}`
+                          : `${unlockCheck.bestParentNameEn}≥Lv.${inspectedForm.reqParentUpgradeLevel}`}
                       </span>
-                      <span className="font-mono font-bold ml-1">
+                      <span className="font-mono font-bold">
                         {unlockCheck.parentMet
                           ? '✓'
                           : `${unlockCheck.bestParentCurrentLv}/${inspectedForm.reqParentUpgradeLevel}`}
                       </span>
-                    </div>
+                    </button>
 
                     {/* Gate 2: Max Level & Depth */}
                     <div
-                      className={`rounded-lg px-2 py-1 border flex items-center justify-between ${
+                      className={`flex-1 min-w-fit rounded-lg px-1.5 py-0.5 border flex items-center justify-between gap-1 whitespace-nowrap ${
                         unlockCheck.levelMet && unlockCheck.depthMet
                           ? 'bg-emerald-950/35 border-emerald-500/40 text-emerald-300'
                           : 'bg-rose-950/30 border-rose-500/35 text-rose-300'
                       }`}
                     >
                       <span>
-                        {lang === 'zh'
-                          ? `Lv.${inspectedForm.reqMaxInRunLevel}${
-                              inspectedForm.reqMaxDepth > 0
-                                ? `·${inspectedForm.reqMaxDepth}m`
-                                : ''
-                            }`
-                          : `Lv.${inspectedForm.reqMaxInRunLevel}${
-                              inspectedForm.reqMaxDepth > 0
-                                ? `·${inspectedForm.reqMaxDepth}m`
-                                : ''
-                            }`}
+                        {`Lv.${inspectedForm.reqMaxInRunLevel}${
+                          inspectedForm.reqMaxDepth > 0
+                            ? `·${inspectedForm.reqMaxDepth}m`
+                            : ''
+                        }`}
                       </span>
-                      <span className="font-mono font-bold ml-1">
+                      <span className="font-mono font-bold">
                         {unlockCheck.levelMet && unlockCheck.depthMet
                           ? '✓'
                           : `Lv.${maxLvRecord}`}
@@ -929,7 +804,7 @@ export const SharkEvolutionAtlasModal: React.FC<
 
                     {/* Gate 3: Coins & Genes */}
                     <div
-                      className={`rounded-lg px-2 py-1 border flex items-center justify-center gap-1.5 font-mono font-bold ${
+                      className={`flex-1 min-w-fit rounded-lg px-1.5 py-0.5 border flex items-center justify-center gap-1.5 font-mono font-bold whitespace-nowrap ${
                         unlockCheck.coinsMet && unlockCheck.genesMet
                           ? 'bg-emerald-950/35 border-emerald-500/40 text-emerald-300'
                           : 'bg-slate-900/90 border-slate-700 text-slate-300'
@@ -942,7 +817,7 @@ export const SharkEvolutionAtlasModal: React.FC<
                             : 'text-rose-400'
                         }`}
                       >
-                        <UiAtlasIcon iconKey="UI_ICON_COIN" size={11} />
+                        <UiAtlasIcon iconKey="UI_ICON_COIN" size={10} />
                         {inspectedForm.unlockCoins.toLocaleString()}
                       </span>
                       <span
@@ -952,7 +827,7 @@ export const SharkEvolutionAtlasModal: React.FC<
                             : 'text-rose-400'
                         }`}
                       >
-                        <UiAtlasIcon iconKey="UI_ICON_GENE" size={11} />
+                        <UiAtlasIcon iconKey="UI_ICON_GENE" size={10} />
                         {inspectedForm.unlockGenes.toLocaleString()}
                       </span>
                     </div>
@@ -988,19 +863,15 @@ export const SharkEvolutionAtlasModal: React.FC<
                       <span>
                         {inspectedUpgradeLv >= 10
                           ? lang === 'zh'
-                            ? '体质已满级 (Lv.10)'
-                            : 'MAX (Lv.10)'
+                            ? '已满级'
+                            : 'MAX'
                           : lang === 'zh'
                           ? `${
-                              upgradeGeneCost > 0 ? '阶级突破' : '强化体质'
-                            } Lv.${inspectedUpgradeLv}→${
-                              inspectedUpgradeLv + 1
-                            }`
+                              upgradeGeneCost > 0 ? '突破' : '强化'
+                            } Lv.${inspectedUpgradeLv + 1}`
                           : `${
-                              upgradeGeneCost > 0 ? 'Breakthrough' : 'Upgrade'
-                            } Lv.${inspectedUpgradeLv}→${
-                              inspectedUpgradeLv + 1
-                            }`}
+                              upgradeGeneCost > 0 ? 'Break' : 'UPG'
+                            } Lv.${inspectedUpgradeLv + 1}`}
                       </span>
                     </span>
                     {inspectedUpgradeLv < 10 && (
@@ -1033,11 +904,11 @@ export const SharkEvolutionAtlasModal: React.FC<
                   >
                     {isInspectedActive
                       ? lang === 'zh'
-                        ? '✓ 当前出战中'
-                        : '✓ Active Form'
+                        ? '✓ 出战中'
+                        : '✓ Active'
                       : lang === 'zh'
-                      ? '切换为出战鲨鱼'
-                      : 'Deploy This Shark'}
+                      ? '出战'
+                      : 'Deploy'}
                   </button>
                 </div>
               ) : (
@@ -1056,11 +927,11 @@ export const SharkEvolutionAtlasModal: React.FC<
                   <span>
                     {unlockCheck.canUnlockNow
                       ? lang === 'zh'
-                        ? '立即破茧进化解锁并出战！'
-                        : 'Evolve & Deploy Now!'
+                        ? '立即进化'
+                        : 'Evolve'
                       : lang === 'zh'
-                      ? '未满足全部进化解锁条件'
-                      : 'Requirements Not Yet Met'}
+                      ? '条件未满'
+                      : 'Locked'}
                   </span>
                 </button>
               )}

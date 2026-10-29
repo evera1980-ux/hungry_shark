@@ -17,9 +17,10 @@
 - **五段式切片游动（5-Slice Sinusoidal Spine Wave）**：
   - 将当前鲨鱼形态的离屏贴图沿水平方向切分为 5 段（吻部 ➔ 头部 ➔ 躯干 ➔ 尾柄 ➔ 尾鳍）。
   - 依据 `shark.swimPhase` 与当前游动速度，从头到尾施加振幅递增的垂直正弦偏移，实现自然流畅的鱼类摆尾游动感與张嘴撕咬形变（`shark.biteAnim`）。
-- **严禁外挂部件（Zero Organ Attachments）**：
-  - 鲨鱼外观**完全由当前出战的 `sharkFormId` 本体精灵图 + 血统光环/护盾特效决定**。
-  - **严禁**在鲨鱼背部、腹部或尾部绘制任何旧版外接机械炮、外置螺旋桨或拼接器官图形。
+- **严禁外挂部件与外围圆圈（Zero Organ Attachments & Zero Outer Circles）**：
+  - 鲨鱼外观**完全由当前出战的 `sharkFormId` 纯净本体精灵图、受击透明度闪烁及黄金狂暴本体滤镜决定**。
+  - **严禁**在鲨鱼外围绘制任何虚线环、光圈圆环或外接机械炮/螺旋桨等拼接图形。
+
 
 ---
 
@@ -106,21 +107,23 @@
   2. **帧级 `getBoundingClientRect()` 同步**：`App.tsx` 中的 `syncCanvasBufferToDisplayBox()` 必须直接读取 `canvas.getBoundingClientRect()` 的实际 CSS 宽高（`cssW`, `cssH`）设置 `canvas.width` 与 `canvas.height`，并在渲染时使用精确的 `scaleX = canvas.width / cssW` 与 `scaleY = canvas.height / cssH`，同时监听 `window.visualViewport` 的 `resize` 与 `orientationchange`。
   3. **竖屏海景等比保真 (`parallaxBackground.ts`)**：`drawTiledLayer` 严禁将宽幅横版海底条带（`1376×256`）直接非等比拉伸铺满超长竖屏高度；在竖屏（`viewH > viewW`）下必须限制海底景观条带高度 `stripH <= Math.max(480, Math.round(viewW * 1.15))` 并严格按原图宽高比计算 `tileW = Math.round(stripH * aspect)`，上方水体区域使用同层顶部水体切片无缝延展。
 
-### 4.5 48 阶进化图谱 3D 轮状画廊与全设备零滚动条规范 (`SharkEvolutionAtlasModal.tsx`)
+### 4.5 极简进化界面「巨幕水族馆 + 连续半环罗盘」与全设备零滚动条规范 (`SharkEvolutionAtlasModal.tsx`)
+- **极简标题与无序号纯净命名**：
+  - 弹窗主标题简化为 **`进化` / `Evolution`**，右侧属性区标题精简为 **`特性`、`咬合`、`生命`、`速度`、`倍率`、`王冠奖励`**，底部操作按钮精简为 **`强化 Lv.X` / `突破 Lv.X`、`出战`、`立即进化`**。
+  - **全面移除 `G1 ~ G6` 世代 Tab 栏与所有鲨鱼名称前的 `#01 ~ #48` 序号**，界面清爽直观、一目了然。
+  - **前置条件明确显示具体鲨鱼名称**：未解锁鲨鱼的前置条件严禁使用笼统的 `前置≥Lv.X` 表达，必须明确显示所特指的前置鲨鱼完整名称与所需等级（例如 `拟态小丑幼鲨≥Lv.2` / `Mimic Clown Fry≥Lv.2`），并支持点击该条件胶囊一键跳转至对应前置鲨鱼。
 - **全局零灰色滚动条 & 零文字截断红线**：
   - 全项目 CSS 强制隐藏所有原生浏览器灰色滚动条（`*::-webkit-scrollbar { display: none !important; } scrollbar-width: none !important;`）。
-  - 图谱内所有鲨鱼名称、称号与专属进化特性**必须 100% 完整展示**，严禁使用小格子导致“一个字加省略号（`…`）”的残缺排版。
-- **左右 3D 轮状画廊（3D Cylindrical Coverflow Wheel）**：
-  - 废除拥挤的 48 小格滚动列表，采用 **5 卡位 3D 环形轮盘（`[-2, -1, 0, +1, +2]`）**：
-    - **中央聚光灯主卡（`offset === 0`）**：`100%` 放大居中，带血统氛围背光、大尺寸实时摆尾游动预览（`176×98`）、完整无截断名称与称号、血统徽章、咬合阶位与当前出战/强化状态。
-    - **两侧透视副卡（`offset = ±1, ±2`）**：按距离自动做透视缩放（`scale(0.75)` / `scale(0.50)`）、水平弧形位移与微倾角，构成立体旋转展台。
-  - **全平台交互支持（触屏 + 非触屏四合一）**：
-    1. **触屏/鼠标拖拽滑动（Touch & Pointer Swipe）**：在轮盘舞台上左右滑动手指，5 张卡片随手指实时 1:1 跟手旋转，松手按位移与惯性自动吸附至上一只/下一只鲨鱼（支持快速甩动连跳）。
-    2. **左右霓虹方向键按钮（`◀` / `▶` Cyber Arrows）**：舞台左右两侧常驻高对比度 `◀` / `▶` 实体按钮，非触屏鼠标一键切换。
-    3. **直接点击两侧副卡 / 底部本代 8 槽位直选条**：点击左/右侧缩小的鲨鱼卡片，或点击舞台下方等宽 8 格本代槽位（`grid-cols-8`），立即将该鲨鱼旋转至中央。
-    4. **鼠标滚轮（`onWheel`）与键盘左右方向键（`ArrowLeft` / `ArrowRight`）**：桌面端滚轮或方向键无缝旋转轮盘。
-- **固定 6 等分世代切换栏（`grid-cols-6` 零滚动条）**：
-  - `G1 ~ G6` 采用严格 6 等分网格（`grid-cols-6`），在任何屏幕宽度下均单行完整铺满、绝不产生横向滚动条，点击任意世代立即切入该世代并高亮可进化红点。
+  - 界面内所有鲨鱼名称与进化特性**必须 100% 完整展示**，严禁使用省略号（`…`）截断鱼名。
+- **移动端优先「上方 68% 巨幕水族馆 + 底部 32% 连续半环罗盘表盘」布局（Giant Aquarium + Continuous Curved Arc Dial）**：
+  - **上方 68% 巨幕主鲨聚光灯舞台**：无遮挡居中展示当前选中鲨鱼的巨幅实时摆尾游动模型（移动端 `186×100` / 桌面端 `220×118`），上方仅保留血统与 `T{N}` 阶位胶囊，下方纯净展示鲨鱼名称与出战/解锁状态胶囊。
+  - **底部 32% 连续弧形罗盘表盘**：以当前选中鲨鱼为中心，沿底部 `180°` 发光弧形导轨无缝展示前后相邻的 7 只鲨鱼（`ARC_OFFSETS = [-3..+3]`，48 只鲨鱼首尾无缝循环）；当前选中鲨鱼在弧顶中央（`slotPos = 0`）凸起放大至 `1.18x` 并亮起青色高光环，卡片内仅展示鲨鱼缩略图与 `T{N}` 咬合阶位，无序号干扰。
+- **全平台交互支持（触屏 + 非触屏四合一）**：
+  1. **触屏/鼠标拨动弧形罗盘（Touch & Pointer Spin）**：在舞台上左右滑动手指，底部弧形表盘实时跟手旋转，松手按惯性自动吸附至最近鲨鱼。
+  2. **直接点击弧形表盘上任意鲨鱼**：点击弧上任意位置的缩小鲨鱼，表盘立即旋转并将该鲨鱼切换至弧顶焦点与上方巨幕。
+  3. **左右霓虹方向键按钮（`◀` / `▶` Cyber Arrows）**：舞台左右两侧常驻 `◀` / `▶` 实体按钮，非触屏鼠标一键切换。
+  4. **鼠标滚轮（`onWheel`）与键盘左右方向键（`ArrowLeft` / `ArrowRight`）**：桌面端滚轮或方向键无缝旋转。
+
 
 ### 4.6 15 秒 3 步非阻断式实操新手引导规范 (`tutorialStep` in `src/App.tsx`)
 - **设计原则**：“边游边学、零暂停弹窗、亲自点击点亮按钮”，全程不打断 60FPS 游动，右上角常驻 `[跳过 / Skip]` 按钮。
@@ -136,7 +139,9 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
-| 2026-10-28 | 新增 **15 秒 3 步实操新手引导（含新手补给礼包与按钮聚光灯）** 与 **HUD 圆章 2 字融合功能标签（`图谱`/`强化`/`进化`/`补给`/`狂暴`/`突破`/`冲刺`）**；移除鱼类外圈与 `T{N}` 文字，完全依托视觉体型判强弱；将 48 阶进化图谱重构为 **3D 左右轮状画廊**；修复 iPhone 14 Pro Max Safari 画面纵向拉伸 Bug | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/game/canvasRenderer.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/index.css` |
+| 2026-10-29 | 选定并固化进化界面为 **「巨幕水族馆 + 底部连续半环罗盘表盘」**；标题简化为 **`进化`**，移除 `G1~G6` 世代 Tab 栏与所有鲨鱼名称前的 `#01~#48` 序号；将解锁条件中的 `前置≥Lv.X` 明确显示为具体前置鲨鱼名称（如 `拟态小丑幼鲨≥Lv.2`）并支持点击跳转；移除玩家鲨鱼自身外圈辅助线 | `src/components/SharkEvolutionAtlasModal.tsx`, `src/game/sharkEvolutionConfig.ts`, `src/App.tsx`, `src/game/canvasRenderer.ts`, `docs/02-DESIGN_SPEC.md` |
+| 2026-10-28 | 新增 **15 秒 3 步实操新手引导（含新手补给礼包与按钮聚光灯）** 与 **HUD 圆章 2 字融合功能标签（`图谱`/`强化`/`进化`/`补给`/`狂暴`/`突破`/`冲刺`）**；移除鱼类外圈与 `T{N}` 文字，完全依托视觉体型判强弱；修复 iPhone 14 Pro Max Safari 画面纵向拉伸 Bug | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/game/canvasRenderer.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/index.css` |
 | 2026-10-27 | 接入 `icons_f5128c12.png` 24 枚定制游戏 UI 图集，全面重构为“无框头像框 + 单行悬浮遥测胶囊 + 声呐摇杆 + MOBA 扇形技能圆章”极简 HUD（视野留白率提升至 90%+） | `src/App.tsx`, `src/components/UiAtlasIcon.tsx`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts` |
 | 2026-10-26 | 建立 48 阶精灵渲染规范、视觉体型===吞噬判定铁律及移动端多点触控（`bindMultiTouchButton` + 零重渲染摇杆）设计规范 | `src/App.tsx`, `src/game/canvasRenderer.ts`, `src/game/spriteSheetManager.ts` |
+
 

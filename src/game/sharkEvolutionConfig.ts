@@ -919,16 +919,14 @@ export function getSharkUpgradeGeneCost(
 export function getParentCandidatesForForm(form: SharkFormConfig): SharkFormConfig[] {
   if (form.index === 0) return [];
   const parents: SharkFormConfig[] = [];
-  if (form.col > 0) {
-    const left = SHARK_EVOLUTION_FORMS[form.row * 8 + (form.col - 1)];
-    if (left) parents.push(left);
+  const prevInSequence = SHARK_EVOLUTION_FORMS[form.index - 1];
+  if (prevInSequence) {
+    parents.push(prevInSequence);
   }
   if (form.row > 0) {
     const up = SHARK_EVOLUTION_FORMS[(form.row - 1) * 8 + form.col];
-    if (up) parents.push(up);
-    if (form.col === 0) {
-      const prevRowEnd = SHARK_EVOLUTION_FORMS[(form.row - 1) * 8 + 7];
-      if (prevRowEnd && !parents.includes(prevRowEnd)) parents.push(prevRowEnd);
+    if (up && !parents.includes(up)) {
+      parents.push(up);
     }
   }
   return parents;
@@ -942,6 +940,8 @@ export interface UnlockCheckResult {
   depthMet: boolean;
   coinsMet: boolean;
   genesMet: boolean;
+  bestParentId: string;
+  bestParentIndex: number;
   bestParentNameZh: string;
   bestParentNameEn: string;
   bestParentCurrentLv: number;
@@ -962,18 +962,23 @@ export function evaluateSharkUnlock(
   const maxDepth = Math.max(save.bestDepthReached, Math.round(liveRunMaxDepth));
 
   const parents = getParentCandidatesForForm(form);
+  const primaryParent =
+    form.index > 0 ? SHARK_EVOLUTION_FORMS[form.index - 1] : undefined;
   let parentMet = form.index === 0;
-  let bestParentCurrentLv = 0;
-  let bestParent = parents[0];
+  let bestParent = primaryParent ?? parents[0];
+  let bestParentCurrentLv =
+    bestParent && save.unlockedSharkIds.includes(bestParent.id)
+      ? (save.sharkUpgradeLevels[bestParent.id] ?? 1)
+      : 0;
 
   for (const p of parents) {
     const isUnlocked = save.unlockedSharkIds.includes(p.id);
     const pLv = isUnlocked ? (save.sharkUpgradeLevels[p.id] ?? 1) : 0;
-    if (pLv >= bestParentCurrentLv) {
-      bestParentCurrentLv = pLv;
-      bestParent = p;
-    }
     if (isUnlocked && pLv >= form.reqParentUpgradeLevel) {
+      if (!parentMet) {
+        bestParent = p;
+        bestParentCurrentLv = pLv;
+      }
       parentMet = true;
     }
   }
@@ -992,6 +997,8 @@ export function evaluateSharkUnlock(
     depthMet,
     coinsMet,
     genesMet,
+    bestParentId: bestParent?.id ?? '',
+    bestParentIndex: bestParent?.index ?? 0,
     bestParentNameZh: bestParent?.nameZh ?? '',
     bestParentNameEn: bestParent?.nameEn ?? '',
     bestParentCurrentLv,

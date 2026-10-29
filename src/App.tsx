@@ -1012,7 +1012,7 @@ export default function App() {
           0,
           180,
           'float_trial_start',
-          '#46 MECHA LEVIATHAN',
+          'MECHA LEVIATHAN',
           '#38bdf8',
           1.25
         );
@@ -1160,7 +1160,7 @@ export default function App() {
         sim.shark.x,
         sim.shark.y - 42,
         'float_evo_ready',
-        `#${form.index + 1} ${langRef.current === 'zh' ? form.nameZh : form.nameEn}`,
+        `${langRef.current === 'zh' ? form.nameZh : form.nameEn}`,
         LINEAGE_META[form.lineage].badgeColor,
         1.25
       );
@@ -3292,7 +3292,6 @@ export default function App() {
                     </span>
                   </div>
                   <div className="font-display font-extrabold text-xs sm:text-sm text-white">
-                    #{String(titleSharkForm.index + 1).padStart(2, '0')}{' '}
                     {lang === 'zh' ? titleSharkForm.nameZh : titleSharkForm.nameEn}
                   </div>
                 </div>
@@ -3346,7 +3345,7 @@ export default function App() {
                 >
                   <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={20} />
                   <span>
-                    {lang === 'zh' ? '鲨鱼进化图谱' : 'Evolution Atlas'} (
+                    {lang === 'zh' ? '进化' : 'Evolution'} (
                     {unlockedTotalCount}/48)
                   </span>
                 </button>
@@ -3359,8 +3358,8 @@ export default function App() {
                   <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={18} />
                   <span>
                     {lang === 'zh'
-                      ? '试驾 #46 机甲利维坦'
-                      : 'Trial #46 Mecha Leviathan'}
+                      ? '试驾机甲利维坦'
+                      : 'Trial Mecha Leviathan'}
                   </span>
                 </button>
               </div>
@@ -3513,7 +3512,6 @@ export default function App() {
                         iconKey={getLineageUiIconKey(activeHudSharkForm.lineage)}
                         size={11}
                       />
-                      #{String(activeHudSharkForm.index + 1).padStart(2, '0')}{' '}
                       {lang === 'zh'
                         ? activeHudSharkForm.nameZh
                         : activeHudSharkForm.nameEn}
@@ -3826,8 +3824,8 @@ export default function App() {
                       {...bindMultiTouchButton(handleInRunBreakthroughOrAtlas)}
                       title={
                         lang === 'zh'
-                          ? `破茧进化：#${nextEvoTargetForm.index + 1} ${nextEvoTargetForm.nameZh}`
-                          : `Morph: #${nextEvoTargetForm.index + 1} ${nextEvoTargetForm.nameEn}`
+                          ? `进化：${nextEvoTargetForm.nameZh}`
+                          : `Morph: ${nextEvoTargetForm.nameEn}`
                       }
                       className="game-btn-spring relative w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center cursor-pointer touch-manipulation animate-bounce"
                     >
@@ -3836,9 +3834,6 @@ export default function App() {
                         size={50}
                         className="w-full h-full drop-shadow-[0_0_10px_rgba(52,211,153,0.85)]"
                       />
-                      <span className="absolute -top-1 -right-1 px-1 py-0.2 rounded-full bg-emerald-400 text-slate-950 font-display font-black text-[8px] border border-white leading-none">
-                        #{nextEvoTargetForm.index + 1}
-                      </span>
                       <span className="absolute -bottom-1 px-1.5 py-0.2 rounded-full bg-slate-950/95 border border-emerald-400 text-emerald-300 font-display font-extrabold text-[8px] whitespace-nowrap leading-none">
                         {lang === 'zh' ? '进化' : 'EVO'}
                       </span>
@@ -4410,8 +4405,8 @@ export default function App() {
                     <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={18} />
                     <span>
                       {lang === 'zh'
-                        ? '打开鲨鱼进化图谱 / 强化躯体'
-                        : 'Open Shark Evolution Atlas'}
+                        ? '进化 / 强化'
+                        : 'Evolution / Upgrade'}
                     </span>
                   </button>
 
@@ -4433,8 +4428,8 @@ export default function App() {
                       <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={18} />
                       <span>
                         {lang === 'zh'
-                          ? '试驾 #46 机甲利维坦'
-                          : 'Trial #46 Mecha Leviathan'}
+                          ? '试驾机甲利维坦'
+                          : 'Trial Mecha Leviathan'}
                       </span>
                     </button>
                   </div>
