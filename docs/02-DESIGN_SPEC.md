@@ -54,18 +54,19 @@
 ### 3.2 极简无框 HUD 四角布局（视野留白率 >= 90%）
 遵循移动端动作游戏（MOBA / 饥饿鲨进化）“去黑盒化、图标化、状态合并”三大视觉瘦身准则：
 1. **顶部左角（一体式圆形鲨鱼头像框 + 双斜切能量条）**：
-   - **圆形头像主按钮**：叠加 `UI_AVATAR_FRAME` 科技环、外圈 SVG 紫色经验进度环（`XP Ring`）与当前鲨鱼实时精灵缩略图；左下角镶嵌 `UI_BADGE_TIER` 阶位盾牌（`T1~T8`），右下角镶嵌局内等级胶囊（`Lv.X`），顶部微浮标显示已解锁图谱进度（`X/48`）。**直接点击头像即可打开 48 阶进化图谱**，省去独立的长条图谱按钮。
-   - **紧凑双斜切条**：头像右侧仅保留 `-skew-x-12` 斜切设计的 **HP 生命条**（含受击延迟消退黄条 `ghostHp` 与血量百分比）和 **BOOST 冲刺能量条**，彻底移除占屏的深色背景板。
-2. **顶部居中（单行悬浮遥测胶囊）**：
+   - **圆形头像主按钮**：叠加 `UI_AVATAR_FRAME` 科技环、外圈 SVG 紫色经验进度环（`XP Ring`）与当前鲨鱼实时精灵缩略图；左下角镶嵌 `UI_BADGE_TIER` 阶位盾牌（`T1~T8`），右下角镶嵌局内等级胶囊（`Lv.X`），顶部微浮标融合功能名显示 `图谱 X/48`（`Atlas X/48`）。**直接点击头像即可打开 48 阶进化图谱**。
+   - **紧凑双斜切条**：头像右侧仅保留 `-skew-x-12` 斜切设计的 **HP 生命条**（含受击延迟消退黄条 `ghostHp` 与血量数值）和 **BOOST 冲刺能量条**，彻底移除占屏的深色背景板。
+2. **顶部居中（单行悬浮遥测胶囊 + 3 步非阻断式新手引导条）**：
    - 将得分（`UI_ICON_SCORE_TROPHY`）、基因（`UI_ICON_GENE`）、金币（`UI_ICON_COIN`）、深度（`UI_ICON_DEPTH`）与当前悬赏目标鱼（`UI_ICON_BOUNTY_TARGET` + `×2`）整合为**单行半透明流线胶囊**；连击火焰（`UI_ICON_COMBO_FIRE`）与黄金狂暴倒计时（`UI_BTN_GOLD_FRENZY`）仅在触发时动态浮现。
+   - 新玩家首次进入（或暂停菜单点击“🎓 重温新手引导”）时，遥测胶囊下方动态浮现**非阻断式 3 步实操引导胶囊**（随时可一键跳过）。
 3. **顶部右角（单枚暂停圆章）**：
-   - 局内右上角仅保留单枚 `40×40px` 的 `UI_ICON_PAUSE` 圆形按钮；语言切换与声音开关（`UI_ICON_SOUND`）收纳至暂停弹窗中。
+   - 局内右上角仅保留单枚 `40×40px` 的 `UI_ICON_PAUSE` 圆形按钮；语言切换、声音开关（`UI_ICON_SOUND`）与重温新手引导收纳至暂停弹窗中。
 4. **底部左角（定制声呐罗盘摇杆 `.landscape-thumb-joy`）**：
-   - 采用 `UI_JOYSTICK_BASE` 半透明发光罗盘底座 + `UI_JOYSTICK_KNOB` 能量球握把，静止时保持低不透明度（`opacity-75`）完全不挡海底视野。
-5. **底部右角（MOBA 扇形圆章技能弧）**：
-   - 废除旧版双排宽幅文字按钮墙，改为**纯圆形游戏技能勋章弧**：
-     - 上排辅助进化弧：`UI_BTN_SUPPLY_DROP`（空投补给）、`UI_BTN_BODY_UPGRADE`（躯体强化，带顶部 `Lv.X/10` 徽标与底部金币价格胶囊）、`UI_BTN_MORPH_EVOLVE`（仅在满足下一阶解锁门禁时高亮弹出的破茧进化圆章）。
-     - 下排核心战斗弧：`UI_BTN_GENE_SURGE`（基因突破）、`UI_BTN_GOLD_FRENZY`（黄金狂暴，外围集成 SVG 圆形充能进度环）与右下角 `76×76px` 超大主按钮 `UI_BTN_BOOST`（涡轮冲刺）。
+   - 采用 `UI_JOYSTICK_BASE` 半透明发光罗盘底座 + `UI_JOYSTICK_KNOB` 能量球握把，静止时保持低不透明度（`opacity-65`）完全不挡海底视野。
+5. **底部右角（MOBA 扇形圆章技能弧 · 融合 2 字动作名胶囊）**：
+   - 废除旧版双排宽幅文字按钮墙，改为**纯圆形游戏技能勋章弧**，并将 **2 字中文/英文功能名直接融合进原本的底部价格/百分比胶囊内**（零额外占位、一眼看懂按钮作用）：
+     - 上排辅助进化弧：`UI_BTN_MORPH_EVOLVE`（`进化 / EVO`，仅在满足下一阶解锁门禁时高亮弹出）、`UI_BTN_BODY_UPGRADE`（顶部 `Lv.X` 徽标 + 底部 `强化 🪙60 / UPG 🪙60` 胶囊）。
+     - 下排核心战斗弧：`UI_BTN_SUPPLY_DROP`（底部 `补给 / Drop`）、`UI_BTN_GOLD_FRENZY`（外围 SVG 圆形充能进度环 + 底部 `狂暴 🪙80 / Frenzy 🪙80`）、`UI_BTN_GENE_SURGE`（底部 `突破 🧬12 / Surge 🧬12`）与右下角超大主按钮 `UI_BTN_BOOST`（底部 `冲刺 100% / Boost 100%`）。
 
 ---
 
@@ -121,12 +122,21 @@
 - **固定 6 等分世代切换栏（`grid-cols-6` 零滚动条）**：
   - `G1 ~ G6` 采用严格 6 等分网格（`grid-cols-6`），在任何屏幕宽度下均单行完整铺满、绝不产生横向滚动条，点击任意世代立即切入该世代并高亮可进化红点。
 
+### 4.6 15 秒 3 步非阻断式实操新手引导规范 (`tutorialStep` in `src/App.tsx`)
+- **设计原则**：“边游边学、零暂停弹窗、亲自点击点亮按钮”，全程不打断 60FPS 游动，右上角常驻 `[跳过 / Skip]` 按钮。
+- **三步实操状态流转**：
+  1. **Step 1 (`EAT_SMALL_FISH`)**：开局在鲨鱼正前方刷新 10 条慢速 `T1` 迎宾小鱼群，左下虚拟摇杆亮起青色呼吸光圈与 `🕹️ 拖动摇杆` 浮标，引导玩家吞食 3 条比自己小的鱼（`0/3 ➔ 3/3`）。
+  2. **Step 2 (`HOLD_BOOST`)**：右下角 `冲刺` 主按钮亮起青色高亮光圈与 `👆 按住冲刺` 浮标，引导玩家按住冲刺键（或空格键）累计 `0.7s` 体验涡轮加速与破甲。
+  3. **Step 3 (`HANDS_ON_UPGRADE`)**：完成冲刺瞬间立即发放 **`🎁 新手补给礼包 (+80🪙 +20🧬)`** 并同帧刷新 HUD，使右下角 `强化`（60🪙）与 `突破`（12🧬）按钮 100% 亮起金色/翠绿聚光灯与 `👆 点此强化` 浮标，由玩家亲自点击任一按钮完成首次强化或基因突破。
+  4. **完成庆贺 (`CELEBRATE` ➔ `DONE`)**：左上角头像 `图谱 X/48` 亮起高光提示 4.2 秒后自动收起，并将 `hungry_shark_tutorial_done_v1 = '1'` 写入 `localStorage`。
+
 ---
 
 ## 5. 文档变更记录 (Changelog)
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
-| 2026-10-28 | 将 48 阶进化图谱重构为 **3D 左右轮状画廊（居中放大 + 两侧透视缩小）**，支持触屏跟手滑动、左右箭头按钮、鼠标滚轮、键盘方向键与 6 等分无滚动条世代切换，彻底消除灰色滚动条与鱼名截断省略号；修复 iPhone 14 Pro Max Safari 画面纵向拉伸 Bug | `src/components/SharkEvolutionAtlasModal.tsx`, `src/index.css`, `index.html`, `src/App.tsx`, `src/game/parallaxBackground.ts` |
+| 2026-10-28 | 新增 **15 秒 3 步实操新手引导（含新手补给礼包与按钮聚光灯）** 与 **HUD 圆章 2 字融合功能标签（`图谱`/`强化`/`进化`/`补给`/`狂暴`/`突破`/`冲刺`）**；移除鱼类外圈与 `T{N}` 文字，完全依托视觉体型判强弱；将 48 阶进化图谱重构为 **3D 左右轮状画廊**；修复 iPhone 14 Pro Max Safari 画面纵向拉伸 Bug | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/game/canvasRenderer.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/index.css` |
 | 2026-10-27 | 接入 `icons_f5128c12.png` 24 枚定制游戏 UI 图集，全面重构为“无框头像框 + 单行悬浮遥测胶囊 + 声呐摇杆 + MOBA 扇形技能圆章”极简 HUD（视野留白率提升至 90%+） | `src/App.tsx`, `src/components/UiAtlasIcon.tsx`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts` |
 | 2026-10-26 | 建立 48 阶精灵渲染规范、视觉体型===吞噬判定铁律及移动端多点触控（`bindMultiTouchButton` + 零重渲染摇杆）设计规范 | `src/App.tsx`, `src/game/canvasRenderer.ts`, `src/game/spriteSheetManager.ts` |
+

@@ -100,11 +100,25 @@
 | `bestDepthReached` | `number` | `220` | 历史下潜达到的最大深度 `m`（用于三重进化门禁校验） |
 | `totalRunsPlayed` | `number` | `0` | 累计游玩局数 |
 
+此外，3 步实操新手引导完成标记保存在 `localStorage` 键名 `hungry_shark_tutorial_done_v1`（值为 `'1'` 表示已完成或跳过，可通过暂停菜单“🎓 重温新手引导”重置）。
+
 ---
 
-## 5. 文档变更记录 (Changelog)
+## 5. 生态刷新器与新手浅滩安全区 (`src/game/ecosystemSpawner.ts`)
+
+- **85% 原生深度带约束 + 浅滩安全区钳制**：当玩家处于阳光珊瑚浅滩（`sharkY <= 380m`）时，屏幕外向下预刷新的鱼群深度被严格钳制在 `<= 440m`，杜绝 `520m+` 暮光带掠食者在浅海玩家正下方提前刷出。
+- **动态咬合阶位感知权重（Bite-Tier-Aware Spawning）**：
+  - 新手保护期（教程进行中或 `T1` 开局前 20 秒）：浅滩刷新权重为 `T1: 84% / T2: 16% / T3+: 0%`，并自动过滤深水雷（`isHazard`）与主动追咬掠食者（`CHASE_ATTACK`），只保留温顺或受惊逃逸的猎物。
+  - 常规 `T1` 浅滩期：`T1: 76% / T2: 18% / T3: 6%`。
+  - `T2+` 浅滩进阶期：`T1: 54% / T2: 26% / T3: 14% / T4: 6%`。
+
+---
+
+## 6. 文档变更记录 (Changelog)
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-10-28 | 新增 3 步实操新手引导状态机（`EAT_SMALL_FISH` ➔ `HOLD_BOOST` ➔ `HANDS_ON_UPGRADE` + 新手补给礼包）、`ecosystemSpawner.ts` 浅滩安全区与咬合阶位感知权重，以及 3D 轮盘式进化图谱组件 | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/components/SharkEvolutionAtlasModal.tsx` |
 | 2026-10-27 | 新增 `public/assets/aistudio/icons_f5128c12.png`（6×4 UI 图标图集）、`src/components/UiAtlasIcon.tsx` 及 `spriteSheetManager.ts` BFS 智能镂空抠图与缓存管线 | `src/game/spriteSheetManager.ts`, `src/components/UiAtlasIcon.tsx`, `src/App.tsx` |
 | 2026-10-26 | 建立完整的三层解耦架构文档、目录职责表与 `SharkMetaSaveData` 存档规范 | `src/App.tsx`, `src/game/*` |
+

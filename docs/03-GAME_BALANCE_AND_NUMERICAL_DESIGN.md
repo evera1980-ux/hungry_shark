@@ -199,6 +199,16 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
    $$y = \text{clamp}\big(y,\; \max(55,\; \text{chosenTier.minDepth}),\; \text{chosenTier.maxDepth}\big)$$
    从而在数学上 **100% 杜绝浅水鱼刷到深海或深海鱼刷到浅水区**。
 
+### 6.3 浅滩安全区与咬合阶位感知刷新权重（Early-Run Sanctuary & Bite-Tier-Aware Spawning）
+为了防止 `T1` 初生幼鲨在阳光浅滩（`0~520m`）被高阶掠食者围攻，在 `src/game/ecosystemSpawner.ts` 中实施三项动态生态调控：
+1. **浅滩下界预刷新钳制**：当玩家深度 `sharkY <= 380m` 时，屏幕外预生成鱼群的深度上限被钳制在 `<= 440m`，防止 `520m+` 暮光带掠食者在浅滩玩家正下方刷出。
+2. **新手保护期攻击性过滤**：在新手引导期间或 `T1` 鲨鱼开局前 `20s`（`isEarlySanctuary === true`），自动过滤深水雷（`isHazard`）与主动追咬掠食者（`behavior === 'CHASE_ATTACK'`），仅刷新温顺或受惊逃逸鱼群。
+3. **浅海动态阶位权重**：
+   - 新手保护期（`isEarlySanctuary`）：`T1: 84% / T2: 16% / T3+: 0%`
+   - 常规 `T1` 鲨鱼浅海期：`T1: 76% / T2: 18% / T3: 6%`
+   - `T2+` 鲨鱼浅海期：`T1: 54% / T2: 26% / T3: 14% / T4: 6%`
+4. **新手引导第 3 步实操补给礼包**：首次完成新手引导第 2 步（按住冲刺 `0.7s`）时，一次性发放 **`+80 🪙 +20 🧬` 新手补给礼包**，确保玩家在引导第 3 步 100% 立即点亮并亲手体验 `强化`（60🪙）或 `突破`（12🧬）。
+
 ---
 
 ## 7. 无限成长与深渊难度膨胀系统 (`InfiniteProgressionManager`)
@@ -218,7 +228,8 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
-| 2026-10-28 | 新增第 5.3 节“单物种统治王冠（🥉/🥈/👑）与局内狩猎热度（Heat Lv.0~5）”：为 48 只鲨鱼独立记录最高分与三段位一次性首通基因奖（严格隔离试驾模式），局内分数转化为磁吸范围与能量恢复被动增益 | `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/App.tsx`, `src/game/rules.test.ts` |
+| 2026-10-28 | 新增第 6.3 节“浅滩安全区与咬合阶位感知刷新权重”：限制浅海玩家下方预刷新深度 `<= 440m`，在 `T1` 前期提升可吞食 `T1` 小鱼刷新占比至 `76%~84%` 并过滤主动追咬掠食者，配套新手引导第 3 步发放 `+80🪙 +20🧬` 实操补给礼包；新增第 5.3 节“单物种统治王冠与局内狩猎热度” | `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts` |
 | 2026-10-27 | 重构双货币经济系统：① 猎物金币/基因产出重构为 ~4:1 黄金比（普通拾取球 75% 金币 / 25% 基因，高浓度基因聚焦于悬赏鱼与深海巨兽）；② 躯体强化常规金币消耗下调 15%，并在 `Lv.4→5` 与 `Lv.9→10` 阶级突破点引入基因消耗 `getSharkUpgradeGeneCost`；③ 黄金狂暴与基因突破改为“代际锚定 + 二次方递增 (`n^2`)”公式 | `src/game/config.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts`, `src/App.tsx`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/game/rules.test.ts` |
 | 2026-10-27 | 新增第 3.4 节“黄金狂暴阶段体型保持特例”：进入黄金阶段时不缩小其他鱼类，保持进入前的巨兽体型以强化猎杀成就感 | `src/game/rules.ts`, `src/game/canvasRenderer.ts`, `src/game/rules.test.ts` |
 | 2026-10-26 | 编写完整数值策划案：明确双轨 `Lv`、咬合阶位 `T`、猎物相对体型算法 `getPreyRelativeVisualScale`、48 阶进化矩阵与深度分布规则 | `src/game/rules.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/config.ts` |
+

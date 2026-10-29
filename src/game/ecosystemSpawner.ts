@@ -209,6 +209,14 @@ export class EcosystemSpawner {
     if (spawnY < 35) {
       spawnY = 35 + rng() * 220;
     }
+    // 新手保护 / T1 浅海开局保护：当玩家在阳光浅滩上层 (sharkY <= 380m) 活动时，防止下方视野外刷怪半径直接伸入 520m+ 暮光带刷出中层掠食者
+    if (
+      sharkY <= 380 &&
+      (this.tutorialProtectionActive ||
+        (this.activeSharkBiteTier <= 1 && this.gameTime < 20))
+    ) {
+      spawnY = Math.min(440, spawnY);
+    }
 
     // 根据猎物实际生成的目标水深 spawnY 严格匹配对应生态层的鱼种，并将生成坐标钳制在该物种真实栖息水深内
     const chosenTier = this.pickPreyConfigForDepth(spawnY, rng);
@@ -276,6 +284,16 @@ export class EcosystemSpawner {
    */
   public activeTargetPreyId: string | null = null;
 
+  /**
+   * 当前玩家鲨鱼的实时常态咬合阶位（用于浅海动态配比，确保 T1 幼鲨开局有充足可吞噬猎物）
+   */
+  public activeSharkBiteTier: number = 1;
+
+  /**
+   * 首局新手引导保护开关（开启时浅海屏蔽主动追咬掠食者与水雷）
+   */
+  public tutorialProtectionActive: boolean = false;
+
   private pickPreyConfigForDepth(
     targetDepthY: number,
     rng: () => number
@@ -286,17 +304,34 @@ export class EcosystemSpawner {
     }
 
     const depth = Math.max(25, targetDepthY);
+    const isEarlySanctuary =
+      depth <= 520 &&
+      (this.tutorialProtectionActive ||
+        (this.activeSharkBiteTier <= 1 && this.gameTime < 20));
 
     // 严格筛选当前水深落在该鱼种真实自然栖息带 [minDepth, maxDepth] 内的物种（绝不让浅水鱼刷到深海，也绝不让深水鱼刷到浅海）
     const habitatPool = allPreys.filter(
       (p) => depth >= p.minDepth && depth <= p.maxDepth
     );
-    const activePool =
+    const rawActivePool =
       habitatPool.length > 0
         ? habitatPool
         : depth <= 520
         ? allPreys.filter((p) => p.maxDepth <= 520)
         : allPreys.filter((p) => p.minDepth >= 500);
+
+    // 在首局引导或 T1 幼鲨前 20 秒内，浅海过滤掉主动冲刺追咬型掠食者（EEL_CHARGER / SUB_PATROL）与水雷
+    const sanctuaryFilteredPool = isEarlySanctuary
+      ? rawActivePool.filter(
+          (p) =>
+            !p.isHazard &&
+            p.behavior !== 'EEL_CHARGER' &&
+            p.behavior !== 'SUB_PATROL' &&
+            p.behavior !== 'MINE_HAZARD'
+        )
+      : rawActivePool;
+    const activePool =
+      sanctuaryFilteredPool.length > 0 ? sanctuaryFilteredPool : rawActivePool;
 
     // 若存在当前悬赏目标鱼，仅当该目标鱼确实属于当前水深栖息群落时，才以 26% 概率优先刷新（杜绝跨水深强行刷出浅水/深水目标鱼）
     if (this.activeTargetPreyId && rng() < 0.26) {
@@ -306,14 +341,21 @@ export class EcosystemSpawner {
       }
     }
 
-    // 根据真实海洋生态垂直分层动态分配 Tier 1..8 阶位权重：
-    // 浅海珊瑚礁 (0~520m)：T1~T4 热带珊瑚礁鱼类；暮光带 (520~1150m)：T3~T6 中层发光鱼与乌贼；深渊带 (1150m+)：T3~T8 深渊掠食者与巨兽
+    // 根据真实海洋生态垂直分层与玩家当前咬合阶位动态分配 Tier 1..8 阶位权重：
+    // - 浅海新手/T1开局保护期：84% T1 可吞噬小鱼 + 16% 温顺 T2 鱼（零主动攻击掠食者）
+    // - 浅海 T1 常态期：76% T1 + 18% T2 + 6% T3（保证 >75% 鱼可直接吞噬）
+    // - 浅海 T2+ 进阶期：54% T1 + 26% T2 + 14% T3 + 6% T4（保证 80% T1~T2 可直接吞噬）
+    // - 暮光带 (520~1150m)：T3~T6 中层发光鱼与乌贼；深渊带 (1150m+)：T3~T8 深渊掠食者与巨兽
     const tierWeights =
       depth > 1150
         ? [0, 0, 12, 18, 22, 20, 16, 12]
         : depth > 520
         ? [0, 0, 32, 30, 24, 14, 0, 0]
-        : [54, 24, 15, 7, 0, 0, 0, 0];
+        : isEarlySanctuary
+        ? [84, 16, 0, 0, 0, 0, 0, 0]
+        : this.activeSharkBiteTier <= 1
+        ? [76, 18, 6, 0, 0, 0, 0, 0]
+        : [54, 26, 14, 6, 0, 0, 0, 0];
 
     const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
     let roll = rng() * totalWeight;
