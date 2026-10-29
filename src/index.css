@@ -17,11 +17,15 @@
   html,
   body,
   #root {
+    position: fixed;
+    inset: 0;
     width: 100%;
     height: 100%;
+    height: 100dvh;
     margin: 0;
     padding: 0;
     overflow: hidden;
+    overscroll-behavior: none;
     background-color: #020617;
     color: #f8fafc;
     font-family: var(--font-sans);
@@ -133,3 +137,48 @@
   }
 }
 
+/* Strictly hide all native OS gray scrollbars across the entire game UI */
+*::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+*,
+.no-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+/* Evolution Atlas 3D Carousel Responsive Layout:
+   1. Mobile Portrait (<768px & portrait): Top 3D Wheel Carousel Stage + Bottom Zero-Scroll Command Deck
+   2. Mobile Landscape (orientation: landscape & max-height: 580px): Left 3D Wheel Stage + Right Command Deck
+   3. Tablet & Desktop (>=768px): Left 3D Wheel Stage (1.15fr) + Right Command Deck (390px)
+*/
+.atlas-split-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.atlas-inspector-panel {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(30, 41, 59, 0.95);
+}
+
+@media (min-width: 768px), ((orientation: landscape) and (max-height: 580px)) {
+  .atlas-split-container {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(320px, 390px);
+  }
+  .atlas-inspector-panel {
+    border-top: none;
+    border-left: 1px solid rgba(30, 41, 59, 0.95);
+  }
+}
+
+@media (orientation: landscape) and (max-height: 580px) and (max-width: 960px) {
+  .atlas-split-container {
+    grid-template-columns: minmax(0, 1.15fr) minmax(290px, 1fr);
+  }
+}

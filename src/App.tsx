@@ -1517,13 +1517,36 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const handleResize = () => {
+    const syncCanvasBufferToDisplayBox = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.floor(window.innerWidth * dpr);
-      canvas.height = Math.floor(window.innerHeight * dpr);
+      const rect = canvas.getBoundingClientRect();
+      const cssW = Math.max(
+        1,
+        Math.round(rect.width || window.visualViewport?.width || window.innerWidth)
+      );
+      const cssH = Math.max(
+        1,
+        Math.round(rect.height || window.visualViewport?.height || window.innerHeight)
+      );
+      const targetW = Math.floor(cssW * dpr);
+      const targetH = Math.floor(cssH * dpr);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+      return {
+        dpr,
+        viewW: cssW,
+        viewH: cssH,
+        scaleX: canvas.width / cssW,
+        scaleY: canvas.height / cssH,
+      };
     };
-    handleResize();
-    window.addEventListener('resize', handleResize);
+    syncCanvasBufferToDisplayBox();
+    window.addEventListener('resize', syncCanvasBufferToDisplayBox);
+    window.addEventListener('orientationchange', syncCanvasBufferToDisplayBox);
+    const vv = window.visualViewport;
+    vv?.addEventListener('resize', syncCanvasBufferToDisplayBox);
 
     let animId = 0;
     let lastTime = performance.now();
@@ -1532,6 +1555,10 @@ export default function App() {
       const rawDt = (now - lastTime) / 1000;
       lastTime = now;
       const dt = Math.min(rawDt, 0.05);
+
+      const { viewW, viewH, scaleX, scaleY } = syncCanvasBufferToDisplayBox();
+      const aspectZoomFactor =
+        viewW < viewH ? Math.max(0.74, Math.min(1, viewW / 580)) : 1;
 
       const sim = simRef.current;
       const shark = sim.shark;
@@ -1618,11 +1645,11 @@ export default function App() {
 
           // If no keyboard directional key is pressed, check full-canvas direct pointer steering
           if (inputX === 0 && inputY === 0 && sim.input.canvasPointerActive) {
-            const dpr = Math.min(window.devicePixelRatio || 1, 2);
-            const vW = canvas.width / dpr;
-            const vH = canvas.height / dpr;
-            const sharkScreenX = vW / 2 + (shark.x - sim.camera.x) * sim.camera.zoom;
-            const sharkScreenY = vH / 2 + (shark.y - sim.camera.y) * sim.camera.zoom;
+            const effectiveZoom = sim.camera.zoom * aspectZoomFactor;
+            const sharkScreenX =
+              viewW / 2 + (shark.x - sim.camera.x) * effectiveZoom;
+            const sharkScreenY =
+              viewH / 2 + (shark.y - sim.camera.y) * effectiveZoom;
             const rawDx = sim.input.canvasPointerX - sharkScreenX;
             const rawDy = sim.input.canvasPointerY - sharkScreenY;
             const dist = Math.hypot(rawDx, rawDy);
@@ -2527,12 +2554,10 @@ export default function App() {
       }
 
       // ==================== 2. RENDER OCEAN WORLD ====================
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const viewW = canvas.width / dpr;
-      const viewH = canvas.height / dpr;
+      const renderZoom = sim.camera.zoom * aspectZoomFactor;
 
       ctx.save();
-      ctx.scale(dpr, dpr);
+      ctx.scale(scaleX, scaleY);
 
       // 3-Tier Seamless Parallax Background
       parallaxBackground.render(
@@ -2552,10 +2577,10 @@ export default function App() {
       const shakeY = (Math.random() - 0.5) * 2 * shakeMag;
 
       ctx.translate(viewW / 2 + shakeX, viewH / 2 + shakeY);
-      ctx.scale(sim.camera.zoom, sim.camera.zoom);
+      ctx.scale(renderZoom, renderZoom);
       ctx.translate(-sim.camera.x, -sim.camera.y);
 
-      const halfSpanX = Math.ceil(viewW / Math.max(0.35, sim.camera.zoom)) + 480;
+      const halfSpanX = Math.ceil(viewW / Math.max(0.35, renderZoom)) + 480;
       const surfStart = Math.floor((sim.camera.x - halfSpanX) / 120) * 120;
       const surfEnd = Math.ceil((sim.camera.x + halfSpanX) / 120) * 120;
 
@@ -2657,11 +2682,11 @@ export default function App() {
       }
 
       // Render Prey Entities within camera frustum
-      const cullMargin = 220 / sim.camera.zoom;
-      const minX = sim.camera.x - viewW / (2 * sim.camera.zoom) - cullMargin;
-      const maxX = sim.camera.x + viewW / (2 * sim.camera.zoom) + cullMargin;
-      const minY = sim.camera.y - viewH / (2 * sim.camera.zoom) - cullMargin;
-      const maxY = sim.camera.y + viewH / (2 * sim.camera.zoom) + cullMargin;
+      const cullMargin = 220 / renderZoom;
+      const minX = sim.camera.x - viewW / (2 * renderZoom) - cullMargin;
+      const maxX = sim.camera.x + viewW / (2 * renderZoom) + cullMargin;
+      const minY = sim.camera.y - viewH / (2 * renderZoom) - cullMargin;
+      const maxY = sim.camera.y + viewH / (2 * renderZoom) + cullMargin;
 
       const isBoosting =
         (sim.input.boostPointerHeld ||
@@ -2750,11 +2775,11 @@ export default function App() {
       // Render Screen-Space Off-Screen Radar Indicators (P1-2: 🎯 Bounty / ★ Golden / ⚠️ Apex Predator)
       if (gameStateRef.current === 'playing') {
         ctx.save();
-        ctx.scale(dpr, dpr);
+        ctx.scale(scaleX, scaleY);
         drawOffScreenRadarIndicators(
           ctx,
           sim.preyList,
-          sim.camera,
+          { ...sim.camera, zoom: renderZoom },
           viewW,
           viewH,
           shark.stats.biteTier,
@@ -2772,11 +2797,13 @@ export default function App() {
         !sim.input.joyActive
       ) {
         ctx.save();
-        ctx.scale(dpr, dpr);
+        ctx.scale(scaleX, scaleY);
         const px = sim.input.canvasPointerX;
         const py = sim.input.canvasPointerY;
-        const sharkScreenX = viewW / 2 + (shark.x - sim.camera.x) * sim.camera.zoom;
-        const sharkScreenY = viewH / 2 + (shark.y - sim.camera.y) * sim.camera.zoom;
+        const sharkScreenX =
+          viewW / 2 + (shark.x - sim.camera.x) * renderZoom;
+        const sharkScreenY =
+          viewH / 2 + (shark.y - sim.camera.y) * renderZoom;
 
         ctx.strokeStyle = isBoosting
           ? 'rgba(250, 204, 21, 0.45)'
@@ -2805,7 +2832,9 @@ export default function App() {
     animId = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(animId);
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', syncCanvasBufferToDisplayBox);
+      window.removeEventListener('orientationchange', syncCanvasBufferToDisplayBox);
+      vv?.removeEventListener('resize', syncCanvasBufferToDisplayBox);
     };
   }, [createPreyEntity, recomputeSharkStats, spawnFloatText, spawnParticle, spawnPickup]);
 
@@ -2993,7 +3022,7 @@ export default function App() {
     GENERATION_NAMES[titleSharkForm.generation - 1] ?? GENERATION_NAMES[0];
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden select-none bg-slate-950">
+    <main className="fixed inset-0 w-full h-full overflow-hidden select-none bg-slate-950">
       {/* Isolated Full-Viewport 60 FPS Canvas 2D Ocean World */}
       <canvas
         ref={canvasRef}

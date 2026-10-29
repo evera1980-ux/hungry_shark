@@ -98,11 +98,35 @@
   - `boostPointerId: number | null`（冲刺按钮按住手指 ID）
 - 在 `pointermove` / `pointerup` / `pointercancel` 中，必须核对 `e.pointerId` 是否与该通道记录的 `pointerId` 一致，确保松开右手升级/冲刺按钮时绝不会打断左手摇杆，松开左手摇杆时也绝不会打断右手冲刺。
 
+### 4.4 iOS Safari 动态视口与 Canvas 1:1 像素长宽比锁定规范（防止 iPhone 竖屏上下拉伸）
+- **问题根源**：在 iPhone 14 Pro Max 等 iOS Safari 浏览器中，CSS `100vh`（`h-screen`）包含顶部地址栏与底部工具栏折叠后的最大高度（如 `932px`），而 `window.innerHeight` 仅返回当前可见区域高度（如 `778px`）。若容器使用 `h-screen` 而 Canvas 像素缓冲区使用 `window.innerHeight`，会导致 `778px` 高的画布位图被 CSS 强制拉长到 `932px`，画面整体纵向变形约 20%。
+- **强制规范**：
+  1. **动态视口定界**：`index.html` 必须启用 `viewport-fit=cover`；`src/index.css` 中 `html, body, #root` 与 `src/App.tsx` 顶层 `<main>` 必须使用 `position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh;`，严禁在顶层容器上使用 `100vh`（`h-screen`）。
+  2. **帧级 `getBoundingClientRect()` 同步**：`App.tsx` 中的 `syncCanvasBufferToDisplayBox()` 必须直接读取 `canvas.getBoundingClientRect()` 的实际 CSS 宽高（`cssW`, `cssH`）设置 `canvas.width` 与 `canvas.height`，并在渲染时使用精确的 `scaleX = canvas.width / cssW` 与 `scaleY = canvas.height / cssH`，同时监听 `window.visualViewport` 的 `resize` 与 `orientationchange`。
+  3. **竖屏海景等比保真 (`parallaxBackground.ts`)**：`drawTiledLayer` 严禁将宽幅横版海底条带（`1376×256`）直接非等比拉伸铺满超长竖屏高度；在竖屏（`viewH > viewW`）下必须限制海底景观条带高度 `stripH <= Math.max(480, Math.round(viewW * 1.15))` 并严格按原图宽高比计算 `tileW = Math.round(stripH * aspect)`，上方水体区域使用同层顶部水体切片无缝延展。
+
+### 4.5 48 阶进化图谱 3D 轮状画廊与全设备零滚动条规范 (`SharkEvolutionAtlasModal.tsx`)
+- **全局零灰色滚动条 & 零文字截断红线**：
+  - 全项目 CSS 强制隐藏所有原生浏览器灰色滚动条（`*::-webkit-scrollbar { display: none !important; } scrollbar-width: none !important;`）。
+  - 图谱内所有鲨鱼名称、称号与专属进化特性**必须 100% 完整展示**，严禁使用小格子导致“一个字加省略号（`…`）”的残缺排版。
+- **左右 3D 轮状画廊（3D Cylindrical Coverflow Wheel）**：
+  - 废除拥挤的 48 小格滚动列表，采用 **5 卡位 3D 环形轮盘（`[-2, -1, 0, +1, +2]`）**：
+    - **中央聚光灯主卡（`offset === 0`）**：`100%` 放大居中，带血统氛围背光、大尺寸实时摆尾游动预览（`176×98`）、完整无截断名称与称号、血统徽章、咬合阶位与当前出战/强化状态。
+    - **两侧透视副卡（`offset = ±1, ±2`）**：按距离自动做透视缩放（`scale(0.75)` / `scale(0.50)`）、水平弧形位移与微倾角，构成立体旋转展台。
+  - **全平台交互支持（触屏 + 非触屏四合一）**：
+    1. **触屏/鼠标拖拽滑动（Touch & Pointer Swipe）**：在轮盘舞台上左右滑动手指，5 张卡片随手指实时 1:1 跟手旋转，松手按位移与惯性自动吸附至上一只/下一只鲨鱼（支持快速甩动连跳）。
+    2. **左右霓虹方向键按钮（`◀` / `▶` Cyber Arrows）**：舞台左右两侧常驻高对比度 `◀` / `▶` 实体按钮，非触屏鼠标一键切换。
+    3. **直接点击两侧副卡 / 底部本代 8 槽位直选条**：点击左/右侧缩小的鲨鱼卡片，或点击舞台下方等宽 8 格本代槽位（`grid-cols-8`），立即将该鲨鱼旋转至中央。
+    4. **鼠标滚轮（`onWheel`）与键盘左右方向键（`ArrowLeft` / `ArrowRight`）**：桌面端滚轮或方向键无缝旋转轮盘。
+- **固定 6 等分世代切换栏（`grid-cols-6` 零滚动条）**：
+  - `G1 ~ G6` 采用严格 6 等分网格（`grid-cols-6`），在任何屏幕宽度下均单行完整铺满、绝不产生横向滚动条，点击任意世代立即切入该世代并高亮可进化红点。
+
 ---
 
 ## 5. 文档变更记录 (Changelog)
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-10-28 | 将 48 阶进化图谱重构为 **3D 左右轮状画廊（居中放大 + 两侧透视缩小）**，支持触屏跟手滑动、左右箭头按钮、鼠标滚轮、键盘方向键与 6 等分无滚动条世代切换，彻底消除灰色滚动条与鱼名截断省略号；修复 iPhone 14 Pro Max Safari 画面纵向拉伸 Bug | `src/components/SharkEvolutionAtlasModal.tsx`, `src/index.css`, `index.html`, `src/App.tsx`, `src/game/parallaxBackground.ts` |
 | 2026-10-27 | 接入 `icons_f5128c12.png` 24 枚定制游戏 UI 图集，全面重构为“无框头像框 + 单行悬浮遥测胶囊 + 声呐摇杆 + MOBA 扇形技能圆章”极简 HUD（视野留白率提升至 90%+） | `src/App.tsx`, `src/components/UiAtlasIcon.tsx`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts` |
 | 2026-10-26 | 建立 48 阶精灵渲染规范、视觉体型===吞噬判定铁律及移动端多点触控（`bindMultiTouchButton` + 零重渲染摇杆）设计规范 | `src/App.tsx`, `src/game/canvasRenderer.ts`, `src/game/spriteSheetManager.ts` |

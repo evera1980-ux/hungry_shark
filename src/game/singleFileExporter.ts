@@ -12,12 +12,12 @@ export function downloadStandaloneSingleFileHtml(): void {
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
 <title>Hungry Shark: 48-Form Evolution | 饥饿鲨：48阶本体进化</title>
 <style>
   * { box-sizing: border-box; user-select: none; -webkit-user-select: none; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #020617; font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: #f8fafc; touch-action: none; }
-  canvas { display: block; width: 100vw; height: 100vh; }
+  html, body { position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh; overflow: hidden; overscroll-behavior: none; background: #020617; font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: #f8fafc; touch-action: none; }
+  canvas { display: block; width: 100%; height: 100%; }
   .hud { position: fixed; inset: 0; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 12px; }
   .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
   .panel { background: rgba(2,6,23,0.84); border: 1px solid rgba(56,189,248,0.35); border-radius: 12px; padding: 8px 12px; pointer-events: auto; backdrop-filter: blur(8px); }
@@ -140,10 +140,17 @@ class ParallaxBackground {
   drawLayer(ctx, layer, camX, vw, vh, alpha) {
     if (!layer || alpha <= 0.01) return;
     ctx.save(); ctx.globalAlpha = alpha;
-    const tw = Math.max(vw, Math.round(vh * (layer.width / layer.height)));
+    const aspect = layer.width / layer.height;
+    const stripH = vh > vw ? Math.min(vh, Math.max(480, Math.round(vw * 1.15))) : vh;
+    const drawY = vh - stripH;
+    const tw = Math.max(1, Math.round(stripH * aspect));
     const px = camX * 0.4;
     const sx = -(((px % tw) + tw) % tw);
-    for (let x = sx; x < vw; x += tw) ctx.drawImage(layer, x, 0, tw + 1, vh);
+    const topSliceH = Math.max(2, Math.floor(layer.height * 0.1));
+    for (let x = sx; x < vw; x += tw) {
+      if (drawY > 0) ctx.drawImage(layer, 0, 0, layer.width, topSliceH, x, 0, tw + 1, drawY + 2);
+      ctx.drawImage(layer, x, drawY, tw + 1, stripH);
+    }
     ctx.restore();
   }
   render(ctx, camX, sharkY, vw, vh) {
@@ -181,7 +188,11 @@ parallaxBg.load();
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-const resize = () => { canvas.width = innerWidth; canvas.height = innerHeight; };
+const resize = () => {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.round(rect.width || innerWidth));
+  canvas.height = Math.max(1, Math.round(rect.height || innerHeight));
+};
 addEventListener('resize', resize); resize();
 
 let shark = { x: 0, y: 260, angle: 0, phase: 0, hp: 120, maxHp: 120, energy: 100, lv: 1, xp: 0, bite: 2, score: 0, genes: 50, coins: 200, boost: false, formIndex: 0 };

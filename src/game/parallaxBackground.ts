@@ -410,22 +410,43 @@ export class ParallaxBackground {
     viewH: number,
     alpha: number
   ): void {
-    if (alpha <= 0.001 || !layer) return;
+    if (alpha <= 0.001 || !layer || layer.width <= 0 || layer.height <= 0) return;
 
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
 
-    // Scale strip height to fill viewport height, preserving aspect ratio for width
+    // Preserve strict 1:1 isotropic aspect ratio of the ocean_bg strip.
+    // On tall portrait mobile screens (e.g. iPhone 14 Pro Max 430x932), cap the seabed strip height
+    // so coral reefs, sunken columns, and volcanic vents are never vertically stretched.
     const aspect = layer.width / layer.height;
-    const tileW = Math.max(viewW, Math.round(viewH * aspect));
+    const maxPortraitStripH = Math.max(480, Math.round(viewW * 1.15));
+    const stripH = viewH > viewW ? Math.min(viewH, maxPortraitStripH) : viewH;
+    const drawY = viewH - stripH;
+    const tileW = Math.max(1, Math.round(stripH * aspect));
 
     // Parallax factor 0.4 + modulo (%) seamless horizontal tiling
     const parallaxX = cameraX * 0.4;
     const startX = -(((parallaxX % tileW) + tileW) % tileW);
+    const topWaterSliceH = Math.max(2, Math.floor(layer.height * 0.1));
 
     // Loop and draw connected slices horizontally across the screen
     for (let x = startX; x < viewW; x += tileW) {
-      ctx.drawImage(layer, Math.floor(x), 0, tileW + 1, viewH);
+      const drawX = Math.floor(x);
+      if (drawY > 0) {
+        // Extend upper water column seamlessly above the seabed strip on portrait screens
+        ctx.drawImage(
+          layer,
+          0,
+          0,
+          layer.width,
+          topWaterSliceH,
+          drawX,
+          0,
+          tileW + 1,
+          drawY + 2
+        );
+      }
+      ctx.drawImage(layer, drawX, drawY, tileW + 1, stripH);
     }
 
     ctx.restore();
