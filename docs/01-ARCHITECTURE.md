@@ -29,7 +29,21 @@
 ├── public/
 │   └── assets/aistudio/
 │       ├── sharks_ec921c3b.png                # 48 阶鲨鱼进化核心精灵图（8 列 × 6 行）
-│       └── icons_f5128c12.png                 # 24 枚游戏级 UI 技能勋章与图标图集（6 列 × 4 行）
+│       ├── fish2_fc857cfa.png                 # 32 种海洋猎物与巨兽核心精灵图
+│       ├── icons_f5128c12.png                 # 24 枚游戏级 UI 技能勋章与图标图集（6 列 × 4 行）
+│       ├── bg_shallow_0_water_0e65cb68.png    # 浅海带 Layer 0：阳光丁达尔光束与焦散水体底图
+│       ├── bg_shallow_1_far_8898229a.png      # 浅海带 Layer 1：远景海底山脉拱门与沉船剪影
+│       ├── bg_shallow_2_mid_b4e0d30a.png      # 浅海带 Layer 2：中景鹿角珊瑚礁盘与紫管海绵崖壁
+│       ├── bg_shallow_3_near_96e92ee1.png     # 浅海带 Layer 3：近景金沙滩、珍珠巨蚌与沉没铁锚
+│       ├── bg_twilight_0_water_7d347ca5.png   # 暮光带 Layer 0：深海钴蓝幽光与生物极光水体底图
+│       ├── bg_twilight_1_far_449e76e5.png     # 暮光带 Layer 1：远景亚特兰蒂斯沉没神殿与符文拱门
+│       ├── bg_twilight_2_mid_019e225b.png     # 暮光带 Layer 2：中景巨鲸肋骨拱门、荧光蘑菇与紫晶崖
+│       ├── bg_twilight_3_near_c853fc41.png    # 暮光带 Layer 3：近景发光符文石碑、海百合与紫海鞭
+│       ├── bg_abyss_0_water_b0e53cc2.png      # 深渊带 Layer 0：黑曜石深渊热液烟雾与上浮火星水体底图
+│       ├── bg_abyss_1_far_7817748d.png        # 深渊带 Layer 1：远景海底火山巨峰与远古海怪颅骨化石
+│       ├── bg_abyss_2_mid_eff4191c.png        # 深渊带 Layer 2：中景黑烟囱热液喷口、巨型管虫与熔岩裂谷
+│       ├── bg_abyss_3_near_52736f9c.png       # 深渊带 Layer 3：近景龟裂玄武岩熔岩海床与盲蟹群落
+│       └── bg_ambient_sprites_0c6882ce.png    # 4×2 海洋氛围精灵图集（沙丁鱼风暴/蝶鱼群/蝠鲼/水母/巨藻/海鞭/气泡/灯笼鱼）
 ├── docs/
 │   ├── 00-AI_CONSTRAINTS.md                   # AI 修改代码与同步更新文档的强制规范
 │   ├── 01-ARCHITECTURE.md                     # 本文档：系统架构与模块职责
@@ -47,10 +61,10 @@
         ├── config.ts                          # 静态世界常量、3 大深度带、32 种海洋生物基础配置
         ├── sharkEvolutionConfig.ts            # 48 阶鲨鱼进化矩阵、四重血统、三重解锁门禁、跨局存档读写
         ├── rules.ts                           # 纯函数核心规则（Lv/T 属性合成、猎物相对体型缩放、碰撞判定）
-        ├── rules.test.ts                      # 核心纯函数单元测试套件（12 项核心断言）
+        ├── rules.test.ts                      # 核心纯函数单元测试套件（15 项核心断言）
         ├── spriteSheetManager.ts              # 8×6 鲨鱼精灵图 + 6×4 UI 图标图集加载、BFS 智能镂空抠图与离屏缓存
         ├── canvasRenderer.ts                  # 鲨鱼多段脊柱游动渲染、32 种猎物骨骼渲染、状态指示环与定制图标头标
-        ├── parallaxBackground.ts              # 三层海洋深度视差背景、丁达尔光束、海床地形与深海发光浮游物
+        ├── parallaxBackground.ts              # 13 张 AI 分层美术背景离屏 BFS 抠图/余弦无缝拼接与五层真视差海洋环境引擎
         ├── infiniteWorldManager.ts            # 无限水平环形世界与动态深海垂直下潜边界控制器
         ├── ecosystemSpawner.ts                # 85% 原生深度带生态刷新器、浅滩新手安全区与咬合阶位感知刷新
         ├── infiniteProgressionManager.ts      # 无限局内难度递增、深渊变异词缀与狂暴叠层控制器
@@ -72,7 +86,7 @@
 
 ### 3.2 第二层：60FPS 零 GC 高频物理与 Canvas 仿真层 (`simRef.current`)
 - 所有每帧变化的游戏实体全部存储在 `useRef`（`simRef.current`）中，**绝不放入 React `useState`**：
-  - `shark`：玩家鲨鱼坐标、速度、角度、生命值、饥饿延迟黄条 `ghostHp`、冲刺能量、局内等级 `level`、经验 `xp`、当前形态 `sharkFormId` 及合成属性 `stats`。
+  - `shark`：玩家鲨鱼坐标、速度、角度、转向角速度 `turnRate`、水平朝向与 2.5D 透视翻转系数（`facingDir` / `facingScaleX`）、生命值、饥饿延迟黄条 `ghostHp`、冲刺能量、局内等级 `level`、经验 `xp`、当前形态 `sharkFormId` 及合成属性 `stats`。
   - `preyList`：当前活跃的海洋猎物与深水雷列表。
   - `particles`（容量 160）、`pickups`（容量 80）、`floatTexts`（容量 36）：**预分配环形对象池（Ring-Buffer Object Pools）**，通过游标（`particleCursor` / `pickupCursor` / `floatCursor`）循环覆写，`requestAnimationFrame` 期间零内存分配、零 GC 卡顿。
   - `input`：键盘按键集合、鼠标/触控转向坐标、虚拟摇杆向量（`joyDx`, `joyDy`）以及**独立隔离的多指触控 ID**（`joyPointerId`, `canvasPointerId`, `boostPointerId`）。
@@ -117,8 +131,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-10-30 | `parallaxBackground.ts` 升级为五层连续水深光谱（`sampleBathymetricWaterColor`）与远/中/近（`0.13x`/`0.27x`/`0.48x`）三平面真视差海洋环境引擎；`simRef.current.shark` 新增流体力学转向状态（`turnRate`、`facingDir`、`facingScaleX`） | `src/game/parallaxBackground.ts`, `src/App.tsx`, `src/game/canvasRenderer.ts`, `src/game/rules.test.ts` |
 | 2026-10-28 | 新增 3 步实操新手引导状态机（`EAT_SMALL_FISH` ➔ `HOLD_BOOST` ➔ `HANDS_ON_UPGRADE` + 新手补给礼包）、`ecosystemSpawner.ts` 浅滩安全区与咬合阶位感知权重，以及底部罗盘弧形拨盘进化图谱组件 | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/components/SharkEvolutionAtlasModal.tsx` |
 | 2026-10-27 | 新增 `public/assets/aistudio/icons_f5128c12.png`（6×4 UI 图标图集）、`src/components/UiAtlasIcon.tsx` 及 `spriteSheetManager.ts` BFS 智能镂空抠图与缓存管线 | `src/game/spriteSheetManager.ts`, `src/components/UiAtlasIcon.tsx`, `src/App.tsx` |
 | 2026-10-26 | 建立完整的三层解耦架构文档、目录职责表与 `SharkMetaSaveData` 存档规范 | `src/App.tsx`, `src/game/*` |
-
-

@@ -375,6 +375,9 @@ export default function App() {
       reachedAbyss: boolean;
       sharkFormId: string;
       morphFlashTimer: number;
+      turnRate: number;
+      facingDir: number;
+      facingScaleX: number;
       stats: ComputedSharkStats;
     };
     camera: {
@@ -444,6 +447,9 @@ export default function App() {
       reachedAbyss: false,
       sharkFormId: metaSave.selectedSharkId,
       morphFlashTimer: 0,
+      turnRate: 0,
+      facingDir: 1,
+      facingScaleX: 1,
       stats: computeEvolvedSharkStats(
         1,
         metaSave.selectedSharkId,
@@ -833,6 +839,9 @@ export default function App() {
         reachedAbyss: false,
         sharkFormId: chosenSharkId,
         morphFlashTimer: withMaxMechaTrial ? 1.0 : 0.45,
+        turnRate: 0,
+        facingDir: 1,
+        facingScaleX: 1,
         stats,
       };
 
@@ -1641,7 +1650,21 @@ export default function App() {
         const targetY = 260 + Math.sin(tSec * 2) * 85;
         const dx = targetX - shark.x;
         const dy = targetY - shark.y;
-        shark.angle = Math.atan2(dy, dx);
+        const nextAngle = Math.atan2(dy, dx);
+        let patrolDiff = nextAngle - shark.angle;
+        while (patrolDiff > Math.PI) patrolDiff -= Math.PI * 2;
+        while (patrolDiff < -Math.PI) patrolDiff += Math.PI * 2;
+        shark.angle = nextAngle;
+        if (Math.cos(shark.angle) > 0.16) shark.facingDir = 1;
+        else if (Math.cos(shark.angle) < -0.16) shark.facingDir = -1;
+        shark.facingScaleX +=
+          (shark.facingDir - shark.facingScaleX) * Math.min(1, dt * 12);
+        const targetPatrolTurn = Math.max(
+          -0.85,
+          Math.min(0.85, (patrolDiff / Math.max(0.008, dt)) * 0.45 * shark.facingDir)
+        );
+        shark.turnRate +=
+          (targetPatrolTurn - shark.turnRate) * Math.min(1, dt * 10);
         shark.x = targetX;
         shark.y = targetY;
         sim.camera.x = shark.x;
@@ -1723,13 +1746,76 @@ export default function App() {
         }
 
         const inputMag = Math.hypot(inputX, inputY);
+        const wantsBoostForTurn =
+          sim.input.boostPointerHeld ||
+          sim.input.rightMouseBoostHeld ||
+          sim.input.keys.has('Space');
+        const isBoostingForTurn =
+          wantsBoostForTurn && (shark.energy > 2 || shark.frenzyTimer > 0);
+
         if (inputMag > 0.08) {
           shark.targetAngle = Math.atan2(inputY, inputX);
           let diff = shark.targetAngle - shark.angle;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          shark.angle += diff * Math.min(1, simDt * 10.5);
+
+          const cosCur = Math.cos(shark.angle);
+          const cosTgt = Math.cos(shark.targetAngle);
+          // Hydrodynamic Horizontal Whip-Turn: when reversing across left/right hemispheres (> 106°),
+          // pivot horizontally with a 2.5D spinal C-bend whip instead of pitching 90° straight up/down like a clock hand!
+          if (
+            inputMag > 0.16 &&
+            Math.abs(diff) > 1.85 &&
+            cosCur * cosTgt < -0.15
+          ) {
+            shark.facingDir = cosTgt >= 0 ? 1 : -1;
+            shark.angle = Math.atan2(
+              Math.sin(shark.angle),
+              -Math.cos(shark.angle)
+            );
+            diff = shark.targetAngle - shark.angle;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+
+            const whipSign =
+              (Math.sin(shark.targetAngle) - Math.sin(shark.angle)) *
+                shark.facingDir >=
+              0
+                ? 1
+                : -1;
+            shark.turnRate = whipSign * 0.92;
+            shark.swimPhase += 0.68;
+          }
+
+          const turnAgility =
+            (isBoostingForTurn ? 13.5 : 11.2) *
+            (1 + Math.min(0.45, Math.abs(diff) / Math.PI));
+          shark.angle += diff * Math.min(1, simDt * turnAgility);
+          shark.angle = Math.atan2(
+            Math.sin(shark.angle),
+            Math.cos(shark.angle)
+          );
+
+          const cosAfter = Math.cos(shark.angle);
+          if (cosAfter > 0.18) {
+            shark.facingDir = 1;
+          } else if (cosAfter < -0.18) {
+            shark.facingDir = -1;
+          }
+
+          const localTargetTurnBend = Math.max(
+            -1,
+            Math.min(1, (diff / 1.05) * shark.facingDir)
+          );
+          shark.turnRate +=
+            (localTargetTurnBend - shark.turnRate) * Math.min(1, simDt * 14);
+        } else {
+          shark.turnRate += (0 - shark.turnRate) * Math.min(1, simDt * 10);
         }
+
+        // Smooth 2.5D horizontal facing interpolation (+1 <-> -1) so crossing vertical or whip-turning never pops in 1 frame
+        shark.facingScaleX +=
+          (shark.facingDir - shark.facingScaleX) * Math.min(1, simDt * 13.5);
 
         // Boost Handling (2x Speed + Tail Flame Particles; supports Space, Boost Button, or Right-Click)
         const wantsBoost =
@@ -2739,7 +2825,7 @@ export default function App() {
       ctx.save();
       ctx.scale(scaleX, scaleY);
 
-      // 3-Tier Seamless Parallax Background
+      // 5-Layer Multi-Plane Depth-Continuous Ocean Environment
       parallaxBackground.render(
         ctx,
         sim.camera.x,
@@ -2747,7 +2833,9 @@ export default function App() {
         viewW,
         viewH,
         now,
-        dt
+        dt,
+        sim.camera.y,
+        renderZoom
       );
 
       // Camera transform with trauma-squared screen shake
@@ -2792,16 +2880,39 @@ export default function App() {
       }
       ctx.stroke();
 
+      // Organic Thermocline Shimmer Wave at Ecological Depth Boundaries (replaces mechanical dashed line)
       for (const z of GAME_CONFIG.zones) {
         if (z.minDepth > 0) {
-          ctx.strokeStyle = 'rgba(148, 163, 184, 0.14)';
-          ctx.setLineDash([12, 12]);
-          ctx.lineWidth = 2;
+          const isAbyssBoundary = z.minDepth >= 1000;
+          const thermGrad = ctx.createLinearGradient(
+            0,
+            z.minDepth - 24,
+            0,
+            z.minDepth + 24
+          );
+          thermGrad.addColorStop(0, 'rgba(56, 189, 248, 0)');
+          thermGrad.addColorStop(
+            0.5,
+            isAbyssBoundary
+              ? 'rgba(139, 92, 246, 0.09)'
+              : 'rgba(56, 189, 248, 0.08)'
+          );
+          thermGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+          ctx.fillStyle = thermGrad;
+          ctx.fillRect(surfStart, z.minDepth - 24, surfEnd - surfStart, 48);
+
+          ctx.strokeStyle = isAbyssBoundary
+            ? 'rgba(167, 139, 250, 0.14)'
+            : 'rgba(125, 211, 252, 0.14)';
+          ctx.lineWidth = 1.5;
           ctx.beginPath();
-          ctx.moveTo(surfStart, z.minDepth);
-          ctx.lineTo(surfEnd, z.minDepth);
+          for (let wx = surfStart; wx <= surfEnd; wx += 80) {
+            const wy =
+              z.minDepth + Math.sin(wx * 0.008 + now * 0.0015) * 6;
+            if (wx === surfStart) ctx.moveTo(wx, wy);
+            else ctx.lineTo(wx, wy);
+          }
           ctx.stroke();
-          ctx.setLineDash([]);
         }
       }
 
@@ -2909,6 +3020,8 @@ export default function App() {
         invulnerableTimer: shark.invulnerableTimer,
         sharkFormId: shark.sharkFormId,
         morphFlashTimer: shark.morphFlashTimer,
+        turnRate: shark.turnRate,
+        facingScaleX: shark.facingScaleX,
       });
 
       // Render Compliant Green Slime Bubbles & Devour FX Sprite Particles

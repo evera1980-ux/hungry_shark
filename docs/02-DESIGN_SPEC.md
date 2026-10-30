@@ -18,6 +18,10 @@
   - 将紧致裁切后的离屏精灵图沿水平体轴（从鱼吻 `u = 0` 到尾鳍 `u = 1`）按渲染尺寸自适应切分为 **24 段**（玩家鲨鱼与进化巨幕预览 `baseSize >= 84px`）、**16 段**（大型猎物/巨兽 `46px ~ 84px`）、**10 段**（中型鱼类 `24px ~ 46px`）或 **6 段**（远景小鱼苗 `< 24px`）。
   - **边界端点共享 + 仿射 Y 斜切（零阶梯切段感）**：第 `i` 段切片直接复用上一段右边界形变 `def0` 作为自身左边界，并计算右边界形变 `def1`，通过 Canvas 2D 仿射变换 `ctx.transform(1, shearY, 0, 1, 0, 0)`（其中 `shearY = (def1.dy - def0.dy) / sliceDstW`）使每一段切片沿脊柱切线方向平滑倾斜，确保相邻切片接缝处的上下轮廓 $100\%$ 严丝合缝（$C^0/C^1$ 连续），并严格锁定源纹理采样宽度与目标宽度比例（`padDst = 0.55px` 等比映射），彻底消除水平矩形切片造成的“阶梯状被切段感”与接缝重影。
   - **解剖学前躯刚性包络与速度耦合**：玩家鲨鱼采用 `SHARK_APEX` 步态（$C^1$ 平滑包络函数 $E(u) = 0.015u + 0.985u^{2.25}$，波数 $k = 2.15$），确保前躯 $42\%$（吻部、鳃裂、胸背鳍躯干）保持流线型整体刚性、撕咬对准零漂移，后段 $58\%$ 尾柄至新月尾鳍传递丝滑推进波；摆尾频率 `shark.swimPhase` 与实时游速、冲刺（`isBoosting`）和黄金狂暴状态动态耦合，并在进化图谱巨幕预览台（`SharkFormCanvasPreview`）中同步启用。
+  - **流体力学 C 形脊柱转弯（Hydrodynamic Spinal Turning C-Bend）与 2.5D 柔顺水平甩尾掉头（Smooth 2.5D Whip-Turn）**：
+    - **脊柱 C 形转向弯曲 (`turnBend` in `computeSpineSliceDeformation`)**：转弯时不再将整只鲨鱼当作刚性木板旋转，而是将角速度 `turnRate` 实时注入 24 段脊柱变形——鱼吻前段（$u < 0.32$）顺着转向内侧微倾领航（`headTurnLead`），胸鳍支点（$u \approx 0.22$）作为旋转枢轴，后躯与尾鳍（$u \to 1$）沿转弯轨迹外侧呈 $C^1$ 连续弧线滞后拖拽（`tailTurnTrail = -clampedTurn * drawH * 0.25 * u^{1.72}`），同时自动放大尾鳍推进振幅（`1 + |turnBend| * 0.42`）与背腹微侧倾压缩（`bankRollScaleY`）。
+    - **水平急转甩尾（Horizontal Whip-Turn，告别“先竖直朝天 90° 再掉头”）**：当玩家操控摇杆/指针跨左右半球大幅度反向掉头（`Math.abs(diff) > 1.85 rad` 且 `cos(angle) * cos(targetAngle) < -0.15`）时，鲨鱼直接沿水平面执行甩尾掉头并注入高强度 C 形脊柱甩尾脉冲（`turnRate = ±0.92`），不再像机械钟表指针一样先竖直朝天/朝海底转过 $\pm 90^\circ$。
+    - **2.5D 透视缩进翻转与垂直防抖滞回（Zero 1-Frame Mirror Pop）**：通过带垂直防抖死区（`|\cos(\theta)| > 0.18`）的 `facingDir` 与平滑插值的 `facingScaleX`（`[-1, 1]`）驱动 2.5D 透视翻转（`perspectiveScaleX = 0.42 + 0.58 * |facingScaleX|^{0.8}`）及连续仰角公式 `horizonPitch = atan2(sin(θ), |cos(θ)|)`，彻底消除跨 $\pm 90^\circ$ 或左右转向时的单帧镜像突变（Mirror Pop）。
 - **严禁外挂部件与外围圆圈（Zero Organ Attachments & Zero Outer Circles）**：
   - 鲨鱼外观**完全由当前出战的 `sharkFormId` 纯净本体精灵图、受击透明度闪烁及黄金狂暴本体滤镜决定**。
   - **严禁**在鲨鱼外围绘制任何虚线环、光圈圆环或外接机械炮/螺旋桨等拼接图形。
@@ -115,7 +119,17 @@
 - **强制规范**：
   1. **动态视口定界**：`index.html` 必须启用 `viewport-fit=cover`；`src/index.css` 中 `html, body, #root` 与 `src/App.tsx` 顶层 `<main>` 必须使用 `position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh;`，严禁在顶层容器上使用 `100vh`（`h-screen`）。
   2. **帧级 `getBoundingClientRect()` 同步**：`App.tsx` 中的 `syncCanvasBufferToDisplayBox()` 必须直接读取 `canvas.getBoundingClientRect()` 的实际 CSS 宽高（`cssW`, `cssH`）设置 `canvas.width` 与 `canvas.height`，并在渲染时使用精确的 `scaleX = canvas.width / cssW` 与 `scaleY = canvas.height / cssH`，同时监听 `window.visualViewport` 的 `resize` 与 `orientationchange`。
-  3. **竖屏海景等比保真 (`parallaxBackground.ts`)**：`drawTiledLayer` 严禁将宽幅横版海底条带（`1376×256`）直接非等比拉伸铺满超长竖屏高度；在竖屏（`viewH > viewW`）下必须限制海底景观条带高度 `stripH <= Math.max(480, Math.round(viewW * 1.15))` 并严格按原图宽高比计算 `tileW = Math.round(stripH * aspect)`，上方水体区域使用同层顶部水体切片无缝延展。
+  3. **13 张 AI 分层手绘美术驱动的五层真视差海洋环境引擎 (`parallaxBackground.ts`)**：
+     - **完整 13 张分层美术矩阵（`OCEAN_LAYER_ASSET_PATHS`）**：
+       - **阳光浅海带 (`0m ~ 520m`)**：`bg_shallow_0_water_0e65cb68.png`（阳光丁达尔光束与水面焦散底图）、`bg_shallow_1_far_8898229a.png`（远景海底山脉石拱门与沉没帆船剪影）、`bg_shallow_2_mid_b4e0d30a.png`（中景鹿角珊瑚、紫管海绵与礁石崖壁）、`bg_shallow_3_near_96e92ee1.png`（近景金沙滩、发光珍珠巨蚌与生锈铁锚）。
+       - **暮光深海带 (`520m ~ 1150m`)**：`bg_twilight_0_water_7d347ca5.png`（深海钴蓝生物极光与海洋雪水体底图）、`bg_twilight_1_far_449e76e5.png`（远景亚特兰蒂斯沉没神殿与发光符文拱门）、`bg_twilight_2_mid_019e225b.png`（中景远古巨鲸肋骨拱廊、青光蘑菇群与紫晶簇）、`bg_twilight_3_near_c853fc41.png`（近景发光符文石碑、海百合与紫色海鞭）。
+       - **深渊海沟带 (`1150m+`)**：`bg_abyss_0_water_b0e53cc2.png`（黑曜石深渊热液烟雾与上浮熔岩火星底图）、`bg_abyss_1_far_7817748d.png`（远景海底火山巨峰与史前海怪颅骨化石）、`bg_abyss_2_mid_eff4191c.png`（中景黑烟囱热液喷口、红冠巨型管虫与熔岩深谷）、`bg_abyss_3_near_52736f9c.png`（近景龟裂玄武岩熔岩海床与深海盲蟹）。
+       - **海洋生态氛围精灵图集 (`4×2` 网格)**：`bg_ambient_sprites_0c6882ce.png`（含旋转沙丁鱼球、蝶鱼群、远景蝠鲼、发光海月水母、摇曳巨藻、荧光海鞭、上升气泡串、深海灯笼鱼群共 8 类动态精灵）。
+     - **离屏智能预处理管线（`processTerrainLayerToSeamlessStrip` & `sliceAmbientSpriteSheet`）**：
+       1. **BFS 连通域智能抠图（保护前景白色细节）**：从顶部天空边界（及 `bg_abyss_3_near` 底部留白边）执行 BFS 泛洪去底（兼容 `#FFFFFF` 纯白与 `bg_shallow_1_far` 的 `#FF00FF` 洋红底色，以及 `bg_abyss_1_far` 史前颅骨眼窝镂空），100% 保护画面内部白色珍珠与白色管虫不被误抠；针对 `bg_shallow_1_far` 左右两侧 `y≈512` 的水平分界线自动执行纵向 Alpha 柔化渐隐，彻底消除水平硬边。
+       2. **上下空白包围盒自动裁切**：自动检测非透明地形上下边界 `[minY, maxY]`（完美裁除 `bg_abyss_3_near` 底部 20% 白色留白条），将 `1024×1024` 方图转化为紧致宽幅地形条带。
+       3. **14% 余弦交叠无缝水平拼接（`makeHorizontallySeamlessCanvas`）**：通过首尾 `14%` 宽度的余弦权重（`0.5 - 0.5 * cos(πt)`）平滑混合生成周期无缝纹理，既消除水平循环接缝，又杜绝 `[A | flipH(A)]` 镜像对称伪影。
+       4. **五层景深交错合成**：按 `水深光谱 + Layer 0 水体底图 (0.05x)` $\to$ `Layer 1 远景奇观 (0.13x)` $\to$ `4×2 远景氛围鱼群/水母/蝠鲼精灵 (0.20x)` $\to$ `Layer 2 中景礁崖/喷口 (0.27x)` $\to$ `Layer 3 近景海床 (0.48x)` $\to$ `实时随水流摆动的巨藻/荧光海鞭与气泡串精灵 (0.52x)` 顺序结合相机水深纵向位移（`verticalOffsetPx`）实时渲染。
 
 ### 4.5 极简去框化进化界面「巨幕水族馆 + 无框连续半环罗盘」与全设备零滚动条规范 (`SharkEvolutionAtlasModal.tsx`)
 - **去线框套线框（De-Boxed / Zero Box-in-Box）原生游戏视觉原则**：
@@ -132,7 +146,7 @@
   - 全项目 CSS 强制隐藏所有原生浏览器灰色滚动条（`*::-webkit-scrollbar { display: none !important; } scrollbar-width: none !important;`）。
   - 界面内所有鲨鱼名称与进化特性**必须 100% 完整展示**，严禁使用省略号（`…`）截断鱼名。
 - **移动端优先「上方 68% 巨幕水族馆 + 底部 32% 无框连续半环罗盘表盘」布局（Giant Aquarium + Frameless Continuous Curved Arc Dial）**：
-  - **上方 68% 巨幕主鲨聚光灯舞台**：无遮挡居中展示当前选中鲨鱼的巨幅实时摆尾游动模型（移动端 `186×100` / 桌面端 `224×120`），上方无框展示血统与 `T{N}` 阶位，下方无框展示鲨鱼名称与出战/解锁状态。
+  - **上方 68% 巨幕主鲨聚光灯舞台**：无遮挡居中展示当前选中鲨鱼的巨幅实时摆尾游动模型（移动端 `186×100` / Desktop `224×120`），上方无框展示血统与 `T{N}` 阶位，下方无框展示鲨鱼名称与出战/解锁状态。
   - **底部 32% 无框连续弧形罗盘表盘**：以当前选中鲨鱼为中心，沿底部 `180°` 发光弧形导轨无缝展示前后相邻的 7 只鲨鱼（`ARC_OFFSETS = [-3..+3]`，48 只鲨鱼首尾无缝循环）；当前选中鲨鱼在弧顶中央（`slotPos = 0`）放大至 `1.24x` 并带柔和青色聚光光晕，直接展示无框鲨鱼缩略图与 `T{N}` 咬合阶位。
   - **48 阶鲨鱼名称与舞台绝对等高锚定 & 全界面零叠放规范（Zero Vertical Shift & Zero Overlap Invariant）**：
     - 切换任意已解锁、出战中、可进化或未解锁鲨鱼时，主舞台鲨鱼名称（`data-testid="atlas-hero-shark-name"`）、鲨鱼模型与顶部血统行的纵向 `Y` 坐标必须保持 **100% 像素级一致（0px 跳动）**。
@@ -160,12 +174,11 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
-| 2026-10-30 | 将脊柱摆尾渲染器升级为**连续仿射斜切丝带算法 (`ctx.transform(1, shearY, 0, 1, 0, 0)` + 边界端点共享 + 24 段高密自适应切片 + 源/目标严格等比接缝映射 + $C^1$ 前躯刚性包络)**，彻底解决纯垂直平移切片导致的“鲨鱼游动被切成几段/阶梯断裂”问题；同步实现 5 大海洋族群差异化步态 (`getPreySwimGait`) 与速度耦合摆尾 | `src/game/canvasRenderer.ts`, `src/components/SharkFormCanvasPreview.tsx`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/02-DESIGN_SPEC.md` |
+| 2026-10-30 | 全面接入 **13 张 AI 分层手绘背景与氛围精灵图集（`bg_{shallow\|twilight\|abyss}_{0_water\|1_far\|2_mid\|3_near}_*.png` + `bg_ambient_sprites_0c6882ce.png`）**，并在 `parallaxBackground.ts` 中实现离屏 BFS 连通域智能抠图（兼容白底/洋红底与颅骨内孔镂空、保护内部白珍珠/白管虫、柔化 `shallow_1_far` 水平分界线）、上下空白边自动裁切（去除 `abyss_3_near` 底部白条）、14% 余弦交叠水平无缝拼接及 8 类海洋氛围精灵（沙丁鱼风暴、蝶鱼群、蝠鲼、发光水母、摇曳巨藻、荧光海鞭、气泡串、灯笼鱼群）实时动画合成 | `src/game/parallaxBackground.ts`, `public/assets/aistudio/bg_*.png`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
+| 2026-10-30 | 将传统静态单层贴图背景升级为**五层连续水深与三平面真视差海洋环境引擎（`parallaxBackground.ts`）**：包含世界空间连续水深光谱渐变（`sampleBathymetricWaterColor`）、晴空海平线远岛与太阳光晕、远/中/近（`0.13x`/`0.27x`/`0.48x`）三平面周期无镜像视差地形与纵向深度位移、实时摇曳海藻森林、双频丁达尔体积光束与水面焦散光网、远景氛围鱼群剪影、三态深海微粒以及自然温跃层折光波带 | `src/game/parallaxBackground.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
+| 2026-10-30 | 新增**流体力学 C 形脊柱转弯（`turnBend` 头领尾随 C 弧变形 + 转向尾鳍增推）**、**2.5D 透视缩进翻转（`facingScaleX` 平滑插值 + `horizonPitch` 连续仰角，零单帧镜像跳变）**与**水平急转甩尾物理机制（跨左右半球掉头直接水平甩尾，告别机械竖直绕圈）**；将脊柱摆尾渲染器升级为**连续仿射斜切丝带算法 (`ctx.transform(1, shearY, 0, 1, 0, 0)` + 24 段高密自适应切片)** | `src/game/canvasRenderer.ts`, `src/App.tsx`, `src/components/SharkFormCanvasPreview.tsx`, `src/game/rules.test.ts`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
 | 2026-10-29 | **移除局内空投补给按钮**；将右下角技能与强化圆章重构为围绕【冲刺】主按钮的 **90° 极坐标扇形环绕布局（`.hud-skill-fan-container`）**；优化左下角虚拟摇杆自适应内缩（`.hud-joystick-ergonomic`，基于 `clamp()` 与 `safe-area-inset` 向右上舒适区偏移，零写死坐标、全屏零遮挡零叠放） | `src/App.tsx`, `src/index.css`, `docs/02-DESIGN_SPEC.md` |
 | 2026-10-29 | 全面执行**「去线框套线框（De-Boxed Frameless UI）」视觉重构**、**48 阶鲨鱼名称纵向高度 100% 恒定对齐（0px 跳动）**与**全分辨率零 UI 叠放修复**：将未解锁前置鲨鱼名称独立为整行宽度（`h-[50px]` 双行定高槽位），拉大底部 180° 弧形罗盘节点间距与纵深留白，重构局内顶部 HUD 为双行零挤压布局，彻底消除小屏/横屏/长英文名下的任何文字或图标叠放 | `src/components/SharkEvolutionAtlasModal.tsx`, `src/App.tsx`, `src/index.css`, `src/game/sharkEvolutionConfig.ts`, `docs/02-DESIGN_SPEC.md` |
 | 2026-10-28 | 新增 **15 秒 3 步实操新手引导（含新手补给礼包与按钮聚光灯）** 与 **HUD 圆章 2 字融合功能标签（`图谱`/`强化`/`进化`/`补给`/`狂暴`/`突破`/`冲刺`）**；移除鱼类外圈与 `T{N}` 文字，完全依托视觉体型判强弱；修复 iPhone 14 Pro Max Safari 画面纵向拉伸 Bug | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/game/canvasRenderer.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/index.css` |
 | 2026-10-27 | 接入 `icons_f5128c12.png` 24 枚定制游戏 UI 图集，全面重构为“无框头像框 + 单行悬浮遥测胶囊 + 声呐摇杆 + MOBA 扇形技能圆章”极简 HUD（视野留白率提升至 90%+） | `src/App.tsx`, `src/components/UiAtlasIcon.tsx`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts` |
 | 2026-10-26 | 建立 48 阶精灵渲染规范、视觉体型===吞噬判定铁律及移动端多点触控（`bindMultiTouchButton` + 零重渲染摇杆）设计规范 | `src/App.tsx`, `src/game/canvasRenderer.ts`, `src/game/spriteSheetManager.ts` |
-
-
-

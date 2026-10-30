@@ -21,6 +21,10 @@ export interface RenderSharkParams {
   equipped?: EquippedOrgansMap;
   sharkFormId?: string;
   morphFlashTimer?: number;
+  /** Normalized angular turning rate in [-1, 1] for dynamic spinal C-bend & tail whip */
+  turnRate?: number;
+  /** Continuous horizontal facing factor in [-1, 1] (+1 = right, -1 = left) for smooth 2.5D U-turns */
+  facingScaleX?: number;
 }
 
 export type SwimGaitType =
@@ -83,6 +87,8 @@ export function getPreySwimGait(config: PreyTierConfig): SwimGaitType {
 /**
  * Computes the vertical spine displacement and local vertical scale for a normalized slice
  * at `u` in [0, 1], where u = 0 is the snout/head (right side of sprite) and u = 1 is the tail tip (left side).
+ * Supports dynamic `turnBend` in [-1, 1] so the snout leads into turns while the posterior spine
+ * and caudal fin curve into a realistic C-arc and whip harder to generate turning torque.
  */
 export function computeSpineSliceDeformation(
   u: number,
@@ -90,9 +96,23 @@ export function computeSpineSliceDeformation(
   gait: SwimGaitType,
   drawH: number,
   intensity: number = 1.0,
-  biteAnim: number = 0
+  biteAnim: number = 0,
+  turnBend: number = 0
 ): { dy: number; scaleY: number } {
   const clampedU = Math.max(0, Math.min(1, u));
+  const clampedTurn = Math.max(-1, Math.min(1, turnBend));
+  const absTurn = Math.abs(clampedTurn);
+
+  // C1-continuous spinal turning C-arc: snout (u < 0.32) leads into the turn,
+  // pectoral fulcrum (u ≈ 0.22) pivots, and posterior body/tail (u -> 1) trails along the turning arc
+  const headTurnLead =
+    clampedU < 0.32
+      ? clampedTurn * drawH * 0.068 * Math.pow(1 - clampedU / 0.32, 2)
+      : 0;
+  const tailTurnTrail = -clampedTurn * drawH * 0.25 * Math.pow(clampedU, 1.72);
+  const turnArcDy = headTurnLead + tailTurnTrail;
+  const turnAmpBoost = 1 + absTurn * 0.42;
+  const bankRollScaleY = 1 - absTurn * 0.055 * (1 - clampedU * 0.65);
 
   switch (gait) {
     case 'SHARK_APEX': {
@@ -101,19 +121,23 @@ export function computeSpineSliceDeformation(
       const envelope = 0.015 * clampedU + 0.985 * Math.pow(clampedU, 2.25);
       const waveNumber = 2.15;
       const theta = phase - clampedU * waveNumber;
-      const baseAmp = drawH * (0.118 * intensity + biteAnim * 0.042);
+      const baseAmp =
+        drawH * (0.118 * intensity * turnAmpBoost + biteAnim * 0.042);
       // C1-smooth head counter-nod during bite snap (zero derivative at u = 0.28)
       const biteHeadSnap =
         clampedU < 0.28
           ? -biteAnim * drawH * 0.032 * Math.pow(1 - clampedU / 0.28, 2)
           : 0;
-      const dy = Math.sin(theta) * baseAmp * envelope + biteHeadSnap;
+      const dy =
+        Math.sin(theta) * baseAmp * envelope + biteHeadSnap + turnArcDy;
       const tailFlare =
         clampedU > 0.65
           ? 1 +
-            Math.pow((clampedU - 0.65) / 0.35, 1.5) * 0.055 * Math.cos(theta * 2)
+            Math.pow((clampedU - 0.65) / 0.35, 1.5) *
+              (0.055 + absTurn * 0.035) *
+              Math.cos(theta * 2)
           : 1.0;
-      return { dy, scaleY: tailFlare };
+      return { dy, scaleY: tailFlare * bankRollScaleY };
     }
 
     case 'ANGUILLIFORM': {
@@ -121,8 +145,10 @@ export function computeSpineSliceDeformation(
       const envelope = 0.14 + 0.86 * Math.pow(clampedU, 1.15);
       const waveNumber = 4.35;
       const theta = phase - clampedU * waveNumber;
-      const dy = Math.sin(theta) * drawH * 0.145 * intensity * envelope;
-      return { dy, scaleY: 1.0 };
+      const dy =
+        Math.sin(theta) * drawH * 0.145 * intensity * turnAmpBoost * envelope +
+        turnArcDy * 0.85;
+      return { dy, scaleY: bankRollScaleY };
     }
 
     case 'MEDUSOID_JET': {
@@ -131,7 +157,7 @@ export function computeSpineSliceDeformation(
       if (clampedU < 0.45) {
         const bellFactor = Math.pow(1 - clampedU / 0.45, 1.5);
         return {
-          dy: Math.cos(phase) * drawH * 0.028 * bellFactor,
+          dy: Math.cos(phase) * drawH * 0.028 * bellFactor + headTurnLead * 0.6,
           scaleY: 1 - jetPulse * 0.085 * bellFactor * intensity,
         };
       }
@@ -139,10 +165,12 @@ export function computeSpineSliceDeformation(
       const theta = phase - tentacleU * 3.2;
       const dy =
         Math.sin(theta) *
-        drawH *
-        0.14 *
-        intensity *
-        Math.pow(tentacleU, 1.5);
+          drawH *
+          0.14 *
+          intensity *
+          turnAmpBoost *
+          Math.pow(tentacleU, 1.5) +
+        tailTurnTrail * 0.75;
       return {
         dy,
         scaleY: 1 + Math.sin(theta) * 0.04 * Math.pow(tentacleU, 1.5),
@@ -162,10 +190,12 @@ export function computeSpineSliceDeformation(
           (1 - smoothFin);
       const flutterDy =
         Math.sin(phase * 2.1 - finU * 2.2) *
-        drawH *
-        0.1 *
-        intensity *
-        smoothFin;
+          drawH *
+          0.1 *
+          intensity *
+          turnAmpBoost *
+          smoothFin +
+        turnArcDy * 0.45;
       return { dy: bobY + flutterDy, scaleY: breath };
     }
 
@@ -187,13 +217,15 @@ export function computeSpineSliceDeformation(
       const envelope = 0.02 + 0.98 * Math.pow(clampedU, 1.95);
       const waveNumber = 2.35;
       const theta = phase - clampedU * waveNumber;
-      const dy = Math.sin(theta) * drawH * 0.12 * intensity * envelope;
+      const dy =
+        Math.sin(theta) * drawH * 0.12 * intensity * turnAmpBoost * envelope +
+        turnArcDy * 0.8;
       const tailFlare =
         clampedU > 0.68
           ? 1 +
             Math.pow((clampedU - 0.68) / 0.32, 1.5) * 0.05 * Math.cos(theta * 2)
           : 1.0;
-      return { dy, scaleY: tailFlare };
+      return { dy, scaleY: tailFlare * bankRollScaleY };
     }
   }
 }
@@ -232,7 +264,7 @@ function drawNaturalAspectFrame(
 /**
  * Continuous Affine-Sheared Ribbon Spine Renderer.
  * Preserves the exact bounding footprint (drawW × drawH) of drawNaturalAspectFrame
- * while warping the sprite along a C1-smooth spinal curve.
+ * while warping the sprite along a C1-smooth spinal curve (including dynamic turning C-bend).
  * Each vertical strip shares exact boundary deformations (def0 at left edge, def1 at right edge)
  * and applies an affine Y-shear (`shearY = (def1.dy - def0.dy) / sliceDstW`) with locked
  * UV-to-destination seam padding, completely eliminating stair-step segmentation artifacts.
@@ -247,7 +279,8 @@ export function drawUndulatingSpriteFrame(
   offsetY: number = 0,
   inflateY: number = 1.0,
   intensity: number = 1.0,
-  biteAnim: number = 0
+  biteAnim: number = 0,
+  turnBend: number = 0
 ): void {
   if (!frame || frame.width === 0 || frame.height === 0) return;
 
@@ -281,7 +314,8 @@ export function drawUndulatingSpriteFrame(
     gait,
     drawH,
     intensity,
-    biteAnim
+    biteAnim,
+    turnBend
   );
 
   for (let i = 0; i < sliceCount; i++) {
@@ -293,7 +327,8 @@ export function drawUndulatingSpriteFrame(
       gait,
       drawH,
       intensity,
-      biteAnim
+      biteAnim,
+      turnBend
     );
 
     const sx = i * sliceSrcW;
@@ -342,8 +377,8 @@ export function drawOrganPart(
 
 /**
  * Draw the player's evolved Shark Form (1 of 48 forms from /assets/aistudio/sharks_ec921c3b.png),
- * preserving natural aspect ratio, multi-slice sinusoidal spine wave deformation, upright dorsal orientation,
- * and Morph Breakthrough shockwave feedback.
+ * preserving natural aspect ratio, multi-slice sinusoidal spine wave deformation,
+ * hydrodynamic turning C-bend, smooth 2.5D horizontal foreshortening flip, and upright dorsal orientation.
  */
 export function drawSharkWithOrgans(
   ctx: CanvasRenderingContext2D,
@@ -362,6 +397,8 @@ export function drawSharkWithOrgans(
     invulnerableTimer = 0,
     sharkFormId = 'shark_00_clown_fry',
     morphFlashTimer = 0,
+    turnRate = 0,
+    facingScaleX,
   } = params;
 
   const sharkForm = getSharkFormById(sharkFormId);
@@ -369,19 +406,43 @@ export function drawSharkWithOrgans(
   ctx.save();
   ctx.translate(x, y);
 
-  // Normalize angle to [-PI, PI] and keep dorsal fin strictly upright when swimming left
+  // Normalize angle to [-PI, PI]
   const normAngle = Math.atan2(Math.sin(angle), Math.cos(angle));
-  const isFacingLeft = Math.abs(normAngle) > Math.PI * 0.5;
-  if (isFacingLeft) {
-    // Mirror horizontally first, then rotate by the mirrored pitch angle so belly never flips up
-    ctx.scale(-1, 1);
-    const leftPitch =
-      normAngle > 0 ? Math.PI - normAngle : -Math.PI - normAngle;
-    ctx.rotate(leftPitch);
-  } else {
-    ctx.rotate(normAngle);
-  }
+  // Smooth 2.5D horizontal facing transition (+1 = right, -1 = left) so U-turns and vertical crossings never pop in 1 frame
+  const rawFacing =
+    typeof facingScaleX === 'number'
+      ? facingScaleX
+      : Math.cos(normAngle) < 0
+      ? -1
+      : 1;
+  const signX = rawFacing >= 0 ? 1 : -1;
+  const absFacing = Math.max(0, Math.min(1, Math.abs(rawFacing)));
+  // flipProgress is 0 during normal swimming and peaks at 1.0 during the midpoint of a horizontal whip-turn
+  const flipProgress = 1 - absFacing;
+  const perspectiveScaleX = 0.42 + 0.58 * Math.pow(absFacing, 0.8);
+  const perspectiveScaleY = 1 - flipProgress * 0.075;
 
+  // Unified continuous elevation pitch in [-PI/2, +PI/2] (identical to normAngle when facing right and PI - normAngle when facing left)
+  const horizonPitch = Math.atan2(
+    Math.sin(normAngle),
+    Math.abs(Math.cos(normAngle))
+  );
+
+  // Combine steering turnRate with automatic U-turn whip C-bend during horizontal flips
+  const flipWhipSign =
+    Math.abs(turnRate) > 0.05
+      ? Math.sign(turnRate)
+      : Math.sin(normAngle) >= 0
+      ? 1
+      : -1;
+  const flipWhipBend = Math.sin(flipProgress * Math.PI) * 0.68 * flipWhipSign;
+  const effectiveTurnBend = Math.max(
+    -1,
+    Math.min(1, turnRate + flipWhipBend)
+  );
+
+  ctx.scale(signX * perspectiveScaleX, perspectiveScaleY);
+  ctx.rotate(horizonPitch + effectiveTurnBend * 0.085);
   ctx.scale(scale, scale);
 
   // Invulnerability (i-frames) natural body flicker after taking damage (no outer circle)
@@ -399,8 +460,7 @@ export function drawSharkWithOrgans(
     (isBoosting ? 0.048 : 0) +
     biteAnim * 0.045;
   const squashY = 1 - Math.sin(swimPhase * 2) * 0.015 + biteAnim * 0.05;
-  const swimIntensity =
-    isBoosting || frenzyTimer > 0 ? 1.32 : 1.0;
+  const swimIntensity = isBoosting || frenzyTimer > 0 ? 1.32 : 1.0;
 
   ctx.rotate(bodyYaw);
 
@@ -424,7 +484,8 @@ export function drawSharkWithOrgans(
     0,
     1.0,
     swimIntensity,
-    biteAnim
+    biteAnim,
+    effectiveTurnBend
   );
   ctx.filter = 'none';
   ctx.restore();
@@ -525,6 +586,10 @@ export function drawPreyEntity(
     0.65,
     Math.min(1.65, speedMag / Math.max(25, config.baseSpeed))
   );
+  const preyTurnBend =
+    gait === 'RIGID_PROPULSION'
+      ? 0
+      : Math.max(-0.55, Math.min(0.55, (vy / Math.max(35, speedMag)) * 0.52));
   const swimPhase = phase * 3.1;
   const swimRock =
     gait === 'RIGID_PROPULSION'
@@ -549,7 +614,9 @@ export function drawPreyEntity(
     0,
     0,
     isInflated ? 1.16 : 1.0,
-    speedRatio
+    speedRatio,
+    0,
+    preyTurnBend
   );
   ctx.filter = 'none';
   ctx.restore();

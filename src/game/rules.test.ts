@@ -29,6 +29,7 @@ import {
   computeSpineSliceDeformation,
   getPreySwimGait,
 } from './canvasRenderer';
+import { sampleBathymetricWaterColor } from './parallaxBackground';
 
 test('I18N dictionary has complete and matching keys in both zh and en', () => {
   const zhKeys = Object.keys(I18N.zh).sort();
@@ -790,7 +791,7 @@ test('Biomechanical Swimming Gait Classification & Anatomical Spine Envelope Inv
     `Shark tail fin (u=1) must whip with clear propulsion amplitude (got ${maxTailDy.toFixed(2)}px)`
   );
 
-  // Verify C0/C1 continuity across 24 slices for all 6 gaits (zero segmentation / stair-step jumps)
+  // Verify C0/C1 continuity across 24 slices for all 6 gaits (zero segmentation / stair-step jumps), including active turning C-bend
   const allGaits = [
     'SHARK_APEX',
     'CARANGIFORM',
@@ -803,10 +804,10 @@ test('Biomechanical Swimming Gait Classification & Anatomical Spine Envelope Inv
   const sliceDstW = 140 / sliceCount;
 
   for (const gait of allGaits) {
-    let prevDef = computeSpineSliceDeformation(1.0, 1.25, gait, drawH, 1.0, 0.5);
+    let prevDef = computeSpineSliceDeformation(1.0, 1.25, gait, drawH, 1.0, 0.5, 0.75);
     for (let i = 0; i < sliceCount; i++) {
       const u1 = 1 - (i + 1) / sliceCount;
-      const nextDef = computeSpineSliceDeformation(u1, 1.25, gait, drawH, 1.0, 0.5);
+      const nextDef = computeSpineSliceDeformation(u1, 1.25, gait, drawH, 1.0, 0.5, 0.75);
       const shearY = (nextDef.dy - prevDef.dy) / sliceDstW;
       // Right edge of affine-sheared slice i at localX = sliceDstW must match left edge of slice i+1
       const rightEdgeY = prevDef.dy + sliceDstW * shearY;
@@ -821,7 +822,54 @@ test('Biomechanical Swimming Gait Classification & Anatomical Spine Envelope Inv
       prevDef = nextDef;
     }
   }
+
+  // Verify Hydrodynamic Turning C-Bend: when turnBend > 0, snout (u=0) leads into the turn (+dy)
+  // while posterior tail (u=1) trails opposite to the turn (-dy)
+  const straightSnout = computeSpineSliceDeformation(0, 0, 'SHARK_APEX', drawH, 1.0, 0, 0);
+  const turnSnout = computeSpineSliceDeformation(0, 0, 'SHARK_APEX', drawH, 1.0, 0, 0.85);
+  const straightTail = computeSpineSliceDeformation(1, 0, 'SHARK_APEX', drawH, 1.0, 0, 0);
+  const turnTail = computeSpineSliceDeformation(1, 0, 'SHARK_APEX', drawH, 1.0, 0, 0.85);
+
+  assert.ok(
+    turnSnout.dy - straightSnout.dy > 2.5,
+    'Positive turnBend must lead the shark snout into the turn (+dy)'
+  );
+  assert.ok(
+    turnTail.dy - straightTail.dy < -8.0,
+    'Positive turnBend must trail the shark tail along the turning C-arc (-dy)'
+  );
 });
 
+test('sampleBathymetricWaterColor interpolates smoothly across shallow, twilight, and abyssal depths without discontinuities', () => {
+  const surface = sampleBathymetricWaterColor(0);
+  const shallow = sampleBathymetricWaterColor(250);
+  const twilight = sampleBathymetricWaterColor(800);
+  const abyss = sampleBathymetricWaterColor(1500);
+  const hadal = sampleBathymetricWaterColor(2100);
 
+  // Luminance decreases from sunlit surface down to upper abyss
+  const lum = (c: { r: number; g: number; b: number }) =>
+    0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+  assert.ok(lum(surface) > lum(shallow), 'Surface must be brighter than mid-shallow reef');
+  assert.ok(lum(shallow) > lum(twilight), 'Shallow reef must be brighter than twilight zone');
+  assert.ok(lum(twilight) > lum(abyss), 'Twilight zone must be brighter than upper abyss');
 
+  // Hadal volcanic trench (>1900m) introduces warm geothermal red-amber underglow
+  assert.ok(hadal.r > abyss.r, 'Hadal hydrothermal zone must have warmer red magma tint than upper abyss');
+
+  // Verify C0 continuity across every 10m step in the underwater column from 0m to 2000m (zero color jumps)
+  let prev = sampleBathymetricWaterColor(0);
+  for (let d = 10; d <= 2000; d += 10) {
+    const cur = sampleBathymetricWaterColor(d);
+    const maxChannelDelta = Math.max(
+      Math.abs(cur.r - prev.r),
+      Math.abs(cur.g - prev.g),
+      Math.abs(cur.b - prev.b)
+    );
+    assert.ok(
+      maxChannelDelta <= 12,
+      `Water color jump too large between ${d - 10}m and ${d}m (delta=${maxChannelDelta})`
+    );
+    prev = cur;
+  }
+});
