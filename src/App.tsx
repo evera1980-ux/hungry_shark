@@ -776,7 +776,7 @@ export default function App() {
       const sim = simRef.current;
       const save = metaSaveRef.current;
       const chosenSharkId = withMaxMechaTrial
-        ? 'shark_45_mecha_leviathan'
+        ? 'shark_41_star_destroyer'
         : save.selectedSharkId;
       const chosenUpgLevel = withMaxMechaTrial
         ? 10
@@ -1467,7 +1467,10 @@ export default function App() {
       xp: Math.round(shark.xp),
       xpToNext: getXpRequiredForLevel(shark.level),
       hp: Math.ceil(shark.hp),
+      maxHp: shark.stats.maxHp,
       energy: Math.round(shark.energy),
+      maxEnergy: shark.stats.maxEnergy,
+      biteTier: shark.stats.biteTier,
       geneSurgeCost: getGeneSurgeCost(
         shark.level,
         economyUsesRef.current.geneSurgeCount,
@@ -1796,10 +1799,11 @@ export default function App() {
             activeSharkForm.row
           );
           const surfaceBreatherBonus = shark.y < 48 ? 18 : 0;
+          const boostRegenMult = shark.stats.boostRegenMultiplier ?? 1.0;
           shark.energy = Math.min(
             shark.stats.maxEnergy,
             shark.energy +
-              (GAME_CONFIG.world.baseBoostRegenPerSec +
+              (GAME_CONFIG.world.baseBoostRegenPerSec * boostRegenMult +
                 surfaceBreatherBonus +
                 heatBuff.energyRegenBonus) *
                 simDt
@@ -1853,9 +1857,14 @@ export default function App() {
           );
         }
 
-        // Sync skeletal swim phase with actual speed
-        const speedNorm = Math.hypot(shark.vx, shark.vy) / 220;
-        shark.swimPhase += simDt * (6.5 + speedNorm * 5.2);
+        // Sync skeletal swim phase with actual speed & boost/frenzy state
+        const speedNorm =
+          Math.hypot(shark.vx, shark.vy) /
+          Math.max(180, shark.stats.moveSpeed || 280);
+        const boostCadenceBonus =
+          isBoosting || shark.frenzyTimer > 0 ? 4.2 : 0;
+        shark.swimPhase +=
+          simDt * (4.8 + speedNorm * 6.8 + boostCadenceBonus);
         shark.biteAnim = Math.max(0, shark.biteAnim - simDt * 3.8);
 
         // Hunger HP Drain + Delayed Ghost Bar
@@ -1920,7 +1929,6 @@ export default function App() {
         // Update Prey AI, Jaw Suction Assist & Check Mouth Devour Collision
         for (let i = sim.preyList.length - 1; i >= 0; i--) {
           const prey = sim.preyList[i];
-          prey.phase += simDt * 3.2;
 
           const distToShark = Math.hypot(shark.x - prey.x, shark.y - prey.y);
           const visualPreyScale = getPreyRelativeVisualScale(
@@ -1942,7 +1950,9 @@ export default function App() {
             renderedPreyRadius,
             18 * shark.stats.scale
           );
-          const suctionRadius = mouthRadius * 2.15 + eatHitRadius;
+          const jawSuctionMult = shark.stats.jawSuctionMultiplier ?? 1.0;
+          const suctionRadius =
+            mouthRadius * 2.15 * jawSuctionMult + eatHitRadius;
           const distToMouthPre = Math.hypot(mouthX - prey.x, mouthY - prey.y);
           const inJawSuctionZone =
             canEatNow && !prey.config.isHazard && distToMouthPre < suctionRadius;
@@ -2028,6 +2038,17 @@ export default function App() {
             }
           }
 
+          // Advance prey swimming phase dynamically coupled to actual instantaneous speed (fleeing/charging fish beat their tails faster)
+          const preySpeedRatio = Math.max(
+            0.55,
+            Math.min(
+              2.2,
+              Math.hypot(prey.vx, prey.vy) /
+                Math.max(25, prey.config.baseSpeed)
+            )
+          );
+          prey.phase += simDt * (1.85 + preySpeedRatio * 1.75);
+
           // P0-3 Jaw Suction Pull: smoothly pull edible prey into the shark's open jaws when close
           if (inJawSuctionZone) {
             const pullRatio = Math.max(0, 1 - distToMouthPre / suctionRadius);
@@ -2089,10 +2110,16 @@ export default function App() {
               // Devour! Build Feeding Combo Chain + Restore Boost Energy on every kill
               shark.comboCount += 1;
               shark.comboTimer = 3.2;
+              const maxComboBonus = shark.stats.maxComboBonus ?? 1.0;
               const comboMult = Number(
-                (1 + Math.min(1.0, (shark.comboCount - 1) * 0.08)).toFixed(2)
+                (
+                  1 + Math.min(maxComboBonus, (shark.comboCount - 1) * 0.08)
+                ).toFixed(2)
               );
-              const boostRefill = 6 + prey.config.tier * 2;
+              const boostRefill =
+                6 +
+                prey.config.tier * 2 +
+                (shark.stats.killEnergyBonus ?? 0);
               shark.energy = Math.min(
                 shark.stats.maxEnergy,
                 shark.energy + boostRefill
@@ -2105,6 +2132,10 @@ export default function App() {
                   : variant === 'ABYSS_BEHEMOTH'
                   ? 2.2
                   : 1.0;
+              const bountyPreyScoreBonus =
+                prey.config.id === sim.targetBounty.preyConfig.id
+                  ? shark.stats.specialPreyScoreMultiplier ?? 1.0
+                  : 1.0;
               const frenzyStackMult =
                 shark.frenzyTimer > 0
                   ? infiniteProgressionManager.getFrenzyScoreMultiplier()
@@ -2112,6 +2143,7 @@ export default function App() {
               const rewardScale =
                 (prey.scaleMultiplier ?? 1.0) *
                 variantScoreMult *
+                bountyPreyScoreBonus *
                 frenzyStackMult *
                 comboMult;
 
@@ -2119,12 +2151,21 @@ export default function App() {
                 Math.round(outcome.scoreGain * rewardScale)
               );
 
+              const effectiveGeneMult =
+                shark.stats.geneYieldMultiplier ??
+                shark.stats.rewardMultiplier ??
+                atlasBonus.rewardMultiplier;
+              const effectiveCoinMult =
+                shark.stats.coinYieldMultiplier ??
+                shark.stats.rewardMultiplier ??
+                atlasBonus.rewardMultiplier;
+
               const earnedGenes = Math.max(
                 1,
                 Math.round(
                   outcome.geneGain *
                     (variant === 'ABYSS_BEHEMOTH' ? 2.5 : 1.0) *
-                    atlasBonus.rewardMultiplier
+                    effectiveGeneMult
                 )
               );
               const earnedCoins = Math.max(
@@ -2132,7 +2173,7 @@ export default function App() {
                 Math.round(
                   outcome.coinGain *
                     (variant === 'GOLDEN_MUTANT' ? 3.0 : 1.0) *
-                    atlasBonus.rewardMultiplier
+                    effectiveCoinMult
                 )
               );
 
@@ -2157,14 +2198,28 @@ export default function App() {
                 }
               }
 
-              // Requires devouring 8 true Golden Mutants outside of Frenzy + passing cooldown
-              if (
-                variant === 'GOLDEN_MUTANT' &&
-                shark.frenzyTimer <= 0 &&
-                infiniteProgressionManager.registerGoldenMutantDevoured()
-              ) {
-                shark.stats = recomputeSharkStats(shark.level, true);
-                shark.frenzyTimer = 3.6 + shark.stats.frenzyDurationBonus;
+              // Requires devouring 8 true Golden Mutants outside of Frenzy (or 7 with Void Lightning trait) + passing cooldown
+              if (variant === 'GOLDEN_MUTANT' && shark.frenzyTimer <= 0) {
+                const triggeredStandard =
+                  infiniteProgressionManager.registerGoldenMutantDevoured();
+                const reducedReq = Math.max(
+                  3,
+                  infiniteProgressionManager.goldenMutantRequired -
+                    (shark.stats.goldenMutantReduction ?? 0)
+                );
+                const triggeredByTrait =
+                  !triggeredStandard &&
+                  (shark.stats.goldenMutantReduction ?? 0) > 0 &&
+                  infiniteProgressionManager.goldenMutantCharge >= reducedReq;
+                if (triggeredByTrait) {
+                  infiniteProgressionManager.goldenMutantCharge = 0;
+                  infiniteProgressionManager.frenzyCooldownTimer = 25;
+                  infiniteProgressionManager.addFrenzyStack();
+                }
+                if (triggeredStandard || triggeredByTrait) {
+                  shark.stats = recomputeSharkStats(shark.level, true);
+                  shark.frenzyTimer = 3.6 + shark.stats.frenzyDurationBonus;
+                }
               }
               if (prey.config.tier >= 4) {
                 shark.hitstopTimer = 0.045;
@@ -2206,8 +2261,14 @@ export default function App() {
                     : 'COIN';
                 const basePickupVal =
                   dropKind === 'COIN'
-                    ? Math.max(3, Math.round(prey.config.tier * 2.5 * atlasBonus.rewardMultiplier))
-                    : Math.max(1, Math.round(prey.config.tier * 1.2 * atlasBonus.rewardMultiplier));
+                    ? Math.max(
+                        3,
+                        Math.round(prey.config.tier * 2.5 * effectiveCoinMult)
+                      )
+                    : Math.max(
+                        1,
+                        Math.round(prey.config.tier * 1.2 * effectiveGeneMult)
+                      );
                 spawnPickup(
                   prey.x,
                   prey.y,
@@ -2234,13 +2295,13 @@ export default function App() {
                 sim.targetBounty.progress += 1;
                 if (sim.targetBounty.progress >= sim.targetBounty.required) {
                   const bountyBonusScore = infiniteProgressionManager.getScaledPreyValue(
-                    350 * prey.config.tier
+                    Math.round(350 * prey.config.tier * bountyPreyScoreBonus)
                   );
                   const bountyGenes = Math.round(
-                    (18 + prey.config.tier * 4) * atlasBonus.rewardMultiplier
+                    (18 + prey.config.tier * 4) * effectiveGeneMult
                   );
                   const bountyCoins = Math.round(
-                    (48 + prey.config.tier * 12) * atlasBonus.rewardMultiplier
+                    (48 + prey.config.tier * 12) * effectiveCoinMult
                   );
                   shark.score += bountyBonusScore;
                   shark.genes += bountyGenes;
@@ -2639,10 +2700,20 @@ export default function App() {
             ),
             comboCount: shark.comboCount,
             comboMultiplier: Number(
-              (1 + Math.min(1.0, Math.max(0, shark.comboCount - 1) * 0.08)).toFixed(2)
+              (
+                1 +
+                Math.min(
+                  shark.stats.maxComboBonus ?? 1.0,
+                  Math.max(0, shark.comboCount - 1) * 0.08
+                )
+              ).toFixed(2)
             ),
             goldenMutantCharge: infiniteProgressionManager.goldenMutantCharge,
-            goldenMutantRequired: infiniteProgressionManager.goldenMutantRequired,
+            goldenMutantRequired: Math.max(
+              3,
+              infiniteProgressionManager.goldenMutantRequired -
+                (shark.stats.goldenMutantReduction ?? 0)
+            ),
             frenzyCooldown: Math.ceil(infiniteProgressionManager.frenzyCooldownTimer),
             activeSharkId: shark.sharkFormId,
             activeUpgradeLevel: activeUpg,

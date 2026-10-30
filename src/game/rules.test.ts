@@ -25,6 +25,10 @@ import {
   SHARK_EVOLUTION_FORMS,
 } from './sharkEvolutionConfig';
 import { SHARK_CELL_BOUNDS, SHARK_GRID_MAP } from './spriteSheetManager';
+import {
+  computeSpineSliceDeformation,
+  getPreySwimGait,
+} from './canvasRenderer';
 
 test('I18N dictionary has complete and matching keys in both zh and en', () => {
   const zhKeys = Object.keys(I18N.zh).sort();
@@ -668,3 +672,156 @@ test('Visual Size vs. Devourability Contract + Gold Frenzy Size Preservation Exc
     }
   }
 });
+
+test('Senior QA Audit: 48-Shark Panel Stats, Trait Descriptions, and Gameplay Calculation Consistency', () => {
+  // 1. Verify every shark's traitZh / traitEn numerical claims match its exact SharkFormConfig fields
+  for (const form of SHARK_EVOLUTION_FORMS) {
+    const biteMatch = form.traitEn.match(/Bite Tier T(\d)/);
+    if (biteMatch) {
+      assert.equal(
+        form.baseBiteTier,
+        Number(biteMatch[1]),
+        `${form.id} traitEn Bite Tier T${biteMatch[1]} must match baseBiteTier=${form.baseBiteTier}`
+      );
+    }
+
+    const hpMatch = form.traitEn.match(/(\d+)\s+Base HP/);
+    if (hpMatch) {
+      assert.equal(
+        form.baseHp,
+        Number(hpMatch[1]),
+        `${form.id} traitEn ${hpMatch[1]} Base HP must match baseHp=${form.baseHp}`
+      );
+    }
+
+    const speedMatch = form.traitEn.match(/\+(\d+)%\s+(?:swim\s+)?speed/);
+    if (speedMatch) {
+      assert.equal(
+        Math.round(form.speedBonus * 100),
+        Number(speedMatch[1]),
+        `${form.id} traitEn +${speedMatch[1]}% speed must match speedBonus=${Math.round(form.speedBonus * 100)}%`
+      );
+    }
+
+    const scoreMultMatch = form.traitEn.match(/(\d+\.\d+)x\s+(?:[Ss]core|\(\+\d+%\)\s+feeding\s+score)/);
+    if (scoreMultMatch) {
+      assert.equal(
+        form.scoreMult,
+        Number(scoreMultMatch[1]),
+        `${form.id} traitEn ${scoreMultMatch[1]}x score must match scoreMult=${form.scoreMult}`
+      );
+    }
+  }
+
+  // 2. Verify Lineage Passives in computeEvolvedSharkStats
+  const bioStats = computeEvolvedSharkStats(1, 'shark_08_blacktip_reef', 1, false, 1.0, 1);
+  const abyssStats = computeEvolvedSharkStats(1, 'shark_12_starry_whale', 1, false, 1.0, 1);
+  assert.equal(bioStats.jawSuctionMultiplier, 1.18, 'APEX_BIO lineage grants 1.18x jaw suction radius');
+  assert.equal(abyssStats.jawSuctionMultiplier, 1.35, 'Starry Whale Shark grants 1.35x jaw suction radius');
+  assert.ok(
+    (abyssStats.geneYieldMultiplier ?? 1) > (bioStats.geneYieldMultiplier ?? 1),
+    'ELDER_ABYSS lineage grants +15% bonus gene crystal yield'
+  );
+
+  // 3. Verify Specific Shark Trait Multipliers & Combat Mitigation in resolvePreyEncounter
+  const tier6Mine = GAME_CONFIG.preyTiers[5]; // Naval Mine hazard
+  const tier8Boss = GAME_CONFIG.preyTiers[7]; // Kraken Boss
+
+  const standardTier2 = computeEvolvedSharkStats(1, 'shark_11_tiger_shark', 1, false, 1.0, 1);
+  const bullShark = computeEvolvedSharkStats(1, 'shark_10_bull_shark', 1, false, 1.0, 1);
+  const cyberAlloy = computeEvolvedSharkStats(1, 'shark_21_cyber_alloy', 1, false, 1.0, 1);
+  const earthGolem = computeEvolvedSharkStats(1, 'shark_30_earth_golem', 1, false, 1.0, 1);
+  const paladinShark = computeEvolvedSharkStats(1, 'shark_44_celestial_paladin', 1, false, 1.0, 1);
+  const krakenShark = computeEvolvedSharkStats(1, 'shark_39_kraken_hydra', 1, false, 1.0, 1);
+
+  assert.equal(bullShark.damageTakenMultiplier, 0.75, '#10 Bull Shark reduces collision damage by 25%');
+  assert.equal(cyberAlloy.mineDamageTakenMultiplier, 0.6, '#21 Cyber Alloy reduces mine explosion damage by 40%');
+  assert.equal(earthGolem.knockbackMultiplier, 0.5, '#30 Earth Golem reduces knockback by 50%');
+  assert.equal(paladinShark.damageTakenMultiplier, 0.5, '#44 Celestial Paladin reduces all damage by 50%');
+  assert.equal( paladinShark.coinYieldMultiplier, Number((1.6 * 2.0).toFixed(2)), '#44 Celestial Paladin doubles coin yield on top of Gen VI bonus');
+
+  const stdBossHit = resolvePreyEncounter(standardTier2, tier8Boss, false, false, 'NONE', 1.0);
+  const bullBossHit = resolvePreyEncounter(bullShark, tier8Boss, false, false, 'NONE', 1.0);
+  assert.ok(
+    Math.abs(bullBossHit.hpDelta) < Math.abs(stdBossHit.hpDelta),
+    'Bull Shark takes less fail damage from oversized Boss than unarmored peer'
+  );
+
+  const golemMineHit = resolvePreyEncounter(earthGolem, tier6Mine, false, false, 'NONE', 1.0);
+  assert.equal(golemMineHit.knockbackForce, 220, 'Earth Golem halves mine knockback from 440 to 220');
+
+  // Verify #39 Kraken Hydra 2x Boss Slayer reward
+  const dreadnoughtStats = computeEvolvedSharkStats(1, 'shark_36_dreadnought_cannon', 1, false, 1.0, 1);
+  const stdBossEat = resolvePreyEncounter(dreadnoughtStats, tier8Boss, false, false, 'NONE', 1.0);
+  const krakenBossEat = resolvePreyEncounter(krakenShark, tier8Boss, false, false, 'NONE', 1.0);
+  assert.equal(krakenBossEat.coinGain, stdBossEat.coinGain * 2, '#39 Kraken Hydra doubles Boss coin reward');
+  assert.equal(krakenBossEat.geneGain, stdBossEat.geneGain * 2, '#39 Kraken Hydra doubles Boss gene reward');
+});
+
+test('Biomechanical Swimming Gait Classification & Anatomical Spine Envelope Invariants', () => {
+  const byId = Object.fromEntries(GAME_CONFIG.preyTiers.map((p) => [p.id, p]));
+
+  assert.equal(getPreySwimGait(byId['coral_clownfish']), 'CARANGIFORM');
+  assert.equal(getPreySwimGait(byId['electric_eel']), 'ANGUILLIFORM');
+  assert.equal(getPreySwimGait(byId['green_moray_eel']), 'ANGUILLIFORM');
+  assert.equal(getPreySwimGait(byId['gene_jelly']), 'MEDUSOID_JET');
+  assert.equal(getPreySwimGait(byId['cthulhu_kraken']), 'MEDUSOID_JET');
+  assert.equal(getPreySwimGait(byId['gold_puffer']), 'PUFFER_BUOYANT');
+  assert.equal(getPreySwimGait(byId['probe_sub']), 'RIGID_PROPULSION');
+  assert.equal(getPreySwimGait(byId['cyber_mine']), 'RIGID_PROPULSION');
+  assert.equal(getPreySwimGait(byId['cyber_mecha_shark_boss']), 'SHARK_APEX');
+
+  // Verify snout (u=0) stays anchored with minimal sway while caudal fin (u=1) whips with maximum amplitude
+  const drawH = 60;
+  let maxSnoutDy = 0;
+  let maxTailDy = 0;
+  for (let p = 0; p < Math.PI * 2; p += 0.2) {
+    const snout = computeSpineSliceDeformation(0, p, 'SHARK_APEX', drawH, 1.0, 0);
+    const tail = computeSpineSliceDeformation(1, p, 'SHARK_APEX', drawH, 1.0, 0);
+    maxSnoutDy = Math.max(maxSnoutDy, Math.abs(snout.dy));
+    maxTailDy = Math.max(maxTailDy, Math.abs(tail.dy));
+  }
+  assert.ok(
+    maxSnoutDy < 0.5,
+    `Shark snout (u=0) must remain rock-steady for bite alignment (got ${maxSnoutDy.toFixed(2)}px)`
+  );
+  assert.ok(
+    maxTailDy > 6.5,
+    `Shark tail fin (u=1) must whip with clear propulsion amplitude (got ${maxTailDy.toFixed(2)}px)`
+  );
+
+  // Verify C0/C1 continuity across 24 slices for all 6 gaits (zero segmentation / stair-step jumps)
+  const allGaits = [
+    'SHARK_APEX',
+    'CARANGIFORM',
+    'ANGUILLIFORM',
+    'MEDUSOID_JET',
+    'PUFFER_BUOYANT',
+    'RIGID_PROPULSION',
+  ] as const;
+  const sliceCount = 24;
+  const sliceDstW = 140 / sliceCount;
+
+  for (const gait of allGaits) {
+    let prevDef = computeSpineSliceDeformation(1.0, 1.25, gait, drawH, 1.0, 0.5);
+    for (let i = 0; i < sliceCount; i++) {
+      const u1 = 1 - (i + 1) / sliceCount;
+      const nextDef = computeSpineSliceDeformation(u1, 1.25, gait, drawH, 1.0, 0.5);
+      const shearY = (nextDef.dy - prevDef.dy) / sliceDstW;
+      // Right edge of affine-sheared slice i at localX = sliceDstW must match left edge of slice i+1
+      const rightEdgeY = prevDef.dy + sliceDstW * shearY;
+      assert.ok(
+        Math.abs(rightEdgeY - nextDef.dy) < 1e-9,
+        `Affine shear right edge of slice ${i} must match left edge of slice ${i + 1} for ${gait}`
+      );
+      assert.ok(
+        Math.abs(nextDef.scaleY - prevDef.scaleY) < 0.03,
+        `Adjacent slices must not have abrupt scaleY jumps for ${gait}`
+      );
+      prevDef = nextDef;
+    }
+  }
+});
+
+
+

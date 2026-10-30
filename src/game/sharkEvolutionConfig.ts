@@ -170,6 +170,18 @@ interface RawSharkSeed {
   traitZh: string;
   traitEn: string;
   colors: [string, string, string];
+  statOverrides?: Partial<
+    Pick<
+      SharkFormConfig,
+      | 'baseHp'
+      | 'speedBonus'
+      | 'hpDrainReduction'
+      | 'boostCostReduction'
+      | 'magnetBonus'
+      | 'devourHealMult'
+      | 'scoreMult'
+    >
+  >;
 }
 
 const RAW_SHARK_SEEDS: RawSharkSeed[] = [
@@ -181,8 +193,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Mimic Clown Fry',
     titleZh: '破壳初生·浅礁伪装者',
     titleEn: 'Reef Camouflage Hatchling',
-    traitZh: '浅海珊瑚礁完美拟态，吞噬小型鱼群额外恢复 +15% 生命',
-    traitEn: '+15% HP restored from shallow reef fish schools',
+    traitZh: '浅海珊瑚礁完美拟态，吞噬小型鱼群额外恢复 +20% 生命',
+    traitEn: '+20% HP restored from shallow reef fish schools',
     colors: ['#fb923c', '#f8fafc', '#fdba74'],
   },
   {
@@ -195,6 +207,7 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     traitZh: '初具真鲨流线体型，基础咬合阶位提升至 T2，游速 +8%',
     traitEn: 'Base Bite Tier T2 unlocked, +8% swim speed',
     colors: ['#eab308', '#fef08a', '#facc15'],
+    statOverrides: { speedBonus: 0.08 },
   },
   {
     id: 'shark_02_neon_reef',
@@ -203,8 +216,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Neon Stream Reef Shark',
     titleZh: '生物电感·极速掠影',
     titleEn: 'Bio-Electric Reef Sprinter',
-    traitZh: '体表霓虹侧线感应猎物，冲刺能量消耗降低 10%，磁吸范围 +30',
-    traitEn: '-10% boost energy cost, +30 magnet radius',
+    traitZh: '体表霓虹侧线感应猎物，冲刺能量消耗降低 14%，磁吸范围 +64',
+    traitEn: '-14% boost energy cost, +64 magnet radius',
     colors: ['#06b6d4', '#a855f7', '#22d3ee'],
   },
   {
@@ -214,8 +227,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Leopard Coral Hunter',
     titleZh: '礁盘伏击·连击新星',
     titleEn: 'Reef Ambush Predator',
-    traitZh: '连击捕食得分加成提升 12%，咬碎硬壳蟹类速度加快',
-    traitEn: '+12% feeding score multiplier, agile reef turning',
+    traitZh: '连击捕食得分倍率提升至 1.27x（+27%），咬碎硬壳蟹类速度加快',
+    traitEn: '1.27x (+27%) feeding score multiplier, agile reef turning',
     colors: ['#d97706', '#fde68a', '#f59e0b'],
   },
   {
@@ -225,9 +238,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Bioluminescent Star Shark',
     titleZh: '微光适应·耐饥潜行者',
     titleEn: 'Twilight-Adapted Stalker',
-    traitZh: '荧光斑点减缓新陈代谢，饥饿掉血速率降低 12%',
-    traitEn: '-12% hunger HP drain rate',
+    traitZh: '荧光斑点减缓新陈代谢，饥饿掉血速率降低 13%',
+    traitEn: '-13% hunger HP drain rate',
     colors: ['#10b981', '#047857', '#34d399'],
+    statOverrides: { hpDrainReduction: 0.13 },
   },
   {
     id: 'shark_05_rivet_proto',
@@ -236,8 +250,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Riveted Tin Proto-Shark',
     titleZh: '初代半机械·发条推进',
     titleEn: 'Clockwork Alloy Prototype',
-    traitZh: '外挂初代合金外壳，生命上限 +25，金币与基因吸附范围 +55',
-    traitEn: '+25 Max HP, +55 coin & gene magnet radius',
+    traitZh: '加固初代合金骨骼，基础生命达 150，金币与基因吸附范围 +78',
+    traitEn: '150 Base HP, +78 coin & gene magnet radius',
     colors: ['#64748b', '#cbd5e1', '#38bdf8'],
   },
   {
@@ -247,8 +261,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Hammerhead Radar Shark',
     titleZh: '全景声呐·360度锁定',
     titleEn: 'Panoramic Sonar Hunter',
-    traitZh: '宽阔锤头具备超强电感应，悬赏目标鱼与黄金变异鱼得分 +20%',
-    traitEn: '+20% score from Bounty & Golden Mutant fish',
+    traitZh: '宽阔锤头具备超强电感应，悬赏目标鱼与黄金变异鱼得分额外 +20%',
+    traitEn: '+20% bonus score from Bounty & Golden Mutant fish',
     colors: ['#60a5fa', '#cbd5e1', '#93c5fd'],
   },
   {
@@ -271,9 +285,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Blacktip Pelagic Shark',
     titleZh: '浪尖飞跃·群鱼收割者',
     titleEn: 'Wave-Leaping Pack Hunter',
-    traitZh: '强健背鳍带来 +15% 基础游速，吞噬回血提升 18%',
-    traitEn: '+15% swim speed, +18% devour HP heal',
+    traitZh: '强健背鳍带来 +15% 基础游速，吞噬回血提升 34%',
+    traitEn: '+15% swim speed, +34% devour HP heal',
     colors: ['#a16207', '#f8fafc', '#fbbf24'],
+    statOverrides: { speedBonus: 0.15 },
   },
   {
     id: 'shark_09_blue_mako',
@@ -282,9 +297,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Blue Mako Torpedo Shark',
     titleZh: '大洋闪电·顺流鱼雷',
     titleEn: 'Oceanic Lightning Torpedo',
-    traitZh: '海洋中游速最快的真鲨之一，冲刺极速 +22%，冲刺回能 +25%',
-    traitEn: '+22% boost speed & faster boost energy recovery',
+    traitZh: '海洋中游速最快的真鲨之一，基础游速 +22%，冲刺能量恢复 +25%',
+    traitEn: '+22% swim speed & +25% boost energy recovery',
     colors: ['#0284c7', '#e0f2fe', '#38bdf8'],
+    statOverrides: { speedBonus: 0.22 },
   },
   {
     id: 'shark_10_bull_shark',
@@ -315,9 +331,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Starry Night Whale Shark',
     titleZh: '暮光滤食·群星庇护',
     titleEn: 'Mesopelagic Star Filter',
-    traitZh: '宽阔巨口吸附半径扩大 35%，饥饿代谢减缓 18%',
-    traitEn: '+35% jaw suction radius, -18% hunger drain',
+    traitZh: '宽阔巨口吸附半径扩大 35%，饥饿代谢减缓 20%',
+    traitEn: '+35% jaw suction radius, -20% hunger drain',
     colors: ['#0f172a', '#38bdf8', '#7dd3fc'],
+    statOverrides: { hpDrainReduction: 0.2 },
   },
   {
     id: 'shark_13_steam_conduit',
@@ -326,8 +343,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Steampunk Conduit Shark',
     titleZh: '高压锅炉·涡轮过载',
     titleEn: 'High-Pressure Boiler Shark',
-    traitZh: '体外蒸汽铜管持续增压，冲刺能耗降低 20%，磁吸范围 +85',
-    traitEn: '-20% boost energy drain, +85 magnet radius',
+    traitZh: '蒸汽动力核心持续增压，冲刺能耗降低 25%，磁吸范围 +114',
+    traitEn: '-25% boost energy drain, +114 magnet radius',
     colors: ['#0f766e', '#d97706', '#2dd4bf'],
   },
   {
@@ -337,8 +354,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Magma Ember Shark',
     titleZh: '海底火山·炙热流体',
     titleEn: 'Volcanic Vent Predator',
-    traitZh: '体内流淌滚烫岩浆，捕食得分 +25%，黄金狂暴时长 +1.0秒',
-    traitEn: '+25% score multiplier, +1.0s Gold Frenzy duration',
+    traitZh: '体内流淌滚烫岩浆，捕食得分倍率 1.54x，黄金狂暴时长 +1.3秒',
+    traitEn: '1.54x score multiplier, +1.3s Gold Frenzy duration',
     colors: ['#ea580c', '#fde047', '#f97316'],
   },
   {
@@ -348,8 +365,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Abyss Tentacle Mutant',
     titleZh: '古神低语·触腕初生',
     titleEn: 'Eldritch Tendril Mutant',
-    traitZh: '腹部共生深渊触须，自动拉扯近距离猎物，基因获取量 +20%',
-    traitEn: 'Tendrils pull nearby prey, +20% Gene crystal yield',
+    traitZh: '深渊基因共鸣，自动牵引近距离猎物，基因获取量额外 +20%',
+    traitEn: 'Abyssal resonance pulls nearby prey, +20% Gene crystal yield',
     colors: ['#7e22ce', '#f472b6', '#c084fc'],
   },
 
@@ -361,8 +378,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Apex Great White Shark',
     titleZh: '海洋死神·顶级掠食者',
     titleEn: 'Supreme Ocean Predator',
-    traitZh: '经典深海霸主！生命上限 +90，咬合阶位达 T4，吞噬回血 +25%',
-    traitEn: '+90 Max HP, Bite Tier T4, +25% devour healing',
+    traitZh: '经典深海霸主！基础生命达 305，咬合阶位 T4，吞噬回血 +48%',
+    traitEn: '305 Base HP, Bite Tier T4, +48% devour healing',
     colors: ['#0369a1', '#f8fafc', '#38bdf8'],
   },
   {
@@ -394,8 +411,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Scythe-Tail Thresher Shark',
     titleZh: '长尾音爆·回旋猎杀',
     titleEn: 'Sonic Whip-Tail Hunter',
-    traitZh: '修长尾鳍产生音爆推进，游速 +24%，冲刺破甲判定距离扩大',
-    traitEn: '+24% swim speed, extended boost armor-break reach',
+    traitZh: '修长尾鳍产生音爆推进，游速 +24%，巨口吸附范围扩大 25%',
+    traitEn: '+24% swim speed, +25% wider jaw suction reach',
     colors: ['#0e7490', '#cffafe', '#06b6d4'],
   },
   {
@@ -405,8 +422,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Abyssal Sling-Jaw Shark',
     titleZh: '千尺暗海·瞬发吞噬',
     titleEn: 'Bathyal Sling-Jaw Devourer',
-    traitZh: '鄂部可向前弹射吸附，大嘴磁吸距离 +40%，饥饿消耗降低 22%',
-    traitEn: '+40% jaw suction range, -22% hunger drain',
+    traitZh: '颚部可向前弹射吸附，大嘴吸附距离 +40%，饥饿消耗降低 26%',
+    traitEn: '+40% jaw suction range, -26% hunger drain',
     colors: ['#312e81', '#f43f5e', '#818cf8'],
   },
   {
@@ -416,8 +433,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Titanium Cyber War-Shark',
     titleZh: '军工级改造·深海装甲舰',
     titleEn: 'Military-Grade Cybernetic Hull',
-    traitZh: '全身覆盖钛合金装甲，冲刺能耗降低 28%，水雷爆炸伤害减免 40%',
-    traitEn: '-28% boost cost, -40% damage taken from naval mines',
+    traitZh: '全身覆盖钛合金装甲，冲刺能耗降低 33%，水雷爆炸伤害减免 40%',
+    traitEn: '-33% boost cost, -40% damage taken from naval mines',
     colors: ['#475569', '#38bdf8', '#94a3b8'],
   },
   {
@@ -427,8 +444,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Obsidian Lava Demon Shark',
     titleZh: '深海地火·熔核暴走',
     titleEn: 'Molten Core Hell-Shark',
-    traitZh: '基础咬合阶位达 T5，捕食得分 +35%，黄金狂暴时长 +1.5秒',
-    traitEn: 'Base Bite Tier T5, +35% score, +1.5s Gold Frenzy',
+    traitZh: '基础咬合阶位达 T5，捕食得分倍率 1.72x，黄金狂暴时长 +1.6秒',
+    traitEn: 'Base Bite Tier T5, 1.72x score, +1.6s Gold Frenzy',
     colors: ['#7c2d12', '#f97316', '#facc15'],
   },
   {
@@ -438,8 +455,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Cthulhu Mindflayer Shark',
     titleZh: '旧日眷族·深渊精神震慑',
     titleEn: 'Old One Tentacle Scion',
-    traitZh: '头部演化为巨型章鱼触手群，咬合阶位 T5，基因与金币收益 +30%',
-    traitEn: 'Base Bite Tier T5, +30% Coin & Gene rewards',
+    traitZh: '头部演化为巨型章鱼触手群，咬合阶位 T5，基因与金币收益额外 +30%',
+    traitEn: 'Base Bite Tier T5, +30% bonus Coin & Gene rewards',
     colors: ['#065f46', '#9333ea', '#c084fc'],
   },
 
@@ -451,8 +468,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Prehistoric Megalodon',
     titleZh: '新生代之王·五十吨咬合力',
     titleEn: '50-Ton Bite Force Sovereign',
-    traitZh: '史前海洋绝对霸主！基础咬合阶位达 T6，生命上限 +180，可咬碎帝王蟹与蝰鱼',
-    traitEn: 'Base Bite Tier T6, +180 Max HP, crushes King Crabs & Viperfish',
+    traitZh: '史前海洋绝对霸主！基础咬合阶位达 T6，基础生命高达 395，可咬碎帝王蟹与蝰鱼',
+    traitEn: 'Base Bite Tier T6, 395 Base HP, crushes King Crabs & Viperfish',
     colors: ['#334155', '#e2e8f0', '#94a3b8'],
   },
   {
@@ -473,8 +490,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Twin-Rocket Mecha Shark',
     titleZh: '超音速潜航·重型制导',
     titleEn: 'Supersonic Thruster Mecha',
-    traitZh: '背负双联赤焰火箭引擎，游速 +32%，冲刺能耗降低 35%',
-    traitEn: '+32% swim speed, -35% boost energy consumption',
+    traitZh: '流线超导推进躯体，游速 +36%，冲刺能耗降低 38%',
+    traitEn: '+36% swim speed, -38% boost energy consumption',
     colors: ['#475569', '#ef4444', '#f87171'],
   },
   {
@@ -484,9 +501,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Glacial Permafrost Shark',
     titleZh: '绝对零度·寒霜棱镜',
     titleEn: 'Absolute Zero Frost Prism',
-    traitZh: '极寒领域使周围猎物逃逸速度减缓，饥饿掉血降低 30%，得分 +40%',
-    traitEn: '-30% hunger drain, +40% score multiplier',
+    traitZh: '极寒晶甲减缓代谢，饥饿掉血降低 30%，捕食得分倍率 1.81x',
+    traitEn: '-30% hunger drain, 1.81x score multiplier',
     colors: ['#0284c7', '#e0f2fe', '#38bdf8'],
+    statOverrides: { hpDrainReduction: 0.3 },
   },
   {
     id: 'shark_28_void_lightning',
@@ -495,9 +513,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Void Lightning Pulse Shark',
     titleZh: '暗雷环绕·电磁超导',
     titleEn: 'Dark Plasma Ring Leviathan',
-    traitZh: '周身环绕紫电引力环，磁吸半径 +160，黄金狂暴充能需求减少 1 条',
-    traitEn: '+160 magnet radius, rapid Gold Frenzy charging',
+    traitZh: '周身环绕紫电引力场，磁吸半径 +160，黄金狂暴充能需求减少 1 条',
+    traitEn: '+160 magnet radius, -1 Golden Mutant needed for Frenzy',
     colors: ['#581c87', '#e879f9', '#c084fc'],
+    statOverrides: { magnetBonus: 160 },
   },
   {
     id: 'shark_29_crimson_cyborg',
@@ -506,8 +525,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Crimson Reaper Cyborg',
     titleZh: '红眼歼灭者·高频激光刃',
     titleEn: 'High-Frequency Laser Fin',
-    traitZh: '基础咬合阶位达 T7！可正面对决腔棘鱼与吞噬鳗，冲刺破甲无往不利',
-    traitEn: 'Base Bite Tier T7! Devours Coelacanths & Gulper Eels',
+    traitZh: '基础咬合阶位达 T7！可正面对决腔棘鱼与吞噬鳗，游速 +39%',
+    traitEn: 'Base Bite Tier T7! Devours Coelacanths & Gulper Eels, +39% speed',
     colors: ['#334155', '#f43f5e', '#fb7185'],
   },
   {
@@ -517,8 +536,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Earth-Core Golem Titan',
     titleZh: '海沟盘石·不灭重甲',
     titleEn: 'Trench Bedrock Behemoth',
-    traitZh: '大陆架岩石重甲护体，生命上限 +260，咬合阶位 T7，受击震退减半',
-    traitEn: '+260 Max HP, Base Bite Tier T7, heavy armor',
+    traitZh: '大陆架岩石重甲护体，基础生命高达 455，咬合阶位 T7，受击震退减半',
+    traitEn: '455 Base HP, Base Bite Tier T7, -50% knockback taken',
     colors: ['#78350f', '#fb923c', '#d97706'],
   },
   {
@@ -528,8 +547,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Multi-Eyed Abyssal Fiend',
     titleZh: '深渊凝视·全知魔物',
     titleEn: 'All-Seeing Trench Horror',
-    traitZh: '全身复眼洞察深渊，咬合阶位 T7，金币与基因获取提升 45%',
-    traitEn: 'Base Bite Tier T7, +45% Coin & Gene rewards',
+    traitZh: '全身复眼洞察深渊，咬合阶位 T7，金币与基因获取额外提升 45%',
+    traitEn: 'Base Bite Tier T7, +45% bonus Coin & Gene rewards',
     colors: ['#1e1b4b', '#f43f5e', '#818cf8'],
   },
 
@@ -541,9 +560,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Chrono Holo-Ring Mecha',
     titleZh: '曲率跃迁·霓虹奇点',
     titleEn: 'Warp-Drive Singularity Mecha',
-    traitZh: '双层超时空全息环加持，游速 +38%，冲刺能耗降低 45%，磁吸 +220',
-    traitEn: '+38% swim speed, -45% boost cost, +220 magnet radius',
+    traitZh: '超时空曲率引擎加持，游速 +42%，冲刺能耗降低 45%，磁吸 +220',
+    traitEn: '+42% swim speed, -45% boost cost, +220 magnet radius',
     colors: ['#6366f1', '#f472b6', '#e879f9'],
+    statOverrides: { boostCostReduction: 0.45, magnetBonus: 220 },
   },
   {
     id: 'shark_33_hellfire_behemoth',
@@ -552,8 +572,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Hellfire Magma Behemoth',
     titleZh: '海床崩裂·焚海君王',
     titleEn: 'Tectonic Eruption Monarch',
-    traitZh: '咬合阶位 T7，生命上限 +320，黄金狂暴时长延长 +2.5秒且得分 +55%',
-    traitEn: 'Bite Tier T7, +320 Max HP, +2.5s Frenzy & +55% score',
+    traitZh: '咬合阶位 T7，基础生命达 495，黄金狂暴时长延长 +2.5秒且得分 1.93x',
+    traitEn: 'Bite Tier T7, 495 Base HP, +2.5s Frenzy & 1.93x score',
     colors: ['#9a3412', '#facc15', '#f97316'],
   },
   {
@@ -563,9 +583,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Dark Matter Singularity Shark',
     titleZh: '事件视界·万物坍缩',
     titleEn: 'Event Horizon Devourer',
-    traitZh: '周身环绕黑洞漩涡，大嘴吸附半径翻倍，饥饿代谢降低 40%',
-    traitEn: '2x jaw suction radius, -40% hunger HP drain',
+    traitZh: '周身环绕黑洞漩涡，大嘴吸附半径翻倍（2.0x），饥饿代谢降低 40%',
+    traitEn: '2.0x jaw suction radius, -40% hunger HP drain',
     colors: ['#3b0764', '#a855f7', '#d8b4fe'],
+    statOverrides: { hpDrainReduction: 0.4 },
   },
   {
     id: 'shark_35_golden_dragon',
@@ -574,8 +595,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Golden Imperial Dragon Shark',
     titleZh: '真龙化形·四海朝拜',
     titleEn: 'Celestial Golden Dragon Sovereign',
-    traitZh: '化龙觉醒！基础咬合阶位直达 T8，金币与基因收益提升 +65%',
-    traitEn: 'Base Bite Tier T8! +65% Coin & Gene drop yield',
+    traitZh: '化龙觉醒！基础咬合阶位直达 T8，金币与基因收益额外提升 +65%',
+    traitEn: 'Base Bite Tier T8! +65% bonus Coin & Gene drop yield',
     colors: ['#ca8a04', '#fef08a', '#facc15'],
   },
   {
@@ -585,8 +606,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Dreadnought Cannon Battleship',
     titleZh: '深海重巡·主炮轰鸣',
     titleEn: 'Heavy Artillery War-Shark',
-    traitZh: '背部搭载重型舰炮，咬合阶位 T8，无需冲刺即可直接破甲吞噬深渊巨兽！',
-    traitEn: 'Base Bite Tier T8, devours Bosses & Behemoths cleanly',
+    traitZh: '重装无畏舰躯体，咬合阶位 T8，游速 +46%，可直接生吞深渊巨兽！',
+    traitEn: 'Base Bite Tier T8, +46% speed, devours Bosses & Behemoths cleanly',
     colors: ['#3f6212', '#cbd5e1', '#84cc16'],
   },
   {
@@ -596,8 +617,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Matrix Code Cyber-Phantom',
     titleZh: '虚拟重构·底层代码篡改',
     titleEn: 'Digital Glitch Overlord',
-    traitZh: '数字化幽灵躯体，咬合阶位 T8，游速 +42%，冲刺能量恢复速度翻倍',
-    traitEn: 'Base Bite Tier T8, +42% speed, 2x boost energy regen',
+    traitZh: '数字化幽灵躯体，咬合阶位 T8，游速 +47%，冲刺能量恢复速度翻倍（2.0x）',
+    traitEn: 'Base Bite Tier T8, +47% speed, 2.0x boost energy regen',
     colors: ['#16a34a', '#86efac', '#4ade80'],
   },
   {
@@ -607,8 +628,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Poseidon Crowned Sovereign',
     titleZh: '七海帝王·黄金王权',
     titleEn: 'Crowned King of the Seven Seas',
-    traitZh: '头戴黄金海皇冠，咬合阶位 T8，生命上限 +400，吞噬回血提升 +50%',
-    traitEn: 'Base Bite Tier T8, +400 Max HP, +50% devour healing',
+    traitZh: '黄金海皇真身，咬合阶位 T8，基础生命达 630，吞噬回血提升 +76%',
+    traitEn: 'Base Bite Tier T8, 630 Base HP, +76% devour healing',
     colors: ['#0284c7', '#facc15', '#fde047'],
   },
   {
@@ -618,7 +639,7 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Kraken Hydra Leviathan Shark',
     titleZh: '触手君王·深渊支配者',
     titleEn: 'Abyssal Tentacle Monarch',
-    traitZh: '融合克拉肯巨妖基因，咬合阶位 T8，反噬深海大王乌贼 Boss 额外获得 2 倍奖励',
+    traitZh: '融合克拉肯巨妖基因，咬合阶位 T8，吞噬深渊 Boss 额外获得 2 倍奖励',
     traitEn: 'Base Bite Tier T8, 2x rewards from devouring Abyss Bosses',
     colors: ['#0f766e', '#a855f7', '#2dd4bf'],
   },
@@ -631,8 +652,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Nebula Galaxy Cosmic Shark',
     titleZh: '星海永恒·宇宙星尘化躯',
     titleEn: 'Astral Nebula Creator',
-    traitZh: '体内孕育璀璨星河，咬合阶位 T8，生命上限 +520，得分与基因收益 +80%',
-    traitEn: 'Bite Tier T8, +520 Max HP, +80% Score & Gene rewards',
+    traitZh: '体内孕育璀璨星河，咬合阶位 T8，基础生命达 645，得分 1.9x 且基因收益 +80%',
+    traitEn: 'Bite Tier T8, 645 Base HP, 1.9x Score & +80% Gene rewards',
     colors: ['#4f46e5', '#ec4899', '#818cf8'],
   },
   {
@@ -642,9 +663,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Star-Destroyer Hyperdrive Shark',
     titleZh: '歼星武装·等离子推进神明',
     titleEn: 'Hyperdrive Mecha Deity',
-    traitZh: '终极机械降神！咬合阶位 T8，游速 +50%，冲刺能耗降低 55%，全屏磁吸 +300',
-    traitEn: 'Bite Tier T8, +50% speed, -55% boost cost, +300 magnet',
+    traitZh: '终极机械降神！咬合阶位 T8，游速 +51%，冲刺能耗降低 55%，全屏磁吸 +300',
+    traitEn: 'Bite Tier T8, +51% speed, -55% boost cost, +300 magnet',
     colors: ['#0284c7', '#38bdf8', '#7dd3fc'],
+    statOverrides: { boostCostReduction: 0.55, magnetBonus: 300 },
   },
   {
     id: 'shark_42_sea_dragon_leviathan',
@@ -653,9 +675,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Azure Sea-Dragon Leviathan',
     titleZh: '远古海神·万丈狂澜',
     titleEn: 'Primordial Sea-Serpent God',
-    traitZh: '完全体沧溟海龙形态！生命上限 +600，吞噬回血翻倍，饥饿消耗降低 45%',
-    traitEn: 'Bite Tier T8, +600 Max HP, 2x devour heal, -45% hunger drain',
+    traitZh: '完全体沧溟海龙形态！基础生命达 765，吞噬回血翻倍（2.0x），饥饿消耗降低 45%',
+    traitEn: 'Bite Tier T8, 765 Base HP, 2.0x devour heal, -45% hunger drain',
     colors: ['#0d9488', '#38bdf8', '#2dd4bf'],
+    statOverrides: { devourHealMult: 2.0, hpDrainReduction: 0.45 },
   },
   {
     id: 'shark_43_solar_supernova',
@@ -664,8 +687,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Solar Corona Supernova Shark',
     titleZh: '耀斑聚变·深海永恒烈阳',
     titleEn: 'Stellar Fusion Sun-God Shark',
-    traitZh: '化身恒星烈阳照亮万米深渊，黄金狂暴时长 +4.0秒，全捕食得分翻倍（2.0x）！',
-    traitEn: 'Bite Tier T8, +4.0s Gold Frenzy duration, 2.0x Score multiplier!',
+    traitZh: '化身恒星烈阳照亮万米深渊，黄金狂暴时长 +4.0秒，捕食得分倍率 2.17x！',
+    traitEn: 'Bite Tier T8, +4.0s Gold Frenzy duration, 2.17x Score multiplier!',
     colors: ['#ea580c', '#fef08a', '#facc15'],
   },
   {
@@ -675,8 +698,8 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Celestial Arcane Paladin Shark',
     titleZh: '神圣裁决·不朽金甲',
     titleEn: 'Divine Aegis Seraph Shark',
-    traitZh: '奥术圣光护体，生命上限 +650，受到任何伤害减免 50%，金币收益翻倍',
-    traitEn: 'Bite Tier T8, +650 Max HP, +100% Coin yield',
+    traitZh: '奥术圣光护体，基础生命高达 785，受到任何伤害减免 50%，金币收益翻倍',
+    traitEn: 'Bite Tier T8, 785 Base HP, -50% damage taken, 2.0x Coin yield',
     colors: ['#d97706', '#38bdf8', '#fef08a'],
   },
   {
@@ -689,6 +712,7 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     traitZh: '无视深海高压代谢，饥饿掉血降低 50%，基因结晶产出翻倍（+100%）',
     traitEn: 'Bite Tier T8, -50% hunger drain, +100% Gene crystal yield',
     colors: ['#3b0764', '#9333ea', '#e879f9'],
+    statOverrides: { hpDrainReduction: 0.5 },
   },
   {
     id: 'shark_46_aurora_valkyrie',
@@ -697,9 +721,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Aurora Winged Valkyrie Shark',
     titleZh: '虹光神翼·超维巡航',
     titleEn: 'Prismatic Valkyrie Sovereign',
-    traitZh: '展开天界极光神翼，游速 +55%，冲刺能耗降低 55%，得分倍率 2.1x',
-    traitEn: 'Bite Tier T8, +55% swim speed, -55% boost cost, 2.1x Score',
+    traitZh: '展开天界极光神翼，游速 +55%，冲刺能耗降低 55%，得分倍率 2.26x',
+    traitEn: 'Bite Tier T8, +55% swim speed, -55% boost cost, 2.26x Score',
     colors: ['#6366f1', '#fde047', '#c084fc'],
+    statOverrides: { speedBonus: 0.55, boostCostReduction: 0.55 },
   },
   {
     id: 'shark_47_omega_devourer',
@@ -708,9 +733,10 @@ const RAW_SHARK_SEEDS: RawSharkSeed[] = [
     nameEn: 'Omega Dimension-Devourer Apex',
     titleZh: '第48号终极进化·万海之主',
     titleEn: 'Ultimate #48 Evolution · Lord of All Seas',
-    traitZh: '48形态终极毕业古神！全属性巅峰，生命 +750，游速 +55%，全收益与得分 2.5x！',
-    traitEn: 'Ultimate #48 Apex God! +750 HP, +55% speed, 2.5x Score & Rewards!',
+    traitZh: '48形态终极毕业古神！全属性巅峰，基础生命 750，游速 +55%，全收益与得分 2.5x！',
+    traitEn: 'Ultimate #48 Apex God! 750 Base HP, +55% speed, 2.5x Score & Rewards!',
     colors: ['#581c87', '#38bdf8', '#f472b6'],
+    statOverrides: { baseHp: 750, speedBonus: 0.55, scoreMult: 2.5 },
   },
 ];
 
@@ -750,32 +776,55 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
           : 7
         : 8;
 
-    // Base stats scaling smoothly across 6 generations and 8 columns
-    const progFactor = row * 8 + col; // 0..47
-    const baseHp = Math.round(100 + row * 75 + col * 10 + (row >= 4 ? (row - 3) * 85 : 0));
-    const baseEnergy = Math.round(100 + row * 22 + col * 3);
-
     const isBio = seed.lineage === 'APEX_BIO';
     const isMecha = seed.lineage === 'CYBER_MECHA';
     const isElem = seed.lineage === 'ELEMENTAL_CORE';
     const isAbyss = seed.lineage === 'ELDER_ABYSS';
 
-    const speedBonus = Number(
+    // Base stats scaling smoothly across 6 generations and 8 columns + APEX_BIO lineage HP bonus
+    const progFactor = row * 8 + col; // 0..47
+    const defaultBaseHp = Math.round(
+      100 +
+        row * 75 +
+        col * 10 +
+        (row >= 4 ? (row - 3) * 85 : 0) +
+        (isBio && index > 0 ? 25 + row * 15 : 0)
+    );
+    const baseHp = seed.statOverrides?.baseHp ?? defaultBaseHp;
+    const baseEnergy = Math.round(100 + row * 22 + col * 3);
+
+    const defaultSpeedBonus = Number(
       (progFactor * 0.01 + (isMecha ? 0.1 : isElem ? 0.05 : 0.02)).toFixed(3)
     );
-    const hpDrainReduction = Number(
+    const speedBonus = seed.statOverrides?.speedBonus ?? defaultSpeedBonus;
+
+    const defaultHpDrainReduction = Number(
       Math.min(0.5, progFactor * 0.008 + (isAbyss ? 0.1 : isBio ? 0.05 : 0.02)).toFixed(3)
     );
-    const boostCostReduction = Number(
+    const hpDrainReduction =
+      seed.statOverrides?.hpDrainReduction ?? defaultHpDrainReduction;
+
+    const defaultBoostCostReduction = Number(
       Math.min(0.6, progFactor * 0.01 + (isMecha ? 0.12 : 0.03)).toFixed(3)
     );
-    const magnetBonus = Math.round(progFactor * 4.5 + (isMecha ? 55 : isAbyss ? 35 : 15));
-    const devourHealMult = Number(
+    const boostCostReduction =
+      seed.statOverrides?.boostCostReduction ?? defaultBoostCostReduction;
+
+    const defaultMagnetBonus = Math.round(
+      progFactor * 4.5 + (isMecha ? 55 : isAbyss ? 35 : 15)
+    );
+    const magnetBonus = seed.statOverrides?.magnetBonus ?? defaultMagnetBonus;
+
+    const defaultDevourHealMult = Number(
       (1.0 + row * 0.14 + (isBio ? 0.2 : 0.04)).toFixed(2)
     );
-    const scoreMult = Number(
+    const devourHealMult =
+      seed.statOverrides?.devourHealMult ?? defaultDevourHealMult;
+
+    const defaultScoreMult = Number(
       (1.0 + row * 0.18 + col * 0.03 + (isElem ? 0.18 : 0)).toFixed(2)
     );
+    const scoreMult = seed.statOverrides?.scoreMult ?? defaultScoreMult;
 
     // Triple-Gate Unlock Requirements (Level Gate + Depth Gate + Coin/Gene Cost)
     const reqParentUpgradeLevel =

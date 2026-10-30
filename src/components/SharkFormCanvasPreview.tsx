@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { computeSpineSliceDeformation } from '../game/canvasRenderer';
 import { getSharkFormById } from '../game/sharkEvolutionConfig';
 import { spriteSheetManager } from '../game/spriteSheetManager';
 
@@ -57,24 +58,58 @@ export const SharkFormCanvasPreview: React.FC<SharkFormCanvasPreviewProps> = ({
       const frame = spriteSheetManager.getSharkFormFrame(form.spriteKey);
       if (frame && frame.width > 0 && frame.height > 0) {
         const padX = width * 0.88;
-        const padY = height * 0.86;
+        const padY = height * 0.82;
         const scale = Math.min(padX / frame.width, padY / frame.height);
         const drawW = frame.width * scale;
         const drawH = frame.height * scale;
 
         ctx.translate(width / 2, height / 2);
-        if (animate) {
-          phase += 0.06;
-          ctx.rotate(Math.sin(phase) * 0.045);
-          const stretch = 1 + Math.sin(phase * 2) * 0.02;
-          ctx.scale(stretch, 2 - stretch);
-        }
-
         if (locked) {
           ctx.filter = 'brightness(0.55) saturate(0.35) contrast(1.1)';
           ctx.globalAlpha = 0.78;
         }
-        ctx.drawImage(frame, -drawW / 2, -drawH / 2, drawW, drawH);
+
+        if (animate) {
+          phase += 0.11;
+          ctx.rotate(Math.sin(phase) * 0.024);
+          const sliceCount = width >= 120 ? 12 : 8;
+          const srcW = frame.width;
+          const srcH = frame.height;
+          const sliceSrcW = srcW / sliceCount;
+          const sliceDstW = drawW / sliceCount;
+          const startDstX = -drawW / 2;
+
+          for (let i = 0; i < sliceCount; i++) {
+            const t = (i + 0.5) / sliceCount;
+            const u = 1 - t;
+            const { dy, scaleY } = computeSpineSliceDeformation(
+              u,
+              phase,
+              'SHARK_APEX',
+              drawH,
+              0.92,
+              0
+            );
+            const sx = i * sliceSrcW;
+            const overlapSrc =
+              i < sliceCount - 1 ? Math.min(1.2, srcW - (sx + sliceSrcW)) : 0;
+            const overlapDst = i < sliceCount - 1 ? 0.75 : 0;
+            const dh = drawH * scaleY;
+            ctx.drawImage(
+              frame,
+              sx,
+              0,
+              sliceSrcW + overlapSrc,
+              srcH,
+              startDstX + i * sliceDstW,
+              dy - dh / 2,
+              sliceDstW + overlapDst,
+              dh
+            );
+          }
+        } else {
+          ctx.drawImage(frame, -drawW / 2, -drawH / 2, drawW, drawH);
+        }
         ctx.filter = 'none';
       }
 

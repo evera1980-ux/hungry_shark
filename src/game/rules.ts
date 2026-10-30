@@ -34,6 +34,18 @@ export interface ComputedSharkStats {
   upgradeLevel?: number;
   scoreMultiplier?: number;
   rewardMultiplier?: number;
+  coinYieldMultiplier?: number;
+  geneYieldMultiplier?: number;
+  jawSuctionMultiplier?: number;
+  damageTakenMultiplier?: number;
+  mineDamageTakenMultiplier?: number;
+  knockbackMultiplier?: number;
+  boostRegenMultiplier?: number;
+  killEnergyBonus?: number;
+  maxComboBonus?: number;
+  goldenMutantReduction?: number;
+  specialPreyScoreMultiplier?: number;
+  bossRewardMultiplier?: number;
   canEatMines?: boolean;
 }
 
@@ -400,6 +412,88 @@ export function computeEvolvedSharkStats(
       ? 1.0 + form.row * 0.3
       : 0;
 
+  // Jaw Suction Radius multiplier (APEX_BIO lineage passive +18%, plus specialized suction sharks)
+  const jawSuctionMultiplier =
+    form.id === 'shark_34_dark_matter'
+      ? 2.0
+      : form.id === 'shark_20_goblin_jaw'
+      ? 1.4
+      : form.id === 'shark_12_starry_whale'
+      ? 1.35
+      : form.id === 'shark_19_thresher_shark' || form.id === 'shark_15_abyss_tentacle'
+      ? 1.25
+      : form.lineage === 'APEX_BIO'
+      ? 1.18
+      : 1.0;
+
+  // Base generation + Atlas collection reward multiplier
+  const baseRewardMult = collectionRewardMult * (1 + form.row * 0.12);
+
+  // Shark-specific Coin & Gene yield trait multipliers (+ ELDER_ABYSS lineage +15% Gene yield)
+  const traitCoinBonus =
+    form.id === 'shark_47_omega_devourer'
+      ? 2.5
+      : form.id === 'shark_44_celestial_paladin'
+      ? 2.0
+      : form.id === 'shark_35_golden_dragon'
+      ? 1.65
+      : form.id === 'shark_31_multi_eyed_fiend'
+      ? 1.45
+      : form.id === 'shark_23_mindflayer_shark'
+      ? 1.3
+      : 1.0;
+
+  const lineageGeneBonus = form.lineage === 'ELDER_ABYSS' ? 1.15 : 1.0;
+  const traitGeneBonus =
+    form.id === 'shark_47_omega_devourer'
+      ? 2.5
+      : form.id === 'shark_45_chaos_void_elder'
+      ? 2.0
+      : form.id === 'shark_40_nebula_galaxy'
+      ? 1.8
+      : form.id === 'shark_35_golden_dragon'
+      ? 1.65
+      : form.id === 'shark_31_multi_eyed_fiend'
+      ? 1.45
+      : form.id === 'shark_23_mindflayer_shark'
+      ? 1.3
+      : form.id === 'shark_15_abyss_tentacle'
+      ? 1.2
+      : 1.0;
+
+  const coinYieldMultiplier = Number((baseRewardMult * traitCoinBonus).toFixed(2));
+  const geneYieldMultiplier = Number(
+    (baseRewardMult * lineageGeneBonus * traitGeneBonus).toFixed(2)
+  );
+  const rewardMultiplier = Number(
+    (baseRewardMult * Math.max(traitCoinBonus, traitGeneBonus)).toFixed(2)
+  );
+
+  // Damage mitigation & knockback armor traits
+  const damageTakenMultiplier =
+    form.id === 'shark_44_celestial_paladin'
+      ? 0.5
+      : form.id === 'shark_10_bull_shark'
+      ? 0.75
+      : 1.0;
+  const mineDamageTakenMultiplier =
+    form.id === 'shark_21_cyber_alloy' ? 0.6 : 1.0;
+  const knockbackMultiplier = form.id === 'shark_30_earth_golem' ? 0.5 : 1.0;
+
+  // Boost energy recovery & feeding combo traits
+  const boostRegenMultiplier =
+    form.id === 'shark_37_matrix_phantom'
+      ? 2.0
+      : form.id === 'shark_09_blue_mako'
+      ? 1.25
+      : 1.0;
+  const killEnergyBonus = form.id === 'shark_18_battle_scar' ? 4 : 0;
+  const maxComboBonus = form.id === 'shark_18_battle_scar' ? 1.4 : 1.0;
+  const goldenMutantReduction = form.id === 'shark_28_void_lightning' ? 1 : 0;
+  const specialPreyScoreMultiplier =
+    form.id === 'shark_06_hammerhead_pup' ? 1.2 : 1.0;
+  const bossRewardMultiplier = form.id === 'shark_39_kraken_hydra' ? 2.0 : 1.0;
+
   // Bio-Radioactive Venom Shark (#25) and Generation VI Cosmic Elder Gods can crunch mines directly
   const canEatMines =
     form.id === 'shark_25_bio_venom' || form.generation >= 6;
@@ -425,9 +519,19 @@ export function computeEvolvedSharkStats(
     sharkFormId: form.id,
     upgradeLevel: upLv,
     scoreMultiplier: form.scoreMult,
-    rewardMultiplier: Number(
-      (collectionRewardMult * (1 + form.row * 0.12)).toFixed(2)
-    ),
+    rewardMultiplier,
+    coinYieldMultiplier,
+    geneYieldMultiplier,
+    jawSuctionMultiplier,
+    damageTakenMultiplier,
+    mineDamageTakenMultiplier,
+    knockbackMultiplier,
+    boostRegenMultiplier,
+    killEnergyBonus,
+    maxComboBonus,
+    goldenMutantReduction,
+    specialPreyScoreMultiplier,
+    bossRewardMultiplier,
     canEatMines,
   };
 }
@@ -490,34 +594,49 @@ export function resolvePreyEncounter(
       : Math.max(3, Math.round(prey.xpValue * 0.55));
 
     const scoreMult = sharkStats.scoreMultiplier ?? 1.0;
+    const bossBonus = prey.isBoss ? sharkStats.bossRewardMultiplier ?? 1.0 : 1.0;
+    const goldenSpecialBonus =
+      mutationVariant === 'GOLDEN_MUTANT'
+        ? sharkStats.specialPreyScoreMultiplier ?? 1.0
+        : 1.0;
 
     return {
       canDevour: true,
       hpDelta: Math.round(prey.hpRestore * healMult),
       xpGain: dampedXpGain,
-      scoreGain: Math.round(prey.scoreValue * mult * scoreMult),
-      geneGain: prey.geneValue * mult,
-      coinGain: prey.coinValue * mult,
+      scoreGain: Math.round(
+        prey.scoreValue * mult * scoreMult * bossBonus * goldenSpecialBonus
+      ),
+      geneGain: Math.round(prey.geneValue * mult * bossBonus),
+      coinGain: Math.round(prey.coinValue * mult * bossBonus),
       knockbackForce: 0,
       floatTextKey,
       isCrit,
     };
   }
 
-  // Otherwise shark takes damage scaled by mutation, global difficulty, and maxHP percentage (so high-level sharks are never invincible in the deep sea)
+  // Otherwise shark takes damage scaled by mutation, global difficulty, maxHP percentage, and armor traits (#10 Bull, #21 Cyber Alloy, #44 Celestial Paladin)
   const behemothDamageMult = mutationVariant === 'ABYSS_BEHEMOTH' ? 1.35 : 1.0;
   const maxHpPercentPenalty = prey.isHazard
     ? Math.round(sharkStats.maxHp * 0.14)
     : prey.tier >= 6 || mutationVariant === 'ABYSS_BEHEMOTH'
     ? Math.round(sharkStats.maxHp * 0.08)
     : 0;
-  const scaledFailDamage = Math.max(
-    1,
+  const rawFailDamage =
     Math.round(
       prey.damageOnFail *
         behemothDamageMult *
         Math.max(1.0, globalDifficultyMultiplier)
-    ) + maxHpPercentPenalty
+    ) + maxHpPercentPenalty;
+  const armorMitigation =
+    (sharkStats.damageTakenMultiplier ?? 1.0) *
+    (prey.isHazard ? sharkStats.mineDamageTakenMultiplier ?? 1.0 : 1.0);
+  const scaledFailDamage = Math.max(
+    1,
+    Math.round(rawFailDamage * armorMitigation)
+  );
+  const knockbackForce = Math.round(
+    (prey.isHazard ? 440 : 300) * (sharkStats.knockbackMultiplier ?? 1.0)
   );
 
   return {
@@ -527,7 +646,7 @@ export function resolvePreyEncounter(
     scoreGain: 0,
     geneGain: 0,
     coinGain: 0,
-    knockbackForce: prey.isHazard ? 440 : 300,
+    knockbackForce,
     floatTextKey: prey.isHazard ? 'float_mine_hit' : 'float_too_big',
     isCrit: false,
   };

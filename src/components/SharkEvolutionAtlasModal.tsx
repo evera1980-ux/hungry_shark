@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Lang } from '../game/i18n';
+import { computeEvolvedSharkStats } from '../game/rules';
 import {
   evaluateSharkUnlock,
   getGlobalAtlasBonuses,
@@ -237,6 +238,21 @@ export const SharkEvolutionAtlasModal: React.FC<
     liveRunMaxDepth
   );
   const atlasBonuses = getGlobalAtlasBonuses(metaSave);
+  const inspectedStats = computeEvolvedSharkStats(
+    1,
+    inspectedForm.id,
+    inspectedUpgradeLv,
+    false,
+    1.0,
+    atlasBonuses.unlockedCount
+  );
+  const maxGenBiteTier = Math.min(8, inspectedForm.baseBiteTier + 2);
+  const effectiveSpeedBonusPct = Math.round(
+    (inspectedForm.speedBonus +
+      (inspectedUpgradeLv - 1) * 0.022 +
+      atlasBonuses.speedBonus) *
+      100
+  );
   const lineageInfo = LINEAGE_META[inspectedForm.lineage];
   const inspectedMasteryTiers = getSharkMasteryConfig(inspectedForm);
   const inspectedBestScore =
@@ -467,7 +483,7 @@ export const SharkEvolutionAtlasModal: React.FC<
                         color: inspectedForm.glowColor,
                       }}
                     >
-                      T{inspectedForm.baseBiteTier}
+                      T{inspectedStats.biteTier}
                     </span>
                   </div>
 
@@ -675,9 +691,9 @@ export const SharkEvolutionAtlasModal: React.FC<
                     {lang === 'zh' ? '咬合' : 'Bite'}
                   </div>
                   <div className="font-mono font-black text-xs sm:text-sm text-amber-300 mt-1 leading-none">
-                    T{inspectedForm.baseBiteTier}
+                    T{inspectedStats.biteTier}
                     <span className="text-[10px] text-slate-500 ml-0.5">
-                      →T{Math.min(8, inspectedForm.baseBiteTier + 2)}
+                      →T{maxGenBiteTier}
                     </span>
                   </div>
                 </div>
@@ -687,10 +703,7 @@ export const SharkEvolutionAtlasModal: React.FC<
                     {lang === 'zh' ? '生命' : 'HP'}
                   </div>
                   <div className="font-mono font-black text-xs sm:text-sm text-emerald-300 mt-1 leading-none">
-                    {Math.round(
-                      inspectedForm.baseHp *
-                        (1 + (inspectedUpgradeLv - 1) * 0.08)
-                    )}
+                    {inspectedStats.maxHp}
                   </div>
                 </div>
 
@@ -699,13 +712,7 @@ export const SharkEvolutionAtlasModal: React.FC<
                     {lang === 'zh' ? '速度' : 'Speed'}
                   </div>
                   <div className="font-mono font-black text-xs sm:text-sm text-sky-300 mt-1 leading-none">
-                    +
-                    {Math.round(
-                      (inspectedForm.speedBonus +
-                        (inspectedUpgradeLv - 1) * 0.022) *
-                        100
-                    )}
-                    %
+                    +{effectiveSpeedBonusPct}%
                   </div>
                 </div>
 

@@ -13,10 +13,11 @@
 - **离屏智能抠图**：`spriteSheetManager.ts` 在加载图集后，会自动检测并剔除四周棋盘格背景色像素（保留鲨鱼本体抗锯齿边缘），并为每个单元格计算紧致包围盒（Tight Bounding Box），缓存为独立的离屏 Canvas。
 - **回退保护**：若图片尚未加载完成，`drawSharkEntity` 会使用对应血统配色的程序化矢量鲨鱼轮廓兜底，确保首帧绝不白屏。
 
-### 1.2 多段正弦脊柱摆动与零外挂部件原则 (`src/game/canvasRenderer.ts`)
-- **五段式切片游动（5-Slice Sinusoidal Spine Wave）**：
-  - 将当前鲨鱼形态的离屏贴图沿水平方向切分为 5 段（吻部 ➔ 头部 ➔ 躯干 ➔ 尾柄 ➔ 尾鳍）。
-  - 依据 `shark.swimPhase` 与当前游动速度，从头到尾施加振幅递增的垂直正弦偏移，实现自然流畅的鱼类摆尾游动感與张嘴撕咬形变（`shark.biteAnim`）。
+### 1.2 连续仿射斜切脊柱丝带摆尾与零外挂部件原则 (`src/game/canvasRenderer.ts`)
+- **连续仿射斜切脊柱丝带渲染（Continuous Affine-Sheared Ribbon Spine Wave，`drawUndulatingSpriteFrame`）**：
+  - 将紧致裁切后的离屏精灵图沿水平体轴（从鱼吻 `u = 0` 到尾鳍 `u = 1`）按渲染尺寸自适应切分为 **24 段**（玩家鲨鱼与进化巨幕预览 `baseSize >= 84px`）、**16 段**（大型猎物/巨兽 `46px ~ 84px`）、**10 段**（中型鱼类 `24px ~ 46px`）或 **6 段**（远景小鱼苗 `< 24px`）。
+  - **边界端点共享 + 仿射 Y 斜切（零阶梯切段感）**：第 `i` 段切片直接复用上一段右边界形变 `def0` 作为自身左边界，并计算右边界形变 `def1`，通过 Canvas 2D 仿射变换 `ctx.transform(1, shearY, 0, 1, 0, 0)`（其中 `shearY = (def1.dy - def0.dy) / sliceDstW`）使每一段切片沿脊柱切线方向平滑倾斜，确保相邻切片接缝处的上下轮廓 $100\%$ 严丝合缝（$C^0/C^1$ 连续），并严格锁定源纹理采样宽度与目标宽度比例（`padDst = 0.55px` 等比映射），彻底消除水平矩形切片造成的“阶梯状被切段感”与接缝重影。
+  - **解剖学前躯刚性包络与速度耦合**：玩家鲨鱼采用 `SHARK_APEX` 步态（$C^1$ 平滑包络函数 $E(u) = 0.015u + 0.985u^{2.25}$，波数 $k = 2.15$），确保前躯 $42\%$（吻部、鳃裂、胸背鳍躯干）保持流线型整体刚性、撕咬对准零漂移，后段 $58\%$ 尾柄至新月尾鳍传递丝滑推进波；摆尾频率 `shark.swimPhase` 与实时游速、冲刺（`isBoosting`）和黄金狂暴状态动态耦合，并在进化图谱巨幕预览台（`SharkFormCanvasPreview`）中同步启用。
 - **严禁外挂部件与外围圆圈（Zero Organ Attachments & Zero Outer Circles）**：
   - 鲨鱼外观**完全由当前出战的 `sharkFormId` 纯净本体精灵图、受击透明度闪烁及黄金狂暴本体滤镜决定**。
   - **严禁**在鲨鱼外围绘制任何虚线环、光圈圆环或外接机械炮/螺旋桨等拼接图形。
@@ -35,9 +36,16 @@
 | **常态下不可直接吞噬 / 会造成伤害** (`canDevourNormally === false` & `!frenzyActive`) | **严格大于或等于玩家鲨鱼（`118% ~ 195%` 鲨鱼尺寸）**<br>跨阶差距越大、深渊巨兽或 Boss 体型越庞大 | 纯凭显著大于玩家鲨鱼的压迫感体型直观传达威胁（深渊巨化种通体呈暗紫魔化色泽），无需人工红圈或 `T{N}` 标签 |
 | **黄金狂暴特例（`frenzyActive === true`）** | **保持进入黄金阶段前的原始体型大小不变（绝不因临时满阶而缩小其他鱼类）** | 原本比玩家庞大的巨兽/潜艇/Boss 依然保持 `118% ~ 195%` 巨型尺寸并覆上一层黄金色泽，玩家可直接正面生吞巨兽，获得极致猎杀爽快感！ |
 
-### 2.2 渲染与物理碰撞统一数据源
+### 2.2 渲染与物理碰撞统一数据源及 5 大海洋族群差异化游动步态
 - `drawPreyEntity()` 中的绘制缩放比例 `visualScale` 与 `App.tsx` 中 `resolvePreyEncounter()` 的碰撞半径缩放比例**必须调用同一个纯函数 `getPreyRelativeVisualScale(prey, shark.stats, prey.mutationVariant, frenzyActive)`**（内部固定使用 `normalBiteTier` 计算视觉尺寸）。
-- 严禁在 `canvasRenderer.ts` 中私自放大或缩小猎物尺寸而不经过 `getPreyRelativeVisualScale`。
+- 严禁在 `canvasRenderer.ts` 中私自放大或缩小猎物尺寸而不经过 `getPreyRelativeVisualScale`；所有切片摆尾变形（`drawUndulatingSpriteFrame`）严格在 `drawW × drawH` 基准包围盒内部执行。
+- **五大海洋生物族群差异化步态 (`getPreySwimGait`)**：
+  1. `CARANGIFORM`（小丑鱼、蓝吊、金枪鱼、灯笼鱼、矛尾鱼等标准鱼类）：前部稳定 + 后 65% 躯干 S 波摆尾推进。
+  2. `ANGUILLIFORM`（电鳗、绿海鳗、蝰鱼、宽咽鱼等长条鳗形生物）：全身多波段（$k = 4.75$）丝滑蜿蜒游走。
+  3. `MEDUSOID_JET`（发光水母、吸血鬼乌贼、大王酸浆鱿、克苏鲁克拉肯）：非对称伞盖/外套膜收缩喷射 + 触须延迟摆动波。
+  4. `PUFFER_BUOYANT`（黄金刺豚、蓑鲉、海马、水滴鱼）：圆润躯体呼吸浮游 + 末端尾鳍高频小幅拨水。
+  5. `RIGID_PROPULSION`（探测潜艇、水雷、寄居蟹、大王具足虫、帝王蟹、遗迹化石）：保持刚性金属艇壳/甲壳结构不发生橡胶弯曲，仅在尾部施加推进器高频微振或步足摇曳。
+- **猎物情绪与速度耦合**：`prey.phase` 推进速率与猎物瞬时移速（`Math.hypot(vx, vy) / baseSpeed`）实时联动，受惊逃窜或冲锋扑咬时摆尾频率自动翻倍。
 
 ---
 
@@ -152,6 +160,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-10-30 | 将脊柱摆尾渲染器升级为**连续仿射斜切丝带算法 (`ctx.transform(1, shearY, 0, 1, 0, 0)` + 边界端点共享 + 24 段高密自适应切片 + 源/目标严格等比接缝映射 + $C^1$ 前躯刚性包络)**，彻底解决纯垂直平移切片导致的“鲨鱼游动被切成几段/阶梯断裂”问题；同步实现 5 大海洋族群差异化步态 (`getPreySwimGait`) 与速度耦合摆尾 | `src/game/canvasRenderer.ts`, `src/components/SharkFormCanvasPreview.tsx`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/02-DESIGN_SPEC.md` |
 | 2026-10-29 | **移除局内空投补给按钮**；将右下角技能与强化圆章重构为围绕【冲刺】主按钮的 **90° 极坐标扇形环绕布局（`.hud-skill-fan-container`）**；优化左下角虚拟摇杆自适应内缩（`.hud-joystick-ergonomic`，基于 `clamp()` 与 `safe-area-inset` 向右上舒适区偏移，零写死坐标、全屏零遮挡零叠放） | `src/App.tsx`, `src/index.css`, `docs/02-DESIGN_SPEC.md` |
 | 2026-10-29 | 全面执行**「去线框套线框（De-Boxed Frameless UI）」视觉重构**、**48 阶鲨鱼名称纵向高度 100% 恒定对齐（0px 跳动）**与**全分辨率零 UI 叠放修复**：将未解锁前置鲨鱼名称独立为整行宽度（`h-[50px]` 双行定高槽位），拉大底部 180° 弧形罗盘节点间距与纵深留白，重构局内顶部 HUD 为双行零挤压布局，彻底消除小屏/横屏/长英文名下的任何文字或图标叠放 | `src/components/SharkEvolutionAtlasModal.tsx`, `src/App.tsx`, `src/index.css`, `src/game/sharkEvolutionConfig.ts`, `docs/02-DESIGN_SPEC.md` |
 | 2026-10-28 | 新增 **15 秒 3 步实操新手引导（含新手补给礼包与按钮聚光灯）** 与 **HUD 圆章 2 字融合功能标签（`图谱`/`强化`/`进化`/`补给`/`狂暴`/`突破`/`冲刺`）**；移除鱼类外圈与 `T{N}` 文字，完全依托视觉体型判强弱；修复 iPhone 14 Pro Max Safari 画面纵向拉伸 Bug | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/game/canvasRenderer.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/index.css` |

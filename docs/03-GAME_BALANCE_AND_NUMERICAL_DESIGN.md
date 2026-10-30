@@ -140,12 +140,17 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 | **第五代·深渊泰坦期** | Row 4 | `#33 ~ #40` | `T7 ~ T8` | 猎杀巨型乌贼与沧龙级巨怪 | `Lv.8` | `Lv.13 ~ Lv.15` | `1180m ~ 1635m` |
 | **第六代·创世神明期** | Row 5 | `#41 ~ #48` | `T8 (满阶)` | 终极神明形态（可吞水雷） | `Lv.9` | `Lv.16 ~ Lv.18` | `1500m ~ 1990m` |
 
-### 4.2 四大进化血统分支（Lineages）
-每只鲨鱼归属于四大血统之一，拥有鲜明的被动侧重：
-1. **🩸 狂暴血统 (`APEX_BIO`)**：额外提升 `+20%` 吞噬回血倍率与 `-5%` 饥饿掉血，适合持久肉搏。
-2. **⚙️ 机甲血统 (`CYBER_MECHA`)**：额外提升 `+10%` 游动移速、`-12%` 冲刺耗能与 `+55 px` 磁吸半径，第 6 代机甲鲨可直接吞噬水雷。
-3. **🔥 元素血统 (`ELEMENTAL_CORE`)**：额外提升 `+18%` 得分倍率与 `+5%` 移速，黄金狂暴持续时间延长。
-4. **👁️ 深渊血统 (`ELDER_ABYSS`)**：额外提升 `-10%` 饥饿掉血与 `+35 px` 磁吸半径，第 5~6 代深渊古神可直接吞噬深水雷。
+### 4.2 四大进化血统分支（Lineages）与专属特性乘数
+每只鲨鱼归属于四大血统之一，在 `src/game/sharkEvolutionConfig.ts` 与 `src/game/rules.ts` (`computeEvolvedSharkStats`) 中拥有完整落地的被动与专属特性乘数：
+1. **🩸 狂暴血统 (`APEX_BIO`)**：额外提升 `+(25 + row * 15)` 基础生命上限、`+20%` 吞噬回血倍率、`-5%` 饥饿掉血，以及 **`1.18x` 巨口吸附判定半径 (`jawSuctionMultiplier`)**。
+2. **⚙️ 机甲血统 (`CYBER_MECHA`)**：额外提升 `+10%` 游动移速、`-12%` 冲刺耗能与 `+55 px` 磁吸半径，第 6 代机甲鲨可直接吞噬水雷 (`canEatMines = true`)。
+3. **🔥 元素血统 (`ELEMENTAL_CORE`)**：额外提升 `+18%` 得分倍率与 `+5%` 移速，黄金狂暴持续时间延长 `+(1.0 + row * 0.3)s`（特定神明鲨如 `#34 地心业火熔岩巨兽` `+2.5s`、`#44 恒星日冕太阳神鲨` `+4.0s`）。
+4. **👁️ 深渊血统 (`ELDER_ABYSS`)**：额外提升 `-10%` 饥饿掉血、`+35 px` 磁吸半径，以及 **`+15%` 基因结晶产出倍率 (`geneYieldMultiplier`)**。
+5. **专属个体特性全量实装**：
+   - **进化面板与局内公式 100% 同源**：`SharkEvolutionAtlasModal.tsx` 直接调用 `computeEvolvedSharkStats(1, form.id, upgradeLv, false, 1.0, unlockedCount)` 渲染面板属性，确保躯体强化 `Lv.5`（`+1T`）与 `Lv.10`（`+2T`）突破后的咬合阶位、强化与图鉴加成后的生命上限与移速在面板与局内 HUD 完全一致。
+   - **代际与个体资源产出乘数 (`coinYieldMultiplier` / `geneYieldMultiplier`)**：代际加成 `1 + row * 0.12` 叠加图鉴加成与 `#15`/`#23`/`#31`/`#35`/`#40`/`#44`/`#45`/`#47` 专属金币/基因收益倍率。
+   - **重甲减伤与抗震退 (`damageTakenMultiplier` / `mineDamageTakenMultiplier` / `knockbackMultiplier`)**：`#10 暴君公牛壮鲨`（碰撞减伤 `-25%`）、`#21 重装钛合金战鲨`（水雷减伤 `-40%`）、`#30 大地岩甲泰坦鲨`（震退减半 `-50%`）、`#44 圣光奥术神装炽天使鲨`（全伤害减免 `-50%`）。
+   - **机动、连击与猎首特权**：`#09 灰鲭深蓝极速鲨`（`1.25x` 冲刺回能）、`#18 百战刀疤狂鲨`（连击上限 `2.4x` + 吞噬回能 `+4`）、`#28 虚空雷霆脉冲鲨`（黄金狂暴需求 `-1`）、`#37 矩阵代码黑客幽灵鲨`（`2.0x` 冲刺回能）、`#39 深渊九头海怪克拉肯鲨`（吞噬深渊 Boss `2.0x` 奖励）。
 
 ### 4.3 全图鉴收集被动光环 (`getGlobalAtlasBonuses`)
 为了鼓励玩家横向收集全部 48 只鲨鱼，而不仅仅只走单一路线，**每多解锁 1 只新鲨鱼形态，全账号永久叠加**：
@@ -176,7 +181,7 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 为了避免“分数日常折算货币造成通胀”以及“平方根折算引发自杀刷钱流”，分数系统严格遵循**“局内化作狩猎热度增益、跨局化作单鲨鱼独立三段位首通奖”**的原则：
 1. **单物种独立三段位王冠 (`getSharkMasteryConfig` & `settleSharkScoreMastery`)**：
    - 48 只鲨鱼各自独立记录最高分 `sharkBestScores[sharkId]` 与已达成王冠段位 `sharkMasteryTiers[sharkId]`（`0 = 无, 1 = 🥉铜冠, 2 = 🥈银冠, 3 = 👑金冠`）。
-   - **试驾严格隔离**：观看广告试驾 `#46 机甲利维坦`（`trialActive === true`）绝不污染正式最高分纪录，也不触发王冠首通。
+   - **试驾严格隔离**：观看广告试驾 `#42 歼星舰超光速机甲神鲨`（`trialActive === true`）绝不污染正式最高分纪录，也不触发王冠首通。
    - **一次性首通基因大奖**：每只鲨鱼首次达到其代际对应的 `🥉 铜冠 (1.0x)`、`🥈 银冠 (2.4x)`、`👑 金冠 (5.0x)` 分数线时，立即发放一次性固定基因奖励（领过即标记 `✓ 已领`，不可重复刷取）。
 2. **局内狩猎热度被动增益 (`computeHuntingHeatBuff(currentScore, generationRow)`)**：
    - 单局当前分数按代际基准映射为 **`Heat Lv.0 ~ Lv.5`**：
@@ -228,9 +233,11 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-10-29 | **资深 QA 进化面板与实战计算全量对齐审计**：① `SharkEvolutionAtlasModal.tsx` 面板四维属性直连 `computeEvolvedSharkStats`，使躯体强化 `Lv.5`/`Lv.10` 咬合突破（`+1T`/`+2T`）与图鉴全局加成实时同步显示；② 统一全部 48 阶鲨鱼 `traitZh`/`traitEn` 特性文案数值与 `SHARK_EVOLUTION_FORMS` 实际参数；③ 在 `rules.ts` 与 `App.tsx` 完整实装代际收益加成（`+12%/row`）、四大血统被动及个体专属特性（巨口吸附、基因/金币专精倍率、碰撞/水雷减伤、抗震退、冲刺回能倍增、Boss 双倍猎首等）；④ 修复广告试驾鲨鱼 ID 为 `#42 shark_41_star_destroyer` | `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/App.tsx`, `src/game/rules.test.ts` |
 | 2026-10-29 | 优化 `evaluateSharkUnlock` 前置鲨鱼解析规则：默认以 48 阶序列中的紧邻前序鲨鱼（`SHARK_EVOLUTION_FORMS[form.index - 1]`）作为明确特指的前置鲨鱼，并输出 `bestParentId`、`bestParentIndex`、`bestParentNameZh`、`bestParentNameEn` 供进化界面直显具体鲨鱼名称；移除海底洞穴系统相关内容 | `src/game/sharkEvolutionConfig.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/game/rules.test.ts` |
 | 2026-10-28 | 新增第 6.3 节“浅滩安全区与咬合阶位感知刷新权重”：限制浅海玩家下方预刷新深度 `<= 440m`，在 `T1` 前期提升可吞食 `T1` 小鱼刷新占比至 `76%~84%` 并过滤主动追咬掠食者，配套新手引导第 3 步发放 `+80🪙 +20🧬` 实操补给礼包；新增第 5.3 节“单物种统治王冠与局内狩猎热度” | `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts` |
 | 2026-10-27 | 重构双货币经济系统：① 猎物金币/基因产出重构为 ~4:1 黄金比（普通拾取球 75% 金币 / 25% 基因，高浓度基因聚焦于悬赏鱼与深海巨兽）；② 躯体强化常规金币消耗下调 15%，并在 `Lv.4→5` 与 `Lv.9→10` 阶级突破点引入基因消耗 `getSharkUpgradeGeneCost`；③ 黄金狂暴与基因突破改为“代际锚定 + 二次方递增 (`n^2`)”公式 | `src/game/config.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts`, `src/App.tsx`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/game/rules.test.ts` |
 | 2026-10-27 | 新增第 3.4 节“黄金狂暴阶段体型保持特例”：进入黄金阶段时不缩小其他鱼类，保持进入前的巨兽体型以强化猎杀成就感 | `src/game/rules.ts`, `src/game/canvasRenderer.ts`, `src/game/rules.test.ts` |
 | 2026-10-26 | 编写完整数值策划案：明确双轨 `Lv`、咬合阶位 `T`、猎物相对体型算法 `getPreyRelativeVisualScale`、48 阶进化矩阵与深度分布规则 | `src/game/rules.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/config.ts` |
+
 
