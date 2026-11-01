@@ -205,14 +205,19 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
    从而在数学上 **100% 杜绝浅水鱼刷到深海或深海鱼刷到浅水区**。
 
 ### 6.3 浅滩安全区与咬合阶位感知刷新权重（Early-Run Sanctuary & Bite-Tier-Aware Spawning）
-为了防止 `T1` 初生幼鲨在阳光浅滩（`0~520m`）被高阶掠食者围攻，在 `src/game/ecosystemSpawner.ts` 中实施三项动态生态调控：
-1. **浅滩下界预刷新钳制**：当玩家深度 `sharkY <= 380m` 时，屏幕外预生成鱼群的深度上限被钳制在 `<= 440m`，防止 `520m+` 暮光带掠食者在浅滩玩家正下方刷出。
-2. **新手保护期攻击性过滤**：在新手引导期间或 `T1` 鲨鱼开局前 `20s`（`isEarlySanctuary === true`），自动过滤深水雷（`isHazard`）与主动追咬掠食者（`behavior === 'CHASE_ATTACK'`），仅刷新温顺或受惊逃逸鱼群。
-3. **浅海动态阶位权重**：
+为了保证阳光珊瑚浅海（`0~520m`）全程拥有畅快解压的捕猎体验，严禁出现海鳝/电鳗等主动冲刺攻击鱼类干扰浅滩游弋，在 `src/game/config.ts`、`src/game/ecosystemSpawner.ts` 与 `src/App.tsx` 中实施四项生态保护机制：
+1. **浅海零主动攻击鱼类栖息（Zero Active Chargers in Shallow Reef）**：
+   - 将剧毒海鳝（`green_moray_eel`，`EEL_CHARGER`）的原生栖息深度迁移至暮光礁坡带（`560m ~ 1180m`），使 `0m ~ 520m` 阳光浅海仅栖息 `T1 ~ T3` 温顺或受惊逃逸/膨胀防御的珊瑚礁鱼群（`DRIFT_SWARM` / `SCHOOL_FLEE` / `PUFFER_INFLATE`）。
+   - `pickPreyConfigForDepth` 在 `depth <= 520m` 时**全程永久过滤** `EEL_CHARGER`、`SUB_PATROL`、`MINE_HAZARD`、`HEAVY_CRUISER` 与 `KRAKEN_BOSS`；同时 `App.tsx` 的 AI 状态机在 `shark.y <= 520m` 或 `prey.y <= 520m` 时强制禁用 `EEL_CHARGER` 蓄力锁定冲刺。
+2. **浅滩下界预刷新永久钳制**：当玩家在阳光浅海活动（`sharkY <= 430m`）时，屏幕外预生成鱼群的深度上限被钳制在浅水区内（新手保护期 `<= 440m`，常态期 `<= 495m`），彻底防止 `520m+` 暮光带鳗鱼/掠食者在浅海玩家正下方刷出并上浮。
+3. **浅海动态阶位权重（全程仅刷 `T1 ~ T3` 珊瑚礁鱼群）**：
    - 新手保护期（`isEarlySanctuary`）：`T1: 84% / T2: 16% / T3+: 0%`
-   - 常规 `T1` 鲨鱼浅海期：`T1: 76% / T2: 18% / T3: 6%`
-   - `T2+` 鲨鱼浅海期：`T1: 54% / T2: 26% / T3: 14% / T4: 6%`
-4. **新手引导第 3 步实操补给礼包**：首次完成新手引导第 2 步（按住冲刺 `0.7s`）时，一次性发放 **`+80 🪙 +20 🧬` 新手补给礼包**，确保玩家在引导第 3 步 100% 立即点亮并亲手体验 `强化`（60🪙）或 `突破`（12🧬）。
+   - 常规 `T1` 鲨鱼浅海期：`T1: 76% / T2: 18% / T3: 6% / T4+: 0%`
+   - `T2+` 鲨鱼浅海期：`T1: 58% / T2: 28% / T3: 14% / T4+: 0%`
+4. **同屏鱼群呼吸感与密度控制（`maxActivePreys = 20`，`debugPreySizeMultiplier = 0.8`）**：
+   - 同屏活跃猎物数量默认配置为 `20` 条，生成环半径扩展至 `640px ~ 1650px`，猎物全局显示与碰撞尺寸缩放倍率默认配置为 `0.8`；
+   - `T1` 小型鱼成簇触发率由 `55%`（3 条紧凑扎堆）下调至 `28%`（仅 1 条伴游鱼结成双鱼对，间距扩大至 `96px × 64px`），开局前方迎宾鱼群由 `10` 条精简至 `5` 条，使浅海与深海视野更疏朗自然。
+5. **新手引导第 3 步实操补给礼包**：首次完成新手引导第 2 步（按住冲刺 `0.7s`）时，一次性发放 **`+80 🪙 +20 🧬` 新手补给礼包**，确保玩家在引导第 3 步 100% 立即点亮并亲手体验 `强化`（60🪙）或 `突破`（12🧬）。
 
 ---
 
@@ -233,11 +238,15 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-10-31 | **固化默认鱼群刷新数量 `20` 与猎物显示大小 `0.8`（保留调参功能、隐藏调参按钮）**：`ecosystemSpawner.ts` 默认 `maxActivePreys` 设为 `20`，`rules.ts` 默认 `debugPreySizeMultiplier` 设为 `0.8`，`App.tsx` 默认隐藏调参面板与调参按钮并保留全部实时调参代码 | `src/game/ecosystemSpawner.ts`, `src/game/rules.ts`, `src/App.tsx`, `src/game/rules.test.ts` |
+| 2026-10-31 | **新增实时调参 Debug 调节器（`debugPreySizeMultiplier` & `syncPreyCountImmediate`）**：`rules.ts` 新增 `getDebugPreySizeMultiplier` / `setDebugPreySizeMultiplier`（支持 `0.35x ~ 2.50x` 实时缩放 `getPreyRelativeVisualScale` 输出，保持渲染与碰撞半径同步）；`ecosystemSpawner.ts` 新增 `syncPreyCountImmediate` 支持 `4 ~ 80` 同屏鱼数实时增删 | `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/rules.test.ts` |
+| 2026-10-31 | **降低同屏鱼群刷新密度 & 浅水区永久移除鳗鱼等主动攻击鱼类**：① `ecosystemSpawner.ts` 将 `maxActivePreys` 由 `50` 下调至 `28`、生成环扩展为 `640~1650px`、`T1` 成簇概率由 `55%`（3 条一簇）降为 `28%`（双鱼结伴），`App.tsx` 开局迎宾小鱼由 `10` 条减至 `5` 条、标题巡游鱼由 `32` 条减至 `18` 条；② 将 `green_moray_eel`（剧毒海鳝，`EEL_CHARGER`）栖息深度由 `130m~520m` 迁移至暮光带 `560m~1180m`，浅水区（`depth <= 520m`）全程永久屏蔽主动攻击鱼类 | `src/game/config.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/parallaxBackground.ts`, `src/game/rules.test.ts` |
 | 2026-10-29 | **资深 QA 进化面板与实战计算全量对齐审计**：① `SharkEvolutionAtlasModal.tsx` 面板四维属性直连 `computeEvolvedSharkStats`，使躯体强化 `Lv.5`/`Lv.10` 咬合突破（`+1T`/`+2T`）与图鉴全局加成实时同步显示；② 统一全部 48 阶鲨鱼 `traitZh`/`traitEn` 特性文案数值与 `SHARK_EVOLUTION_FORMS` 实际参数；③ 在 `rules.ts` 与 `App.tsx` 完整实装代际收益加成（`+12%/row`）、四大血统被动及个体专属特性（巨口吸附、基因/金币专精倍率、碰撞/水雷减伤、抗震退、冲刺回能倍增、Boss 双倍猎首等）；④ 修复广告试驾鲨鱼 ID 为 `#42 shark_41_star_destroyer` | `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/App.tsx`, `src/game/rules.test.ts` |
 | 2026-10-29 | 优化 `evaluateSharkUnlock` 前置鲨鱼解析规则：默认以 48 阶序列中的紧邻前序鲨鱼（`SHARK_EVOLUTION_FORMS[form.index - 1]`）作为明确特指的前置鲨鱼，并输出 `bestParentId`、`bestParentIndex`、`bestParentNameZh`、`bestParentNameEn` 供进化界面直显具体鲨鱼名称；移除海底洞穴系统相关内容 | `src/game/sharkEvolutionConfig.ts`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/game/rules.test.ts` |
 | 2026-10-28 | 新增第 6.3 节“浅滩安全区与咬合阶位感知刷新权重”：限制浅海玩家下方预刷新深度 `<= 440m`，在 `T1` 前期提升可吞食 `T1` 小鱼刷新占比至 `76%~84%` 并过滤主动追咬掠食者，配套新手引导第 3 步发放 `+80🪙 +20🧬` 实操补给礼包；新增第 5.3 节“单物种统治王冠与局内狩猎热度” | `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts` |
 | 2026-10-27 | 重构双货币经济系统：① 猎物金币/基因产出重构为 ~4:1 黄金比（普通拾取球 75% 金币 / 25% 基因，高浓度基因聚焦于悬赏鱼与深海巨兽）；② 躯体强化常规金币消耗下调 15%，并在 `Lv.4→5` 与 `Lv.9→10` 阶级突破点引入基因消耗 `getSharkUpgradeGeneCost`；③ 黄金狂暴与基因突破改为“代际锚定 + 二次方递增 (`n^2`)”公式 | `src/game/config.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts`, `src/App.tsx`, `src/components/SharkEvolutionAtlasModal.tsx`, `src/game/rules.test.ts` |
 | 2026-10-27 | 新增第 3.4 节“黄金狂暴阶段体型保持特例”：进入黄金阶段时不缩小其他鱼类，保持进入前的巨兽体型以强化猎杀成就感 | `src/game/rules.ts`, `src/game/canvasRenderer.ts`, `src/game/rules.test.ts` |
 | 2026-10-26 | 编写完整数值策划案：明确双轨 `Lv`、咬合阶位 `T`、猎物相对体型算法 `getPreyRelativeVisualScale`、48 阶进化矩阵与深度分布规则 | `src/game/rules.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/config.ts` |
+
 
 

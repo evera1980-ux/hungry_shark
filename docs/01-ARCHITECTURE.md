@@ -118,12 +118,15 @@
 
 ---
 
-## 5. 生态刷新器与新手浅滩安全区 (`ecosystemSpawner.ts`)
+## 5. 生态刷新器与浅滩无主动攻击保护区 (`ecosystemSpawner.ts`)
 
-- **85% 原生深度带约束 + 浅滩安全区钳制 (`ecosystemSpawner.ts`)**：当玩家处于阳光珊瑚浅滩（`sharkY <= 380m`）时，屏幕外向下预刷新的鱼群深度被严格钳制在 `<= 440m`，杜绝 `520m+` 暮光带掠食者在浅海玩家正下方提前刷出。
-- **动态咬合阶位感知权重（Bite-Tier-Aware Spawning）**：
-  - 新手保护期（教程进行中或 `T1` 开局前 20 秒）：浅滩刷新权重为 `T1: 84% / T2: 16% / T3+: 0%`，并自动过滤深水雷（`isHazard`）与主动冲刺追咬掠食者（`EEL_CHARGER` / `SUB_PATROL`）。
-  - 常规 `T1` 浅滩期：`T1: 76% / T2: 18% / T3: 6%`。
+- **舒适疏朗的同屏生态密度控制（`maxActivePreys = 20`）与实时动态扩缩容（`syncPreyCountImmediate`）**：默认将同屏活跃猎物上限设定为 `20` 条，视野外生成环扩展为 `640px ~ 1650px`，并将 `T1` 小型鱼成簇概率控制在 `28%`（每次仅伴游 `1` 条同种鱼形成双鱼结伴，伴游间距 `96px × 64px`），避免浅海垂直空间内鱼群过度扎堆拥挤；同时保留 `syncPreyCountImmediate()` 方法与局内 Debug 调节面板代码（`4 ~ 80` 条，默认隐藏调参按钮）。
+- **85% 原生深度带约束 + 浅滩下界永久钳制 (`ecosystemSpawner.ts`)**：当玩家处于阳光珊瑚浅滩上中层（`sharkY <= 430m`）时，屏幕外向下预刷新的鱼群深度全程被钳制在浅海区内（新手期 `<= 440m`，常态期 `<= 495m`），彻底杜绝 `520m+` 暮光带鳗鱼等掠食者在浅海玩家正下方提前刷出。
+- **浅海全程零主动攻击鱼类 + 动态咬合阶位感知权重（Bite-Tier-Aware Spawning）**：
+  - 整个阳光珊瑚浅海（`0m ~ 520m`）全程永久屏蔽主动冲刺攻击型掠食者（`EEL_CHARGER` / `SUB_PATROL` / `HEAVY_CRUISER` / `KRAKEN_BOSS`）与水雷（`MINE_HAZARD`），仅刷新 `T1 ~ T3` 珊瑚礁鱼群。
+  - 新手保护期（教程进行中或 `T1` 开局前 20 秒）：浅滩刷新权重为 `T1: 84% / T2: 16% / T3+: 0%`。
+  - 常规 `T1` 浅滩期：`T1: 76% / T2: 18% / T3: 6% / T4+: 0%`。
+  - `T2+` 浅滩进阶期：`T1: 58% / T2: 28% / T3: 14% / T4+: 0%`。
 
 ---
 
@@ -131,6 +134,10 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-10-31 | **固化默认参数（鱼群刷新数量 `20`、猎物显示大小 `0.8`）并隐藏调参按钮（保留调参代码功能）**：① `ecosystemSpawner.ts` 将默认 `maxActivePreys` 固化为 `20`；② `rules.ts` 将默认 `debugPreySizeMultiplier` 固化为 `0.8`；③ `App.tsx` 保留全部实时调参代码与重置逻辑（重置为 `20 / 0.8`），将 `showDebugPanel` 默认设为 `false` 并隐藏标题页与局内 HUD 的 `🛠 调参` 按钮 | `src/game/ecosystemSpawner.ts`, `src/game/rules.ts`, `src/App.tsx`, `src/game/rules.test.ts` |
+| 2026-10-31 | **新增实时调参 Debug 面板（鱼群刷新数量 & 猎物显示大小实时调节器）**：① `ecosystemSpawner.ts` 新增 `syncPreyCountImmediate()`，支持实时调高/调低 `maxActivePreys`（`4 ~ 80`）并在同帧从最远端回收多余猎物或补充新鱼；② `rules.ts` 新增 `getDebugPreySizeMultiplier()` / `setDebugPreySizeMultiplier()`（`0.35x ~ 2.50x`），在 `getPreyRelativeVisualScale` 中同步缩放渲染与碰撞半径；③ `App.tsx` 新增可收起/展开的 `🛠 实时调试面板 (Debug)`，支持滑动条、快捷步进与一键重置默认 | `src/App.tsx`, `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `src/game/rules.test.ts` |
+| 2026-10-31 | **降低鱼群刷新密度与阳光浅水区零主动攻击优化**：① `ecosystemSpawner.ts` 将同屏最大猎物数 `maxActivePreys` 由 `50` 下调至 `28`，生成环扩展至 `640~1650px`，并将 `T1` 小鱼成簇概率由 `55%`（3 条扎堆）下调为 `28%`（双鱼结伴），`App.tsx` 开局迎宾小鱼由 `10` 条精简为 `5` 条、标题界面巡游鱼由 `32` 条精简为 `18` 条；② 浅水区（`0m ~ 520m`）永久移除海鳝（`green_moray_eel` 迁至 `560m ~ 1180m`）等主动冲刺攻击鱼类 | `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/parallaxBackground.ts`, `src/game/config.ts`, `src/game/rules.test.ts` |
+| 2026-10-30 | 全链路 60FPS 渲染与启动性能深度优化：（1）`canvasRenderer.ts` 引入 `WeakMap` 离屏着色纹理缓存（`getPrebakedTintedFrame`），彻底消除黄金狂暴/变异鱼/受击闪烁时每帧数百次切片级 `ctx.filter` 重绘开销，并将 `drawUndulatingSpriteFrame` 内层切片循环改为仿射逆矩阵直驱（零 `ctx.save/restore`）；（2）`parallaxBackground.ts` 引入分帧异步预处理队列（`enqueueProcessingTask`，每帧最多处理 1 张背景图层）与 640px 最优纹理降采样、单遍 $O(W\times H)$ 天际线柔化、单次合并渲染的体积光束及预烘焙 256×256 深海暗角缓存；（3）`spriteSheetManager.ts` 消除 94 次冗余 `getImageData` GPU 回读并将 UI 图标 `toDataURL` 改为按需懒加载；（4）`App.tsx` 移除 `tick()` 中每帧同步触发的 `getBoundingClientRect()` 强制回流，并对海面波浪、温跃层波带及掉落物/猎物执行严格视锥体裁剪（Frustum Culling） | `src/game/canvasRenderer.ts`, `src/game/parallaxBackground.ts`, `src/game/spriteSheetManager.ts`, `src/App.tsx`, `src/components/SharkFormCanvasPreview.tsx` |
 | 2026-10-30 | `parallaxBackground.ts` 升级为五层连续水深光谱（`sampleBathymetricWaterColor`）与远/中/近（`0.13x`/`0.27x`/`0.48x`）三平面真视差海洋环境引擎；`simRef.current.shark` 新增流体力学转向状态（`turnRate`、`facingDir`、`facingScaleX`） | `src/game/parallaxBackground.ts`, `src/App.tsx`, `src/game/canvasRenderer.ts`, `src/game/rules.test.ts` |
 | 2026-10-28 | 新增 3 步实操新手引导状态机（`EAT_SMALL_FISH` ➔ `HOLD_BOOST` ➔ `HANDS_ON_UPGRADE` + 新手补给礼包）、`ecosystemSpawner.ts` 浅滩安全区与咬合阶位感知权重，以及底部罗盘弧形拨盘进化图谱组件 | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `src/components/SharkEvolutionAtlasModal.tsx` |
 | 2026-10-27 | 新增 `public/assets/aistudio/icons_f5128c12.png`（6×4 UI 图标图集）、`src/components/UiAtlasIcon.tsx` 及 `spriteSheetManager.ts` BFS 智能镂空抠图与缓存管线 | `src/game/spriteSheetManager.ts`, `src/components/UiAtlasIcon.tsx`, `src/App.tsx` |

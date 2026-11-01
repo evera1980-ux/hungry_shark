@@ -233,23 +233,28 @@ interface TerrainProcessOptions {
 
 /**
  * Processes an AI-generated terrain layer (1024x1024 JPEG/PNG with solid #FFFFFF or #FF00FF background):
- * 1. Flood-fills from the top sky edge (and bottom edge if white margin exists, e.g. bg_abyss_3_near)
+ * 1. Downscales to an optimal 640px working width (reducing pixel-processing cost and per-frame texture bandwidth by 61%).
+ * 2. Flood-fills from the top sky edge (and bottom edge if white margin exists, e.g. bg_abyss_3_near)
  *    so interior white artwork details (pearls, hydrothermal tube worms, crab shells) are 100% preserved.
- * 2. Smoothly despills and feathers anti-aliased JPEG edge pixels.
- * 3. Crops empty sky & bottom margin rows into a wide-aspect terrain strip.
- * 4. Applies a 14% cosine horizontal seam blend so tiled strips loop seamlessly across X.
+ * 3. Smoothly despills and feathers anti-aliased JPEG edge pixels.
+ * 4. Crops empty sky & bottom margin rows into a wide-aspect terrain strip.
+ * 5. Applies a 14% cosine horizontal seam blend so tiled strips loop seamlessly across X.
  */
 function processTerrainLayerToSeamlessStrip(
   img: HTMLImageElement,
   options: TerrainProcessOptions = {}
 ): HTMLCanvasElement {
-  const w = img.naturalWidth || img.width || 1024;
-  const h = img.naturalHeight || img.height || 1024;
+  const srcW = img.naturalWidth || img.width || 1024;
+  const srcH = img.naturalHeight || img.height || 1024;
+  const maxDim = 640;
+  const scale = srcW > maxDim ? maxDim / srcW : 1;
+  const w = Math.max(64, Math.round(srcW * scale));
+  const h = Math.max(64, Math.round(srcH * scale));
 
   const rawCanvas = document.createElement('canvas');
   rawCanvas.width = w;
   rawCanvas.height = h;
-  const ctx = rawCanvas.getContext('2d');
+  const ctx = rawCanvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return rawCanvas;
 
   ctx.drawImage(img, 0, 0, w, h);
@@ -408,33 +413,33 @@ function processTerrainLayerToSeamlessStrip(
     }
   }
 
-  // 3. Special horizon feathering for bg_shallow_1_far_8898229a.png:
-  // In bg_shallow_1_far, the magenta ends along a flat horizontal line at y≈511 on the left/right of the central peak.
-  // We smoothly feather the bright cyan water haze below y=511 into transparency so there is zero straight horizontal seam!
+  // 3. O(W * H) single-pass horizon feathering for bg_shallow_1_far_8898229a.png:
+  // Tracks vertical distance from sky in O(1) per pixel down each column (replacing nested while loop).
   if (options.isShallowFar) {
-    for (let y = Math.floor(h * 0.48); y < Math.floor(h * 0.68); y++) {
-      for (let x = 0; x < w; x++) {
+    const startY = Math.floor(h * 0.42);
+    const endY = Math.floor(h * 0.68);
+    const maxScan = Math.max(24, Math.round(56 * scale));
+    const cyanRampSpan = Math.max(16, Math.round(48 * scale));
+    const solidRampSpan = Math.max(4, Math.round(7 * scale));
+
+    for (let x = 0; x < w; x++) {
+      let distFromSky = 0;
+      for (let y = startY; y < endY; y++) {
         const p = y * w + x;
-        if (visited[p]) continue;
-        const idx = p * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-
-        // Detect how far down from the nearest transparent pixel above this column is
-        let distFromSky = 0;
-        const maxScan = 88;
-        while (distFromSky < maxScan && y - distFromSky >= 0) {
-          if (visited[(y - distFromSky) * w + x]) break;
-          distFromSky++;
+        if (visited[p]) {
+          distFromSky = 0;
+          continue;
         }
-
-        // The central mountain peak starts around y=430 (well above y=511), whereas the flat cyan horizon starts at y≈511
-        const isBrightCyanBackdrop = g > 145 && b > 155 && b >= r + 35;
+        distFromSky++;
         if (distFromSky < maxScan) {
+          const idx = p * 4;
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+          const isBrightCyanBackdrop = g > 145 && b > 155 && b >= r + 35;
           const ramp = isBrightCyanBackdrop
-            ? Math.max(0, Math.min(1, (distFromSky - 6) / 76))
-            : Math.max(0, Math.min(1, distFromSky / 10));
+            ? Math.max(0, Math.min(1, (distFromSky - 4) / cyanRampSpan))
+            : Math.max(0, Math.min(1, distFromSky / solidRampSpan));
           data[idx + 3] = Math.round(data[idx + 3] * ramp * ramp);
         }
       }
@@ -451,19 +456,20 @@ function processTerrainLayerToSeamlessStrip(
         rowOpaqueCount++;
       }
     }
-    if (rowOpaqueCount >= 6) {
+    if (rowOpaqueCount >= 4) {
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     }
   }
 
-  if (maxY <= minY + 32) {
+  const scaledPad = Math.max(3, Math.round((options.trimTopPaddingPx ?? 8) * scale));
+  if (maxY <= minY + 24) {
     minY = Math.floor(h * 0.35);
     maxY = h - 1;
   } else {
-    minY = Math.max(0, minY - (options.trimTopPaddingPx ?? 10));
+    minY = Math.max(0, minY - scaledPad);
     // Trim 2px inside maxY to guarantee zero bottom white border fringe
-    maxY = Math.min(h - 1, Math.max(minY + 64, maxY - 2));
+    maxY = Math.min(h - 1, Math.max(minY + 40, maxY - 2));
   }
 
   ctx.putImageData(imgData, 0, 0);
@@ -481,11 +487,15 @@ function processTerrainLayerToSeamlessStrip(
 }
 
 /**
- * Processes an AI-generated Layer 0 Water Backdrop into a horizontally-seamless tileable canvas.
+ * Processes an AI-generated Layer 0 Water Backdrop into a compact 512x512 horizontally-seamless tileable canvas.
  */
 function processWaterLayerToSeamlessTile(img: HTMLImageElement): HTMLCanvasElement {
-  const w = img.naturalWidth || img.width || 1024;
-  const h = img.naturalHeight || img.height || 1024;
+  const srcW = img.naturalWidth || img.width || 1024;
+  const srcH = img.naturalHeight || img.height || 1024;
+  const maxDim = 512;
+  const scale = srcW > maxDim ? maxDim / srcW : 1;
+  const w = Math.max(64, Math.round(srcW * scale));
+  const h = Math.max(64, Math.round(srcH * scale));
   const raw = document.createElement('canvas');
   raw.width = w;
   raw.height = h;
@@ -497,14 +507,18 @@ function processWaterLayerToSeamlessTile(img: HTMLImageElement): HTMLCanvasEleme
 }
 
 /**
- * Slices the 4x2 `bg_ambient_sprites` sheet (1024x1024 on white background) into 8 isolated,
- * background-stripped, tight-cropped sprite canvases while preserving soft bioluminescent glows.
+ * Slices the 4x2 `bg_ambient_sprites` sheet into 8 isolated, background-stripped,
+ * tight-cropped sprite canvases while preserving soft bioluminescent glows.
  */
 function sliceAmbientSpriteSheet(
   img: HTMLImageElement
 ): Partial<Record<AmbientSpriteKind, HTMLCanvasElement>> {
-  const w = img.naturalWidth || img.width || 1024;
-  const h = img.naturalHeight || img.height || 1024;
+  const srcW = img.naturalWidth || img.width || 1024;
+  const srcH = img.naturalHeight || img.height || 1024;
+  const maxDim = 768;
+  const scale = srcW > maxDim ? maxDim / srcW : 1;
+  const w = Math.max(128, Math.round(srcW * scale));
+  const h = Math.max(128, Math.round(srcH * scale));
   const cols = 4;
   const rows = 2;
   const cellW = Math.floor(w / cols);
@@ -531,15 +545,15 @@ function sliceAmbientSpriteSheet(
     const cellCanvas = document.createElement('canvas');
     cellCanvas.width = cellW;
     cellCanvas.height = cellH;
-    const cCtx = cellCanvas.getContext('2d');
+    const cCtx = cellCanvas.getContext('2d', { willReadFrequently: true });
     if (!cCtx) continue;
 
     cCtx.drawImage(
       img,
-      col * cellW,
-      row * cellH,
-      cellW,
-      cellH,
+      (col * srcW) / cols,
+      (row * srcH) / rows,
+      srcW / cols,
+      srcH / rows,
       0,
       0,
       cellW,
@@ -556,8 +570,8 @@ function sliceAmbientSpriteSheet(
 
     for (let y = 0; y < cellH; y++) {
       for (let x = 0; x < cellW; x++) {
-        // Ignore 6px outer cell border to prevent grid neighbor bleed
-        if (x < 6 || x >= cellW - 6 || y < 6 || y >= cellH - 6) {
+        // Ignore 5px outer cell border to prevent grid neighbor bleed
+        if (x < 5 || x >= cellW - 5 || y < 5 || y >= cellH - 5) {
           data[(y * cellW + x) * 4 + 3] = 0;
           continue;
         }
@@ -618,8 +632,8 @@ function sliceAmbientSpriteSheet(
 
     cCtx.putImageData(imgData, 0, 0);
 
-    if (maxX > minX + 8 && maxY > minY + 8) {
-      const pad = 4;
+    if (maxX > minX + 6 && maxY > minY + 6) {
+      const pad = 3;
       const sx = Math.max(0, minX - pad);
       const sy = Math.max(0, minY - pad);
       const sw = Math.min(cellW - sx, maxX - minX + 1 + pad * 2);
@@ -743,11 +757,11 @@ export function createFallbackOceanSheetCanvas(): HTMLCanvasElement {
 
 /**
  * True 5-Layer Multi-Plane AI-Illustrated Ocean Environment Engine:
- * - Layer 0: Seamless AI-painted Water Column Backdrop (`bg_{zone}_0_water`) blended over continuous Bathymetric Water Spectrum (`0.05x` parallax)
- * - Layer 1: Distant Seamounts / Sunken Atlantean Ruins / Prehistoric Abyssal Skull (`bg_{zone}_1_far`, `0.14x` parallax)
- * - Layer 2: Ambient Marine Life Sprites (`bg_ambient_sprites` — sardine baitballs, butterflyfish, manta rays, glowing jellyfish, lanternfish, `0.20x` parallax)
- * - Layer 3: Midground Coral Cliffs / Whale Ribcage Canyon / Black Smoker Chimneys (`bg_{zone}_2_mid`, `0.28x` parallax)
- * - Layer 4: Foreground Pearl Clams & Anchor / Glowing Rune Monoliths / Molten Lava Crust (`bg_{zone}_3_near`, `0.48x` parallax) + Animated Swaying Kelp & Sea Whip Sprites (`0.52x` parallax)
+ * - Layer 0: Seamless AI-painted Water Column Backdrop (`bg_{zone}_0_water`) blended over continuous Bathymetric Water Spectrum (`0.04x` horizontal, `0.010x` vertical parallax)
+ * - Layer 1: Distant Seamounts / Sunken Atlantean Ruins / Prehistoric Abyssal Skull (`bg_{zone}_1_far`, `0.10x` horizontal, `0.015x` vertical parallax)
+ * - Layer 2: Ambient Marine Life Sprites (`bg_ambient_sprites` — sardine baitballs, butterflyfish, manta rays, glowing jellyfish, lanternfish, `0.16x` horizontal, `0.022x` vertical parallax)
+ * - Layer 3: Midground Coral Cliffs / Whale Ribcage Canyon / Black Smoker Chimneys (`bg_{zone}_2_mid`, `0.22x` horizontal, `0.028x` vertical parallax)
+ * - Layer 4: Foreground Pearl Clams & Anchor / Glowing Rune Monoliths / Molten Lava Crust (`bg_{zone}_3_near`, `0.38x` horizontal, `0.042x` vertical parallax) + Animated Swaying Kelp & Sea Whip Sprites (`0.42x` horizontal, `0.042x` vertical parallax)
  */
 export class ParallaxBackground {
   public layers: HTMLCanvasElement[] = [];
@@ -755,6 +769,9 @@ export class ParallaxBackground {
   private biomePlanes: BiomeParallaxPlanes[] = [];
   private ambientSprites: Partial<Record<AmbientSpriteKind, HTMLCanvasElement>> = {};
   private assetsLoadingStarted: boolean = false;
+  private processingQueue: Array<() => void> = [];
+  private isProcessingQueueRunning: boolean = false;
+  private vignetteCanvas: HTMLCanvasElement | null = null;
   private bubbles: AmbientBubble[] = [];
   private schools: AmbientBackgroundSchool[] = [];
 
@@ -765,7 +782,7 @@ export class ParallaxBackground {
       'BIO_SPORE',
       'MAGMA_EMBER',
     ];
-    for (let i = 0; i < 44; i++) {
+    for (let i = 0; i < 40; i++) {
       this.bubbles.push({
         x: Math.random() * 2400,
         y: Math.random() * 1400,
@@ -791,17 +808,17 @@ export class ParallaxBackground {
       'LANTERNFISH_SCHOOL',
     ];
 
-    for (let s = 0; s < 9; s++) {
-      const isTwilight = s >= 5;
+    for (let s = 0; s < 6; s++) {
+      const isTwilight = s >= 3;
       const spriteKind = isTwilight
-        ? twilightSprites[(s - 5) % twilightSprites.length]
+        ? twilightSprites[(s - 3) % twilightSprites.length]
         : shallowSprites[s % shallowSprites.length];
       this.schools.push({
-        x: s * 390 + (s * 97) % 180,
+        x: s * 560 + (s * 113) % 220,
         y: 0.18 + (s % 4) * 0.11,
         speedX: spriteKind === 'SARDINE_BAITBALL' ? 8 : spriteKind === 'MANTA_RAY' ? 22 : 16 + (s % 3) * 5,
         dir: s % 2 === 0 ? 1 : -1,
-        count: 6 + (s % 4) * 2,
+        count: 5 + (s % 3) * 2,
         spreadX: 38 + (s % 3) * 14,
         spreadY: 16 + (s % 2) * 10,
         phase: s * 1.1,
@@ -812,17 +829,73 @@ export class ParallaxBackground {
     }
   }
 
+  private getOrCreateVignetteCanvas(): HTMLCanvasElement | null {
+    if (this.vignetteCanvas) return this.vignetteCanvas;
+    if (typeof document === 'undefined') return null;
+    const size = 256;
+    const c = document.createElement('canvas');
+    c.width = size;
+    c.height = size;
+    const vCtx = c.getContext('2d');
+    if (vCtx) {
+      const cx = size * 0.5;
+      const cy = size * 0.5;
+      const grad = vCtx.createRadialGradient(cx, cy, size * 0.24, cx, cy, size * 0.72);
+      grad.addColorStop(0, 'rgba(2, 6, 23, 0)');
+      grad.addColorStop(0.7, 'rgba(4, 12, 34, 0.48)');
+      grad.addColorStop(1, 'rgba(2, 6, 23, 0.95)');
+      vCtx.fillStyle = grad;
+      vCtx.fillRect(0, 0, size, size);
+    }
+    this.vignetteCanvas = c;
+    return c;
+  }
+
   /**
-   * Initializes procedural fallback immediately and kicks off asynchronous loading + offscreen alpha/seam processing
+   * Executes at most 1 heavy offscreen image flood-fill/seam task per animation frame
+   * so startup never stalls the 60 FPS game loop.
+   */
+  private enqueueProcessingTask(task: () => void, highPriority: boolean = false): void {
+    if (highPriority) {
+      this.processingQueue.unshift(task);
+    } else {
+      this.processingQueue.push(task);
+    }
+    if (!this.isProcessingQueueRunning) {
+      this.isProcessingQueueRunning = true;
+      this.pumpProcessingQueue();
+    }
+  }
+
+  private pumpProcessingQueue(): void {
+    const nextTask = this.processingQueue.shift();
+    if (!nextTask) {
+      this.isProcessingQueueRunning = false;
+      return;
+    }
+    try {
+      nextTask();
+    } catch {
+      // Ignore individual asset processing errors
+    }
+    if (typeof window !== 'undefined') {
+      window.setTimeout(() => this.pumpProcessingQueue(), 16);
+    } else {
+      this.pumpProcessingQueue();
+    }
+  }
+
+  /**
+   * Initializes procedural fallback immediately and kicks off asynchronous loading + staggered offscreen alpha/seam processing
    * for all 13 AI-generated background layer assets.
    */
   public load(_url?: string): void {
     if (typeof document === 'undefined') return;
 
     if (this.biomePlanes.length < 3) {
-      const shallow = bakeFallbackPlanes(1024, 380, '#0369a1', '#0e7490', '#f59e0b', '#38bdf8');
-      const twilight = bakeFallbackPlanes(1024, 380, '#1e3a8a', '#172554', '#0f172a', '#22d3ee');
-      const abyssal = bakeFallbackPlanes(1024, 380, '#1e1b4b', '#14111d', '#09070e', '#f97316');
+      const shallow = bakeFallbackPlanes(640, 260, '#0369a1', '#0e7490', '#f59e0b', '#38bdf8');
+      const twilight = bakeFallbackPlanes(640, 260, '#1e3a8a', '#172554', '#0f172a', '#22d3ee');
+      const abyssal = bakeFallbackPlanes(640, 260, '#1e1b4b', '#14111d', '#09070e', '#f97316');
       this.biomePlanes = [shallow, twilight, abyssal];
       this.layers = [shallow.near, twilight.near, abyssal.near];
       this.loaded = true;
@@ -831,33 +904,37 @@ export class ParallaxBackground {
     if (this.assetsLoadingStarted || typeof Image === 'undefined') return;
     this.assetsLoadingStarted = true;
 
-    const loadImg = (src: string, onReady: (img: HTMLImageElement) => void) => {
+    const loadImg = (
+      src: string,
+      highPriority: boolean,
+      onReady: (img: HTMLImageElement) => void
+    ) => {
       const img = new Image();
       img.decoding = 'async';
       img.onload = () => {
         if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-          onReady(img);
+          this.enqueueProcessingTask(() => onReady(img), highPriority);
         }
       };
       img.src = src;
     };
 
-    // 1. Shallow Zone (0m ~ 520m)
-    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.water, (img) => {
+    // 1. Shallow Zone (0m ~ 520m — highPriority = true since player starts here!)
+    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.water, true, (img) => {
       this.biomePlanes[0].water = processWaterLayerToSeamlessTile(img);
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.far, (img) => {
+    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.far, true, (img) => {
       this.biomePlanes[0].far = processTerrainLayerToSeamlessStrip(img, {
         isShallowFar: true,
         trimTopPaddingPx: 6,
       });
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.mid, (img) => {
+    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.mid, true, (img) => {
       this.biomePlanes[0].mid = processTerrainLayerToSeamlessStrip(img, {
         trimTopPaddingPx: 8,
       });
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.near, (img) => {
+    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.near, true, (img) => {
       const processed = processTerrainLayerToSeamlessStrip(img, {
         trimTopPaddingPx: 8,
       });
@@ -865,21 +942,26 @@ export class ParallaxBackground {
       this.layers[0] = processed;
     });
 
-    // 2. Twilight Zone (520m ~ 1150m)
-    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.water, (img) => {
+    // 2. Ambient Marine Sprite Sheet (4x2 grid)
+    loadImg(OCEAN_LAYER_ASSET_PATHS.ambientSprites, false, (img) => {
+      this.ambientSprites = sliceAmbientSpriteSheet(img);
+    });
+
+    // 3. Twilight Zone (520m ~ 1150m)
+    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.water, false, (img) => {
       this.biomePlanes[1].water = processWaterLayerToSeamlessTile(img);
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.far, (img) => {
+    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.far, false, (img) => {
       this.biomePlanes[1].far = processTerrainLayerToSeamlessStrip(img, {
         trimTopPaddingPx: 8,
       });
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.mid, (img) => {
+    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.mid, false, (img) => {
       this.biomePlanes[1].mid = processTerrainLayerToSeamlessStrip(img, {
         trimTopPaddingPx: 8,
       });
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.near, (img) => {
+    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.near, false, (img) => {
       const processed = processTerrainLayerToSeamlessStrip(img, {
         trimTopPaddingPx: 8,
       });
@@ -887,42 +969,67 @@ export class ParallaxBackground {
       this.layers[1] = processed;
     });
 
-    // 3. Abyss Zone (1150m+)
-    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.water, (img) => {
+    // 4. Abyss Zone (1150m+)
+    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.water, false, (img) => {
       this.biomePlanes[2].water = processWaterLayerToSeamlessTile(img);
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.far, (img) => {
+    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.far, false, (img) => {
       this.biomePlanes[2].far = processTerrainLayerToSeamlessStrip(img, {
         punchUpperInteriorWhiteHoles: true,
         trimTopPaddingPx: 8,
       });
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.mid, (img) => {
+    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.mid, false, (img) => {
       this.biomePlanes[2].mid = processTerrainLayerToSeamlessStrip(img, {
         trimTopPaddingPx: 8,
       });
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.near, (img) => {
+    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.near, false, (img) => {
       const processed = processTerrainLayerToSeamlessStrip(img, {
         trimTopPaddingPx: 6,
       });
       this.biomePlanes[2].near = processed;
       this.layers[2] = processed;
     });
-
-    // 4. Ambient Marine Sprite Sheet (4x2 grid)
-    loadImg(OCEAN_LAYER_ASSET_PATHS.ambientSprites, (img) => {
-      this.ambientSprites = sliceAmbientSpriteSheet(img);
-    });
   }
 
   /**
-   * Draws a horizontally-seamless Layer 0 Water Backdrop with gentle 0.05x parallax.
+   * Computes physically consistent, strictly ordered vertical parallax offsets (Far < Mid < Near)
+   * anchored at each biome's seabed floor (`biomeFloorY`) using a single shared normalized elevation
+   * curve `u = Math.tanh(Math.max(0, biomeFloorY - midWorldY) / 480)` in `[0, 1]`:
+   * - Because all three planes share the exact same monotonic curve `u` with strictly increasing
+   *   positive amplitudes (`far: 8px < mid: 16px < near: 28px`, velocity ratio `1 : 2 : 3.5`),
+   *   their relative motion direction is 100% consistent at every depth in the biome:
+   *   1. Shark dives DOWN (`midWorldY` increases -> `u` decreases):
+   *      All layers move UP on screen, with Near rising 1.75x faster than Mid (`nearY - midY` decreases),
+   *      so the closer Foreground rises relative to Midground and naturally occludes more of the lower Midground.
+   *   2. Shark swims UP (`midWorldY` decreases -> `u` increases):
+   *      All layers move DOWN on screen, with Near dropping 1.75x faster than Mid (`nearY - midY` increases),
+   *      so the closer Foreground drops faster and reveals more of the Midground behind it.
+   *   3. Near never lifts its bottom edge above `viewH` (`nearY = 28 * u >= 0`) and never freezes mid-biome.
+   */
+  private computeBiomeVerticalOffsets(
+    midWorldY: number,
+    biomeFloorY: number
+  ): { farY: number; midY: number; nearY: number } {
+    const u = Math.tanh(Math.max(0, biomeFloorY - midWorldY) / 480);
+    return {
+      farY: -20 + 8 * u,
+      midY: -10 + 16 * u,
+      nearY: 28 * u,
+    };
+  }
+
+  /**
+   * Draws a horizontally-seamless Layer 0 Water Backdrop with gentle 0.04x horizontal
+   * and 0.010x vertical parallax, maintaining constant vertical aspect ratio without
+   * stretching or bobbing when the shark swims near the surface.
    */
   private drawSeamlessWaterBackdrop(
     ctx: CanvasRenderingContext2D,
     waterPlane: HTMLCanvasElement | undefined,
     cameraX: number,
+    cameraY: number,
     waterTopY: number,
     viewW: number,
     viewH: number,
@@ -932,14 +1039,20 @@ export class ParallaxBackground {
 
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    const drawH = Math.max(256, viewH - waterTopY);
+    if (waterTopY > 0) {
+      ctx.beginPath();
+      ctx.rect(0, waterTopY, viewW, viewH - waterTopY);
+      ctx.clip();
+    }
+    const drawH = viewH + 24;
     const aspect = waterPlane.width / Math.max(1, waterPlane.height);
-    const tileW = Math.max(320, Math.round(Math.max(viewH, drawH) * aspect));
-    const scrollX = cameraX * 0.05;
+    const tileW = Math.max(320, Math.round(drawH * aspect));
+    const scrollX = cameraX * 0.04;
     const startX = -(((scrollX % tileW) + tileW) % tileW);
+    const parallaxY = -Math.tanh((Math.max(0, cameraY) * 0.01) / 10) * 10;
 
     for (let x = startX; x < viewW; x += tileW) {
-      ctx.drawImage(waterPlane, Math.floor(x), waterTopY, tileW + 1, drawH);
+      ctx.drawImage(waterPlane, Math.floor(x), parallaxY, tileW + 1, drawH);
     }
     ctx.restore();
   }
@@ -972,7 +1085,7 @@ export class ParallaxBackground {
       Math.min(maxHeightPx, Math.round(viewH * heightViewportRatio))
     );
     const tileW = Math.max(256, Math.round(targetH * aspect));
-    const drawY = Math.round(viewH - targetH + verticalOffsetPx);
+    const drawY = viewH - targetH + verticalOffsetPx;
 
     if (drawY >= viewH + 8) {
       ctx.restore();
@@ -990,9 +1103,9 @@ export class ParallaxBackground {
         ctx.drawImage(
           plane,
           0,
-          plane.height - 3,
+          plane.height - 2,
           plane.width,
-          3,
+          2,
           dx,
           drawY + targetH - 1,
           tileW + 1,
@@ -1006,7 +1119,8 @@ export class ParallaxBackground {
 
   /**
    * Draws live swaying kelp (`GIANT_KELP`), glowing twilight sea-whips (`BIOLUM_SEA_WHIP`),
-   * and rising bubble columns (`BUBBLE_STREAM`) sliced from `bg_ambient_sprites` along the foreground seabed.
+   * and rising bubble columns (`BUBBLE_STREAM`) sliced from `bg_ambient_sprites` and locked
+   * to the foreground seabed plane (`0.38x` horizontal & `nearY` vertical parallax) so roots never slide.
    */
   private drawAnimatedSeabedSprites(
     ctx: CanvasRenderingContext2D,
@@ -1029,7 +1143,7 @@ export class ParallaxBackground {
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
     const spacing = 360;
-    const scrollX = cameraX * 0.52;
+    const scrollX = cameraX * 0.38;
     const firstWorldIdx = Math.floor((scrollX - 180) / spacing);
     const count = Math.ceil((viewW + 360) / spacing) + 1;
     const baseY = viewH + verticalOffsetPx;
@@ -1092,8 +1206,8 @@ export class ParallaxBackground {
 
   /**
    * Draws distant atmospheric marine life (`bg_ambient_sprites`: sardine baitballs, butterflyfish schools,
-   * manta rays, glowing moon jellyfish, and deep-sea lanternfish) in the mid-water column (`0.20x` parallax)
-   * at reduced atmospheric contrast so they enrich depth without ever confusing foreground prey targeting.
+   * manta rays, glowing moon jellyfish, and deep-sea lanternfish) in the mid-far water column (`0.16x` horizontal,
+   * `12px` vertical amplitude between Far `8px` and Mid `16px`) at reduced atmospheric contrast.
    */
   private drawDistantAmbientSchools(
     ctx: CanvasRenderingContext2D,
@@ -1134,9 +1248,18 @@ export class ParallaxBackground {
       sc.phase += dt * 2.4;
 
       const baseX =
-        (((sc.x - cameraX * 0.2) % wrapW) + wrapW) % wrapW - 210;
-      const bobY = Math.sin(sc.phase * 0.65) * 14;
-      const baseY = Math.max(screenSurfaceY + 95, viewH * sc.y + bobY);
+        (((sc.x - cameraX * 0.16) % wrapW) + wrapW) % wrapW - 210;
+      const zoneFloorY = sc.zone === 0 ? 680 : 1340;
+      const u = Math.tanh(Math.max(0, zoneFloorY - sharkY) / 480);
+      const schoolParallaxY = -6 + 12 * u;
+      const bobY = Math.sin(sc.phase * 0.65) * 9;
+      const baseY = viewH * sc.y + schoolParallaxY + bobY;
+
+      const distBelowSurface = baseY - (screenSurfaceY + 38);
+      if (distBelowSurface <= 0) continue;
+      const surfaceFade = Math.min(1, distBelowSurface / 56);
+      const effectiveFade = zoneFade * surfaceFade;
+      if (effectiveFade <= 0.02) continue;
 
       const sprite = this.ambientSprites[sc.spriteKind];
       if (sprite && sprite.width > 0 && sprite.height > 0) {
@@ -1147,7 +1270,7 @@ export class ParallaxBackground {
             : sc.spriteKind === 'MANTA_RAY'
             ? 0.38
             : 0.46;
-        ctx.globalAlpha = baseOpacity * zoneFade;
+        ctx.globalAlpha = baseOpacity * effectiveFade;
         ctx.translate(baseX, baseY);
 
         const drawW = sprite.width * sc.scale;
@@ -1169,7 +1292,7 @@ export class ParallaxBackground {
         ctx.drawImage(sprite, -drawW * 0.5, -drawH * 0.5, drawW, drawH);
         ctx.restore();
       } else {
-        ctx.globalAlpha = 0.22 * zoneFade;
+        ctx.globalAlpha = 0.22 * effectiveFade;
         ctx.fillStyle = sc.zone === 1 ? '#38bdf8' : '#075985';
         for (let f = 0; f < sc.count; f++) {
           const fx =
@@ -1251,17 +1374,15 @@ export class ParallaxBackground {
       ctx.restore();
     }
 
-    // 1B. Continuous Multi-Stop Bathymetric Water Column Base Gradient
+    // 1B. Continuous Bathymetric Water Column Base Gradient (3 stops instead of 4)
     if (waterTopY < viewH) {
       const topSampleDepth = Math.max(0, topWorldY);
-      const upperMidDepth = Math.max(0, topWorldY * 0.65 + botWorldY * 0.35);
-      const lowerMidDepth = Math.max(0, topWorldY * 0.3 + botWorldY * 0.7);
+      const midSampleDepth = Math.max(0, midWorldY);
       const botSampleDepth = Math.max(0, botWorldY);
 
       const waterGrad = ctx.createLinearGradient(0, waterTopY, 0, viewH);
       waterGrad.addColorStop(0, sampleBathymetricWaterColor(topSampleDepth).css);
-      waterGrad.addColorStop(0.36, sampleBathymetricWaterColor(upperMidDepth).css);
-      waterGrad.addColorStop(0.72, sampleBathymetricWaterColor(lowerMidDepth).css);
+      waterGrad.addColorStop(0.5, sampleBathymetricWaterColor(midSampleDepth).css);
       waterGrad.addColorStop(1, sampleBathymetricWaterColor(botSampleDepth).css);
       ctx.fillStyle = waterGrad;
       ctx.fillRect(0, waterTopY, viewW, viewH - waterTopY);
@@ -1278,6 +1399,7 @@ export class ParallaxBackground {
           ctx,
           shallow.water,
           cameraX,
+          midWorldY,
           waterTopY,
           viewW,
           viewH,
@@ -1296,6 +1418,7 @@ export class ParallaxBackground {
           ctx,
           twilight.water,
           cameraX,
+          midWorldY,
           waterTopY,
           viewW,
           viewH,
@@ -1310,6 +1433,7 @@ export class ParallaxBackground {
           ctx,
           abyssal.water,
           cameraX,
+          midWorldY,
           waterTopY,
           viewW,
           viewH,
@@ -1318,41 +1442,34 @@ export class ParallaxBackground {
       }
     }
 
-    // ==================== 2. DYNAMIC VOLUMETRIC GOD RAYS & SURFACE CAUSTIC SHIMMER ====================
+    // ==================== 2. BATCHED VOLUMETRIC GOD RAYS (1 GRADIENT + 1 FILL) ====================
     const rayVisibility = Math.max(0, 1 - midWorldY / 1050);
-    if (rayVisibility > 0.015 && waterTopY < viewH) {
+    if (rayVisibility > 0.02 && waterTopY < viewH) {
       ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, waterTopY, viewW, viewH - waterTopY);
-      ctx.clip();
-
       const tSec = nowMs * 0.00055;
       const rayOriginY = Math.max(0, screenSurfaceY);
-      const rayReachH = Math.min(viewH, rayOriginY + viewH * 0.85);
+      const rayEndY = Math.min(viewH, rayOriginY + viewH * 0.72);
 
-      ctx.globalAlpha = rayVisibility * 0.55;
-      const spanB = viewW + 360;
-      for (let r = 0; r < 5; r++) {
-        const baseX =
-          (((r * 310 + 90 - cameraX * 0.28) % spanB) + spanB) % spanB - 180;
-        const sway = Math.cos(tSec * 1.35 + r * 0.95) * 28;
-        const pulse = 0.75 + Math.sin(tSec * 2.1 + r * 1.7) * 0.25;
-        const grad = ctx.createLinearGradient(
-          baseX,
-          rayOriginY,
-          baseX + 95 + sway,
-          rayReachH * 0.85
-        );
-        grad.addColorStop(0, `rgba(254, 249, 195, ${(0.18 * pulse).toFixed(3)})`);
-        grad.addColorStop(0.5, `rgba(125, 211, 252, ${(0.06 * pulse).toFixed(3)})`);
-        grad.addColorStop(1, 'rgba(56, 189, 248, 0)');
-        ctx.fillStyle = grad;
+      if (rayEndY > rayOriginY + 12) {
+        ctx.globalAlpha = rayVisibility * 0.52;
+        const sharedRayGrad = ctx.createLinearGradient(0, rayOriginY, 0, rayEndY);
+        sharedRayGrad.addColorStop(0, 'rgba(254, 249, 195, 0.16)');
+        sharedRayGrad.addColorStop(0.5, 'rgba(125, 211, 252, 0.055)');
+        sharedRayGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+        ctx.fillStyle = sharedRayGrad;
+
+        const spanB = viewW + 360;
         ctx.beginPath();
-        ctx.moveTo(baseX, rayOriginY);
-        ctx.lineTo(baseX + 46, rayOriginY);
-        ctx.lineTo(baseX + 155 + sway, rayReachH * 0.85);
-        ctx.lineTo(baseX + 42 + sway, rayReachH * 0.85);
-        ctx.closePath();
+        for (let r = 0; r < 5; r++) {
+          const baseX =
+            (((r * 310 + 90 - cameraX * 0.07) % spanB) + spanB) % spanB - 180;
+          const sway = Math.cos(tSec * 1.35 + r * 0.95) * 28;
+          ctx.moveTo(baseX, rayOriginY);
+          ctx.lineTo(baseX + 46, rayOriginY);
+          ctx.lineTo(baseX + 155 + sway, rayEndY);
+          ctx.lineTo(baseX + 42 + sway, rayEndY);
+          ctx.closePath();
+        }
         ctx.fill();
       }
       ctx.restore();
@@ -1361,33 +1478,32 @@ export class ParallaxBackground {
     // ==================== 3. LAYER 1 (FAR) -> AMBIENT SPRITES -> LAYER 2 (MID) -> LAYER 3 (NEAR) ====================
     if (this.biomePlanes.length === 3) {
       const [shallow, twilight, abyssal] = this.biomePlanes;
+      const shallowOffsets = this.computeBiomeVerticalOffsets(midWorldY, 680);
+      const twilightOffsets = this.computeBiomeVerticalOffsets(midWorldY, 1340);
+      const abyssOffsets = this.computeBiomeVerticalOffsets(midWorldY, 2100);
 
-      // Biome 0: Sunlit Coral Reef (0m ~ 680m, anchored around 280m so all 3 staircase layers are visible in shallow water!)
+      // Biome 0 Far: Sunlit Coral Reef (0m ~ 680m)
       if (midWorldY < 700) {
         const alpha0 =
           midWorldY < 460 ? 1 : Math.max(0, 1 - (midWorldY - 460) / 220);
-        const depthDelta0 = Math.max(0, 270 - midWorldY);
-        const farOffY = Math.min(48, depthDelta0 * 0.18);
-        const midOffY = Math.min(36, depthDelta0 * 0.14);
 
-        // Layer 1: Far Seamount Arches & Sunken Galleon (0.13x parallax, tallest staircase)
+        // Layer 1: Far Seamount Arches & Sunken Galleon (0.10x horizontal, 8px vertical amplitude)
         this.drawParallaxPlane(
           ctx,
           shallow.far,
           cameraX,
           viewW,
           viewH,
-          0.13,
-          farOffY - 24,
+          0.1,
+          shallowOffsets.farY,
           alpha0 * 0.92,
           0.56,
           240,
           520
         );
-        void midOffY;
       }
 
-      // Biome 1 Far: Twilight Sunken Atlantean Temple (440m ~ 1340m, anchored around 760m)
+      // Biome 1 Far: Twilight Sunken Atlantean Temple (440m ~ 1340m)
       if (midWorldY > 440 && midWorldY < 1340) {
         let alpha1 = 1;
         if (midWorldY < 660) {
@@ -1395,8 +1511,6 @@ export class ParallaxBackground {
         } else if (midWorldY > 1080) {
           alpha1 = 1 - (midWorldY - 1080) / 260;
         }
-        const depthDelta1 = Math.max(0, 760 - midWorldY);
-        const farOffY = Math.min(54, depthDelta1 * 0.16);
 
         this.drawParallaxPlane(
           ctx,
@@ -1404,8 +1518,8 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.13,
-          farOffY - 22,
+          0.1,
+          twilightOffsets.farY,
           alpha1 * 0.94,
           0.58,
           250,
@@ -1417,8 +1531,6 @@ export class ParallaxBackground {
       if (midWorldY > 1060) {
         const alpha2 =
           midWorldY < 1320 ? (midWorldY - 1060) / 260 : 1;
-        const depthDelta2 = Math.max(0, 1340 - midWorldY);
-        const farOffY = Math.min(60, depthDelta2 * 0.16);
 
         this.drawParallaxPlane(
           ctx,
@@ -1426,8 +1538,8 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.13,
-          farOffY - 18,
+          0.1,
+          abyssOffsets.farY,
           alpha2 * 0.94,
           0.62,
           270,
@@ -1435,7 +1547,7 @@ export class ParallaxBackground {
         );
       }
 
-      // Ambient Marine Schools & Jellyfish (0.20x parallax — sandwiched between Far Layer 1 and Mid Layer 2!)
+      // Ambient Marine Schools & Jellyfish (0.16x horizontal, 12px vertical amplitude)
       this.drawDistantAmbientSchools(
         ctx,
         cameraX,
@@ -1451,46 +1563,43 @@ export class ParallaxBackground {
       if (midWorldY < 700) {
         const alpha0 =
           midWorldY < 460 ? 1 : Math.max(0, 1 - (midWorldY - 460) / 220);
-        const depthDelta0 = Math.max(0, 270 - midWorldY);
-        const midOffY = Math.min(36, depthDelta0 * 0.14);
-        const nearOffY = Math.min(18, depthDelta0 * 0.08);
 
-        // Layer 2: Midground Coral Reef Cliffs & Purple Tube Sponges (0.27x parallax, mid staircase)
+        // Layer 2: Midground Coral Reef Cliffs & Purple Tube Sponges (0.22x horizontal, 16px vertical amplitude)
         this.drawParallaxPlane(
           ctx,
           shallow.mid,
           cameraX,
           viewW,
           viewH,
-          0.27,
-          midOffY - 12,
+          0.22,
+          shallowOffsets.midY,
           alpha0,
           0.42,
           185,
           400
         );
-        // Layer 3: Foreground Sandbank, Pearl Clams & Rusty Anchor (0.48x parallax, flush bottom staircase)
+        // Layer 3: Foreground Sandbank, Pearl Clams & Rusty Anchor (0.38x horizontal, 28px vertical amplitude)
         this.drawParallaxPlane(
           ctx,
           shallow.near,
           cameraX,
           viewW,
           viewH,
-          0.48,
-          nearOffY,
+          0.38,
+          shallowOffsets.nearY,
           alpha0,
           0.31,
           135,
           300
         );
-        // Layer 4: Swaying Giant Kelp & Rising Bubble Streams from bg_ambient_sprites (0.52x parallax)
+        // Layer 4: Swaying Giant Kelp & Rising Bubble Streams locked to Near seabed (0.38x horizontal, 28px vertical amplitude)
         this.drawAnimatedSeabedSprites(
           ctx,
           cameraX,
           viewW,
           viewH,
           nowMs,
-          nearOffY,
+          shallowOffsets.nearY,
           alpha0,
           'SHALLOW'
         );
@@ -1504,9 +1613,6 @@ export class ParallaxBackground {
         } else if (midWorldY > 1080) {
           alpha1 = 1 - (midWorldY - 1080) / 260;
         }
-        const depthDelta1 = Math.max(0, 760 - midWorldY);
-        const midOffY = Math.min(44, depthDelta1 * 0.15);
-        const nearOffY = Math.min(20, depthDelta1 * 0.08);
 
         this.drawParallaxPlane(
           ctx,
@@ -1514,8 +1620,8 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.27,
-          midOffY - 12,
+          0.22,
+          twilightOffsets.midY,
           alpha1,
           0.43,
           190,
@@ -1527,10 +1633,10 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.48,
-          nearOffY,
+          0.38,
+          twilightOffsets.nearY,
           alpha1,
-          0.30,
+          0.3,
           130,
           290
         );
@@ -1540,7 +1646,7 @@ export class ParallaxBackground {
           viewW,
           viewH,
           nowMs,
-          nearOffY,
+          twilightOffsets.nearY,
           alpha1,
           'TWILIGHT'
         );
@@ -1550,9 +1656,6 @@ export class ParallaxBackground {
       if (midWorldY > 1060) {
         const alpha2 =
           midWorldY < 1320 ? (midWorldY - 1060) / 260 : 1;
-        const depthDelta2 = Math.max(0, 1340 - midWorldY);
-        const midOffY = Math.min(48, depthDelta2 * 0.16);
-        const nearOffY = Math.min(18, depthDelta2 * 0.06);
 
         this.drawParallaxPlane(
           ctx,
@@ -1560,8 +1663,8 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.27,
-          midOffY - 10,
+          0.22,
+          abyssOffsets.midY,
           alpha2,
           0.48,
           210,
@@ -1573,8 +1676,8 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.48,
-          nearOffY,
+          0.38,
+          abyssOffsets.nearY,
           alpha2,
           0.22,
           95,
@@ -1585,10 +1688,9 @@ export class ParallaxBackground {
 
     // ==================== 4. 3-MODE DEPTH-REACTIVE ECOLOGICAL PARTICLES ====================
     ctx.save();
+    const isAbyss = midWorldY > 1150;
+    const isTwilight = midWorldY >= 520 && midWorldY <= 1150;
     for (const b of this.bubbles) {
-      const isAbyss = midWorldY > 1150;
-      const isTwilight = midWorldY >= 520 && midWorldY <= 1150;
-
       const verticalDir = isTwilight && b.kind === 'MARINE_SNOW' ? 0.35 : -1;
       b.y += verticalDir * b.speedY * dt;
       b.wobblePhase += dt * 2.1;
@@ -1638,47 +1740,26 @@ export class ParallaxBackground {
     }
     ctx.restore();
 
-    // ==================== 5. DEPTH PRESSURE VIGNETTE & HYDROTHERMAL MAGMA UNDERGLOW ====================
+    // ==================== 5. PRE-BAKED DEPTH PRESSURE VIGNETTE & HYDROTHERMAL MAGMA UNDERGLOW ====================
     if (midWorldY > 520) {
       ctx.save();
       const depthPressure = Math.min(1, (midWorldY - 520) / 1100);
-      const outerR = Math.hypot(viewW, viewH) * 0.58;
-      const innerR = Math.min(viewW, viewH) * (0.30 - depthPressure * 0.06);
-      const vig = ctx.createRadialGradient(
-        viewW * 0.5,
-        viewH * 0.5,
-        innerR,
-        viewW * 0.5,
-        viewH * 0.5,
-        outerR
-      );
-      vig.addColorStop(0, 'rgba(2, 6, 23, 0)');
-      vig.addColorStop(
-        0.72,
-        `rgba(4, 12, 34, ${(depthPressure * 0.22).toFixed(3)})`
-      );
-      vig.addColorStop(
-        1,
-        `rgba(2, 6, 23, ${(depthPressure * 0.45).toFixed(3)})`
-      );
-      ctx.fillStyle = vig;
-      ctx.fillRect(0, 0, viewW, viewH);
+      const vigCanvas = this.getOrCreateVignetteCanvas();
+      if (vigCanvas && depthPressure > 0.02) {
+        ctx.globalAlpha = depthPressure * 0.48;
+        ctx.drawImage(vigCanvas, 0, 0, viewW, viewH);
+      }
 
       if (midWorldY > 1150) {
         const magmaFactor = Math.min(1, (midWorldY - 1150) / 450);
         const pulse = 0.78 + Math.sin(nowMs * 0.0028) * 0.22;
-        const lavaGrad = ctx.createLinearGradient(0, viewH * 0.65, 0, viewH);
+        ctx.globalAlpha = magmaFactor * 0.18 * pulse;
+        const lavaGrad = ctx.createLinearGradient(0, viewH * 0.68, 0, viewH);
         lavaGrad.addColorStop(0, 'rgba(234, 88, 12, 0)');
-        lavaGrad.addColorStop(
-          0.7,
-          `rgba(234, 88, 12, ${(magmaFactor * 0.09 * pulse).toFixed(3)})`
-        );
-        lavaGrad.addColorStop(
-          1,
-          `rgba(251, 146, 60, ${(magmaFactor * 0.20 * pulse).toFixed(3)})`
-        );
+        lavaGrad.addColorStop(0.65, 'rgba(234, 88, 12, 0.45)');
+        lavaGrad.addColorStop(1, 'rgba(251, 146, 60, 1)');
         ctx.fillStyle = lavaGrad;
-        ctx.fillRect(0, viewH * 0.65, viewW, viewH * 0.35);
+        ctx.fillRect(0, viewH * 0.68, viewW, viewH * 0.32);
       }
       ctx.restore();
     }

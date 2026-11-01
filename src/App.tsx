@@ -17,12 +17,14 @@ import {
   computeEvolvedSharkStats,
   computeHuntingHeatBuff,
   getDepthZone,
+  getDebugPreySizeMultiplier,
   getEffectivePreyTier,
   getGeneSurgeCost,
   getGoldOverdriveCost,
   getPreyRelativeVisualScale,
   getXpRequiredForLevel,
   resolvePreyEncounter,
+  setDebugPreySizeMultiplier,
 } from './game/rules';
 import {
   evaluateSharkUnlock,
@@ -183,6 +185,18 @@ export default function App() {
 
   // Audio mute state
   const [isMuted, setIsMuted] = useState<boolean>(false);
+
+  // Live Debug Panel state (Real-time Fish Spawn Count & Prey Display Size regulators; hidden by default)
+  const [showDebugPanel, setShowDebugPanel] = useState<boolean>(false);
+  const [debugMaxPreys, setDebugMaxPreys] = useState<number>(
+    () => ecosystemSpawner.maxActivePreys
+  );
+  const [debugPreySizeMult, setDebugPreySizeMult] = useState<number>(() =>
+    getDebugPreySizeMultiplier()
+  );
+  const [liveActivePreyCount, setLiveActivePreyCount] = useState<number>(
+    () => ecosystemSpawner.maxActivePreys
+  );
 
   // 3-Step Hands-On Onboarding Tutorial State
   type TutorialStep =
@@ -656,12 +670,20 @@ export default function App() {
   // Pick an edible Target Fish species strictly native to the current ocean depth zone
   const rollTargetBountyConfig = useCallback(
     (maxBiteTier: number, currentDepth: number, excludeId?: string): PreyTierConfig => {
-      const effectiveMaxTier = currentDepth > 500 ? Math.max(3, maxBiteTier) : Math.max(1, maxBiteTier);
+      const isShallow = currentDepth <= 520;
+      const effectiveMaxTier = isShallow
+        ? Math.min(3, Math.max(1, maxBiteTier))
+        : Math.max(3, maxBiteTier);
       const edible = GAME_CONFIG.preyTiers.filter(
         (p) =>
           p.tier <= effectiveMaxTier &&
           !p.isHazard &&
-          p.id !== excludeId
+          p.id !== excludeId &&
+          (!isShallow ||
+            (p.behavior !== 'EEL_CHARGER' &&
+              p.behavior !== 'SUB_PATROL' &&
+              p.behavior !== 'HEAVY_CRUISER' &&
+              p.behavior !== 'KRAKEN_BOSS'))
       );
       const strictNative = edible.filter(
         (p) => currentDepth >= p.minDepth && currentDepth <= p.maxDepth
@@ -688,11 +710,13 @@ export default function App() {
       const halfW = infiniteWorldManager.worldWidth / 2;
       const refDepth = typeof nearSharkY === 'number' ? Math.max(0, nearSharkY) : 220;
 
-      // Weight lower tiers higher in shallow water; shift toward deep abyssal tiers when diving past 1200m+
+      // Weight lower tiers higher in shallow water (T1~T3 only, zero active attackers); shift toward deep abyssal tiers past 1200m+
       const tierWeights =
         refDepth > 1250
           ? [12, 12, 14, 16, 16, 12, 12, 6]
-          : [26, 24, 16, 11, 9, 7, 5, 2];
+          : refDepth > 520
+          ? [0, 0, 32, 30, 24, 14, 0, 0]
+          : [58, 28, 14, 0, 0, 0, 0, 0];
       const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
       let roll = Math.random() * totalWeight;
       let chosenTierNum = 1;
@@ -705,7 +729,13 @@ export default function App() {
       }
 
       const tierCandidates = GAME_CONFIG.preyTiers.filter(
-        (p) => p.tier === chosenTierNum
+        (p) =>
+          p.tier === chosenTierNum &&
+          (refDepth > 520 ||
+            (p.maxDepth <= 520 &&
+              !p.isHazard &&
+              p.behavior !== 'EEL_CHARGER' &&
+              p.behavior !== 'SUB_PATROL'))
       );
       const chosenTier: PreyTierConfig =
         tierCandidates.length > 0
@@ -904,14 +934,23 @@ export default function App() {
       // Populate initial ocean ecosystem via EcosystemSpawner object pool & reset InfiniteProgressionManager
       infiniteProgressionManager.reset();
       ecosystemSpawner.reset(sim.preyList);
-      const initialSpawnCount = Math.max(40, ecosystemSpawner.maxActivePreys - 10);
+      const targetMaxPreys = Math.max(4, ecosystemSpawner.maxActivePreys);
+      const starterShowcaseIds = [
+        'coral_clownfish',
+        'neon_tetra_school',
+        'gene_jelly',
+        'coral_clownfish',
+        'neon_tetra_school',
+      ];
+      const showcaseCount = Math.min(starterShowcaseIds.length, targetMaxPreys);
+      const initialSpawnCount = Math.max(0, targetMaxPreys - showcaseCount);
       for (let i = 0; i < initialSpawnCount; i++) {
         const spawned = ecosystemSpawner.spawnPreyOffScreen(
           sim.preyList,
           sim.shark.x,
           sim.shark.y,
           Math.random,
-          [660, ecosystemSpawner.spawnRadius],
+          [720, ecosystemSpawner.spawnRadius],
           0
         );
         if (i < 2) {
@@ -922,20 +961,8 @@ export default function App() {
           );
         }
       }
-      // Guarantee 10 immediately edible T1 shallow reef fish in welcoming clusters right in front of the shark
-      const starterShowcaseIds = [
-        'coral_clownfish',
-        'neon_tetra_school',
-        'gene_jelly',
-        'coral_clownfish',
-        'neon_tetra_school',
-        'gene_jelly',
-        'coral_clownfish',
-        'neon_tetra_school',
-        'coral_clownfish',
-        'gene_jelly',
-      ];
-      for (let i = 0; i < starterShowcaseIds.length; i++) {
+      // Guarantee up to 5 well-spaced edible T1 shallow reef fish in front of the shark so opening view is clean and breathable
+      for (let i = 0; i < showcaseCount; i++) {
         const candidate =
           GAME_CONFIG.preyTiers.find((p) => p.id === starterShowcaseIds[i]) ??
           GAME_CONFIG.preyTiers[0];
@@ -944,8 +971,8 @@ export default function App() {
         sim.preyList.push({
           uid: sim.nextPreyUid++,
           config: tierConfig,
-          x: 135 + i * 68,
-          y: 165 + ((i % 3) - 1) * 48,
+          x: 165 + i * 115,
+          y: 165 + ((i % 3) - 1) * 62,
           vx: 26,
           vy: 0,
           angle: 0,
@@ -955,6 +982,7 @@ export default function App() {
           scaleMultiplier: 1.0,
         });
       }
+      setLiveActivePreyCount(sim.preyList.length);
 
       const activeForm = getSharkFormById(chosenSharkId);
       const nextEvo = getNextEvolutionTarget(chosenSharkId, save);
@@ -1587,6 +1615,14 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    let cachedDisplay = {
+      dpr: 1,
+      viewW: 1280,
+      viewH: 720,
+      scaleX: 1,
+      scaleY: 1,
+    };
+
     const syncCanvasBufferToDisplayBox = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       const rect = canvas.getBoundingClientRect();
@@ -1604,13 +1640,14 @@ export default function App() {
         canvas.width = targetW;
         canvas.height = targetH;
       }
-      return {
+      cachedDisplay = {
         dpr,
         viewW: cssW,
         viewH: cssH,
         scaleX: canvas.width / cssW,
         scaleY: canvas.height / cssH,
       };
+      return cachedDisplay;
     };
     syncCanvasBufferToDisplayBox();
     window.addEventListener('resize', syncCanvasBufferToDisplayBox);
@@ -1626,7 +1663,7 @@ export default function App() {
       lastTime = now;
       const dt = Math.min(rawDt, 0.05);
 
-      const { viewW, viewH, scaleX, scaleY } = syncCanvasBufferToDisplayBox();
+      const { viewW, viewH, scaleX, scaleY } = cachedDisplay;
       const aspectZoomFactor =
         viewW < viewH ? Math.max(0.74, Math.min(1, viewW / 580)) : 1;
 
@@ -1673,7 +1710,7 @@ export default function App() {
 
         // Ambient prey swim on title screen
         if (sim.preyList.length === 0) {
-          for (let i = 0; i < 32; i++) {
+          for (let i = 0; i < 18; i++) {
             sim.preyList.push(createPreyEntity(0, 260));
           }
         }
@@ -2080,6 +2117,12 @@ export default function App() {
               break;
             }
             case 'EEL_CHARGER': {
+              // Shallow Sanctuary Protection: eels never actively charge at players swimming in the shallow zone (<= 520m)
+              if (shark.y <= 520 || prey.y <= 520) {
+                prey.telegraphTimer = 0;
+                prey.vy = Math.sin(prey.phase * 1.2) * 18;
+                break;
+              }
               if (distToShark < 290 && prey.telegraphTimer <= 0) {
                 prey.telegraphTimer = 0.55;
               }
@@ -2108,9 +2151,11 @@ export default function App() {
               if (distToShark < 420) {
                 const dirAngle = Math.atan2(shark.y - prey.y, shark.x - prey.x);
                 const isAggressiveApex =
-                  prey.config.isBoss ||
-                  prey.mutationVariant === 'ABYSS_BEHEMOTH' ||
-                  shark.stats.biteTier < effectivePreyTier;
+                  shark.y > 520 &&
+                  prey.y > 520 &&
+                  (prey.config.isBoss ||
+                    prey.mutationVariant === 'ABYSS_BEHEMOTH' ||
+                    shark.stats.biteTier < effectivePreyTier);
                 const mult =
                   shark.frenzyTimer > 0
                     ? -0.75
@@ -2816,6 +2861,7 @@ export default function App() {
             heatLevel: hudHeat.heatLevel,
             masteryCrownTier: liveMastery.newCrownTier,
           });
+          setLiveActivePreyCount(sim.preyList.length);
         }
       }
 
@@ -2848,41 +2894,49 @@ export default function App() {
       ctx.scale(renderZoom, renderZoom);
       ctx.translate(-sim.camera.x, -sim.camera.y);
 
-      const halfSpanX = Math.ceil(viewW / Math.max(0.35, renderZoom)) + 480;
+      const cullMargin = 115 / renderZoom;
+      const minX = sim.camera.x - viewW / (2 * renderZoom) - cullMargin;
+      const maxX = sim.camera.x + viewW / (2 * renderZoom) + cullMargin;
+      const minY = sim.camera.y - viewH / (2 * renderZoom) - cullMargin;
+      const maxY = sim.camera.y + viewH / (2 * renderZoom) + cullMargin;
+
+      const halfSpanX = Math.ceil(viewW / Math.max(0.35, renderZoom) * 0.55) + 180;
       const surfStart = Math.floor((sim.camera.x - halfSpanX) / 120) * 120;
       const surfEnd = Math.ceil((sim.camera.x + halfSpanX) / 120) * 120;
 
-      // Vivid Sunlit Sea Surface & Animated Dual Wave Crests
-      const skySurfGrad = ctx.createLinearGradient(0, -180, 0, 32);
-      skySurfGrad.addColorStop(0, 'rgba(186, 230, 253, 0.36)');
-      skySurfGrad.addColorStop(0.75, 'rgba(125, 211, 252, 0.22)');
-      skySurfGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
-      ctx.fillStyle = skySurfGrad;
-      ctx.fillRect(surfStart, -180, surfEnd - surfStart, 212);
+      // Vivid Sunlit Sea Surface & Animated Dual Wave Crests (only drawn when near surface!)
+      if (minY < 45) {
+        const skySurfGrad = ctx.createLinearGradient(0, -180, 0, 32);
+        skySurfGrad.addColorStop(0, 'rgba(186, 230, 253, 0.36)');
+        skySurfGrad.addColorStop(0.75, 'rgba(125, 211, 252, 0.22)');
+        skySurfGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+        ctx.fillStyle = skySurfGrad;
+        ctx.fillRect(surfStart, -180, surfEnd - surfStart, 212);
 
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.42)';
-      ctx.lineWidth = 6;
-      ctx.beginPath();
-      for (let wx = surfStart; wx <= surfEnd; wx += 60) {
-        const wy = 24 + Math.cos(wx * 0.012 - now * 0.0024) * 7;
-        if (wx === surfStart) ctx.moveTo(wx, wy);
-        else ctx.lineTo(wx, wy);
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.42)';
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        for (let wx = surfStart; wx <= surfEnd; wx += 60) {
+          const wy = 24 + Math.cos(wx * 0.012 - now * 0.0024) * 7;
+          if (wx === surfStart) ctx.moveTo(wx, wy);
+          else ctx.lineTo(wx, wy);
+        }
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(224, 242, 254, 0.85)';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        for (let wx = surfStart; wx <= surfEnd; wx += 60) {
+          const wy = 14 + Math.sin(wx * 0.015 + now * 0.0032) * 8;
+          if (wx === surfStart) ctx.moveTo(wx, wy);
+          else ctx.lineTo(wx, wy);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
 
-      ctx.strokeStyle = 'rgba(224, 242, 254, 0.85)';
-      ctx.lineWidth = 3.5;
-      ctx.beginPath();
-      for (let wx = surfStart; wx <= surfEnd; wx += 60) {
-        const wy = 14 + Math.sin(wx * 0.015 + now * 0.0032) * 8;
-        if (wx === surfStart) ctx.moveTo(wx, wy);
-        else ctx.lineTo(wx, wy);
-      }
-      ctx.stroke();
-
-      // Organic Thermocline Shimmer Wave at Ecological Depth Boundaries (replaces mechanical dashed line)
+      // Organic Thermocline Shimmer Wave at Ecological Depth Boundaries (only drawn when in viewport!)
       for (const z of GAME_CONFIG.zones) {
-        if (z.minDepth > 0) {
+        if (z.minDepth > 0 && z.minDepth >= minY - 36 && z.minDepth <= maxY + 36) {
           const isAbyssBoundary = z.minDepth >= 1000;
           const thermGrad = ctx.createLinearGradient(
             0,
@@ -2920,7 +2974,15 @@ export default function App() {
       const coinSprite = spriteSheetManager.getUiIconFrame('UI_ICON_COIN');
       const geneSprite = spriteSheetManager.getUiIconFrame('UI_ICON_GENE');
       for (const pk of sim.pickups) {
-        if (!pk.active) continue;
+        if (
+          !pk.active ||
+          pk.x < minX ||
+          pk.x > maxX ||
+          pk.y < minY ||
+          pk.y > maxY
+        ) {
+          continue;
+        }
         ctx.save();
         const bobY = Math.sin(pk.phase) * 3.5;
         ctx.translate(pk.x, pk.y + bobY);
@@ -2973,12 +3035,6 @@ export default function App() {
       }
 
       // Render Prey Entities within camera frustum
-      const cullMargin = 220 / renderZoom;
-      const minX = sim.camera.x - viewW / (2 * renderZoom) - cullMargin;
-      const maxX = sim.camera.x + viewW / (2 * renderZoom) + cullMargin;
-      const minY = sim.camera.y - viewH / (2 * renderZoom) - cullMargin;
-      const maxY = sim.camera.y + viewH / (2 * renderZoom) + cullMargin;
-
       const isBoosting =
         (sim.input.boostPointerHeld ||
           sim.input.rightMouseBoostHeld ||
@@ -3303,6 +3359,36 @@ export default function App() {
     setIsMuted(muted);
   };
 
+  // Real-time Debug Controller 1: Update active fish spawn count immediately
+  const handleDebugMaxPreysChange = useCallback((nextVal: number) => {
+    const clamped = Math.max(4, Math.min(80, Math.round(nextVal)));
+    ecosystemSpawner.maxActivePreys = clamped;
+    setDebugMaxPreys(clamped);
+    const sim = simRef.current;
+    ecosystemSpawner.syncPreyCountImmediate(
+      sim.preyList,
+      sim.shark.x,
+      sim.shark.y,
+      Math.random,
+      sim.shark.score,
+      [220, Math.min(980, ecosystemSpawner.spawnRadius)]
+    );
+    setLiveActivePreyCount(sim.preyList.length);
+  }, []);
+
+  // Real-time Debug Controller 2: Update prey visual & hitbox size multiplier immediately
+  const handleDebugPreySizeChange = useCallback((nextVal: number) => {
+    const clamped = Number(Math.max(0.35, Math.min(2.5, nextVal)).toFixed(2));
+    setDebugPreySizeMultiplier(clamped);
+    setDebugPreySizeMult(clamped);
+  }, []);
+
+  // Reset both Debug Controllers to default values (20 fish, 0.80x prey size)
+  const handleResetDebugParams = useCallback(() => {
+    handleDebugMaxPreysChange(20);
+    handleDebugPreySizeChange(0.8);
+  }, [handleDebugMaxPreysChange, handleDebugPreySizeChange]);
+
   const titleSharkForm = getSharkFormById(metaSave.selectedSharkId);
   const titleSharkUpg = metaSave.sharkUpgradeLevels[titleSharkForm.id] ?? 1;
   const unlockedTotalCount = metaSave.unlockedSharkIds.length;
@@ -3379,7 +3465,166 @@ export default function App() {
               />
               <span>{isMuted ? t('btn_unmute') : t('btn_mute')}</span>
             </button>
+
+            <button
+              type="button"
+              data-testid="toggle-debug-panel-title-btn"
+              onClick={() => setShowDebugPanel((prev) => !prev)}
+              className={`hidden game-btn-spring px-3.5 py-1.5 md:px-4 md:py-2 rounded-full font-display font-bold text-xs shadow-md whitespace-nowrap shrink-0 cursor-pointer ${
+                showDebugPanel
+                  ? 'bg-cyan-400 text-slate-950'
+                  : 'bg-slate-950/65 text-cyan-200 hover:bg-slate-900/90'
+              }`}
+            >
+              🛠 {lang === 'zh' ? '调参' : 'Debug'}
+            </button>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ==================== LIVE REAL-TIME DEBUG REGULATOR PANEL ==================== */}
+      <AnimatePresence>
+        {showDebugPanel && (
+          <motion.aside
+            key="live-debug-panel"
+            data-testid="live-debug-panel"
+            initial={{ opacity: 0, y: -12, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -12, scale: 0.96 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerMove={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onTouchMove={(e) => e.stopPropagation()}
+            className="fixed top-14 left-2 sm:top-16 sm:left-3 z-40 w-[268px] sm:w-[296px] rounded-2xl bg-slate-950/90 backdrop-blur-md p-3 text-white shadow-[0_12px_32px_rgba(2,6,23,0.85)] border border-cyan-400/30 pointer-events-auto select-none"
+          >
+            <div className="flex items-center justify-between gap-2 mb-2.5 pb-1.5 border-b border-white/10">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs">🛠️</span>
+                <span className="font-display font-extrabold text-xs tracking-wide text-cyan-300">
+                  {lang === 'zh'
+                    ? '实时调试面板 (Debug)'
+                    : 'Live Debug Controls'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  data-testid="debug-reset-btn"
+                  {...bindMultiTouchButton(handleResetDebugParams)}
+                  className="px-2 py-0.5 rounded-full bg-white/10 hover:bg-white/20 font-display font-bold text-[10px] text-amber-300 cursor-pointer"
+                >
+                  {lang === 'zh' ? '重置默认' : 'Reset'}
+                </button>
+                <button
+                  type="button"
+                  data-testid="debug-close-btn"
+                  {...bindMultiTouchButton(() => setShowDebugPanel(false))}
+                  className="px-2 py-0.5 rounded-full bg-white/10 hover:bg-white/20 font-display font-bold text-[10px] text-slate-300 hover:text-white cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Regulator 1: Fish Spawn Count / Density */}
+            <div className="mb-3">
+              <div className="flex items-center justify-between text-[11px] font-display font-bold mb-1">
+                <span className="text-slate-200">
+                  {lang === 'zh' ? '1. 鱼群刷新数量' : '1. Fish Spawn Count'}
+                </span>
+                <span className="font-mono-num text-cyan-300 font-extrabold">
+                  {debugMaxPreys}{' '}
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    ({lang === 'zh' ? '同屏' : 'live'}: {liveActivePreyCount})
+                  </span>
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  data-testid="debug-fish-minus-btn"
+                  {...bindMultiTouchButton(() =>
+                    handleDebugMaxPreysChange(debugMaxPreys - 4)
+                  )}
+                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 font-mono-num font-bold text-[11px] text-cyan-200 cursor-pointer shrink-0"
+                >
+                  -4
+                </button>
+                <input
+                  type="range"
+                  data-testid="debug-fish-count-slider"
+                  min={4}
+                  max={80}
+                  step={1}
+                  value={debugMaxPreys}
+                  onChange={(e) =>
+                    handleDebugMaxPreysChange(Number(e.target.value))
+                  }
+                  className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                />
+                <button
+                  type="button"
+                  data-testid="debug-fish-plus-btn"
+                  {...bindMultiTouchButton(() =>
+                    handleDebugMaxPreysChange(debugMaxPreys + 4)
+                  )}
+                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 font-mono-num font-bold text-[11px] text-cyan-200 cursor-pointer shrink-0"
+                >
+                  +4
+                </button>
+              </div>
+            </div>
+
+            {/* Regulator 2: Prey Display Size Multiplier */}
+            <div>
+              <div className="flex items-center justify-between text-[11px] font-display font-bold mb-1">
+                <span className="text-slate-200">
+                  {lang === 'zh' ? '2. 猎物显示大小' : '2. Prey Display Size'}
+                </span>
+                <span className="font-mono-num text-emerald-300 font-extrabold">
+                  {debugPreySizeMult.toFixed(2)}x{' '}
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    ({Math.round(debugPreySizeMult * 100)}%)
+                  </span>
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  data-testid="debug-size-minus-btn"
+                  {...bindMultiTouchButton(() =>
+                    handleDebugPreySizeChange(debugPreySizeMult - 0.1)
+                  )}
+                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 font-mono-num font-bold text-[11px] text-emerald-200 cursor-pointer shrink-0"
+                >
+                  -0.1
+                </button>
+                <input
+                  type="range"
+                  data-testid="debug-prey-size-slider"
+                  min={0.35}
+                  max={2.5}
+                  step={0.05}
+                  value={debugPreySizeMult}
+                  onChange={(e) =>
+                    handleDebugPreySizeChange(Number(e.target.value))
+                  }
+                  className="w-full accent-emerald-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                />
+                <button
+                  type="button"
+                  data-testid="debug-size-plus-btn"
+                  {...bindMultiTouchButton(() =>
+                    handleDebugPreySizeChange(debugPreySizeMult + 0.1)
+                  )}
+                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 font-mono-num font-bold text-[11px] text-emerald-200 cursor-pointer shrink-0"
+                >
+                  +0.1
+                </button>
+              </div>
+            </div>
+          </motion.aside>
         )}
       </AnimatePresence>
 
@@ -3796,6 +4041,31 @@ export default function App() {
                       </span>
                     </div>
                   </div>
+
+                  {/* Compact Debug Panel Toggle Pill (Hidden by default per configuration; code retained) */}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    data-testid="hud-toggle-debug-btn"
+                    {...bindMultiTouchButton(() =>
+                      setShowDebugPanel((prev) => !prev)
+                    )}
+                    title={
+                      lang === 'zh'
+                        ? '打开/收起实时调参面板 (Debug)'
+                        : 'Toggle Live Debug Panel'
+                    }
+                    className={`hidden game-btn-spring px-2.5 py-1 rounded-full font-display font-extrabold text-[10px] sm:text-xs items-center gap-1 cursor-pointer touch-manipulation shrink-0 shadow ${
+                      showDebugPanel
+                        ? 'bg-cyan-400 text-slate-950'
+                        : 'bg-slate-950/75 text-cyan-200 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span>🛠</span>
+                    <span className="hidden sm:inline">
+                      {lang === 'zh' ? '调参' : 'Debug'}
+                    </span>
+                  </button>
 
                   {/* Single Compact Pause Medallion */}
                   <button

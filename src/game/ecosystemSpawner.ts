@@ -11,19 +11,19 @@ import { infiniteProgressionManager } from './infiniteProgressionManager';
 
 export class EcosystemSpawner {
   /**
-   * 同屏最大鱼数量
+   * 同屏最大鱼数量（控制生态密度，避免浅海视野内鱼群过度拥挤）
    */
-  public maxActivePreys: number = 50;
+  public maxActivePreys: number = 20;
 
   /**
    * 在距离玩家多远的外围生成 (minSpawnRadius ~ spawnRadius)
    */
-  public spawnRadius: number = 1500;
+  public spawnRadius: number = 1650;
 
   /**
    * 视野外生成的内圈最小半径
    */
-  public minSpawnRadius: number = 800;
+  public minSpawnRadius: number = 640;
 
   /**
    * 累计游戏时长（秒），驱动无限数值膨胀 (Infinite Scaling)
@@ -37,7 +37,7 @@ export class EcosystemSpawner {
   private nextUid: number = 1;
 
   /**
-   * 群居小鱼（SCHOOL_FLEE）成簇结队生成锚点，让小丑鱼/霓虹灯鱼/沙丁鱼等自动排成 3~4 条的小鱼群
+   * 群居小鱼（SCHOOL_FLEE）轻量双鱼结伴生成锚点，避免单簇过多导致视野拥挤
    */
   private schoolClusterAnchor: {
     config: PreyTierConfig;
@@ -50,9 +50,9 @@ export class EcosystemSpawner {
   } | null = null;
 
   constructor(
-    maxActivePreys: number = 50,
-    spawnRadius: number = 1500,
-    minSpawnRadius: number = 540
+    maxActivePreys: number = 20,
+    spawnRadius: number = 1650,
+    minSpawnRadius: number = 640
   ) {
     this.maxActivePreys = maxActivePreys;
     this.spawnRadius = spawnRadius;
@@ -71,6 +71,10 @@ export class EcosystemSpawner {
         if (p) this.pool.push(p);
       }
     }
+  }
+
+  public getPoolSize(): number {
+    return this.pool.length;
   }
 
   /**
@@ -103,10 +107,55 @@ export class EcosystemSpawner {
   }
 
   /**
+   * 实时同步当前同屏猎物数量至 maxActivePreys（用于 Debug 调节器或局内动态密度调整）：
+   * - 当同屏鱼数超出 maxActivePreys 时，优先从距离玩家最远的鱼开始回收到对象池
+   * - 当同屏鱼数少于 maxActivePreys 时，立即补充新鱼
+   */
+  public syncPreyCountImmediate(
+    activePreys: PreyEntity[],
+    sharkX: number,
+    sharkY: number,
+    rng: () => number = Math.random,
+    currentScore: number = 0,
+    customDistanceRange?: [number, number]
+  ): void {
+    const targetCount = Math.max(0, Math.round(this.maxActivePreys));
+    while (activePreys.length > targetCount) {
+      let farthestIdx = activePreys.length - 1;
+      let maxDistSq = -1;
+      for (let i = 0; i < activePreys.length; i++) {
+        const p = activePreys[i];
+        const dx = infiniteWorldManager.getShortestDeltaX(sharkX, p.x);
+        const dy = p.y - sharkY;
+        const dSq = dx * dx + dy * dy;
+        if (dSq > maxDistSq) {
+          maxDistSq = dSq;
+          farthestIdx = i;
+        }
+      }
+      const [removed] = activePreys.splice(farthestIdx, 1);
+      if (removed) {
+        this.pool.push(removed);
+      }
+    }
+
+    while (activePreys.length < targetCount) {
+      this.spawnPreyOffScreen(
+        activePreys,
+        sharkX,
+        sharkY,
+        rng,
+        customDistanceRange,
+        currentScore
+      );
+    }
+  }
+
+  /**
    * 每帧更新：
    * 1. 累加 gameTime
    * 2. 清理距离玩家过远（distance > spawnRadius * 1.5）的鱼并回收到对象池
-   * 3. 维持同屏鱼群数量达到 maxActivePreys
+   * 3. 实时裁剪或补齐同屏鱼群数量至 maxActivePreys
    */
   public update(
     deltaTime: number,
@@ -132,10 +181,8 @@ export class EcosystemSpawner {
       }
     }
 
-    // 2. 维持同屏鱼群数量 (补齐至 maxActivePreys)
-    while (activePreys.length < this.maxActivePreys) {
-      this.spawnPreyOffScreen(activePreys, sharkX, sharkY, rng, undefined, currentScore);
-    }
+    // 2. 维持同屏鱼群数量 (实时裁剪多余鱼或补齐至 maxActivePreys)
+    this.syncPreyCountImmediate(activePreys, sharkX, sharkY, rng, currentScore);
   }
 
   /**
@@ -161,8 +208,8 @@ export class EcosystemSpawner {
       this.schoolClusterAnchor = null;
     }
 
-    // 若当前存在未生成的同伴鱼群锚点，优先在领头鱼附近 (32~68px) 生成同种伴游鱼，形成鱼群编队
-    // 重要防滚雪球机制：伴游鱼固定为普通个体 ('NONE')，严禁一簇鱼群同时刷出 4 条黄金变异鱼导致秒触发狂暴
+    // 若当前存在未生成的同伴鱼群锚点，优先在领头鱼附近 (48~96px) 生成 1 条同种伴游鱼，形成自然双鱼结伴
+    // 重要防滚雪球机制：伴游鱼固定为普通个体 ('NONE')，严禁一簇鱼群同时刷出多条黄金变异鱼导致秒触发狂暴
     if (this.schoolClusterAnchor && this.schoolClusterAnchor.remainingMates > 0) {
       const anchor = this.schoolClusterAnchor;
       anchor.remainingMates -= 1;
@@ -170,8 +217,8 @@ export class EcosystemSpawner {
         this.schoolClusterAnchor = null;
       }
 
-      const offsetX = (rng() - 0.5) * 76;
-      const offsetY = (rng() - 0.5) * 52;
+      const offsetX = (rng() - 0.5) * 96;
+      const offsetY = (rng() - 0.5) * 64;
       const mateX = infiniteWorldManager.wrapEntityX(anchor.x + offsetX);
       const mateY = Math.max(
         Math.max(25, anchor.config.minDepth),
@@ -209,13 +256,14 @@ export class EcosystemSpawner {
     if (spawnY < 35) {
       spawnY = 35 + rng() * 220;
     }
-    // 新手保护 / T1 浅海开局保护：当玩家在阳光浅滩上层 (sharkY <= 380m) 活动时，防止下方视野外刷怪半径直接伸入 520m+ 暮光带刷出中层掠食者
-    if (
-      sharkY <= 380 &&
-      (this.tutorialProtectionActive ||
-        (this.activeSharkBiteTier <= 1 && this.gameTime < 20))
-    ) {
-      spawnY = Math.min(440, spawnY);
+    // 浅海生态保护：当玩家在阳光珊瑚浅海上中层 (sharkY <= 430m) 活动时，防止下方视野外刷怪半径直接伸入 520m+ 暮光带刷出鳗鱼等主动攻击掠食者
+    if (sharkY <= 430) {
+      const maxShallowSpawnY =
+        this.tutorialProtectionActive ||
+        (this.activeSharkBiteTier <= 1 && this.gameTime < 20)
+          ? 440
+          : 495;
+      spawnY = Math.min(maxShallowSpawnY, spawnY);
     }
 
     // 根据猎物实际生成的目标水深 spawnY 严格匹配对应生态层的鱼种，并将生成坐标钳制在该物种真实栖息水深内
@@ -239,7 +287,7 @@ export class EcosystemSpawner {
     const vy = (rng() - 0.5) * 24;
     const headingAngle = moveDir > 0 ? 0 : Math.PI;
 
-    // 仅对单一个体的小型 Tier 1 鱼种建立 2 条伴游鱼编队（本身已经是多鱼群贴图的物种以及 T2+ 大体型鱼不重叠扎堆）
+    // 仅对单一个体的小型 Tier 1 鱼种以 28% 概率建立 1 条伴游鱼编队（双鱼结伴，避免成团扎堆）
     const isMultiFishSprite =
       chosenTier.id === 'gene_jelly' ||
       chosenTier.id === 'neon_tetra_school' ||
@@ -248,7 +296,7 @@ export class EcosystemSpawner {
       chosenTier.tier === 1 &&
       !isMultiFishSprite &&
       !chosenTier.isHazard &&
-      rng() < 0.55
+      rng() < 0.28
     ) {
       this.schoolClusterAnchor = {
         config: chosenTier,
@@ -257,7 +305,7 @@ export class EcosystemSpawner {
         vx,
         vy,
         angle: headingAngle,
-        remainingMates: 2,
+        remainingMates: 1,
       };
     }
 
@@ -290,7 +338,7 @@ export class EcosystemSpawner {
   public activeSharkBiteTier: number = 1;
 
   /**
-   * 首局新手引导保护开关（开启时浅海屏蔽主动追咬掠食者与水雷）
+   * 首局新手引导保护开关（开启时浅海仅刷 T1~T2 温顺小鱼）
    */
   public tutorialProtectionActive: boolean = false;
 
@@ -304,8 +352,9 @@ export class EcosystemSpawner {
     }
 
     const depth = Math.max(25, targetDepthY);
+    const isShallowZone = depth <= 520;
     const isEarlySanctuary =
-      depth <= 520 &&
+      isShallowZone &&
       (this.tutorialProtectionActive ||
         (this.activeSharkBiteTier <= 1 && this.gameTime < 20));
 
@@ -316,18 +365,20 @@ export class EcosystemSpawner {
     const rawActivePool =
       habitatPool.length > 0
         ? habitatPool
-        : depth <= 520
+        : isShallowZone
         ? allPreys.filter((p) => p.maxDepth <= 520)
         : allPreys.filter((p) => p.minDepth >= 500);
 
-    // 在首局引导或 T1 幼鲨前 20 秒内，浅海过滤掉主动冲刺追咬型掠食者（EEL_CHARGER / SUB_PATROL）与水雷
-    const sanctuaryFilteredPool = isEarlySanctuary
+    // 整个阳光珊瑚浅水区 (0m ~ 520m) 全程永久禁止刷出鳗鱼等主动冲刺攻击型掠食者（EEL_CHARGER / SUB_PATROL / HEAVY_CRUISER / KRAKEN_BOSS）与水雷
+    const sanctuaryFilteredPool = isShallowZone
       ? rawActivePool.filter(
           (p) =>
             !p.isHazard &&
             p.behavior !== 'EEL_CHARGER' &&
             p.behavior !== 'SUB_PATROL' &&
-            p.behavior !== 'MINE_HAZARD'
+            p.behavior !== 'MINE_HAZARD' &&
+            p.behavior !== 'HEAVY_CRUISER' &&
+            p.behavior !== 'KRAKEN_BOSS'
         )
       : rawActivePool;
     const activePool =
@@ -344,8 +395,8 @@ export class EcosystemSpawner {
     // 根据真实海洋生态垂直分层与玩家当前咬合阶位动态分配 Tier 1..8 阶位权重：
     // - 浅海新手/T1开局保护期：84% T1 可吞噬小鱼 + 16% 温顺 T2 鱼（零主动攻击掠食者）
     // - 浅海 T1 常态期：76% T1 + 18% T2 + 6% T3（保证 >75% 鱼可直接吞噬）
-    // - 浅海 T2+ 进阶期：54% T1 + 26% T2 + 14% T3 + 6% T4（保证 80% T1~T2 可直接吞噬）
-    // - 暮光带 (520~1150m)：T3~T6 中层发光鱼与乌贼；深渊带 (1150m+)：T3~T8 深渊掠食者与巨兽
+    // - 浅海 T2+ 进阶期：58% T1 + 28% T2 + 14% T3（浅海仅栖息 T1~T3 珊瑚礁鱼群，0% T4+ 掠食者）
+    // - 暮光带 (520~1150m)：T3~T6 中层发光鱼、海鳝与乌贼；深渊带 (1150m+)：T3~T8 深渊掠食者与巨兽
     const tierWeights =
       depth > 1150
         ? [0, 0, 12, 18, 22, 20, 16, 12]
@@ -355,7 +406,7 @@ export class EcosystemSpawner {
         ? [84, 16, 0, 0, 0, 0, 0, 0]
         : this.activeSharkBiteTier <= 1
         ? [76, 18, 6, 0, 0, 0, 0, 0]
-        : [54, 26, 14, 6, 0, 0, 0, 0];
+        : [58, 28, 14, 0, 0, 0, 0, 0];
 
     const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
     let roll = rng() * totalWeight;
@@ -375,7 +426,8 @@ export class EcosystemSpawner {
   }
 }
 
-// 局内实时生态生成器：将刷新圈收紧至紧贴视口外缘的黄金狩猎环 (520px ~ 1060px)，同屏上限提升至 58 条
-export const ecosystemSpawner = new EcosystemSpawner(58, 1060, 520);
+// 局内实时生态生成器：将刷新圈扩至宽广视野环 (640px ~ 1650px)，默认同屏上限设为 20 条（保留 Debug 实时调参能力）
+export const ecosystemSpawner = new EcosystemSpawner(20, 1650, 640);
+
 
 

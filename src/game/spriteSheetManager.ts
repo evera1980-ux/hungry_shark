@@ -428,7 +428,9 @@ export class SpriteSheetManager {
     return this.loadingPromise;
   }
 
-  private createChromaKeyCanvas(img: HTMLImageElement): HTMLCanvasElement | null {
+  private createChromaKeyCanvas(
+    img: HTMLImageElement
+  ): { sheetCanvas: HTMLCanvasElement; imgData: ImageData } | null {
     const fullW = img.naturalWidth || img.width;
     const fullH = img.naturalHeight || img.height;
     if (!fullW || !fullH) return null;
@@ -458,12 +460,12 @@ export class SpriteSheetManager {
       }
     }
     sheetCtx.putImageData(imgData, 0, 0);
-    return sheetCanvas;
+    return { sheetCanvas, imgData };
   }
 
   private sliceBoundedFrame(
     sheetCanvas: HTMLCanvasElement,
-    sheetCtx: CanvasRenderingContext2D,
+    fullData: Uint8ClampedArray,
     bounds: [number, number, number, number]
   ): HTMLCanvasElement {
     const fullW = sheetCanvas.width;
@@ -474,7 +476,6 @@ export class SpriteSheetManager {
     const cellW = Math.max(1, Math.floor((nx1 - nx0) * fullW));
     const cellH = Math.max(1, Math.floor((ny1 - ny0) * fullH));
 
-    const cellData = sheetCtx.getImageData(sx, sy, cellW, cellH);
     let minX = cellW;
     let minY = cellH;
     let maxX = 0;
@@ -482,8 +483,9 @@ export class SpriteSheetManager {
     let hasPixels = false;
 
     for (let py = 0; py < cellH; py++) {
+      const rowOffset = (sy + py) * fullW + sx;
       for (let px = 0; px < cellW; px++) {
-        const alpha = cellData.data[(py * cellW + px) * 4 + 3];
+        const alpha = fullData[(rowOffset + px) * 4 + 3];
         if (alpha > 18) {
           hasPixels = true;
           if (px < minX) minX = px;
@@ -520,10 +522,10 @@ export class SpriteSheetManager {
   }
 
   private processAndSlicePrimaryImage(img: HTMLImageElement): void {
-    const sheetCanvas = this.createChromaKeyCanvas(img);
-    if (!sheetCanvas) return;
-    const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
-    if (!sheetCtx) return;
+    const res = this.createChromaKeyCanvas(img);
+    if (!res) return;
+    const { sheetCanvas, imgData } = res;
+    const fullData = imgData.data;
 
     this.rawGridFrames = [];
     const orderedKeys: PrimarySpriteFrameKey[] = [
@@ -548,7 +550,7 @@ export class SpriteSheetManager {
     for (const key of orderedKeys) {
       const frameCanvas = this.sliceBoundedFrame(
         sheetCanvas,
-        sheetCtx,
+        fullData,
         SPRITE_CELL_BOUNDS[key]
       );
       this.frames[key] = frameCanvas;
@@ -557,10 +559,10 @@ export class SpriteSheetManager {
   }
 
   private processAndSliceFish2Image(img: HTMLImageElement): void {
-    const sheetCanvas = this.createChromaKeyCanvas(img);
-    if (!sheetCanvas) return;
-    const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
-    if (!sheetCtx) return;
+    const res = this.createChromaKeyCanvas(img);
+    if (!res) return;
+    const { sheetCanvas, imgData } = res;
+    const fullData = imgData.data;
 
     this.fish2GridFrames = [];
     const orderedFish2Keys = Object.keys(FISH2_GRID_MAP) as Fish2SpriteKey[];
@@ -568,7 +570,7 @@ export class SpriteSheetManager {
     for (const key of orderedFish2Keys) {
       const frameCanvas = this.sliceBoundedFrame(
         sheetCanvas,
-        sheetCtx,
+        fullData,
         FISH2_CELL_BOUNDS[key]
       );
       this.frames[key] = frameCanvas;
@@ -577,10 +579,10 @@ export class SpriteSheetManager {
   }
 
   private processAndSliceSharksImage(img: HTMLImageElement): void {
-    const sheetCanvas = this.createChromaKeyCanvas(img);
-    if (!sheetCanvas) return;
-    const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
-    if (!sheetCtx) return;
+    const res = this.createChromaKeyCanvas(img);
+    if (!res) return;
+    const { sheetCanvas, imgData } = res;
+    const fullData = imgData.data;
 
     this.sharksGridFrames = [];
     const orderedSharkKeys = Object.keys(SHARK_GRID_MAP) as SharkSpriteKey[];
@@ -588,7 +590,7 @@ export class SpriteSheetManager {
     for (const key of orderedSharkKeys) {
       const frameCanvas = this.sliceBoundedFrame(
         sheetCanvas,
-        sheetCtx,
+        fullData,
         SHARK_CELL_BOUNDS[key]
       );
       this.frames[key] = frameCanvas;
@@ -761,11 +763,6 @@ export class SpriteSheetManager {
 
       this.frames[key] = frameCanvas;
       this.uiIconsGridFrames.push(frameCanvas);
-      try {
-        this.uiIconDataUrls[key] = frameCanvas.toDataURL('image/png');
-      } catch {
-        // Ignore dataURL security errors if any
-      }
     }
   }
 
@@ -778,7 +775,17 @@ export class SpriteSheetManager {
   }
 
   public getUiIconDataUrl(key: UiIconKey): string | undefined {
-    return this.uiIconDataUrls[key];
+    const cached = this.uiIconDataUrls[key];
+    if (cached) return cached;
+    const frameCanvas = this.frames[key];
+    if (!frameCanvas) return undefined;
+    try {
+      const dataUrl = frameCanvas.toDataURL('image/png');
+      this.uiIconDataUrls[key] = dataUrl;
+      return dataUrl;
+    } catch {
+      return undefined;
+    }
   }
 
   public getSharkFormFrame(

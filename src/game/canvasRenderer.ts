@@ -261,6 +261,59 @@ function drawNaturalAspectFrame(
   );
 }
 
+export type SpriteTintVariant = 'NONE' | 'GOLD' | 'ABYSS' | 'FLASH' | 'LOCKED';
+
+const tintedFrameCache = new WeakMap<
+  HTMLCanvasElement,
+  Partial<Record<SpriteTintVariant, HTMLCanvasElement>>
+>();
+
+/**
+ * Returns a pre-baked tinted offscreen canvas for Golden Frenzy / Golden Mutant ('GOLD'),
+ * Abyss Behemoth ('ABYSS'), Damage/Morph Hit-Flash ('FLASH'), or Locked Atlas Preview ('LOCKED').
+ * Caching the tinted frame once per sprite completely eliminates per-slice `ctx.filter`
+ * evaluation during 60 FPS multi-slice ribbon rendering (avoiding 300+ CSS filter passes/frame).
+ */
+export function getPrebakedTintedFrame(
+  frame: HTMLCanvasElement | undefined,
+  variant: SpriteTintVariant
+): HTMLCanvasElement | undefined {
+  if (!frame || variant === 'NONE' || frame.width === 0 || frame.height === 0) {
+    return frame;
+  }
+
+  let cacheEntry = tintedFrameCache.get(frame);
+  if (!cacheEntry) {
+    cacheEntry = {};
+    tintedFrameCache.set(frame, cacheEntry);
+  }
+  const existing = cacheEntry[variant];
+  if (existing) return existing;
+
+  if (typeof document === 'undefined') return frame;
+  const out = document.createElement('canvas');
+  out.width = frame.width;
+  out.height = frame.height;
+  const oCtx = out.getContext('2d');
+  if (!oCtx) return frame;
+
+  // Bake the CSS filter once onto the single sprite frame (never inside the 60Hz slice loop!)
+  if (variant === 'FLASH') {
+    oCtx.filter = 'brightness(1.85) contrast(1.2)';
+  } else if (variant === 'GOLD') {
+    oCtx.filter = 'sepia(0.85) saturate(3.2) hue-rotate(5deg) brightness(1.15)';
+  } else if (variant === 'ABYSS') {
+    oCtx.filter = 'hue-rotate(255deg) saturate(1.6) contrast(1.1)';
+  } else if (variant === 'LOCKED') {
+    oCtx.filter = 'brightness(0.55) saturate(0.35) contrast(1.1)';
+  }
+  oCtx.drawImage(frame, 0, 0);
+  oCtx.filter = 'none';
+
+  cacheEntry[variant] = out;
+  return out;
+}
+
 /**
  * Continuous Affine-Sheared Ribbon Spine Renderer.
  * Preserves the exact bounding footprint (drawW × drawH) of drawNaturalAspectFrame
@@ -284,8 +337,11 @@ export function drawUndulatingSpriteFrame(
 ): void {
   if (!frame || frame.width === 0 || frame.height === 0) return;
 
-  // Rigid objects or ultra-small distant sprites can fast-path when no spinal bending is needed
-  if (gait === 'RIGID_PROPULSION' && baseSize < 42) {
+  // Rigid objects or small distant sprites can fast-path when no spinal bending is needed
+  if (
+    (gait === 'RIGID_PROPULSION' && baseSize < 48) ||
+    (baseSize < 20 && Math.abs(turnBend) < 0.08)
+  ) {
     drawNaturalAspectFrame(ctx, frame, baseSize, offsetX, offsetY, inflateY);
     return;
   }
@@ -296,9 +352,19 @@ export function drawUndulatingSpriteFrame(
   const drawW = baseSize * sqrtAspect;
   const drawH = (baseSize / sqrtAspect) * inflateY;
 
-  // High-resolution adaptive slice density: 24 strips for player sharks & hero previews
+  // Adaptive biomechanical slice LOD: 18 strips for hero player shark, 6..12 strips for prey species
   const sliceCount =
-    baseSize >= 84 ? 24 : baseSize >= 46 ? 16 : baseSize >= 24 ? 10 : 6;
+    gait === 'SHARK_APEX'
+      ? baseSize >= 72
+        ? 18
+        : 12
+      : baseSize >= 92
+      ? 12
+      : baseSize >= 52
+      ? 10
+      : baseSize >= 28
+      ? 8
+      : 6;
   const srcW = frame.width;
   const srcH = frame.height;
   const sliceSrcW = srcW / sliceCount;
@@ -343,11 +409,10 @@ export function drawUndulatingSpriteFrame(
     const centerY0 = offsetY + def0.dy;
     const shearY = (def1.dy - def0.dy) / Math.max(1e-4, sliceDstW);
 
-    ctx.save();
-    ctx.translate(dx, centerY0);
-    ctx.transform(1, shearY, 0, 1, 0, 0);
+    // Apply local affine shear+translate and immediately invert it after drawImage to avoid per-slice ctx.save/restore overhead
+    ctx.transform(1, shearY, 0, 1, dx, centerY0);
     ctx.drawImage(frame, sx, 0, sw, srcH, 0, -dh / 2, dw, dh);
-    ctx.restore();
+    ctx.transform(1, -shearY, 0, 1, -dx, shearY * dx - centerY0);
 
     def0 = def1;
   }
@@ -465,15 +530,17 @@ export function drawSharkWithOrgans(
   ctx.rotate(bodyYaw);
 
   // Pure 48-Form Shark Evolution Body Sprite (No outer circles or bolted-on clutter!)
-  const sharkFrame = spriteSheetManager.getSharkFormFrame(sharkForm.spriteKey);
-  ctx.save();
+  const rawSharkFrame = spriteSheetManager.getSharkFormFrame(sharkForm.spriteKey);
+  const sharkTintVariant: SpriteTintVariant =
+    hitFlashTimer > 0 || morphFlashTimer > 0.55
+      ? 'FLASH'
+      : frenzyTimer > 0
+      ? 'GOLD'
+      : 'NONE';
+  const sharkFrame = getPrebakedTintedFrame(rawSharkFrame, sharkTintVariant);
+
   ctx.translate(lungeX, 0);
   ctx.scale(stretchX, squashY);
-  if (hitFlashTimer > 0 || morphFlashTimer > 0.55) {
-    ctx.filter = 'brightness(1.85) contrast(1.2)';
-  } else if (frenzyTimer > 0) {
-    ctx.filter = 'sepia(0.85) saturate(3.5) brightness(1.15)';
-  }
   drawUndulatingSpriteFrame(
     ctx,
     sharkFrame,
@@ -487,8 +554,6 @@ export function drawSharkWithOrgans(
     biteAnim,
     effectiveTurnBend
   );
-  ctx.filter = 'none';
-  ctx.restore();
 
   ctx.restore();
 }
@@ -562,7 +627,6 @@ export function drawPreyEntity(
   // Pure natural creature rendering — no artificial outer circles or T{N} text labels!
   // Visual Size === Devourability Contract guarantees edible fish are <= 64% of shark size
   // and dangerous predators/hazards are >= 118% of shark size.
-  ctx.save();
   const gait = getPreySwimGait(config);
 
   // Upright swimming orientation: flip horizontally when moving left, and tilt along vertical trajectory
@@ -597,13 +661,15 @@ export function drawPreyEntity(
       : Math.sin(swimPhase) * 0.032;
   ctx.rotate(swimRock);
 
-  if (frenzyActive || mutationVariant === 'GOLDEN_MUTANT') {
-    ctx.filter = 'sepia(0.85) saturate(3.2) hue-rotate(5deg) brightness(1.15)';
-  } else if (mutationVariant === 'ABYSS_BEHEMOTH') {
-    ctx.filter = 'hue-rotate(255deg) saturate(1.6) contrast(1.1)';
-  }
+  const tintVariant: SpriteTintVariant =
+    frenzyActive || mutationVariant === 'GOLDEN_MUTANT'
+      ? 'GOLD'
+      : mutationVariant === 'ABYSS_BEHEMOTH'
+      ? 'ABYSS'
+      : 'NONE';
 
-  const preyFrame = spriteSheetManager.getPreySprite(config);
+  const rawPreyFrame = spriteSheetManager.getPreySprite(config);
+  const preyFrame = getPrebakedTintedFrame(rawPreyFrame, tintVariant);
   const drawSize = r * 2.25;
   drawUndulatingSpriteFrame(
     ctx,
@@ -618,8 +684,6 @@ export function drawPreyEntity(
     0,
     preyTurnBend
   );
-  ctx.filter = 'none';
-  ctx.restore();
 
   ctx.restore();
 }

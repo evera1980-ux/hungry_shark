@@ -205,21 +205,23 @@ test('InfiniteWorldManager provides seamless continuous horizontal swimming with
 import { EcosystemSpawner } from './ecosystemSpawner';
 import { PreyEntity } from './canvasRenderer';
 
-test('EcosystemSpawner maintains maxActivePreys=50, recycles distant prey beyond 1.5x spawnRadius, and applies Infinite Scaling', () => {
-  const spawner = new EcosystemSpawner(50, 1500);
+test('EcosystemSpawner maintains default maxActivePreys=20, recycles distant prey beyond 1.5x spawnRadius, and applies Infinite Scaling', () => {
+  const spawner = new EcosystemSpawner();
+  assert.equal(spawner.maxActivePreys, 20);
+  assert.equal(spawner.spawnRadius, 1650);
   const activePreys: PreyEntity[] = [];
 
   // Advance 25 seconds -> scaleMultiplier = 1.0 + 25 * 0.01 = 1.25
   spawner.update(25, activePreys, 0, 500, () => 0.5);
-  assert.equal(activePreys.length, 50);
+  assert.equal(activePreys.length, 20);
   assert.equal(spawner.getScaleMultiplier(), 1.25);
   assert.equal(activePreys[0].scaleMultiplier, 1.25);
 
-  // Move one prey far outside spawnRadius * 1.5 (e.g. y = 4000, distance = 3500 > 2250)
+  // Move one prey far outside spawnRadius * 1.5 (e.g. y = 4000, distance = 3500 > 2475)
   activePreys[0].y = 4000;
   spawner.update(5, activePreys, 0, 500, () => 0.25);
-  // Still 50 active preys after culling and respawning off-screen with new scaleMultiplier = 1.30
-  assert.equal(activePreys.length, 50);
+  // Still 20 active preys after culling and respawning off-screen with new scaleMultiplier = 1.30
+  assert.equal(activePreys.length, 20);
   assert.equal(spawner.getScaleMultiplier(), 1.3);
   assert.equal(activePreys[activePreys.length - 1].scaleMultiplier, 1.3);
 });
@@ -255,10 +257,12 @@ test('InfiniteProgressionManager increases globalDifficultyMultiplier by 10% eve
 
 import {
   getEffectivePreyTier,
+  getDebugPreySizeMultiplier,
   getGeneSurgeCost,
   getGoldOverdriveCost,
   getOrganRerollCost,
   getPreyRelativeVisualScale,
+  setDebugPreySizeMultiplier,
 } from './rules';
 
 test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, Abyss Behemoth armor tier, and dynamic economy costs', () => {
@@ -392,6 +396,44 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
     assert.ok(
       dPrey.config.maxDepth >= 1150,
       `Shallow reef species ${dPrey.config.id} (maxDepth=${dPrey.config.maxDepth}) must never spawn in the deep abyss`
+    );
+  }
+
+  // Verify that no actively attacking eel/predator (EEL_CHARGER / SUB_PATROL / MINE_HAZARD) resides or spawns in the shallow zone (<= 520m), even in late game at Bite Tier 4
+  for (const p of GAME_CONFIG.preyTiers) {
+    if (p.minDepth < 520) {
+      assert.notEqual(
+        p.behavior,
+        'EEL_CHARGER',
+        `Shallow-water species ${p.id} (minDepth=${p.minDepth}) must never have EEL_CHARGER behavior`
+      );
+      assert.equal(
+        Boolean(p.isHazard),
+        false,
+        `Shallow-water species ${p.id} must never be an active hazard`
+      );
+    }
+  }
+  depthSpawner.activeSharkBiteTier = 4;
+  depthSpawner.tutorialProtectionActive = false;
+  depthSpawner.update(45, shallowSamples, 0, 260, () => 0.92);
+  for (let i = 0; i < 40; i++) {
+    const sLate = depthSpawner.spawnPreyOffScreen(
+      shallowSamples,
+      0,
+      260,
+      () => ((i * 3) % 10) / 10,
+      [520, 1000],
+      5000
+    );
+    assert.notEqual(
+      sLate.config.behavior,
+      'EEL_CHARGER',
+      `Late-game shallow spawn ${sLate.config.id} must never be an EEL_CHARGER`
+    );
+    assert.ok(
+      sLate.y <= 520,
+      `Off-screen spawn while shark is in shallow zone (y=260) must stay in shallow water <= 520m (got y=${sLate.y})`
     );
   }
 });
@@ -594,7 +636,8 @@ test('Visual Size vs. Devourability Contract + Gold Frenzy Size Preservation Exc
       1.0,
       10
     );
-    const sharkDrawSize = 96 * normalStats.scale;
+    const sharkDrawSize =
+      96 * normalStats.scale * getDebugPreySizeMultiplier();
 
     for (const prey of GAME_CONFIG.preyTiers) {
       for (const variant of variants) {
@@ -873,3 +916,57 @@ test('sampleBathymetricWaterColor interpolates smoothly across shallow, twilight
     prev = cur;
   }
 });
+
+test('Live Debug Regulators: setDebugPreySizeMultiplier and EcosystemSpawner.syncPreyCountImmediate', () => {
+  // 1. Verify default debugPreySizeMultiplier is 0.8 and setDebugPreySizeMultiplier scales getPreyRelativeVisualScale linearly
+  const sharkStats = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false, 1.0, 1);
+  const clownfish = GAME_CONFIG.preyTiers[0];
+  assert.equal(getDebugPreySizeMultiplier(), 0.8);
+  const defaultScale08 = getPreyRelativeVisualScale(clownfish, sharkStats);
+
+  setDebugPreySizeMultiplier(1.0);
+  assert.equal(getDebugPreySizeMultiplier(), 1.0);
+  const baseScale = getPreyRelativeVisualScale(clownfish, sharkStats);
+  assert.ok(
+    Math.abs(defaultScale08 - baseScale * 0.8) < 0.005,
+    `Expected default 0.8x scale ~ ${baseScale * 0.8}, got ${defaultScale08}`
+  );
+
+  setDebugPreySizeMultiplier(1.5);
+  assert.equal(getDebugPreySizeMultiplier(), 1.5);
+  const enlargedScale = getPreyRelativeVisualScale(clownfish, sharkStats);
+  assert.ok(
+    Math.abs(enlargedScale - baseScale * 1.5) < 0.005,
+    `Expected enlargedScale ~ ${baseScale * 1.5}, got ${enlargedScale}`
+  );
+
+  setDebugPreySizeMultiplier(0.5);
+  const shrunkScale = getPreyRelativeVisualScale(clownfish, sharkStats);
+  assert.ok(
+    Math.abs(shrunkScale - baseScale * 0.5) < 0.005,
+    `Expected shrunkScale ~ ${baseScale * 0.5}, got ${shrunkScale}`
+  );
+
+  // Restore to configured default 0.8
+  setDebugPreySizeMultiplier(0.8);
+  assert.equal(getPreyRelativeVisualScale(clownfish, sharkStats), defaultScale08);
+
+  // 2. Verify EcosystemSpawner defaults to maxActivePreys = 20 and syncPreyCountImmediate trims/spawns immediately
+  const spawner = new EcosystemSpawner();
+  assert.equal(spawner.maxActivePreys, 20);
+  const activePreys: PreyEntity[] = [];
+  spawner.syncPreyCountImmediate(activePreys, 0, 220, () => 0.4, 0);
+  assert.equal(activePreys.length, 20);
+
+  // Lower target to 10 -> immediately trims down to 10 and recycles 10 into pool
+  spawner.maxActivePreys = 10;
+  spawner.syncPreyCountImmediate(activePreys, 0, 220, () => 0.4, 0);
+  assert.equal(activePreys.length, 10);
+  assert.ok(spawner.getPoolSize() >= 10);
+
+  // Raise target to 36 -> immediately spawns back up to 36
+  spawner.maxActivePreys = 36;
+  spawner.syncPreyCountImmediate(activePreys, 0, 220, () => 0.4, 0);
+  assert.equal(activePreys.length, 36);
+});
+

@@ -1,5 +1,8 @@
 import React, { useEffect, useRef } from 'react';
-import { computeSpineSliceDeformation } from '../game/canvasRenderer';
+import {
+  computeSpineSliceDeformation,
+  getPrebakedTintedFrame,
+} from '../game/canvasRenderer';
 import { getSharkFormById } from '../game/sharkEvolutionConfig';
 import { spriteSheetManager } from '../game/spriteSheetManager';
 
@@ -55,7 +58,8 @@ export const SharkFormCanvasPreview: React.FC<SharkFormCanvasPreviewProps> = ({
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, width, height);
 
-      const frame = spriteSheetManager.getSharkFormFrame(form.spriteKey);
+      const rawFrame = spriteSheetManager.getSharkFormFrame(form.spriteKey);
+      const frame = getPrebakedTintedFrame(rawFrame, locked ? 'LOCKED' : 'NONE');
       if (frame && frame.width > 0 && frame.height > 0) {
         const padX = width * 0.88;
         const padY = height * 0.82;
@@ -65,7 +69,6 @@ export const SharkFormCanvasPreview: React.FC<SharkFormCanvasPreviewProps> = ({
 
         ctx.translate(width / 2, height / 2);
         if (locked) {
-          ctx.filter = 'brightness(0.55) saturate(0.35) contrast(1.1)';
           ctx.globalAlpha = 0.78;
         }
 
@@ -110,7 +113,6 @@ export const SharkFormCanvasPreview: React.FC<SharkFormCanvasPreviewProps> = ({
         } else {
           ctx.drawImage(frame, -drawW / 2, -drawH / 2, drawW, drawH);
         }
-        ctx.filter = 'none';
       }
 
       ctx.restore();

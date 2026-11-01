@@ -15,8 +15,8 @@
 
 ### 1.2 连续仿射斜切脊柱丝带摆尾与零外挂部件原则 (`src/game/canvasRenderer.ts`)
 - **连续仿射斜切脊柱丝带渲染（Continuous Affine-Sheared Ribbon Spine Wave，`drawUndulatingSpriteFrame`）**：
-  - 将紧致裁切后的离屏精灵图沿水平体轴（从鱼吻 `u = 0` 到尾鳍 `u = 1`）按渲染尺寸自适应切分为 **24 段**（玩家鲨鱼与进化巨幕预览 `baseSize >= 84px`）、**16 段**（大型猎物/巨兽 `46px ~ 84px`）、**10 段**（中型鱼类 `24px ~ 46px`）或 **6 段**（远景小鱼苗 `< 24px`）。
-  - **边界端点共享 + 仿射 Y 斜切（零阶梯切段感）**：第 `i` 段切片直接复用上一段右边界形变 `def0` 作为自身左边界，并计算右边界形变 `def1`，通过 Canvas 2D 仿射变换 `ctx.transform(1, shearY, 0, 1, 0, 0)`（其中 `shearY = (def1.dy - def0.dy) / sliceDstW`）使每一段切片沿脊柱切线方向平滑倾斜，确保相邻切片接缝处的上下轮廓 $100\%$ 严丝合缝（$C^0/C^1$ 连续），并严格锁定源纹理采样宽度与目标宽度比例（`padDst = 0.55px` 等比映射），彻底消除水平矩形切片造成的“阶梯状被切段感”与接缝重影。
+  - 将紧致裁切后的离屏精灵图沿水平体轴（从鱼吻 `u = 0` 到尾鳍 `u = 1`）按生物种类与渲染尺寸自适应切分为 **18 段**（玩家主角鲨鱼 `SHARK_APEX`）、**12 段**（大型掠食者/巨兽 `baseSize >= 92px`）、**10 段**（中大型猎物 `52px ~ 92px`）、**8 段**（常规鱼类 `28px ~ 52px`）或 **6 段**（小型鱼苗 `< 28px`）；并通过 `WeakMap` 离屏着色纹理缓存（`getPrebakedTintedFrame`，支持 `GOLD`/`ABYSS`/`FLASH`/`LOCKED`）一次性预烘焙变色精灵图，严禁在 60FPS 切片循环内动态设置 `ctx.filter`。
+  - **边界端点共享 + 仿射 Y 斜切逆矩阵直驱（零阶梯切段感 & 零 `save/restore` 开销）**：第 `i` 段切片直接复用上一段右边界形变 `def0` 作为自身左边界，并计算右边界形变 `def1`，通过 Canvas 2D 仿射变换 `ctx.transform(1, shearY, 0, 1, dx, centerY0)`（其中 `shearY = (def1.dy - def0.dy) / sliceDstW`）使每一段切片沿脊柱切线方向平滑倾斜，绘制后立即乘以其精确逆矩阵 `ctx.transform(1, -shearY, 0, 1, -dx, shearY * dx - centerY0)` 复位（避免每帧数百次 `ctx.save/restore` 状态栈开销），确保相邻切片接缝处的上下轮廓 $100\%$ 严丝合缝（$C^0/C^1$ 连续），彻底消除水平矩形切片造成的“阶梯状被切段感”与接缝重影。
   - **解剖学前躯刚性包络与速度耦合**：玩家鲨鱼采用 `SHARK_APEX` 步态（$C^1$ 平滑包络函数 $E(u) = 0.015u + 0.985u^{2.25}$，波数 $k = 2.15$），确保前躯 $42\%$（吻部、鳃裂、胸背鳍躯干）保持流线型整体刚性、撕咬对准零漂移，后段 $58\%$ 尾柄至新月尾鳍传递丝滑推进波；摆尾频率 `shark.swimPhase` 与实时游速、冲刺（`isBoosting`）和黄金狂暴状态动态耦合，并在进化图谱巨幕预览台（`SharkFormCanvasPreview`）中同步启用。
   - **流体力学 C 形脊柱转弯（Hydrodynamic Spinal Turning C-Bend）与 2.5D 柔顺水平甩尾掉头（Smooth 2.5D Whip-Turn）**：
     - **脊柱 C 形转向弯曲 (`turnBend` in `computeSpineSliceDeformation`)**：转弯时不再将整只鲨鱼当作刚性木板旋转，而是将角速度 `turnRate` 实时注入 24 段脊柱变形——鱼吻前段（$u < 0.32$）顺着转向内侧微倾领航（`headTurnLead`），胸鳍支点（$u \approx 0.22$）作为旋转枢轴，后躯与尾鳍（$u \to 1$）沿转弯轨迹外侧呈 $C^1$ 连续弧线滞后拖拽（`tailTurnTrail = -clampedTurn * drawH * 0.25 * u^{1.72}`），同时自动放大尾鳍推进振幅（`1 + |turnBend| * 0.42`）与背腹微侧倾压缩（`bankRollScaleY`）。
@@ -118,18 +118,24 @@
 - **问题根源**：在 iPhone 14 Pro Max 等 iOS Safari 浏览器中，CSS `100vh`（`h-screen`）包含顶部地址栏与底部工具栏折叠后的最大高度（如 `932px`），而 `window.innerHeight` 仅返回当前可见区域高度（如 `778px`）。若容器使用 `h-screen` 而 Canvas 像素缓冲区使用 `window.innerHeight`，会导致 `778px` 高的画布位图被 CSS 强制拉长到 `932px`，画面整体纵向变形约 20%。
 - **强制规范**：
   1. **动态视口定界**：`index.html` 必须启用 `viewport-fit=cover`；`src/index.css` 中 `html, body, #root` 与 `src/App.tsx` 顶层 `<main>` 必须使用 `position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh;`，严禁在顶层容器上使用 `100vh`（`h-screen`）。
-  2. **帧级 `getBoundingClientRect()` 同步**：`App.tsx` 中的 `syncCanvasBufferToDisplayBox()` 必须直接读取 `canvas.getBoundingClientRect()` 的实际 CSS 宽高（`cssW`, `cssH`）设置 `canvas.width` 与 `canvas.height`，并在渲染时使用精确的 `scaleX = canvas.width / cssW` 与 `scaleY = canvas.height / cssH`，同时监听 `window.visualViewport` 的 `resize` 与 `orientationchange`。
+  2. **事件驱动的 `getBoundingClientRect()` 缓存同步（零 60Hz 强制同步布局回流）**：`App.tsx` 中的 `syncCanvasBufferToDisplayBox()` 在挂载、`resize`、`orientationchange` 及 `window.visualViewport` 尺寸变更时读取 `canvas.getBoundingClientRect()` 的实际 CSS 宽高（`cssW`, `cssH`）设置 `canvas.width` 与 `canvas.height`，并将 `{ dpr, viewW, viewH, scaleX, scaleY }` 缓存于 `cachedDisplay` 供 `tick()` 每帧零开销读取，严禁在 60FPS `tick()` 循环内每帧调用 `getBoundingClientRect()` 触发浏览器强制重排。
   3. **13 张 AI 分层手绘美术驱动的五层真视差海洋环境引擎 (`parallaxBackground.ts`)**：
      - **完整 13 张分层美术矩阵（`OCEAN_LAYER_ASSET_PATHS`）**：
        - **阳光浅海带 (`0m ~ 520m`)**：`bg_shallow_0_water_0e65cb68.png`（阳光丁达尔光束与水面焦散底图）、`bg_shallow_1_far_8898229a.png`（远景海底山脉石拱门与沉没帆船剪影）、`bg_shallow_2_mid_b4e0d30a.png`（中景鹿角珊瑚、紫管海绵与礁石崖壁）、`bg_shallow_3_near_96e92ee1.png`（近景金沙滩、发光珍珠巨蚌与生锈铁锚）。
        - **暮光深海带 (`520m ~ 1150m`)**：`bg_twilight_0_water_7d347ca5.png`（深海钴蓝生物极光与海洋雪水体底图）、`bg_twilight_1_far_449e76e5.png`（远景亚特兰蒂斯沉没神殿与发光符文拱门）、`bg_twilight_2_mid_019e225b.png`（中景远古巨鲸肋骨拱廊、青光蘑菇群与紫晶簇）、`bg_twilight_3_near_c853fc41.png`（近景发光符文石碑、海百合与紫色海鞭）。
        - **深渊海沟带 (`1150m+`)**：`bg_abyss_0_water_b0e53cc2.png`（黑曜石深渊热液烟雾与上浮熔岩火星底图）、`bg_abyss_1_far_7817748d.png`（远景海底火山巨峰与史前海怪颅骨化石）、`bg_abyss_2_mid_eff4191c.png`（中景黑烟囱热液喷口、红冠巨型管虫与熔岩深谷）、`bg_abyss_3_near_52736f9c.png`（近景龟裂玄武岩熔岩海床与深海盲蟹）。
        - **海洋生态氛围精灵图集 (`4×2` 网格)**：`bg_ambient_sprites_0c6882ce.png`（含旋转沙丁鱼球、蝶鱼群、远景蝠鲼、发光海月水母、摇曳巨藻、荧光海鞭、上升气泡串、深海灯笼鱼群共 8 类动态精灵）。
-     - **离屏智能预处理管线（`processTerrainLayerToSeamlessStrip` & `sliceAmbientSpriteSheet`）**：
-       1. **BFS 连通域智能抠图（保护前景白色细节）**：从顶部天空边界（及 `bg_abyss_3_near` 底部留白边）执行 BFS 泛洪去底（兼容 `#FFFFFF` 纯白与 `bg_shallow_1_far` 的 `#FF00FF` 洋红底色，以及 `bg_abyss_1_far` 史前颅骨眼窝镂空），100% 保护画面内部白色珍珠与白色管虫不被误抠；针对 `bg_shallow_1_far` 左右两侧 `y≈512` 的水平分界线自动执行纵向 Alpha 柔化渐隐，彻底消除水平硬边。
-       2. **上下空白包围盒自动裁切**：自动检测非透明地形上下边界 `[minY, maxY]`（完美裁除 `bg_abyss_3_near` 底部 20% 白色留白条），将 `1024×1024` 方图转化为紧致宽幅地形条带。
-       3. **14% 余弦交叠无缝水平拼接（`makeHorizontallySeamlessCanvas`）**：通过首尾 `14%` 宽度的余弦权重（`0.5 - 0.5 * cos(πt)`）平滑混合生成周期无缝纹理，既消除水平循环接缝，又杜绝 `[A | flipH(A)]` 镜像对称伪影。
-       4. **五层景深交错合成**：按 `水深光谱 + Layer 0 水体底图 (0.05x)` $\to$ `Layer 1 远景奇观 (0.13x)` $\to$ `4×2 远景氛围鱼群/水母/蝠鲼精灵 (0.20x)` $\to$ `Layer 2 中景礁崖/喷口 (0.27x)` $\to$ `Layer 3 近景海床 (0.48x)` $\to$ `实时随水流摆动的巨藻/荧光海鞭与气泡串精灵 (0.52x)` 顺序结合相机水深纵向位移（`verticalOffsetPx`）实时渲染。
+     - **分帧异步离屏智能预处理管线（`enqueueProcessingTask` + `processTerrainLayerToSeamlessStrip` & `sliceAmbientSpriteSheet`）**：
+       1. **分帧队列调度与最优纹理分辨率**：13 张大图加载完成后通过 `enqueueProcessingTask` 按每帧最多处理 1 张图的节奏异步执行（优先处理浅海带 4 张图层），并将地形层缩放至 `640px` 宽、水体底图缩放至 `512px` 宽，降低 61% 像素处理与实时采样带宽开销，确保首屏零卡顿。
+       2. **BFS 连通域智能抠图（保护前景白色细节）**：从顶部天空边界（及 `bg_abyss_3_near` 底部留白边）执行 BFS 泛洪去底（兼容 `#FFFFFF` 纯白与 `bg_shallow_1_far` 的 `#FF00FF` 洋红底色，以及 `bg_abyss_1_far` 史前颅骨眼窝镂空），100% 保护画面内部白色珍珠与白色管虫不被误抠；针对 `bg_shallow_1_far` 左右两侧水平分界线采用单遍 $O(W\times H)$ 列扫描算法执行纵向 Alpha 柔化渐隐。
+       3. **上下空白包围盒自动裁切**：自动检测非透明地形上下边界 `[minY, maxY]`（完美裁除 `bg_abyss_3_near` 底部 20% 白色留白条），将方图转化为紧致宽幅地形条带。
+       4. **14% 余弦交叠无缝水平拼接（`makeHorizontallySeamlessCanvas`）**：通过首尾 `14%` 宽度的余弦权重（`0.5 - 0.5 * cos(πt)`）平滑混合生成周期无缝纹理，既消除水平循环接缝，又杜绝 `[A | flipH(A)]` 镜像对称伪影。
+        5. **五层景深交错合成与物理级纵向/横向相对视差标定（`computeBiomeVerticalOffsets`）**：
+           - **海床锚定共享单调高度曲线（解决前景在中下水层冻结导致的“前/中景相对运动方向反转”问题）**：各生态带统一以各自海床底部（`biomeFloorY`：浅海 `680m`、暮光 `1340m`、深渊 `2100m`）为锚点，计算唯一共享的归一化距底高度参数 `u = Math.tanh(Math.max(0, biomeFloorY - midWorldY) / 480) ∈ [0, 1]`，并按真实光学景深严格递增分配位移振幅（`farY = -20 + 8 * u`、`schoolParallaxY = -6 + 12 * u`、`midY = -10 + 16 * u`、`nearY = 28 * u`，速度恒定满足 `远景 : 氛围鱼群 : 中景 : 近景 = 1 : 1.5 : 2 : 3.5`）：
+             1. **鲨鱼向下潜（`midWorldY` 增大 $\to u$ 减小）**：远、中、近三层同时在屏幕上向上移动，且**近景（`near`）上移速度恒为中景（`mid`）的 `1.75` 倍**（`nearY - midY` 随下潜单调减小），即近景相对于中景**向上抬升并遮挡更多中景下部**，同时底部始终贴合视口下缘（`nearY >= 0`），绝不中途卡死或露底。
+             2. **鲨鱼向上浮（`midWorldY` 减小 $\to u$ 增大）**：远、中、近三层同时在屏幕上向下移动，且**近景（`near`）下移速度恒为中景（`mid`）的 `1.75` 倍**（`nearY - midY` 随上浮单调增大），即近景相对于中景**加速下沉，自然显露后方更多中景礁崖与远景奇观**。
+           - **海床植被零滑移锁定**：生长于近景海床之上的摇曳巨藻/荧光海鞭与气泡串（`drawAnimatedSeabedSprites`）采用与近景海床完全一致的横向视差系数（`0.38x`）与纵向偏移（`nearY`），彻底消除植物根部在沙滩上的横向滑移。
+           - **渲染合成顺序**：按 `水深光谱 + Layer 0 水体底图 (横向 0.04x / 纵向 0.010x)` $\to$ `单次合并填充的体积光束 (横向 0.07x)` $\to$ `Layer 1 远景奇观 (横向 0.10x / 纵向振幅 8px)` $\to$ `4×2 远景氛围鱼群/水母/蝠鲼精灵 (横向 0.16x / 纵向振幅 12px)` $\to$ `Layer 2 中景礁崖/喷口 (横向 0.22x / 纵向振幅 16px)` $\to$ `Layer 3 近景海床 + 实时随水流摆动的巨藻/荧光海鞭与气泡串精灵 (同锁定横向 0.38x / 纵向振幅 28px)` $\to$ `预烘焙 256×256 深海水压暗角缓存` 顺序实时渲染。
 
 ### 4.5 极简去框化进化界面「巨幕水族馆 + 无框连续半环罗盘」与全设备零滚动条规范 (`SharkEvolutionAtlasModal.tsx`)
 - **去线框套线框（De-Boxed / Zero Box-in-Box）原生游戏视觉原则**：
@@ -168,12 +174,23 @@
   3. **Step 3 (`HANDS_ON_UPGRADE`)**：完成冲刺瞬间立即发放 **`🎁 新手补给礼包 (+80🪙 +20🧬)`** 并同帧刷新 HUD，使右下角 `强化`（60🪙）与 `突破`（12🧬）按钮 100% 亮起金色/翠绿聚光灯与 `👆 点此强化` 浮标，由玩家亲自点击任一按钮完成首次强化或基因突破。
   4. **完成庆贺 (`CELEBRATE` ➔ `DONE`)**：左上角头像 `图谱 X/48` 亮起高光提示 4.2 秒后自动收起，并将 `hungry_shark_tutorial_done_v1 = '1'` 写入 `localStorage`。
 
+### 4.7 实时调参 Debug 悬浮面板 (`data-testid="live-debug-panel"` in `src/App.tsx`，默认隐藏入口、保留完整调参代码)
+- **入口与布局**：在标题页右上角与局内 HUD 右上角保留 `🛠 调参 / Debug` 开关按钮与 `live-debug-panel` 面板完整代码实现，默认设置 `showDebugPanel = false` 并为调参按钮添加 `hidden` 类隐藏入口，保持正式游玩界面纯净无干扰。
+- **双通道实时调节器（指针事件隔离，滑动零误触画布转向）**：
+  1. **鱼群刷新数量调节器（`4 ~ 80` 条，默认固化为 `20`）**：提供滑块与 `-4` / `+4` 步进按钮，实时更新 `ecosystemSpawner.maxActivePreys` 并调用 `syncPreyCountImmediate()` 同帧增删猎物，直观显示当前同屏鱼数。
+  2. **猎物显示大小调节器（`0.35x ~ 2.50x`，默认固化为 `0.80x`）**：提供滑块与 `-0.1` / `+0.1` 步进按钮，实时调用 `setDebugPreySizeMultiplier()` 同步缩放猎物屏幕绘制尺寸与碰撞半径。
+  3. **一键重置按钮（`重置默认 / Reset`）**：立即恢复 `20 条 / 0.80x` 默认参数。
+
 ---
 
 ## 5. 文档变更记录 (Changelog)
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-10-31 | 按调参结论将默认「鱼群刷新数量」固化为 `20`、默认「猎物显示大小」固化为 `0.80x`，隐藏标题页与局内 HUD 的 `🛠 调参` 按钮（`showDebugPanel = false` + `hidden`），同时完整保留实时调参面板与控制器代码功能 | `src/App.tsx`, `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `docs/02-DESIGN_SPEC.md` |
+| 2026-10-31 | 新增实时调参 Debug 悬浮面板（`live-debug-panel`）：支持在标题页与局内实时滑动调节「1. 鱼群刷新数量（`4~80`）」与「2. 猎物显示大小倍率（`0.35x~2.50x`）」，内置多指触控绑定与指针事件冒泡隔离 | `src/App.tsx`, `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `docs/02-DESIGN_SPEC.md` |
+| 2026-10-31 | 修正前/中/后景相对运动方向与海床锚定纵向视差（`computeBiomeVerticalOffsets`）：消除此前因 `nearDrift` 在生态带中段（`240m`/`760m`/`1380m`）以下被 `Math.max(0, delta)` 截断归零导致的“下潜时前景静止而中景上移（相对运动方向反转）”缺陷；改为以各生态带海床底部（`680m`/`1340m`/`2100m`）为统一锚点，共享单调高度曲线 `u = Math.tanh(Math.max(0, biomeFloorY - midWorldY) / 480)` 并按 `远景 8px : 鱼群 12px : 中景 16px : 近景 28px`（`1 : 1.5 : 2 : 3.5`）严格递增分配纵向振幅，同时将海床巨藻/海鞭横向视差锁定至近景海床（`0.38x`）消除根部滑移 | `src/game/parallaxBackground.ts`, `docs/02-DESIGN_SPEC.md` |
+| 2026-10-30 | 全链路 60FPS 性能优化：新增 `WeakMap` 预烘焙着色精灵缓存（`getPrebakedTintedFrame`，彻底消除黄金狂暴/变异鱼每帧数百次切片级 `ctx.filter` 重绘）、脊柱切片仿射逆矩阵直驱（移除内层 `ctx.save/restore`）、13 张背景大图分帧异步预处理队列（`enqueueProcessingTask`）与 640px 降采样、移除每帧 `getBoundingClientRect()` 强制重排，以及海面波浪/温跃层/掉落物视锥体裁剪 | `src/game/canvasRenderer.ts`, `src/game/parallaxBackground.ts`, `src/game/spriteSheetManager.ts`, `src/App.tsx`, `src/components/SharkFormCanvasPreview.tsx`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
 | 2026-10-30 | 全面接入 **13 张 AI 分层手绘背景与氛围精灵图集（`bg_{shallow\|twilight\|abyss}_{0_water\|1_far\|2_mid\|3_near}_*.png` + `bg_ambient_sprites_0c6882ce.png`）**，并在 `parallaxBackground.ts` 中实现离屏 BFS 连通域智能抠图（兼容白底/洋红底与颅骨内孔镂空、保护内部白珍珠/白管虫、柔化 `shallow_1_far` 水平分界线）、上下空白边自动裁切（去除 `abyss_3_near` 底部白条）、14% 余弦交叠水平无缝拼接及 8 类海洋氛围精灵（沙丁鱼风暴、蝶鱼群、蝠鲼、发光水母、摇曳巨藻、荧光海鞭、气泡串、灯笼鱼群）实时动画合成 | `src/game/parallaxBackground.ts`, `public/assets/aistudio/bg_*.png`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
 | 2026-10-30 | 将传统静态单层贴图背景升级为**五层连续水深与三平面真视差海洋环境引擎（`parallaxBackground.ts`）**：包含世界空间连续水深光谱渐变（`sampleBathymetricWaterColor`）、晴空海平线远岛与太阳光晕、远/中/近（`0.13x`/`0.27x`/`0.48x`）三平面周期无镜像视差地形与纵向深度位移、实时摇曳海藻森林、双频丁达尔体积光束与水面焦散光网、远景氛围鱼群剪影、三态深海微粒以及自然温跃层折光波带 | `src/game/parallaxBackground.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
 | 2026-10-30 | 新增**流体力学 C 形脊柱转弯（`turnBend` 头领尾随 C 弧变形 + 转向尾鳍增推）**、**2.5D 透视缩进翻转（`facingScaleX` 平滑插值 + `horizonPitch` 连续仰角，零单帧镜像跳变）**与**水平急转甩尾物理机制（跨左右半球掉头直接水平甩尾，告别机械竖直绕圈）**；将脊柱摆尾渲染器升级为**连续仿射斜切丝带算法 (`ctx.transform(1, shearY, 0, 1, 0, 0)` + 24 段高密自适应切片)** | `src/game/canvasRenderer.ts`, `src/App.tsx`, `src/components/SharkFormCanvasPreview.tsx`, `src/game/rules.test.ts`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |

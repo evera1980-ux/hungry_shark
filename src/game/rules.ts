@@ -99,6 +99,19 @@ export function getEffectivePreyTier(
   return prey.tier;
 }
 
+let debugPreySizeMultiplier = 0.8;
+
+export function getDebugPreySizeMultiplier(): number {
+  return debugPreySizeMultiplier;
+}
+
+export function setDebugPreySizeMultiplier(multiplier: number): void {
+  if (!Number.isFinite(multiplier)) return;
+  debugPreySizeMultiplier = Number(
+    Math.max(0.25, Math.min(3.5, multiplier)).toFixed(2)
+  );
+}
+
 /**
  * Computes the visual & hitbox scale of a prey entity relative to the shark's current on-screen size.
  * Core visual-gameplay contract:
@@ -112,6 +125,8 @@ export function getEffectivePreyTier(
  *    - Entering Gold Frenzy temporarily boosts bite power to swallow everything (`resolvePreyEncounter` -> DEVOUR),
  *      but DOES NOT shrink other fish! All fish and giant deep-sea monsters preserve their pre-frenzy visual size
  *      (`normalBiteTier`) so hunting and devouring massive predators during Gold Frenzy feels maximally rewarding.
+ * 3. Live Debug Multiplier (`debugPreySizeMultiplier`, default `0.8`):
+ *    - Scales both visual rendering (`drawPreyEntity`) and collision radius (`App.tsx`) in lockstep when tuned in the Debug UI.
  */
 export function getPreyRelativeVisualScale(
   prey: PreyTierConfig,
@@ -143,7 +158,9 @@ export function getPreyRelativeVisualScale(
       0.16,
       Math.min(0.64, tierRatio * levelShrink)
     );
-    return Number((sharkParityScale * targetSharkRatio).toFixed(3));
+    return Number(
+      (sharkParityScale * targetSharkRatio * debugPreySizeMultiplier).toFixed(3)
+    );
   }
 
   // Inedible / dangerous fish (or giant prey during Gold Frenzy): strictly >= 118% of shark's linear size
@@ -154,7 +171,9 @@ export function getPreyRelativeVisualScale(
     1.95,
     1.18 + (overTier - 1) * 0.17 + behemothExtra + bossExtra
   );
-  return Number((sharkParityScale * targetDangerRatio).toFixed(3));
+  return Number(
+    (sharkParityScale * targetDangerRatio * debugPreySizeMultiplier).toFixed(3)
+  );
 }
 
 export function computeSharkStats(
