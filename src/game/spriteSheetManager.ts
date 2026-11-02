@@ -123,11 +123,74 @@ export const UI_ICON_GRID_MAP: Record<UiIconKey, [number, number]> = {
   UI_LINEAGE_ABYSS: [3, 5],
 };
 
+/**
+ * 4 High-Craft Sci-Fi Game UI Banners & Pill Buttons from (/assets/aistudio/buttons_16e3a0cf.png):
+ * - UI_PLATE_AVATAR_BAR: Top sci-fi metallic cyan-lit hollow ring + dark-navy angled data bar
+ * - UI_BAR_BTN_GREEN: Bottom-left emerald cyclone play button with right play arrow
+ * - UI_BAR_BTN_BLUE: Bottom-center sapphire DNA helix evolution button
+ * - UI_BAR_BTN_GOLD: Bottom-right brushed-gold video ad clapperboard button
+ */
+export type UiBannerKey =
+  | 'UI_PLATE_AVATAR_BAR'
+  | 'UI_BAR_BTN_GREEN'
+  | 'UI_BAR_BTN_BLUE'
+  | 'UI_BAR_BTN_GOLD';
+
+export const UI_BANNER_BOUNDS: Record<
+  UiBannerKey,
+  [number, number, number, number]
+> = {
+  UI_PLATE_AVATAR_BAR: [0.08, 0.02, 0.91, 0.6],
+  UI_BAR_BTN_GREEN: [0.025, 0.68, 0.356, 0.94],
+  UI_BAR_BTN_BLUE: [0.356, 0.68, 0.66, 0.94],
+  UI_BAR_BTN_GOLD: [0.66, 0.68, 0.985, 0.94],
+};
+
+/**
+ * 9 Sci-Fi Pause / Settings Modal UI Elements from (/assets/aistudio/setting_83a7a273.png):
+ * - SETTING_MODAL_FRAME: Outer neon cyan/purple metallic dialog frame with top pause header plate
+ * - SETTING_SHARK_CARD: Wide dark metallic shark summary card with recessed left square avatar frame
+ * - SETTING_BTN_EVOLVE: Compact cyan octagonal button with left DNA double-helix icon
+ * - SETTING_BTN_RESUME: Wide glowing emerald-green octagonal button with play triangle
+ * - SETTING_BTN_LANG: Cyan-bordered dark octagonal button with left globe icon
+ * - SETTING_BTN_SOUND: Cyan-bordered dark octagonal button with left speaker icon
+ * - SETTING_BTN_TUTORIAL: Full-width gold-bordered dark carbon button with left graduation cap icon
+ * - SETTING_BTN_RESTART: Steel-grey octagonal button with left circular refresh icon
+ * - SETTING_BTN_MAIN_MENU: Steel-grey octagonal button with left door exit icon
+ */
+export type UiSettingKey =
+  | 'SETTING_MODAL_FRAME'
+  | 'SETTING_SHARK_CARD'
+  | 'SETTING_BTN_EVOLVE'
+  | 'SETTING_BTN_RESUME'
+  | 'SETTING_BTN_LANG'
+  | 'SETTING_BTN_SOUND'
+  | 'SETTING_BTN_TUTORIAL'
+  | 'SETTING_BTN_RESTART'
+  | 'SETTING_BTN_MAIN_MENU';
+
+export const UI_SETTING_BOUNDS: Record<
+  UiSettingKey,
+  [number, number, number, number]
+> = {
+  SETTING_MODAL_FRAME: [0.038, 0.048, 0.51, 0.635],
+  SETTING_SHARK_CARD: [0.538, 0.085, 0.962, 0.308],
+  SETTING_BTN_EVOLVE: [0.678, 0.39, 0.815, 0.506],
+  SETTING_BTN_RESUME: [0.525, 0.55, 0.975, 0.755],
+  SETTING_BTN_LANG: [0.038, 0.658, 0.268, 0.782],
+  SETTING_BTN_SOUND: [0.276, 0.658, 0.504, 0.782],
+  SETTING_BTN_TUTORIAL: [0.038, 0.805, 0.508, 0.935],
+  SETTING_BTN_RESTART: [0.538, 0.81, 0.746, 0.925],
+  SETTING_BTN_MAIN_MENU: [0.754, 0.81, 0.962, 0.925],
+};
+
 export type SpriteFrameKey =
   | PrimarySpriteFrameKey
   | Fish2SpriteKey
   | SharkSpriteKey
-  | UiIconKey;
+  | UiIconKey
+  | UiBannerKey
+  | UiSettingKey;
 
 export const SPRITE_GRID_MAP: Record<PrimarySpriteFrameKey, [number, number]> = {
   BASE_SHARK: [0, 0],
@@ -302,14 +365,38 @@ for (let r = 0; r < 6; r++) {
 export class SpriteSheetManager {
   public frames: Partial<Record<SpriteFrameKey, HTMLCanvasElement>> = {};
   public uiIconDataUrls: Partial<Record<UiIconKey, string>> = {};
+  public uiBannerDataUrls: Partial<Record<UiBannerKey, string>> = {};
+  public uiSettingDataUrls: Partial<Record<UiSettingKey, string>> = {};
+  public uiSettingIconFrames: Partial<Record<UiSettingKey, HTMLCanvasElement>> =
+    {};
+  public uiSettingIconDataUrls: Partial<Record<UiSettingKey, string>> = {};
+  public uiSettingCleanModalFrame: HTMLCanvasElement | null = null;
+  public uiSettingCleanModalFrameDataUrl: string | undefined = undefined;
+  public avatarBarHollowMetrics: {
+    cxPct: number;
+    cyPct: number;
+    innerDiaPctH: number;
+    outerDiaPctH: number;
+    aspectRatio: number;
+  } = {
+    cxPct: 18.42,
+    cyPct: 50.0,
+    innerDiaPctH: 53.7,
+    outerDiaPctH: 85.5,
+    aspectRatio: 1102 / 406,
+  };
   public rawGridFrames: HTMLCanvasElement[] = [];
   public fish2GridFrames: HTMLCanvasElement[] = [];
   public sharksGridFrames: HTMLCanvasElement[] = [];
   public uiIconsGridFrames: HTMLCanvasElement[] = [];
+  public uiBannersGridFrames: HTMLCanvasElement[] = [];
+  public uiSettingsGridFrames: HTMLCanvasElement[] = [];
   public loaded: boolean = false;
   public fish2Loaded: boolean = false;
   public sharksLoaded: boolean = false;
   public uiIconsLoaded: boolean = false;
+  public uiBannersLoaded: boolean = false;
+  public uiSettingsLoaded: boolean = false;
   private loadingPromise: Promise<void> | null = null;
   private listeners: Set<() => void> = new Set();
 
@@ -332,18 +419,24 @@ export class SpriteSheetManager {
    * 2. Extended 6x5 target fish sprite sheet (/assets/aistudio/fish2_fc857cfa.png)
    * 3. 48-Shark Evolution Matrix 8x6 sprite sheet (/assets/aistudio/sharks_ec921c3b.png)
    * 4. 24-Icon Game UI Atlas 6x4 sprite sheet (/assets/aistudio/icons_f5128c12.png)
+   * 5. Sci-Fi Avatar Data Bar & 3 Pill Buttons sheet (/assets/aistudio/buttons_16e3a0cf.png)
+   * 6. Pause / Settings Modal UI sheet (/assets/aistudio/setting_83a7a273.png)
    */
   public load(
     primaryUrl: string = '/assets/aistudio/fish_24bdaa5a.png',
     fish2Url: string = '/assets/aistudio/fish2_fc857cfa.png',
     sharksUrl: string = '/assets/aistudio/sharks_ec921c3b.png',
-    uiIconsUrl: string = '/assets/aistudio/icons_f5128c12.png'
+    uiIconsUrl: string = '/assets/aistudio/icons_f5128c12.png',
+    uiBannersUrl: string = '/assets/aistudio/buttons_16e3a0cf.png',
+    uiSettingsUrl: string = '/assets/aistudio/setting_83a7a273.png'
   ): Promise<void> {
     if (
       this.loaded &&
       this.fish2Loaded &&
       this.sharksLoaded &&
-      this.uiIconsLoaded
+      this.uiIconsLoaded &&
+      this.uiBannersLoaded &&
+      this.uiSettingsLoaded
     ) {
       return Promise.resolve();
     }
@@ -419,11 +512,39 @@ export class SpriteSheetManager {
       imgIcons.src = uiIconsUrl;
     });
 
+    const loadUiBanners = new Promise<void>((resolve) => {
+      const imgBanners = new Image();
+      imgBanners.crossOrigin = 'anonymous';
+      imgBanners.onload = () => {
+        this.processAndSliceUiBannersImage(imgBanners);
+        this.uiBannersLoaded = true;
+        this.notifyListeners();
+        resolve();
+      };
+      imgBanners.onerror = () => resolve();
+      imgBanners.src = uiBannersUrl;
+    });
+
+    const loadUiSettings = new Promise<void>((resolve) => {
+      const imgSettings = new Image();
+      imgSettings.crossOrigin = 'anonymous';
+      imgSettings.onload = () => {
+        this.processAndSliceUiSettingsImage(imgSettings);
+        this.uiSettingsLoaded = true;
+        this.notifyListeners();
+        resolve();
+      };
+      imgSettings.onerror = () => resolve();
+      imgSettings.src = uiSettingsUrl;
+    });
+
     this.loadingPromise = Promise.all([
       loadPrimary,
       loadFish2,
       loadSharks,
       loadUiIcons,
+      loadUiBanners,
+      loadUiSettings,
     ]).then(() => undefined);
     return this.loadingPromise;
   }
@@ -766,6 +887,687 @@ export class SpriteSheetManager {
     }
   }
 
+  /**
+   * Slices & mattes the 4 Sci-Fi UI Banners & Buttons from (/assets/aistudio/buttons_16e3a0cf.png):
+   * - Removes the neutral dark-grey background (~RGB 60,60,60) via perimeter Flood-Fill
+   * - Hollows out the inner circular shark window of UI_PLATE_AVATAR_BAR at (0.240, 0.3125)
+   * - Smoothly unmixes the grey background from outer neon cyan/green/blue/gold glow halos
+   * - Preserves native tight aspect ratio for crisp rendering at any responsive size
+   */
+  private processAndSliceUiBannersImage(img: HTMLImageElement): void {
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    if (!srcW || !srcH) return;
+
+    const scale = Math.min(1, 826 / srcW);
+    const fullW = Math.max(1, Math.round(srcW * scale));
+    const fullH = Math.max(1, Math.round(srcH * scale));
+
+    const rawCanvas = document.createElement('canvas');
+    rawCanvas.width = fullW;
+    rawCanvas.height = fullH;
+    const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+    if (!rawCtx) return;
+    rawCtx.drawImage(img, 0, 0, fullW, fullH);
+
+    this.uiBannersGridFrames = [];
+    const orderedKeys = Object.keys(UI_BANNER_BOUNDS) as UiBannerKey[];
+
+    for (const key of orderedKeys) {
+      const [nx0, ny0, nx1, ny1] = UI_BANNER_BOUNDS[key];
+      const sx = Math.floor(nx0 * fullW);
+      const sy = Math.floor(ny0 * fullH);
+      const ex = Math.floor(nx1 * fullW);
+      const ey = Math.floor(ny1 * fullH);
+      const cellW = Math.max(1, ex - sx);
+      const cellH = Math.max(1, ey - sy);
+
+      const cellData = rawCtx.getImageData(sx, sy, cellW, cellH);
+      const data = cellData.data;
+      const bgR = data[0] || 60;
+      const bgG = data[1] || 60;
+      const bgB = data[2] || 60;
+
+      const visited = new Uint8Array(cellW * cellH);
+      const queue = new Int32Array(cellW * cellH);
+      let qHead = 0;
+      let qTail = 0;
+
+      const isNeutralGreyBg = (idx: number): boolean => {
+        const p = idx * 4;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const diff = Math.max(
+          Math.abs(r - bgR),
+          Math.abs(g - bgG),
+          Math.abs(b - bgB)
+        );
+        const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+        return diff <= 16 && chroma <= 12;
+      };
+
+      const enqueue = (px: number, py: number) => {
+        if (px < 0 || px >= cellW || py < 0 || py >= cellH) return;
+        const idx = py * cellW + px;
+        if (visited[idx]) return;
+        if (!isNeutralGreyBg(idx)) return;
+        visited[idx] = 1;
+        queue[qTail++] = idx;
+      };
+
+      // Seed perimeter pixels
+      for (let px = 0; px < cellW; px++) {
+        enqueue(px, 0);
+        enqueue(px, cellH - 1);
+      }
+      for (let py = 0; py < cellH; py++) {
+        enqueue(0, py);
+        enqueue(cellW - 1, py);
+      }
+
+      // Seed hollow avatar ring center for UI_PLATE_AVATAR_BAR
+      const hollowFullCx = Math.round(0.2398 * fullW);
+      const hollowFullCy = Math.round(0.3125 * fullH);
+      if (key === 'UI_PLATE_AVATAR_BAR') {
+        const localCx = hollowFullCx - sx;
+        const localCy = hollowFullCy - sy;
+        for (let dy = -8; dy <= 8; dy++) {
+          for (let dx = -8; dx <= 8; dx++) {
+            enqueue(localCx + dx, localCy + dy);
+          }
+        }
+      }
+
+      // BFS Flood-Fill of flat neutral grey background
+      while (qHead < qTail) {
+        const curr = queue[qHead++];
+        data[curr * 4 + 3] = 0;
+        const cx = curr % cellW;
+        const cy = (curr - cx) / cellW;
+        if (cx > 0) enqueue(cx - 1, cy);
+        if (cx + 1 < cellW) enqueue(cx + 1, cy);
+        if (cy > 0) enqueue(cx, cy - 1);
+        if (cy + 1 < cellH) enqueue(cx, cy + 1);
+      }
+
+      // Only seed boundary visited pixels (adjacent to unvisited pixels) for fast halo unmixing
+      const distMap = new Uint8Array(cellW * cellH);
+      let bHead = 0;
+      let bTail = 0;
+      for (let py = 1; py < cellH - 1; py++) {
+        const rowOff = py * cellW;
+        for (let px = 1; px < cellW - 1; px++) {
+          const i = rowOff + px;
+          if (!visited[i]) continue;
+          if (
+            !visited[i - 1] ||
+            !visited[i + 1] ||
+            !visited[i - cellW] ||
+            !visited[i + cellW]
+          ) {
+            distMap[i] = 1;
+            queue[bTail++] = i;
+          }
+        }
+      }
+      while (bHead < bTail) {
+        const curr = queue[bHead++];
+        const d = distMap[curr];
+        if (d >= 5) continue;
+        const cx = curr % cellW;
+        const cy = (curr - cx) / cellW;
+        const neighbors = [
+          cx > 0 ? curr - 1 : -1,
+          cx + 1 < cellW ? curr + 1 : -1,
+          cy > 0 ? curr - cellW : -1,
+          cy + 1 < cellH ? curr + cellW : -1,
+        ];
+        for (const nIdx of neighbors) {
+          if (nIdx < 0 || visited[nIdx] || distMap[nIdx] > 0) continue;
+          const p = nIdx * 4;
+          const r = data[p];
+          const g = data[p + 1];
+          const b = data[p + 2];
+          if (r < 38 && g < 46 && b > r + 6) continue;
+          const diff = Math.max(
+            Math.abs(r - bgR),
+            Math.abs(g - bgG),
+            Math.abs(b - bgB)
+          );
+          if (diff < 46) {
+            distMap[nIdx] = d + 1;
+            queue[bTail++] = nIdx;
+            const alphaFactor = Math.min(1, Math.max(0.04, (diff - 8) / 38));
+            data[p + 3] = Math.round(data[p + 3] * alphaFactor);
+            const invA = 1 / Math.max(0.15, alphaFactor);
+            data[p] = Math.max(
+              0,
+              Math.min(255, Math.round((r - bgR * (1 - alphaFactor)) * invA))
+            );
+            data[p + 1] = Math.max(
+              0,
+              Math.min(255, Math.round((g - bgG * (1 - alphaFactor)) * invA))
+            );
+            data[p + 2] = Math.max(
+              0,
+              Math.min(255, Math.round((b - bgB * (1 - alphaFactor)) * invA))
+            );
+          }
+        }
+      }
+
+      // Compute tight bounding box of non-transparent pixels
+      let minX = cellW;
+      let minY = cellH;
+      let maxX = 0;
+      let maxY = 0;
+      let hasPixels = false;
+
+      for (let py = 0; py < cellH; py++) {
+        for (let px = 0; px < cellW; px++) {
+          if (data[(py * cellW + px) * 4 + 3] > 18) {
+            hasPixels = true;
+            if (px < minX) minX = px;
+            if (py < minY) minY = py;
+            if (px > maxX) maxX = px;
+            if (py > maxY) maxY = py;
+          }
+        }
+      }
+
+      const tempCell = document.createElement('canvas');
+      tempCell.width = cellW;
+      tempCell.height = cellH;
+      const tempCtx = tempCell.getContext('2d');
+      if (tempCtx) {
+        tempCtx.putImageData(cellData, 0, 0);
+      }
+
+      const pad = 2;
+      const bx = hasPixels ? Math.max(0, minX - pad) : 0;
+      const by = hasPixels ? Math.max(0, minY - pad) : 0;
+      const bw = hasPixels
+        ? Math.min(cellW - bx, maxX - minX + 1 + pad * 2)
+        : cellW;
+      const bh = hasPixels
+        ? Math.min(cellH - by, maxY - minY + 1 + pad * 2)
+        : cellH;
+
+      const frameCanvas = document.createElement('canvas');
+      frameCanvas.width = Math.max(1, bw);
+      frameCanvas.height = Math.max(1, bh);
+      const fCtx = frameCanvas.getContext('2d');
+      if (fCtx) {
+        fCtx.drawImage(tempCell, bx, by, bw, bh, 0, 0, bw, bh);
+      }
+
+      if (key === 'UI_PLATE_AVATAR_BAR' && hasPixels) {
+        const croppedHollowCx = hollowFullCx - sx - bx;
+        const croppedHollowCy = hollowFullCy - sy - by;
+        const innerRadiusPx = 0.1419 * fullH;
+        this.avatarBarHollowMetrics = {
+          cxPct: Number(((croppedHollowCx / bw) * 100).toFixed(2)),
+          cyPct: Number(((croppedHollowCy / bh) * 100).toFixed(2)),
+          innerDiaPctH: Number((((innerRadiusPx * 2) / bh) * 100).toFixed(2)),
+          outerDiaPctH: 85.5,
+          aspectRatio: bw / bh,
+        };
+      }
+
+      this.frames[key] = frameCanvas;
+      this.uiBannersGridFrames.push(frameCanvas);
+    }
+  }
+
+  /**
+   * Slices & mattes the 9 Sci-Fi Pause / Settings Modal UI Elements from (/assets/aistudio/setting_83a7a273.png):
+   * - Removes the dark charcoal grid background (~RGB 27,28,32) via perimeter Flood-Fill
+   * - Hollows out the interior window of SETTING_MODAL_FRAME at (0.273, 0.380) so the background grid lines disappear
+   * - Preserves native tight aspect ratios of all 9 components
+   */
+  private processAndSliceUiSettingsImage(img: HTMLImageElement): void {
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    if (!srcW || !srcH) return;
+
+    const scale = Math.min(1, 826 / srcW);
+    const fullW = Math.max(1, Math.round(srcW * scale));
+    const fullH = Math.max(1, Math.round(srcH * scale));
+
+    const rawCanvas = document.createElement('canvas');
+    rawCanvas.width = fullW;
+    rawCanvas.height = fullH;
+    const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+    if (!rawCtx) return;
+    rawCtx.drawImage(img, 0, 0, fullW, fullH);
+
+    this.uiSettingsGridFrames = [];
+    const orderedKeys = Object.keys(UI_SETTING_BOUNDS) as UiSettingKey[];
+
+    for (const key of orderedKeys) {
+      const [nx0, ny0, nx1, ny1] = UI_SETTING_BOUNDS[key];
+      const sx = Math.floor(nx0 * fullW);
+      const sy = Math.floor(ny0 * fullH);
+      const ex = Math.floor(nx1 * fullW);
+      const ey = Math.floor(ny1 * fullH);
+      const cellW = Math.max(1, ex - sx);
+      const cellH = Math.max(1, ey - sy);
+
+      const cellData = rawCtx.getImageData(sx, sy, cellW, cellH);
+      const data = cellData.data;
+      const bgR = 28;
+      const bgG = 28;
+      const bgB = 31;
+
+      const visited = new Uint8Array(cellW * cellH);
+      const queue = new Int32Array(cellW * cellH);
+      let qHead = 0;
+      let qTail = 0;
+
+      const isCharcoalGridBg = (idx: number): boolean => {
+        const p = idx * 4;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+        return r <= 37 && g <= 37 && b <= 41 && chroma <= 8;
+      };
+
+      const enqueue = (px: number, py: number) => {
+        if (px < 0 || px >= cellW || py < 0 || py >= cellH) return;
+        const idx = py * cellW + px;
+        if (visited[idx]) return;
+        if (!isCharcoalGridBg(idx)) return;
+        visited[idx] = 1;
+        queue[qTail++] = idx;
+      };
+
+      // Seed perimeter pixels
+      for (let px = 0; px < cellW; px++) {
+        enqueue(px, 0);
+        enqueue(px, cellH - 1);
+      }
+      for (let py = 0; py < cellH; py++) {
+        enqueue(0, py);
+        enqueue(cellW - 1, py);
+      }
+
+      // Seed hollow interior window of SETTING_MODAL_FRAME so its inner grid lines become transparent
+      if (key === 'SETTING_MODAL_FRAME') {
+        const localCx = Math.round(0.273 * fullW) - sx;
+        const localCy = Math.round(0.38 * fullH) - sy;
+        for (let dy = -10; dy <= 10; dy++) {
+          for (let dx = -10; dx <= 10; dx++) {
+            enqueue(localCx + dx, localCy + dy);
+          }
+        }
+      }
+
+      // BFS Flood-Fill
+      while (qHead < qTail) {
+        const curr = queue[qHead++];
+        data[curr * 4 + 3] = 0;
+        const cx = curr % cellW;
+        const cy = (curr - cx) / cellW;
+        if (cx > 0) enqueue(cx - 1, cy);
+        if (cx + 1 < cellW) enqueue(cx + 1, cy);
+        if (cy > 0) enqueue(cx, cy - 1);
+        if (cy + 1 < cellH) enqueue(cx, cy + 1);
+      }
+
+      // Only seed boundary visited pixels (adjacent to unvisited pixels) for fast halo unmixing
+      const distMap = new Uint8Array(cellW * cellH);
+      let bHead = 0;
+      let bTail = 0;
+      for (let py = 1; py < cellH - 1; py++) {
+        const rowOff = py * cellW;
+        for (let px = 1; px < cellW - 1; px++) {
+          const i = rowOff + px;
+          if (!visited[i]) continue;
+          if (
+            !visited[i - 1] ||
+            !visited[i + 1] ||
+            !visited[i - cellW] ||
+            !visited[i + cellW]
+          ) {
+            distMap[i] = 1;
+            queue[bTail++] = i;
+          }
+        }
+      }
+      while (bHead < bTail) {
+        const curr = queue[bHead++];
+        const d = distMap[curr];
+        if (d >= 4) continue;
+        const cx = curr % cellW;
+        const cy = (curr - cx) / cellW;
+        const neighbors = [
+          cx > 0 ? curr - 1 : -1,
+          cx + 1 < cellW ? curr + 1 : -1,
+          cy > 0 ? curr - cellW : -1,
+          cy + 1 < cellH ? curr + cellW : -1,
+        ];
+        for (const nIdx of neighbors) {
+          if (nIdx < 0 || visited[nIdx] || distMap[nIdx] > 0) continue;
+          const p = nIdx * 4;
+          const r = data[p];
+          const g = data[p + 1];
+          const b = data[p + 2];
+          const diff = Math.max(
+            Math.abs(r - bgR),
+            Math.abs(g - bgG),
+            Math.abs(b - bgB)
+          );
+          if (diff < 32) {
+            distMap[nIdx] = d + 1;
+            queue[bTail++] = nIdx;
+            const alphaFactor = Math.min(1, Math.max(0.06, (diff - 4) / 28));
+            data[p + 3] = Math.round(data[p + 3] * alphaFactor);
+            const invA = 1 / Math.max(0.15, alphaFactor);
+            data[p] = Math.max(
+              0,
+              Math.min(255, Math.round((r - bgR * (1 - alphaFactor)) * invA))
+            );
+            data[p + 1] = Math.max(
+              0,
+              Math.min(255, Math.round((g - bgG * (1 - alphaFactor)) * invA))
+            );
+            data[p + 2] = Math.max(
+              0,
+              Math.min(255, Math.round((b - bgB * (1 - alphaFactor)) * invA))
+            );
+          }
+        }
+      }
+
+      // Compute tight bounding box of non-transparent pixels
+      let minX = cellW;
+      let minY = cellH;
+      let maxX = 0;
+      let maxY = 0;
+      let hasPixels = false;
+
+      for (let py = 0; py < cellH; py++) {
+        for (let px = 0; px < cellW; px++) {
+          if (data[(py * cellW + px) * 4 + 3] > 18) {
+            hasPixels = true;
+            if (px < minX) minX = px;
+            if (py < minY) minY = py;
+            if (px > maxX) maxX = px;
+            if (py > maxY) maxY = py;
+          }
+        }
+      }
+
+      const tempCell = document.createElement('canvas');
+      tempCell.width = cellW;
+      tempCell.height = cellH;
+      const tempCtx = tempCell.getContext('2d');
+      if (tempCtx) {
+        tempCtx.putImageData(cellData, 0, 0);
+      }
+
+      const pad = 2;
+      const bx = hasPixels ? Math.max(0, minX - pad) : 0;
+      const by = hasPixels ? Math.max(0, minY - pad) : 0;
+      const bw = hasPixels
+        ? Math.min(cellW - bx, maxX - minX + 1 + pad * 2)
+        : cellW;
+      const bh = hasPixels
+        ? Math.min(cellH - by, maxY - minY + 1 + pad * 2)
+        : cellH;
+
+      let frameCanvas = document.createElement('canvas');
+      frameCanvas.width = Math.max(1, bw);
+      frameCanvas.height = Math.max(1, bh);
+      const fCtx = frameCanvas.getContext('2d', { willReadFrequently: true });
+      if (fCtx) {
+        fCtx.drawImage(tempCell, bx, by, bw, bh, 0, 0, bw, bh);
+      }
+
+      // For the 5 bottom setting buttons (LANG, SOUND, TUTORIAL, RESTART, MAIN_MENU),
+      // extract the left-baked icon so it can be centered right next to the text (matching setting1.png)
+      // and patch the far-left icon region with the button's clean symmetric right-side texture.
+      if (
+        fCtx &&
+        (key === 'SETTING_BTN_LANG' ||
+          key === 'SETTING_BTN_SOUND' ||
+          key === 'SETTING_BTN_TUTORIAL' ||
+          key === 'SETTING_BTN_RESTART' ||
+          key === 'SETTING_BTN_MAIN_MENU')
+      ) {
+        const fImg = fCtx.getImageData(0, 0, bw, bh);
+        const fData = fImg.data;
+        let xStartRatio = 0.065;
+        let xEndRatio = 0.26;
+        if (key === 'SETTING_BTN_TUTORIAL') {
+          xStartRatio = 0.038;
+          xEndRatio = 0.155;
+        } else if (key === 'SETTING_BTN_RESTART') {
+          xStartRatio = 0.078;
+          xEndRatio = 0.305;
+        } else if (key === 'SETTING_BTN_MAIN_MENU') {
+          xStartRatio = 0.078;
+          xEndRatio = 0.32;
+        }
+
+        const ix0 = Math.max(2, Math.round(bw * xStartRatio));
+        const ix1 = Math.min(bw - 4, Math.round(bw * xEndRatio));
+        const iy0 = Math.max(2, Math.round(bh * 0.14));
+        const iy1 = Math.min(bh - 3, Math.round(bh * 0.86));
+        const iw = Math.max(1, ix1 - ix0 + 1);
+        const ih = Math.max(1, iy1 - iy0 + 1);
+
+        const iconCanvas = document.createElement('canvas');
+        iconCanvas.width = iw;
+        iconCanvas.height = ih;
+        const iconCtx = iconCanvas.getContext('2d');
+        if (iconCtx) {
+          const iconImg = iconCtx.createImageData(iw, ih);
+          const iData = iconImg.data;
+          let iMinX = iw;
+          let iMinY = ih;
+          let iMaxX = 0;
+          let iMaxY = 0;
+          let hasIconPx = false;
+
+          const leftRefX = Math.max(1, ix0 - 2);
+          const rightRefX = Math.min(bw - 2, ix1 + 2);
+          const spanX = Math.max(1, rightRefX - leftRefX);
+
+          for (let py = iy0; py <= iy1; py++) {
+            const leftIdx = (py * bw + leftRefX) * 4;
+            const rightIdx = (py * bw + rightRefX) * 4;
+            const lR = fData[leftIdx];
+            const lG = fData[leftIdx + 1];
+            const lB = fData[leftIdx + 2];
+            const lA = fData[leftIdx + 3];
+            const rR = fData[rightIdx];
+            const rG = fData[rightIdx + 1];
+            const rB = fData[rightIdx + 2];
+            const rA = fData[rightIdx + 3];
+
+            for (let px = ix0; px <= ix1; px++) {
+              const pIdx = (py * bw + px) * 4;
+              const t = (px - leftRefX) / spanX;
+              const bgRowR = Math.round(lR * (1 - t) + rR * t);
+              const bgRowG = Math.round(lG * (1 - t) + rG * t);
+              const bgRowB = Math.round(lB * (1 - t) + rB * t);
+              const bgRowA = Math.round(lA * (1 - t) + rA * t);
+
+              const r = fData[pIdx];
+              const g = fData[pIdx + 1];
+              const b = fData[pIdx + 2];
+
+              const diff = Math.max(
+                Math.abs(r - bgRowR),
+                Math.abs(g - bgRowG),
+                Math.abs(b - bgRowB)
+              );
+              if (diff > 11) {
+                const lx = px - ix0;
+                const ly = py - iy0;
+                const outIdx = (ly * iw + lx) * 4;
+                const alphaRatio = Math.min(1, (diff - 8) / 26);
+                const invA = 1 / Math.max(0.22, alphaRatio);
+                iData[outIdx] = Math.max(
+                  0,
+                  Math.min(
+                    255,
+                    Math.round((r - bgRowR * (1 - alphaRatio)) * invA)
+                  )
+                );
+                iData[outIdx + 1] = Math.max(
+                  0,
+                  Math.min(
+                    255,
+                    Math.round((g - bgRowG * (1 - alphaRatio)) * invA)
+                  )
+                );
+                iData[outIdx + 2] = Math.max(
+                  0,
+                  Math.min(
+                    255,
+                    Math.round((b - bgRowB * (1 - alphaRatio)) * invA)
+                  )
+                );
+                iData[outIdx + 3] = Math.round(alphaRatio * 255);
+                hasIconPx = true;
+                if (lx < iMinX) iMinX = lx;
+                if (ly < iMinY) iMinY = ly;
+                if (lx > iMaxX) iMaxX = lx;
+                if (ly > iMaxY) iMaxY = ly;
+              }
+
+              // Cleanly patch button interior with local scanline background gradient
+              fData[pIdx] = bgRowR;
+              fData[pIdx + 1] = bgRowG;
+              fData[pIdx + 2] = bgRowB;
+              fData[pIdx + 3] = bgRowA;
+            }
+          }
+
+          fCtx.putImageData(fImg, 0, 0);
+          iconCtx.putImageData(iconImg, 0, 0);
+
+          if (hasIconPx) {
+            const tw = Math.max(1, iMaxX - iMinX + 1);
+            const th = Math.max(1, iMaxY - iMinY + 1);
+            const trimmedIcon = document.createElement('canvas');
+            trimmedIcon.width = tw;
+            trimmedIcon.height = th;
+            const tCtx = trimmedIcon.getContext('2d');
+            if (tCtx) {
+              tCtx.drawImage(iconCanvas, iMinX, iMinY, tw, th, 0, 0, tw, th);
+            }
+            this.uiSettingIconFrames[key] = trimmedIcon;
+          }
+        }
+      }
+
+      // 3-Slice widen SETTING_SHARK_CARD to 6.05:1 (matching setting1.png) while keeping
+      // the left recessed square avatar frame (0..26%) and right chamfered edge (90..100%) 1:1 unstretched!
+      if (key === 'SETTING_SHARK_CARD' && bw > 20 && bh > 10) {
+        const targetW = Math.round(bh * 6.05);
+        if (targetW > bw) {
+          const leftCapW = Math.round(bw * 0.26);
+          const rightCapW = Math.round(bw * 0.1);
+          const midSrcW = Math.max(1, bw - leftCapW - rightCapW);
+          const midDstW = Math.max(1, targetW - leftCapW - rightCapW);
+
+          const widened = document.createElement('canvas');
+          widened.width = targetW;
+          widened.height = bh;
+          const wCtx = widened.getContext('2d');
+          if (wCtx) {
+            wCtx.drawImage(
+              frameCanvas,
+              0,
+              0,
+              leftCapW,
+              bh,
+              0,
+              0,
+              leftCapW,
+              bh
+            );
+            wCtx.drawImage(
+              frameCanvas,
+              leftCapW,
+              0,
+              midSrcW,
+              bh,
+              leftCapW,
+              0,
+              midDstW,
+              bh
+            );
+            wCtx.drawImage(
+              frameCanvas,
+              bw - rightCapW,
+              0,
+              rightCapW,
+              bh,
+              targetW - rightCapW,
+              0,
+              rightCapW,
+              bh
+            );
+            frameCanvas = widened;
+          }
+        }
+      }
+
+      // For SETTING_MODAL_FRAME, also generate a clean medallion variant where only the inner || pause bars
+      // inside the top circular header medallion (x: 39.6%..44.4%, y: 4.5%..11.2%) are smoothly interpolated
+      // with the medallion's own dark-teal interior, preserving the outer glowing circular medallion ring 100% intact!
+      if (key === 'SETTING_MODAL_FRAME' && bw > 40 && bh > 40) {
+        const cleanCanvas = document.createElement('canvas');
+        cleanCanvas.width = bw;
+        cleanCanvas.height = bh;
+        const cCtx = cleanCanvas.getContext('2d', { willReadFrequently: true });
+        if (cCtx) {
+          cCtx.drawImage(frameCanvas, 0, 0);
+          const cImg = cCtx.getImageData(0, 0, bw, bh);
+          const cData = cImg.data;
+          const ix0 = Math.max(2, Math.round(bw * 0.424));
+          const ix1 = Math.min(bw - 4, Math.round(bw * 0.488));
+          const iy0 = Math.max(2, Math.round(bh * 0.038));
+          const iy1 = Math.min(bh - 2, Math.round(bh * 0.118));
+          const spanX = Math.max(1, ix1 - ix0);
+
+          for (let py = iy0; py <= iy1; py++) {
+            const leftIdx = (py * bw + (ix0 - 1)) * 4;
+            const rightIdx = (py * bw + (ix1 + 1)) * 4;
+            const lR = cData[leftIdx];
+            const lG = cData[leftIdx + 1];
+            const lB = cData[leftIdx + 2];
+            const lA = cData[leftIdx + 3];
+            const rR = cData[rightIdx];
+            const rG = cData[rightIdx + 1];
+            const rB = cData[rightIdx + 2];
+            const rA = cData[rightIdx + 3];
+
+            for (let px = ix0; px <= ix1; px++) {
+              const t = (px - ix0) / spanX;
+              const dstIdx = (py * bw + px) * 4;
+              cData[dstIdx] = Math.round(lR * (1 - t) + rR * t);
+              cData[dstIdx + 1] = Math.round(lG * (1 - t) + rG * t);
+              cData[dstIdx + 2] = Math.round(lB * (1 - t) + rB * t);
+              cData[dstIdx + 3] = Math.round(lA * (1 - t) + rA * t);
+            }
+          }
+          cCtx.putImageData(cImg, 0, 0);
+          this.uiSettingCleanModalFrame = cleanCanvas;
+        }
+      }
+
+      this.frames[key] = frameCanvas;
+      this.uiSettingsGridFrames.push(frameCanvas);
+    }
+  }
+
   public getFrame(key: SpriteFrameKey): HTMLCanvasElement | undefined {
     return this.frames[key];
   }
@@ -782,6 +1584,72 @@ export class SpriteSheetManager {
     try {
       const dataUrl = frameCanvas.toDataURL('image/png');
       this.uiIconDataUrls[key] = dataUrl;
+      return dataUrl;
+    } catch {
+      return undefined;
+    }
+  }
+
+  public getUiBannerFrame(key: UiBannerKey): HTMLCanvasElement | undefined {
+    return this.frames[key];
+  }
+
+  public getUiBannerDataUrl(key: UiBannerKey): string | undefined {
+    const cached = this.uiBannerDataUrls[key];
+    if (cached) return cached;
+    const frameCanvas = this.frames[key];
+    if (!frameCanvas) return undefined;
+    try {
+      const dataUrl = frameCanvas.toDataURL('image/png');
+      this.uiBannerDataUrls[key] = dataUrl;
+      return dataUrl;
+    } catch {
+      return undefined;
+    }
+  }
+
+  public getUiSettingFrame(key: UiSettingKey): HTMLCanvasElement | undefined {
+    return this.frames[key];
+  }
+
+  public getUiSettingDataUrl(key: UiSettingKey): string | undefined {
+    const cached = this.uiSettingDataUrls[key];
+    if (cached) return cached;
+    const frameCanvas = this.frames[key];
+    if (!frameCanvas) return undefined;
+    try {
+      const dataUrl = frameCanvas.toDataURL('image/png');
+      this.uiSettingDataUrls[key] = dataUrl;
+      return dataUrl;
+    } catch {
+      return undefined;
+    }
+  }
+
+  public getUiSettingCleanModalFrameDataUrl(): string | undefined {
+    if (this.uiSettingCleanModalFrameDataUrl) {
+      return this.uiSettingCleanModalFrameDataUrl;
+    }
+    const cleanCanvas =
+      this.uiSettingCleanModalFrame ?? this.frames.SETTING_MODAL_FRAME;
+    if (!cleanCanvas) return undefined;
+    try {
+      const dataUrl = cleanCanvas.toDataURL('image/png');
+      this.uiSettingCleanModalFrameDataUrl = dataUrl;
+      return dataUrl;
+    } catch {
+      return undefined;
+    }
+  }
+
+  public getUiSettingIconDataUrl(key: UiSettingKey): string | undefined {
+    const cached = this.uiSettingIconDataUrls[key];
+    if (cached) return cached;
+    const iconCanvas = this.uiSettingIconFrames[key];
+    if (!iconCanvas) return undefined;
+    try {
+      const dataUrl = iconCanvas.toDataURL('image/png');
+      this.uiSettingIconDataUrls[key] = dataUrl;
       return dataUrl;
     } catch {
       return undefined;

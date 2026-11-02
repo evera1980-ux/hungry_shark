@@ -24,7 +24,13 @@ import {
   settleSharkScoreMastery,
   SHARK_EVOLUTION_FORMS,
 } from './sharkEvolutionConfig';
-import { SHARK_CELL_BOUNDS, SHARK_GRID_MAP } from './spriteSheetManager';
+import {
+  SHARK_CELL_BOUNDS,
+  SHARK_GRID_MAP,
+  spriteSheetManager,
+  UI_BANNER_BOUNDS,
+  UI_SETTING_BOUNDS,
+} from './spriteSheetManager';
 import {
   computeSpineSliceDeformation,
   getPreySwimGait,
@@ -969,4 +975,55 @@ test('Live Debug Regulators: setDebugPreySizeMultiplier and EcosystemSpawner.syn
   spawner.syncPreyCountImmediate(activePreys, 0, 220, () => 0.4, 0);
   assert.equal(activePreys.length, 36);
 });
+
+test('UI_BANNER_BOUNDS (buttons_16e3a0cf.png) defines 4 non-overlapping normalized regions and valid hollow avatar metrics', () => {
+  const keys = Object.keys(UI_BANNER_BOUNDS) as Array<keyof typeof UI_BANNER_BOUNDS>;
+  assert.deepEqual(keys.sort(), [
+    'UI_BAR_BTN_BLUE',
+    'UI_BAR_BTN_GOLD',
+    'UI_BAR_BTN_GREEN',
+    'UI_PLATE_AVATAR_BAR',
+  ]);
+
+  for (const key of keys) {
+    const [x0, y0, x1, y1] = UI_BANNER_BOUNDS[key];
+    assert.ok(x0 >= 0 && x1 <= 1 && x0 < x1, `${key} x bounds valid`);
+    assert.ok(y0 >= 0 && y1 <= 1 && y0 < y1, `${key} y bounds valid`);
+  }
+
+  // Top avatar plate must not overlap vertically with bottom 3 buttons
+  const [, , , plateY1] = UI_BANNER_BOUNDS.UI_PLATE_AVATAR_BAR;
+  for (const btnKey of ['UI_BAR_BTN_GREEN', 'UI_BAR_BTN_BLUE', 'UI_BAR_BTN_GOLD'] as const) {
+    const [, btnY0] = UI_BANNER_BOUNDS[btnKey];
+    assert.ok(plateY1 <= btnY0, `Top avatar bar must not overlap vertically with ${btnKey}`);
+  }
+
+  // Bottom 3 buttons must be ordered left-to-right (Green -> Blue -> Gold) with zero horizontal overlap
+  assert.ok(UI_BANNER_BOUNDS.UI_BAR_BTN_GREEN[2] <= UI_BANNER_BOUNDS.UI_BAR_BTN_BLUE[0]);
+  assert.ok(UI_BANNER_BOUNDS.UI_BAR_BTN_BLUE[2] <= UI_BANNER_BOUNDS.UI_BAR_BTN_GOLD[0]);
+
+  // Verify hollow avatar circle metrics are within left circular medallion region
+  const metrics = spriteSheetManager.avatarBarHollowMetrics;
+  assert.ok(metrics.cxPct > 12 && metrics.cxPct < 26);
+  assert.ok(metrics.cyPct >= 45 && metrics.cyPct <= 55);
+  assert.ok(metrics.innerDiaPctH >= 45 && metrics.innerDiaPctH <= 65);
+
+  // Verify all 9 UI_SETTING_BOUNDS (setting_83a7a273.png) are valid and pairwise non-overlapping
+  const settingKeys = Object.keys(UI_SETTING_BOUNDS) as Array<keyof typeof UI_SETTING_BOUNDS>;
+  assert.equal(settingKeys.length, 9);
+  for (let i = 0; i < settingKeys.length; i++) {
+    const k1 = settingKeys[i];
+    const [ax0, ay0, ax1, ay1] = UI_SETTING_BOUNDS[k1];
+    assert.ok(ax0 >= 0 && ax1 <= 1 && ax0 < ax1, `${k1} x bounds valid`);
+    assert.ok(ay0 >= 0 && ay1 <= 1 && ay0 < ay1, `${k1} y bounds valid`);
+    for (let j = i + 1; j < settingKeys.length; j++) {
+      const k2 = settingKeys[j];
+      const [bx0, by0, bx1, by1] = UI_SETTING_BOUNDS[k2];
+      const overlaps = ax0 < bx1 && ax1 > bx0 && ay0 < by1 && ay1 > by0;
+      assert.equal(overlaps, false, `${k1} and ${k2} must not overlap in setting_83a7a273.png`);
+    }
+  }
+});
+
+
 

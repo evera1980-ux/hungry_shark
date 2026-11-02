@@ -51,7 +51,15 @@ import {
 } from './game/canvasRenderer';
 import { SharkEvolutionAtlasModal } from './components/SharkEvolutionAtlasModal';
 import { SharkFormCanvasPreview } from './components/SharkFormCanvasPreview';
-import { getLineageUiIconKey, UiAtlasIcon } from './components/UiAtlasIcon';
+import {
+  getLineageUiIconKey,
+  UiAtlasIcon,
+  UiAvatarDataBar,
+  UiBannerButton,
+  UiSettingButton,
+  UiSettingModalFrame,
+  UiSettingSharkCard,
+} from './components/UiAtlasIcon';
 import { downloadStandaloneSingleFileHtml } from './game/singleFileExporter';
 import { spriteSheetManager } from './game/spriteSheetManager';
 import { parallaxBackground } from './game/parallaxBackground';
@@ -549,6 +557,30 @@ export default function App() {
     gameStateRef.current = gameState;
     if (typeof document !== 'undefined') {
       document.body.dataset.state = gameState;
+    }
+    if (typeof window !== 'undefined') {
+      (
+        window as unknown as {
+          __debugTriggerGameOver?: (revive?: boolean) => void;
+        }
+      ).__debugTriggerGameOver = (revive: boolean = true) => {
+        setRunSnapshot({
+          score: 12850,
+          maxDepth: 680,
+          preyEaten: 34,
+          level: 5,
+          coinsEarned: 185,
+          genesEarned: 28,
+          unlockedFormsCount: metaSaveRef.current.unlockedSharkIds.length,
+          activeSharkId: metaSaveRef.current.selectedSharkId,
+          personalBestScore: 12850,
+          isNewRecord: true,
+          masteryGenesBonus: 15,
+          masteryCrownTier: 2,
+        });
+        setReviveOffered(revive);
+        setGameState('gameover');
+      };
     }
   }, [gameState]);
 
@@ -1677,41 +1709,92 @@ export default function App() {
 
       // ==================== 1. UPDATE SIMULATION ====================
       if (gameStateRef.current === 'title') {
-        // Title Screen Live World Camera Tour / Hero Patrol with Active Deployed Shark Form
-        shark.sharkFormId = metaSaveRef.current.selectedSharkId;
-        shark.swimPhase += dt * 7.5;
+        // Title Screen Hero Patrol: uses the exact in-game Hydrodynamic Horizontal Whip-Turn & 2.5D Spinal C-Bend physics
+        const selectedId = metaSaveRef.current.selectedSharkId;
+        if (shark.sharkFormId !== selectedId) {
+          shark.sharkFormId = selectedId;
+          shark.stats = recomputeSharkStats(1, false, selectedId);
+        }
         shark.biteAnim = Math.max(0, shark.biteAnim - dt * 3);
         shark.morphFlashTimer = Math.max(0, shark.morphFlashTimer - dt * 1.4);
-        const tSec = now * 0.0008;
-        const targetX = Math.cos(tSec) * 280;
-        const targetY = 260 + Math.sin(tSec * 2) * 85;
-        const dx = targetX - shark.x;
-        const dy = targetY - shark.y;
-        const nextAngle = Math.atan2(dy, dx);
-        let patrolDiff = nextAngle - shark.angle;
-        while (patrolDiff > Math.PI) patrolDiff -= Math.PI * 2;
-        while (patrolDiff < -Math.PI) patrolDiff += Math.PI * 2;
-        shark.angle = nextAngle;
-        if (Math.cos(shark.angle) > 0.16) shark.facingDir = 1;
-        else if (Math.cos(shark.angle) < -0.16) shark.facingDir = -1;
-        shark.facingScaleX +=
-          (shark.facingDir - shark.facingScaleX) * Math.min(1, dt * 12);
-        const targetPatrolTurn = Math.max(
-          -0.85,
-          Math.min(0.85, (patrolDiff / Math.max(0.008, dt)) * 0.45 * shark.facingDir)
+
+        // Alternate horizontal patrol direction every ~3.3s with gentle horizontal cruise undulation
+        const patrolDir = Math.cos(now * 0.00095) >= 0 ? 1 : -1;
+        const inputX = patrolDir;
+        const inputY =
+          Math.sin(now * 0.0022) * 0.12 +
+          Math.max(-0.18, Math.min(0.18, (240 - shark.y) * 0.008));
+
+        shark.targetAngle = Math.atan2(inputY, inputX);
+        let diff = shark.targetAngle - shark.angle;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+
+        const cosCur = Math.cos(shark.angle);
+        const cosTgt = Math.cos(shark.targetAngle);
+        // Hydrodynamic Horizontal Whip-Turn: pivot horizontally with 2.5D spinal C-bend whip instead of pitching 90° up/down
+        if (Math.abs(diff) > 1.85 && cosCur * cosTgt < -0.15) {
+          shark.facingDir = cosTgt >= 0 ? 1 : -1;
+          shark.angle = Math.atan2(
+            Math.sin(shark.angle),
+            -Math.cos(shark.angle)
+          );
+          diff = shark.targetAngle - shark.angle;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+
+          const whipSign =
+            (Math.sin(shark.targetAngle) - Math.sin(shark.angle)) *
+              shark.facingDir >=
+            0
+              ? 1
+              : -1;
+          shark.turnRate = whipSign * 0.92;
+          shark.swimPhase += 0.68;
+        }
+
+        const turnAgility = 11.2 * (1 + Math.min(0.45, Math.abs(diff) / Math.PI));
+        shark.angle += diff * Math.min(1, dt * turnAgility);
+        shark.angle = Math.atan2(Math.sin(shark.angle), Math.cos(shark.angle));
+
+        const cosAfter = Math.cos(shark.angle);
+        if (cosAfter > 0.18) {
+          shark.facingDir = 1;
+        } else if (cosAfter < -0.18) {
+          shark.facingDir = -1;
+        }
+
+        const localTargetTurnBend = Math.max(
+          -1,
+          Math.min(1, (diff / 1.05) * shark.facingDir)
         );
         shark.turnRate +=
-          (targetPatrolTurn - shark.turnRate) * Math.min(1, dt * 10);
-        shark.x = targetX;
-        shark.y = targetY;
+          (localTargetTurnBend - shark.turnRate) * Math.min(1, dt * 14);
+        shark.facingScaleX +=
+          (shark.facingDir - shark.facingScaleX) * Math.min(1, dt * 13.5);
+
+        const patrolSpeed = (shark.stats.moveSpeed || 280) * 0.62;
+        shark.vx +=
+          (Math.cos(shark.angle) * patrolSpeed - shark.vx) * Math.min(1, dt * 7);
+        shark.vy +=
+          (Math.sin(shark.angle) * patrolSpeed - shark.vy) * Math.min(1, dt * 7);
+
+        shark.x = infiniteWorldManager.wrapEntityX(shark.x + shark.vx * dt);
+        shark.y = Math.max(140, Math.min(340, shark.y + shark.vy * dt));
+
+        const speedNorm =
+          Math.hypot(shark.vx, shark.vy) /
+          Math.max(180, shark.stats.moveSpeed || 280);
+        shark.swimPhase += dt * (4.8 + speedNorm * 6.8);
+
         sim.camera.x = shark.x;
-        sim.camera.y = shark.y - 115;
-        sim.camera.zoom = 1.05;
+        sim.camera.y = shark.y;
+        sim.camera.zoom = 1.15;
 
         // Ambient prey swim on title screen
         if (sim.preyList.length === 0) {
           for (let i = 0; i < 18; i++) {
-            sim.preyList.push(createPreyEntity(0, 260));
+            sim.preyList.push(createPreyEntity(0, 240));
           }
         }
         for (const prey of sim.preyList) {
@@ -3440,15 +3523,15 @@ export default function App() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-            className="fixed top-3 right-3 md:top-4 md:right-4 z-30 flex items-center gap-2 pointer-events-auto"
+            className="fixed top-2.5 right-2.5 sm:top-3.5 sm:right-3.5 md:top-4 md:right-4 z-30 flex items-center gap-1 sm:gap-2 pointer-events-auto"
           >
             <button
               type="button"
               onClick={toggleLanguage}
               aria-label={t('btn_lang_toggle')}
-              className="game-btn-spring px-3.5 py-1.5 md:px-4 md:py-2 rounded-full font-display font-bold text-xs tracking-wide text-sky-100 bg-slate-950/65 hover:bg-slate-900/90 shadow-md whitespace-nowrap shrink-0 cursor-pointer"
+              className="game-btn-spring px-2 py-1 sm:px-3.5 sm:py-1.5 md:px-4 md:py-2 rounded-full font-display font-bold text-[10px] sm:text-xs tracking-wide text-sky-100 bg-slate-950/65 hover:bg-slate-900/90 shadow-md whitespace-nowrap shrink-0 cursor-pointer"
             >
-              {t('btn_lang_toggle')} ({lang.toUpperCase()})
+              {t('btn_lang_toggle')}
             </button>
 
             <button
@@ -3456,11 +3539,11 @@ export default function App() {
               tabIndex={-1}
               onClick={toggleMute}
               aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
-              className="game-btn-spring px-3.5 py-1.5 md:px-4 md:py-2 rounded-full font-display font-semibold text-xs text-slate-200 bg-slate-950/65 hover:bg-slate-900/90 shadow-md flex items-center gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
+              className="game-btn-spring px-2 py-1 sm:px-3.5 sm:py-1.5 md:px-4 md:py-2 rounded-full font-display font-semibold text-[10px] sm:text-xs text-slate-200 bg-slate-950/65 hover:bg-slate-900/90 shadow-md flex items-center gap-1 sm:gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
             >
               <UiAtlasIcon
                 iconKey="UI_ICON_SOUND"
-                size={16}
+                size={14}
                 className={isMuted ? 'opacity-40 grayscale' : ''}
               />
               <span>{isMuted ? t('btn_unmute') : t('btn_mute')}</span>
@@ -3638,142 +3721,158 @@ export default function App() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.25 }}
             aria-label={t('game_title')}
-            className="fixed inset-0 z-20 flex flex-col justify-between p-3 sm:p-5 md:p-10 pointer-events-none"
+            className="fixed inset-0 z-20 flex flex-col justify-between p-2.5 sm:p-3.5 md:p-4 pointer-events-none"
             style={{
               background:
                 'radial-gradient(circle at 50% 35%, rgba(2, 132, 199, 0.12) 0%, rgba(2, 6, 23, 0.78) 100%)',
             }}
           >
-            <div className="h-2 sm:h-4" />
-
-            {/* Centerpiece Emblem + Frameless Deployed Shark Bar + Primary CTAs */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.94, y: -14 }}
-              transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-              className="landscape-title-wrap max-w-2xl mx-auto flex flex-col items-center text-center pointer-events-auto -mt-2 md:-mt-6"
-            >
-              {/* Frameless Active Shark Form & Persistent Bank Status Strip */}
-              <div
-                onClick={() => setShowAtlasModal(true)}
-                className="mb-2.5 sm:mb-3.5 px-4 py-1.5 rounded-full bg-slate-950/65 hover:bg-slate-950/85 flex items-center gap-3 sm:gap-4 shadow-[0_10px_30px_rgba(2,6,23,0.75)] cursor-pointer transition-all"
+            {/* Top Section: Top-Left Avatar Module + Upper Title Header */}
+            <div className="w-full flex flex-col items-center">
+              {/* Top-Left Corner: Deployed Shark Avatar, Name & Data Module (Reduced 30% in size) */}
+              <motion.div
+                initial={{ opacity: 0, x: -20, y: -12 }}
+                animate={{ opacity: 1, x: 0, y: 0 }}
+                exit={{ opacity: 0, x: -20, y: -12 }}
+                transition={{ type: 'spring', stiffness: 340, damping: 28 }}
+                className="w-full flex items-start justify-start pointer-events-auto"
               >
-                <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
-                  <UiAtlasIcon
-                    iconKey="UI_AVATAR_FRAME"
-                    size={48}
-                    className="absolute inset-0"
-                  />
-                  <SharkFormCanvasPreview
-                    sharkId={titleSharkForm.id}
-                    width={38}
-                    height={26}
-                    animate={true}
-                  />
-                </div>
-                <div className="text-left">
-                  <div className="text-[10px] font-mono-num text-sky-300 font-bold flex items-center gap-1">
-                    <UiAtlasIcon
-                      iconKey={getLineageUiIconKey(titleSharkForm.lineage)}
-                      size={12}
-                    />
-                    <span>
-                      {lang === 'zh' ? titleGenInfo.nameZh : titleGenInfo.nameEn}{' '}
-                      · Lv.{titleSharkUpg}/10
-                    </span>
-                  </div>
-                  <div className="font-display font-extrabold text-xs sm:text-sm text-white">
-                    {lang === 'zh' ? titleSharkForm.nameZh : titleSharkForm.nameEn}
-                  </div>
-                </div>
-                <div className="h-5 w-px bg-white/10" />
-                <div className="flex items-center gap-3 text-xs font-mono-num font-bold">
-                  <span className="text-amber-300 flex items-center gap-1">
-                    <UiAtlasIcon iconKey="UI_ICON_COIN" size={15} />
-                    {metaSave.bankedCoins}
-                  </span>
-                  <span className="text-emerald-300 flex items-center gap-1">
-                    <UiAtlasIcon iconKey="UI_ICON_GENE" size={15} />
-                    {metaSave.bankedGenes}
-                  </span>
-                </div>
-              </div>
-
-              <h1
-                className="font-display font-extrabold text-white tracking-tight hud-stroke mb-1 sm:mb-1.5"
-                style={{
-                  fontSize: 'clamp(1.65rem, 3.6vw, 3.2rem)',
-                  textWrap: 'balance',
-                }}
-              >
-                {t('game_title')}
-              </h1>
-
-              <p className="text-sky-200/90 text-xs sm:text-sm md:text-base font-medium mb-3 sm:mb-4 max-w-md">
-                {lang === 'zh'
-                  ? '48阶鲨鱼本体进化 · 跨局基因与金币养成 · 无缝深海吞噬'
-                  : '48-Form Shark Body Evolution · Persistent Coins & Genes · Seamless Hunting'}
-              </p>
-
-              {/* Primary Actions (3 clean frameless game buttons, horizontal on mobile landscape) */}
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-3 w-full">
-                <button
-                  type="button"
-                  data-start="true"
-                  data-testid="start-game-btn"
-                  onClick={() => startNewRun(false)}
-                  className="game-btn-spring w-full sm:w-auto px-6 py-2.5 sm:py-3 rounded-2xl font-display font-extrabold text-sm sm:text-base md:text-lg text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-[0_8px_24px_rgba(52,211,153,0.35)] cursor-pointer whitespace-nowrap shrink-0 flex items-center justify-center gap-2"
-                >
-                  <UiAtlasIcon iconKey="UI_BTN_BOOST" size={22} />
-                  <span>{t('btn_start')}</span>
-                </button>
-
-                <button
-                  type="button"
-                  data-testid="open-atlas-btn"
+                <UiAvatarDataBar
+                  dataTestId="title-avatar-data-bar"
                   onClick={() => setShowAtlasModal(true)}
-                  className="game-btn-spring w-full sm:w-auto px-5 py-2.5 sm:py-3 rounded-2xl font-display font-extrabold text-xs sm:text-sm md:text-base text-slate-950 bg-sky-400 hover:bg-sky-300 shadow-[0_8px_24px_rgba(56,189,248,0.35)] cursor-pointer whitespace-nowrap shrink-0 flex items-center justify-center gap-1.5"
+                  title={
+                    lang === 'zh'
+                      ? '点击打开48阶进化图谱'
+                      : 'Click to open 48-Form Evolution Atlas'
+                  }
+                  className="w-[203px] sm:w-[245px] md:w-[273px] transition-transform hover:scale-[1.02]"
+                  avatarContent={
+                    <SharkFormCanvasPreview
+                      sharkId={titleSharkForm.id}
+                      width={38}
+                      height={27}
+                      animate={true}
+                    />
+                  }
+                  ringOverlay={
+                    <div className="relative w-full h-full pointer-events-none">
+                      <div className="absolute -bottom-0.5 -left-0.5 flex items-center justify-center w-4.5 h-4.5 sm:w-5 sm:h-5">
+                        <UiAtlasIcon
+                          iconKey="UI_BADGE_TIER"
+                          size={18}
+                          className="absolute inset-0"
+                        />
+                        <span className="relative z-10 font-mono-num font-black text-[7px] sm:text-[8px] text-amber-200 hud-stroke leading-none">
+                          T{titleSharkForm.baseBiteTier}
+                        </span>
+                      </div>
+                    </div>
+                  }
                 >
-                  <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={20} />
-                  <span>
-                    {lang === 'zh' ? '进化' : 'Evolution'} (
-                    {unlockedTotalCount}/48)
-                  </span>
-                </button>
+                  <div className="flex flex-col justify-between h-full text-left py-0.5 min-w-0 overflow-hidden">
+                    <div className="flex items-center justify-between gap-1 text-[7px] sm:text-[8px] md:text-[9px] font-mono-num text-sky-300 font-bold leading-none min-w-0">
+                      <span className="flex items-center gap-0.5 min-w-0 truncate">
+                        <UiAtlasIcon
+                          iconKey={getLineageUiIconKey(titleSharkForm.lineage)}
+                          size={9}
+                        />
+                        <span className="truncate">
+                          G{titleSharkForm.generation} ·{' '}
+                          {lang === 'zh'
+                            ? LINEAGE_META[titleSharkForm.lineage].nameZh
+                            : LINEAGE_META[titleSharkForm.lineage].nameEn}
+                        </span>
+                      </span>
+                      <span className="text-amber-300 shrink-0">
+                        Lv.{titleSharkUpg}/10
+                      </span>
+                    </div>
 
-                <button
-                  type="button"
-                  onClick={handleTrialMaxMechaAd}
-                  className="game-btn-spring w-full sm:w-auto px-4 py-2.5 sm:py-3 rounded-2xl font-display font-bold text-xs sm:text-sm text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-[0_8px_24px_rgba(251,191,36,0.35)] cursor-pointer whitespace-nowrap shrink-0 flex items-center justify-center gap-1.5"
-                >
-                  <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={18} />
-                  <span>
-                    {lang === 'zh'
-                      ? '试驾机甲利维坦'
-                      : 'Trial Mecha Leviathan'}
-                  </span>
-                </button>
-              </div>
+                    <div className="font-display font-extrabold text-[10px] sm:text-xs md:text-[13px] text-white hud-stroke truncate leading-tight">
+                      {lang === 'zh'
+                        ? titleSharkForm.nameZh
+                        : titleSharkForm.nameEn}
+                    </div>
 
-              <button
-                type="button"
-                onClick={downloadStandaloneSingleFileHtml}
-                className="mt-2 sm:mt-2.5 px-4 py-1 text-[11px] sm:text-xs font-medium text-sky-300/85 hover:text-white underline underline-offset-4 cursor-pointer whitespace-nowrap transition-colors"
+                    <div className="flex items-center gap-2 text-[8.5px] sm:text-[9.5px] md:text-[10px] font-mono-num font-bold leading-none">
+                      <span className="text-amber-300 flex items-center gap-0.5">
+                        <UiAtlasIcon iconKey="UI_ICON_COIN" size={10} />
+                        {metaSave.bankedCoins}
+                      </span>
+                      <span className="text-emerald-300 flex items-center gap-0.5">
+                        <UiAtlasIcon iconKey="UI_ICON_GENE" size={10} />
+                        {metaSave.bankedGenes}
+                      </span>
+                    </div>
+                  </div>
+                </UiAvatarDataBar>
+              </motion.div>
+
+              {/* Upper Title Header (Moved upward above the central shark animation stage) */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.92, y: -12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.94, y: -14 }}
+                transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+                className="landscape-title-wrap max-w-2xl mx-auto flex flex-col items-center text-center pointer-events-auto mt-4 sm:mt-5"
               >
-                ⬇ {t('btn_export_html')}
-              </button>
-            </motion.div>
+                <h1
+                  className="font-display font-extrabold text-white tracking-tight hud-stroke mb-1 sm:mb-1.5"
+                  style={{
+                    fontSize: 'clamp(1.65rem, 3.6vw, 3.2rem)',
+                    textWrap: 'balance',
+                  }}
+                >
+                  {t('game_title')}
+                </h1>
 
-            {/* Flat Single-Line Control Hint in Bottom Safe Margin */}
+                <p className="text-sky-200/90 text-xs sm:text-sm md:text-base font-medium max-w-md px-2">
+                  {lang === 'zh'
+                    ? '48阶鲨鱼本体进化 · 跨局基因与金币养成 · 无缝深海吞噬'
+                    : '48-Form Shark Body Evolution · Persistent Coins & Genes · Seamless Hunting'}
+                </p>
+              </motion.div>
+            </div>
+
+            {/* Bottom Section: 3 Primary Action Buttons (Moved further downward so center shark stage is 100% unobstructed) */}
             <motion.div
-              initial={{ opacity: 0, y: 12 }}
+              initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 12 }}
-              transition={{ delay: 0.08, duration: 0.25 }}
-              className="text-center text-[10px] sm:text-xs md:text-sm text-slate-300/90 font-medium tracking-wide px-2 leading-snug"
+              exit={{ opacity: 0, y: 16 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+              className="mb-6 sm:mb-8 md:mb-10 flex flex-col sm:flex-row items-center justify-center gap-2.5 sm:gap-3 w-full pointer-events-auto"
             >
-              {t('control_hint')}
+              <UiBannerButton
+                variant="green"
+                dataStart={true}
+                dataTestId="start-game-btn"
+                onClick={() => startNewRun(false)}
+                className="w-[154px] sm:w-[144px] md:w-[160px]"
+                labelClassName="text-[10px] sm:text-[10.5px] md:text-[11.5px]"
+              >
+                {t('btn_start')}
+              </UiBannerButton>
+
+              <UiBannerButton
+                variant="blue"
+                dataTestId="open-atlas-btn"
+                onClick={() => setShowAtlasModal(true)}
+                className="w-[154px] sm:w-[140px] md:w-[157px]"
+                labelClassName="text-[10px] sm:text-[10.5px] md:text-[11.5px]"
+              >
+                {lang === 'zh' ? '进化' : 'Evolution'} ({unlockedTotalCount}
+                /48)
+              </UiBannerButton>
+
+              <UiBannerButton
+                variant="gold"
+                dataTestId="trial-mecha-btn"
+                onClick={handleTrialMaxMechaAd}
+                className="w-[154px] sm:w-[144px] md:w-[162px]"
+                labelClassName="text-[9.5px] sm:text-[10px] md:text-[11px]"
+              >
+                {lang === 'zh' ? '试驾机甲利维坦' : 'Trial Mecha'}
+              </UiBannerButton>
             </motion.div>
           </motion.section>
         )}
@@ -3792,165 +3891,249 @@ export default function App() {
           >
             {/* ==================== TOP PERIMETER RIBBON (ZERO-OVERLAP TWO-ROW RESPONSIVE HUD) ==================== */}
             <div className="flex flex-col gap-1.5 w-full">
-              {/* Row 1: Top-Left Avatar & Bars + Top-Right Telemetry & Pause (Guaranteed Zero Overlap on 360px+) */}
-              <div className="flex items-center justify-between gap-1.5 w-full">
-                {/* 1. Top-Left: Frameless Shark Avatar Medallion (with Circular XP Ring + Atlas Entry) & Skewed HP/Boost Bars */}
+              {/* Row 1: Top-Left Avatar & Bars (-30% size) + Top-Center Score/Telemetry Pill (Moved Up & Centered) + Top-Right Pause */}
+              <div className="relative flex items-start justify-between gap-1.5 w-full">
+                {/* 1. Top-Left: Sliced Sci-Fi Avatar Data Bar (-30% size: 151px / 193px / 217px) */}
                 <motion.div
                   initial={{ opacity: 0, x: -24, y: -8 }}
                   animate={{ opacity: 1, x: 0, y: 0 }}
                   exit={{ opacity: 0, x: -24, y: -8 }}
                   transition={{ type: 'spring', stiffness: 350, damping: 28 }}
-                  className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto shrink-0"
+                  className="pointer-events-auto shrink-0"
                 >
-                  {/* Interactive Avatar Medallion -> Click to open 48-Shark Evolution Atlas */}
-                  <button
-                    type="button"
-                    data-testid="hud-open-atlas-btn"
-                    {...bindMultiTouchButton(() => setShowAtlasModal(true))}
-                    title={
-                      lang === 'zh'
-                        ? `点击打开进化图谱 (${hudState.unlockedFormsCount}/48)`
-                        : `Open Evolution Atlas (${hudState.unlockedFormsCount}/48)`
-                    }
-                    className="game-btn-spring relative w-11 h-11 sm:w-14 sm:h-14 flex items-center justify-center rounded-full cursor-pointer touch-manipulation shrink-0 group"
-                  >
-                    {/* Circular Purple XP Ring around the Avatar */}
-                    <svg
-                      viewBox="0 0 64 64"
-                      className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
-                      aria-hidden="true"
-                    >
-                      <circle
-                        cx="32"
-                        cy="32"
-                        r="29"
-                        fill="rgba(2, 6, 23, 0.72)"
-                        stroke="rgba(15, 23, 42, 0.85)"
-                        strokeWidth="3.5"
-                      />
-                      <circle
-                        cx="32"
-                        cy="32"
-                        r="29"
-                        fill="none"
-                        stroke="#c084fc"
-                        strokeWidth="3.5"
-                        strokeLinecap="round"
-                        strokeDasharray="182.2"
-                        strokeDashoffset={
-                          182.2 -
-                          (182.2 *
-                            Math.max(
-                              0,
-                              Math.min(
-                                100,
-                                (hudState.xp / Math.max(1, hudState.xpToNext)) *
-                                  100
-                              )
-                            )) /
-                            100
-                        }
-                      />
-                    </svg>
-
-                    {/* Sliced Deep-Sea Metallic Avatar Frame Ring */}
-                    <UiAtlasIcon
-                      iconKey="UI_AVATAR_FRAME"
-                      size={54}
-                      className="absolute inset-0 w-full h-full"
-                    />
-
-                    {/* Current Shark Form Preview inside Medallion */}
-                    <div className="relative z-10 flex items-center justify-center">
+                  <UiAvatarDataBar
+                    dataTestId="hud-avatar-data-bar"
+                    className="w-[151px] sm:w-[178px] lg:w-[217px]"
+                    avatarContent={
                       <SharkFormCanvasPreview
                         sharkId={activeHudSharkForm.id}
-                        width={32}
-                        height={22}
+                        width={29}
+                        height={20}
                       />
-                    </div>
+                    }
+                    ringOverlay={
+                      <button
+                        type="button"
+                        data-testid="hud-open-atlas-btn"
+                        {...bindMultiTouchButton(() => setShowAtlasModal(true))}
+                        title={
+                          lang === 'zh'
+                            ? `点击打开进化图谱 (${hudState.unlockedFormsCount}/48)`
+                            : `Open Evolution Atlas (${hudState.unlockedFormsCount}/48)`
+                        }
+                        className="game-btn-spring relative w-full h-full flex items-center justify-center rounded-full cursor-pointer touch-manipulation group"
+                      >
+                        {/* Circular Purple XP Ring around the Hollow Avatar Window */}
+                        <svg
+                          viewBox="0 0 64 64"
+                          className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
+                          aria-hidden="true"
+                        >
+                          <circle
+                            cx="32"
+                            cy="32"
+                            r="29"
+                            fill="none"
+                            stroke="#c084fc"
+                            strokeWidth="2.8"
+                            strokeLinecap="round"
+                            strokeDasharray="182.2"
+                            strokeDashoffset={
+                              182.2 -
+                              (182.2 *
+                                Math.max(
+                                  0,
+                                  Math.min(
+                                    100,
+                                    (hudState.xp /
+                                      Math.max(1, hudState.xpToNext)) *
+                                      100
+                                  )
+                                )) /
+                                100
+                            }
+                          />
+                        </svg>
 
-                    {/* Bottom-Left Bite Tier Shield Badge (T1..T8) */}
-                    <div className="absolute -bottom-1 -left-1 z-20 flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6">
-                      <UiAtlasIcon
-                        iconKey="UI_BADGE_TIER"
-                        size={22}
-                        className="absolute inset-0"
-                      />
-                      <span className="relative z-10 font-mono-num font-black text-[8px] sm:text-[9px] text-amber-200 hud-stroke leading-none">
-                        T{hudState.biteTier}
-                      </span>
-                    </div>
+                        {/* Bottom-Left Bite Tier Shield Badge (T1..T8) */}
+                        <div className="absolute -bottom-0.5 -left-0.5 z-20 flex items-center justify-center w-3.5 h-3.5 sm:w-4 sm:h-4">
+                          <UiAtlasIcon
+                            iconKey="UI_BADGE_TIER"
+                            size={15}
+                            className="absolute inset-0"
+                          />
+                          <span className="relative z-10 font-mono-num font-black text-[6px] sm:text-[7px] text-amber-200 hud-stroke leading-none">
+                            T{hudState.biteTier}
+                          </span>
+                        </div>
 
-                    {/* Bottom-Right In-Run Level Tag (Frameless) */}
-                    <span className="absolute -bottom-0.5 -right-0.5 z-20 px-1 py-0.5 rounded-full bg-purple-950/95 font-mono-num font-black text-[7px] sm:text-[8px] text-purple-200 shadow leading-none">
-                      Lv.{hudState.level}
-                    </span>
+                        {/* Bottom-Right In-Run Level Tag */}
+                        <span className="absolute -bottom-0.5 -right-0.5 z-20 px-1 py-0.2 rounded-full bg-purple-950/95 font-mono-num font-black text-[5.5px] sm:text-[6.5px] text-purple-200 shadow leading-none">
+                          Lv.{hudState.level}
+                        </span>
 
-                    {/* Top-Right Mini Atlas Collection Counter (Frameless) */}
-                    <span
-                      className={`absolute -top-1 -right-1.5 z-20 px-1 py-0.5 rounded-full font-display font-extrabold text-[7px] sm:text-[8px] leading-none whitespace-nowrap shadow transition-all ${
-                        tutorialStep === 'CELEBRATE'
-                          ? 'bg-cyan-400 text-slate-950 shadow-[0_0_14px_rgba(34,211,238,0.95)] scale-110 animate-bounce'
-                          : 'bg-slate-950/90 text-sky-200'
-                      }`}
-                    >
-                      {lang === 'zh' ? '图谱' : 'Atlas'}{' '}
-                      {hudState.unlockedFormsCount}/48
-                    </span>
-                  </button>
+                        {/* Top-Right Mini Atlas Collection Counter */}
+                        <span
+                          className={`absolute -top-0.5 -right-0.5 z-20 px-1 py-0.2 rounded-full font-display font-extrabold text-[5.5px] sm:text-[6.5px] leading-none whitespace-nowrap shadow transition-all ${
+                            tutorialStep === 'CELEBRATE'
+                              ? 'bg-cyan-400 text-slate-950 shadow-[0_0_14px_rgba(34,211,238,0.95)] scale-110 animate-bounce'
+                              : 'bg-slate-950/90 text-sky-200'
+                          }`}
+                        >
+                          {lang === 'zh' ? '图谱' : 'Atlas'}{' '}
+                          {hudState.unlockedFormsCount}/48
+                        </span>
+                      </button>
+                    }
+                  >
+                    {/* Right Angled Dark-Navy Data Plate: Shark Name + Skewed HP & Boost Bars */}
+                    <div className="flex flex-col justify-between h-full gap-0.5 py-0.2">
+                      <div className="flex items-center justify-between text-[6.5px] sm:text-[7.5px] lg:text-[8.5px] font-display font-extrabold text-white hud-stroke leading-none px-0.5 min-w-0">
+                        <span className="truncate flex items-center gap-0.5 min-w-0">
+                          <UiAtlasIcon
+                            iconKey={getLineageUiIconKey(
+                              activeHudSharkForm.lineage
+                            )}
+                            size={8}
+                          />
+                          <span className="truncate">
+                            {lang === 'zh'
+                              ? activeHudSharkForm.nameZh
+                              : activeHudSharkForm.nameEn}
+                          </span>
+                        </span>
+                        <span className="font-mono-num text-amber-300 shrink-0 ml-0.5">
+                          Lv.{hudState.activeUpgradeLevel}
+                        </span>
+                      </div>
 
-                  {/* Frameless Skewed Vitality HP & Boost Energy Bars */}
-                  <div className="flex flex-col gap-1 w-[92px] sm:w-[138px] md:w-[158px]">
-                    {/* Compact Stroked Shark Name + Body Upgrade Lv */}
-                    <div className="flex items-center justify-between text-[9px] sm:text-[10px] font-display font-extrabold text-white hud-stroke leading-none px-0.5">
-                      <span className="truncate flex items-center gap-0.5">
-                        <UiAtlasIcon
-                          iconKey={getLineageUiIconKey(
-                            activeHudSharkForm.lineage
-                          )}
-                          size={10}
+                      {/* Skewed HP Bar with Delayed Damage Ghost Fill */}
+                      <div className="relative h-1.5 sm:h-2 lg:h-2.5 w-full bg-slate-950/85 -skew-x-12 rounded-sm overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.65)]">
+                        <div
+                          ref={hpGhostFillRef}
+                          className="absolute inset-y-0 left-0 w-full bg-rose-500/80 origin-left"
+                          style={{ transform: 'scaleX(1)' }}
                         />
-                        {lang === 'zh'
-                          ? activeHudSharkForm.nameZh
-                          : activeHudSharkForm.nameEn}
-                      </span>
-                      <span className="font-mono-num text-amber-300 shrink-0 ml-0.5">
-                        Lv.{hudState.activeUpgradeLevel}
-                      </span>
-                    </div>
+                        <div
+                          ref={hpBarFillRef}
+                          className="relative h-full w-full bg-gradient-to-r from-emerald-500 to-emerald-300 origin-left"
+                          style={{ transform: 'scaleX(1)' }}
+                        />
+                        <span className="absolute inset-0 flex items-center justify-end pr-0.5 text-[5.5px] sm:text-[6.5px] font-mono-num font-extrabold text-white hud-stroke leading-none skew-x-12">
+                          {hudState.hp}/{hudState.maxHp}
+                        </span>
+                      </div>
 
-                    {/* Skewed HP Bar with Delayed Damage Ghost Fill (No Wireframe Border) */}
-                    <div className="relative h-2.5 sm:h-3 w-full bg-slate-950/85 -skew-x-12 rounded-sm overflow-hidden shadow-[0_2px_8px_rgba(0,0,0,0.65)]">
-                      <div
-                        ref={hpGhostFillRef}
-                        className="absolute inset-y-0 left-0 w-full bg-rose-500/80 origin-left transition-transform duration-75"
-                        style={{ transform: 'scaleX(1)' }}
-                      />
-                      <div
-                        ref={hpBarFillRef}
-                        className="relative h-full w-full bg-gradient-to-r from-emerald-500 to-emerald-300 origin-left"
-                        style={{ transform: 'scaleX(1)' }}
-                      />
-                      <span className="absolute inset-0 flex items-center justify-end pr-1 text-[8px] font-mono-num font-extrabold text-white hud-stroke leading-none skew-x-12">
-                        {hudState.hp}/{hudState.maxHp}
+                      {/* Skewed Boost Energy Bar */}
+                      <div className="relative h-1 sm:h-1.5 w-[90%] bg-slate-950/85 -skew-x-12 rounded-sm overflow-hidden shadow-[0_2px_6px_rgba(0,0,0,0.6)]">
+                        <div
+                          ref={energyBarFillRef}
+                          className="h-full w-full bg-gradient-to-r from-sky-500 to-cyan-300 origin-left"
+                          style={{ transform: 'scaleX(1)' }}
+                        />
+                      </div>
+
+                      {/* Hidden DOM ref for legacy XP bar sync safety */}
+                      <div ref={xpBarFillRef} className="hidden" />
+                    </div>
+                  </UiAvatarDataBar>
+                </motion.div>
+
+                {/* 2. Top-Center: Score & Telemetry Strip (Top edge aligned with straight horizontal top edge of Avatar Data Bar at 15.5% height) */}
+                <motion.div
+                  initial={{ opacity: 0, y: -12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  transition={{
+                    type: 'spring',
+                    stiffness: 350,
+                    damping: 28,
+                    delay: 0.01,
+                  }}
+                  data-testid="hud-telemetry-pill"
+                  className="pointer-events-auto shrink-0 mx-auto sm:mx-0 sm:absolute sm:left-1/2 sm:-translate-x-1/2 mt-[8.5px] sm:mt-0 sm:top-[15.5%] px-2 py-0.5 sm:px-3 sm:py-1 rounded-full bg-slate-950/65 flex items-center gap-1.5 sm:gap-2.5 lg:gap-3.5 shadow-[0_4px_16px_rgba(2,6,23,0.55)]"
+                >
+                  {/* Score + Mastery Crown + Hunting Heat */}
+                  <div
+                    className="flex items-center gap-0.5 sm:gap-1 shrink-0"
+                    title={
+                      lang === 'zh'
+                        ? `${t('hud_score')} · 狩猎热度 Lv.${hudState.heatLevel} (磁吸+${hudState.heatLevel * 16}px / 能量恢复+${(hudState.heatLevel * 2.2).toFixed(1)}/s)`
+                        : `${t('hud_score')} · Hunting Heat Lv.${hudState.heatLevel} (Magnet +${hudState.heatLevel * 16}px / Regen +${(hudState.heatLevel * 2.2).toFixed(1)}/s)`
+                    }
+                  >
+                    <UiAtlasIcon iconKey="UI_ICON_SCORE_TROPHY" size={13} />
+                    <span className="font-display font-extrabold text-[10px] sm:text-xs lg:text-sm text-white font-mono-num hud-stroke leading-none">
+                      {hudState.score}
+                    </span>
+                    {hudState.masteryCrownTier > 0 && (
+                      <span className="text-[10px] leading-none">
+                        {hudState.masteryCrownTier === 3
+                          ? '👑'
+                          : hudState.masteryCrownTier === 2
+                          ? '🥈'
+                          : '🥉'}
                       </span>
-                    </div>
+                    )}
+                    {hudState.heatLevel > 0 && (
+                      <span className="px-1 py-0.2 rounded bg-orange-500/35 text-orange-200 font-mono-num font-black text-[8px] leading-none">
+                        H{hudState.heatLevel}
+                      </span>
+                    )}
+                  </div>
 
-                    {/* Skewed Boost Energy Bar (No Wireframe Border) */}
-                    <div className="relative h-1.5 sm:h-2 w-[88%] bg-slate-950/85 -skew-x-12 rounded-sm overflow-hidden shadow-[0_2px_6px_rgba(0,0,0,0.6)]">
-                      <div
-                        ref={energyBarFillRef}
-                        className="h-full w-full bg-gradient-to-r from-sky-500 to-cyan-300 origin-left"
-                        style={{ transform: 'scaleX(1)' }}
-                      />
-                    </div>
+                  {/* Genes */}
+                  <div
+                    className="flex items-center gap-0.5 sm:gap-1 shrink-0"
+                    title={t('hud_genes')}
+                  >
+                    <UiAtlasIcon iconKey="UI_ICON_GENE" size={13} />
+                    <span className="font-display font-bold text-[10px] sm:text-xs lg:text-sm text-emerald-300 font-mono-num hud-stroke leading-none">
+                      {hudState.genes}
+                    </span>
+                  </div>
 
-                    {/* Hidden DOM ref for legacy XP bar sync safety */}
-                    <div ref={xpBarFillRef} className="hidden" />
+                  {/* Coins */}
+                  <div
+                    className="flex items-center gap-0.5 sm:gap-1 shrink-0"
+                    title={t('hud_coins')}
+                  >
+                    <UiAtlasIcon iconKey="UI_ICON_COIN" size={13} />
+                    <span className="font-display font-bold text-[10px] sm:text-xs lg:text-sm text-amber-300 font-mono-num hud-stroke leading-none">
+                      {hudState.coins}
+                    </span>
+                  </div>
+
+                  {/* Depth */}
+                  <div
+                    className="flex items-center gap-0.5 sm:gap-1 shrink-0"
+                    title={t(hudState.zoneKey)}
+                  >
+                    <UiAtlasIcon iconKey="UI_ICON_DEPTH" size={13} />
+                    <span className="font-mono-num font-bold text-[10px] sm:text-xs lg:text-sm text-sky-200 hud-stroke leading-none">
+                      {hudState.depth}m
+                    </span>
+                  </div>
+
+                  {/* Compact Bounty Target Badge (visible on tablet/desktop) */}
+                  <div
+                    className="hidden md:flex items-center gap-1 pl-1.5 border-l border-white/10 shrink-0"
+                    title={t('hud_target_fish')}
+                  >
+                    <UiAtlasIcon iconKey="UI_ICON_BOUNTY_TARGET" size={13} />
+                    <span className="font-display font-bold text-[11px] lg:text-xs text-cyan-200 hud-stroke whitespace-nowrap leading-none flex items-center gap-1">
+                      <span className="max-w-[105px] lg:max-w-none truncate">
+                        {t(hudState.targetFishNameKey)}
+                      </span>
+                      <span className="font-mono-num text-amber-300 shrink-0">
+                        {hudState.targetFishProgress}/
+                        {hudState.targetFishRequired}
+                      </span>
+                    </span>
                   </div>
                 </motion.div>
 
-                {/* 2. Top-Right: Frameless Single-Line Icon Telemetry Strip + Compact Pause Medallion */}
+                {/* 3. Top-Right: Compact Pause Medallion */}
                 <motion.div
                   initial={{ opacity: 0, x: 24, y: -8 }}
                   animate={{ opacity: 1, x: 0, y: 0 }}
@@ -3961,87 +4144,8 @@ export default function App() {
                     damping: 28,
                     delay: 0.02,
                   }}
-                  className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto shrink-0 ml-auto"
+                  className="flex items-center gap-1.5 sm:gap-2 pointer-events-auto shrink-0"
                 >
-                  <div className="px-2.5 py-1 sm:px-3 rounded-full bg-slate-950/60 flex items-center gap-2 sm:gap-3.5 shadow-[0_4px_16px_rgba(2,6,23,0.55)]">
-                    {/* Score + Mastery Crown + Hunting Heat */}
-                    <div
-                      className="flex items-center gap-0.5 sm:gap-1 shrink-0"
-                      title={
-                        lang === 'zh'
-                          ? `${t('hud_score')} · 狩猎热度 Lv.${hudState.heatLevel} (磁吸+${hudState.heatLevel * 16}px / 能量恢复+${(hudState.heatLevel * 2.2).toFixed(1)}/s)`
-                          : `${t('hud_score')} · Hunting Heat Lv.${hudState.heatLevel} (Magnet +${hudState.heatLevel * 16}px / Regen +${(hudState.heatLevel * 2.2).toFixed(1)}/s)`
-                      }
-                    >
-                      <UiAtlasIcon iconKey="UI_ICON_SCORE_TROPHY" size={14} />
-                      <span className="font-display font-extrabold text-[11px] sm:text-sm text-white font-mono-num hud-stroke leading-none">
-                        {hudState.score}
-                      </span>
-                      {hudState.masteryCrownTier > 0 && (
-                        <span className="text-[10px] leading-none">
-                          {hudState.masteryCrownTier === 3
-                            ? '👑'
-                            : hudState.masteryCrownTier === 2
-                            ? '🥈'
-                            : '🥉'}
-                        </span>
-                      )}
-                      {hudState.heatLevel > 0 && (
-                        <span className="px-1 py-0.2 rounded bg-orange-500/35 text-orange-200 font-mono-num font-black text-[8px] leading-none">
-                          H{hudState.heatLevel}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Genes */}
-                    <div
-                      className="flex items-center gap-0.5 sm:gap-1 shrink-0"
-                      title={t('hud_genes')}
-                    >
-                      <UiAtlasIcon iconKey="UI_ICON_GENE" size={14} />
-                      <span className="font-display font-bold text-[11px] sm:text-sm text-emerald-300 font-mono-num hud-stroke leading-none">
-                        {hudState.genes}
-                      </span>
-                    </div>
-
-                    {/* Coins */}
-                    <div
-                      className="flex items-center gap-0.5 sm:gap-1 shrink-0"
-                      title={t('hud_coins')}
-                    >
-                      <UiAtlasIcon iconKey="UI_ICON_COIN" size={14} />
-                      <span className="font-display font-bold text-[11px] sm:text-sm text-amber-300 font-mono-num hud-stroke leading-none">
-                        {hudState.coins}
-                      </span>
-                    </div>
-
-                    {/* Depth */}
-                    <div
-                      className="flex items-center gap-0.5 sm:gap-1 shrink-0"
-                      title={t(hudState.zoneKey)}
-                    >
-                      <UiAtlasIcon iconKey="UI_ICON_DEPTH" size={14} />
-                      <span className="font-mono-num font-bold text-[11px] sm:text-sm text-sky-200 hud-stroke leading-none">
-                        {hudState.depth}m
-                      </span>
-                    </div>
-
-                    {/* Compact Bounty Target Badge (visible on tablet/desktop) */}
-                    <div
-                      className="hidden md:flex items-center gap-1 pl-2 border-l border-white/10 shrink-0"
-                      title={t('hud_target_fish')}
-                    >
-                      <UiAtlasIcon iconKey="UI_ICON_BOUNTY_TARGET" size={14} />
-                      <span className="font-display font-bold text-xs text-cyan-200 hud-stroke whitespace-nowrap leading-none">
-                        {t(hudState.targetFishNameKey)}{' '}
-                        <span className="font-mono-num text-amber-300">
-                          {hudState.targetFishProgress}/
-                          {hudState.targetFishRequired}
-                        </span>
-                      </span>
-                    </div>
-                  </div>
-
                   {/* Compact Debug Panel Toggle Pill (Hidden by default per configuration; code retained) */}
                   <button
                     type="button"
@@ -4071,6 +4175,7 @@ export default function App() {
                   <button
                     type="button"
                     tabIndex={-1}
+                    data-testid="hud-pause-btn"
                     {...bindMultiTouchButton(() => setGameState('paused'))}
                     aria-label={t('btn_pause')}
                     title={`${t('btn_pause')} [P]`}
@@ -4620,7 +4725,7 @@ export default function App() {
         />
       )}
 
-      {/* ==================== 4. PAUSE MODAL (FRAMELESS DE-BOXED DESIGN) ==================== */}
+      {/* ==================== 4. PAUSE MODAL (SCI-FI SETTING1.PNG LAYOUT FROM SETTING_83A7A273.PNG) ==================== */}
       <AnimatePresence>
         {gameState === 'paused' && (
           <motion.div
@@ -4632,111 +4737,139 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label={t('btn_pause')}
-            className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-4 bg-slate-950/90 pointer-events-auto"
+            className="fixed inset-0 z-40 flex items-center justify-center p-2.5 sm:p-4 bg-slate-950/80 pointer-events-auto"
           >
             <motion.div
-              initial={{ opacity: 0, scale: 0.88, y: 20 }}
+              initial={{ opacity: 0, scale: 0.9, y: 18 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.92, y: 16 }}
+              exit={{ opacity: 0, scale: 0.94, y: 14 }}
               transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-              className="landscape-modal-card w-full max-w-lg max-h-[94dvh] overflow-y-auto bg-gradient-to-b from-[#06132d] to-[#030917] rounded-3xl p-5 sm:p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.85)]"
+              className="w-full max-w-[630px] flex items-center justify-center"
             >
-              <h2 className="font-display font-extrabold text-xl sm:text-2xl text-white mb-1 flex items-center justify-center gap-2">
-                <UiAtlasIcon iconKey="UI_ICON_PAUSE" size={26} />
-                <span>{t('btn_pause')}</span>
-              </h2>
-              <p className="text-xs text-slate-400 mb-4">
-                {lang === 'zh'
-                  ? `已解锁鲨鱼形态：${hudState.unlockedFormsCount} / 48`
-                  : `Unlocked Shark Forms: ${hudState.unlockedFormsCount} / 48`}
-              </p>
+              <UiSettingModalFrame
+                dataTestId="pause-setting-modal"
+                title={lang === 'zh' ? '暂停' : 'PAUSE'}
+              >
+                {/* Subtitle: Unlocked Shark Forms */}
+                <p className="h-[6.5%] shrink-0 flex items-center justify-center text-[2.45cqw] font-display font-bold text-slate-200/95 tracking-wide text-center leading-none">
+                  {lang === 'zh'
+                    ? `已解锁鲨鱼形态: ${hudState.unlockedFormsCount} / 48`
+                    : `Unlocked Shark Forms: ${hudState.unlockedFormsCount} / 48`}
+                </p>
 
-              {/* Frameless Active Shark Form Summary Row */}
-              <div className="flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.04] mb-4 text-left">
-                <div className="flex items-center gap-3">
-                  <SharkFormCanvasPreview
-                    sharkId={activeHudSharkForm.id}
-                    width={64}
-                    height={44}
-                  />
-                  <div>
-                    <div className="text-xs sm:text-sm font-display font-extrabold text-white">
-                      {lang === 'zh'
-                        ? activeHudSharkForm.nameZh
-                        : activeHudSharkForm.nameEn}
-                    </div>
-                    <div className="text-[11px] text-sky-300 font-mono-num">
-                      {lang === 'zh' ? '强化等级' : 'Body Level'} Lv.
-                      {hudState.activeUpgradeLevel}/10 · {lang === 'zh' ? '咬合' : 'Bite'} T
-                      {hudState.biteTier}
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
+                {/* Row 1: Shortened Shark Summary Card + Right Evolve Button */}
+                <UiSettingSharkCard
+                  dataTestId="pause-avatar-data-bar"
                   onClick={() => setShowAtlasModal(true)}
-                  className="px-3.5 py-1.5 rounded-xl bg-sky-400 text-slate-950 font-display font-extrabold text-xs hover:bg-sky-300 cursor-pointer flex items-center gap-1"
-                >
-                  <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={16} />
-                  <span>{lang === 'zh' ? '进化' : 'Evolution'}</span>
-                </button>
-              </div>
+                  avatarContent={
+                    <SharkFormCanvasPreview
+                      sharkId={activeHudSharkForm.id}
+                      width={56}
+                      height={38}
+                      className="w-full h-full object-contain"
+                    />
+                  }
+                  sharkName={
+                    lang === 'zh'
+                      ? activeHudSharkForm.nameZh
+                      : activeHudSharkForm.nameEn
+                  }
+                  subtitle={
+                    lang === 'zh'
+                      ? `强化等级 Lv.${hudState.activeUpgradeLevel}/10 · 咬合 T${hudState.biteTier}`
+                      : `Body Level Lv.${hudState.activeUpgradeLevel}/10 · Bite T${hudState.biteTier}`
+                  }
+                  actionButton={
+                    <UiSettingButton
+                      settingKey="SETTING_BTN_EVOLVE"
+                      dataTestId="pause-atlas-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowAtlasModal(true);
+                      }}
+                      className="w-full h-full"
+                      labelClassName="text-[2.25cqw]"
+                    >
+                      {lang === 'zh' ? '进化' : 'Evolve'}
+                    </UiSettingButton>
+                  }
+                />
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <button
-                  type="button"
+                {/* Row 2: Wide Green Resume Hunting Button */}
+                <UiSettingButton
+                  settingKey="SETTING_BTN_RESUME"
+                  dataTestId="pause-resume-btn"
                   onClick={() => setGameState('playing')}
-                  className="game-btn-spring sm:col-span-2 w-full py-2.5 sm:py-3 rounded-2xl font-display font-bold text-sm text-slate-950 bg-emerald-400 hover:bg-emerald-300 cursor-pointer"
+                  className="w-full h-[17.5%] shrink-0"
+                  labelClassName="text-[3.35cqw]"
                 >
-                  ▶ {t('btn_resume')}
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleLanguage}
-                  className="game-btn-spring w-full py-2 rounded-2xl font-display font-semibold text-xs text-sky-200 bg-white/[0.06] hover:bg-white/[0.12] cursor-pointer"
-                >
-                  {t('btn_lang_toggle')} ({lang.toUpperCase()})
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleMute}
-                  className="game-btn-spring w-full py-2 rounded-2xl font-display font-semibold text-xs text-slate-200 bg-white/[0.06] hover:bg-white/[0.12] flex items-center justify-center gap-1.5 cursor-pointer"
-                >
-                  <UiAtlasIcon
-                    iconKey="UI_ICON_SOUND"
-                    size={16}
-                    className={isMuted ? 'opacity-40 grayscale' : ''}
-                  />
-                  <span>{isMuted ? t('btn_unmute') : t('btn_mute')}</span>
-                </button>
-                <button
-                  type="button"
+                  {lang === 'zh' ? '继续狩猎' : t('btn_resume')}
+                </UiSettingButton>
+
+                {/* Row 3: 2-Column Language Toggle + Audio Toggle */}
+                <div className="grid grid-cols-2 gap-[2.2cqw] w-full h-[13.8%] shrink-0">
+                  <UiSettingButton
+                    settingKey="SETTING_BTN_LANG"
+                    onClick={toggleLanguage}
+                    className="w-full h-full"
+                    labelClassName="text-[2.3cqw]"
+                  >
+                    {t('btn_lang_toggle')} ({lang.toUpperCase()})
+                  </UiSettingButton>
+
+                  <UiSettingButton
+                    settingKey="SETTING_BTN_SOUND"
+                    onClick={toggleMute}
+                    className="w-full h-full"
+                    labelClassName="text-[2.3cqw]"
+                  >
+                    {lang === 'zh'
+                      ? isMuted
+                        ? '音效: 关'
+                        : '音效: 开'
+                      : isMuted
+                      ? 'Audio: OFF'
+                      : 'Audio: ON'}
+                  </UiSettingButton>
+                </div>
+
+                {/* Row 4: Full-Width Gold Replay Onboarding Tutorial Button */}
+                <UiSettingButton
+                  settingKey="SETTING_BTN_TUTORIAL"
                   onClick={replayTutorialOnboarding}
-                  className="game-btn-spring sm:col-span-2 w-full py-2 rounded-2xl font-display font-semibold text-xs text-cyan-200 bg-white/[0.06] hover:bg-white/[0.12] cursor-pointer"
+                  className="w-full h-[13.8%] shrink-0"
+                  labelClassName="text-[2.35cqw]"
                 >
-                  🎓 {lang === 'zh' ? '重温新手引导' : 'Replay Onboarding Tutorial'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => startNewRun(false)}
-                  className="game-btn-spring w-full py-2 rounded-2xl font-display font-semibold text-xs text-slate-200 bg-white/[0.06] hover:bg-white/[0.12] cursor-pointer"
-                >
-                  ↻ {t('btn_restart')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setGameState('title')}
-                  className="game-btn-spring w-full py-2 rounded-2xl font-display font-semibold text-xs text-slate-400 bg-white/[0.04] hover:text-white cursor-pointer"
-                >
-                  {t('btn_title')}
-                </button>
-              </div>
+                  {lang === 'zh' ? '重温新手引导' : 'Replay Onboarding Tutorial'}
+                </UiSettingButton>
+
+                {/* Row 5: 2-Column Restart Run + Return to Main Menu */}
+                <div className="grid grid-cols-2 gap-[2.2cqw] w-full h-[13.2%] shrink-0">
+                  <UiSettingButton
+                    settingKey="SETTING_BTN_RESTART"
+                    onClick={() => startNewRun(false)}
+                    className="w-full h-full"
+                    labelClassName="text-[2.25cqw]"
+                  >
+                    {lang === 'zh' ? '重新开始' : 'Restart'}
+                  </UiSettingButton>
+
+                  <UiSettingButton
+                    settingKey="SETTING_BTN_MAIN_MENU"
+                    onClick={() => setGameState('title')}
+                    className="w-full h-full"
+                    labelClassName="text-[2.25cqw]"
+                  >
+                    {lang === 'zh' ? '返回主界面' : 'Main Menu'}
+                  </UiSettingButton>
+                </div>
+              </UiSettingModalFrame>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* ==================== 5. GAMEOVER / AD REVIVE & SETTLEMENT MODAL (DE-BOXED) ==================== */}
+      {/* ==================== 5. GAMEOVER / AD REVIVE & SETTLEMENT MODAL (SCI-FI ARMOR FRAME) ==================== */}
       <AnimatePresence>
         {gameState === 'gameover' && (
           <motion.div
@@ -4748,85 +4881,200 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label={reviveOffered ? t('gameover_title') : t('settlement_title')}
-            className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-4 bg-slate-950/90 pointer-events-auto"
+            className="fixed inset-0 z-40 flex items-center justify-center p-2.5 sm:p-4 bg-slate-950/85 pointer-events-auto"
           >
             <motion.div
-              key={reviveOffered ? 'revive-card' : 'settlement-card'}
-              initial={{ opacity: 0, scale: 0.88, y: 20 }}
+              key="gameover-modal-container"
+              initial={{ opacity: 0, scale: 0.9, y: 18 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.92, y: 16 }}
+              exit={{ opacity: 0, scale: 0.94, y: 14 }}
               transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-              className="landscape-modal-card w-full max-w-lg max-h-[94dvh] overflow-y-auto bg-gradient-to-b from-[#06132d] to-[#030917] rounded-3xl p-5 sm:p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.85)]"
+              className="w-full max-w-[630px] flex items-center justify-center"
             >
               {reviveOffered ? (
-                <>
-                  <h2 className="font-display font-extrabold text-xl sm:text-2xl text-rose-400 mb-1.5 flex items-center justify-center gap-2">
-                    <UiAtlasIcon iconKey="UI_ICON_DANGER_SKULL" size={28} />
-                    <span>{t('gameover_title')}</span>
-                  </h2>
-                  <p className="text-xs sm:text-sm text-slate-300 mb-4 sm:mb-5">
+                <UiSettingModalFrame
+                  dataTestId="gameover-revive-modal"
+                  variant="revive"
+                  headerIconKey="UI_ICON_DANGER_SKULL"
+                  title={lang === 'zh' ? '深海重创' : 'DEFEAT'}
+                >
+                  {/* Row 0: Emergency Warning Subtitle */}
+                  <p className="h-[7.2%] shrink-0 flex items-center justify-center text-[2.15cqw] font-sans font-bold text-rose-200/95 tracking-wide text-center leading-none px-[1.5cqw]">
                     {t('gameover_subtitle')}
                   </p>
 
-                  <div className="flex flex-col gap-2.5">
-                    <button
-                      type="button"
-                      onClick={handleReviveWithFrenzyAd}
-                      className="game-btn-spring w-full py-3.5 px-5 rounded-2xl font-display font-extrabold text-sm sm:text-base text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-lg cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={20} />
-                      <span>{t('btn_revive_ad')}</span>
-                    </button>
+                  {/* Row 1: Fallen Predator & Unbanked Run Progress Card */}
+                  <UiSettingSharkCard
+                    dataTestId="gameover-revive-shark-card"
+                    className="h-[24.0%]"
+                    avatarContent={
+                      <SharkFormCanvasPreview
+                        sharkId={runSnapshot.activeSharkId}
+                        width={56}
+                        height={38}
+                        className="w-full h-full object-contain"
+                      />
+                    }
+                    sharkName={
+                      <span className="inline-flex items-center gap-[1cqw]">
+                        <span>
+                          {lang === 'zh'
+                            ? (getSharkFormById(runSnapshot.activeSharkId) ??
+                                activeHudSharkForm).nameZh
+                            : (getSharkFormById(runSnapshot.activeSharkId) ??
+                                activeHudSharkForm).nameEn}
+                        </span>
+                        <span className="text-[2.1cqw] font-mono-num text-amber-300">
+                          Lv.{runSnapshot.level} · T{hudState.biteTier}
+                        </span>
+                      </span>
+                    }
+                    subtitle={
+                      lang === 'zh'
+                        ? `当前得分 ${runSnapshot.score.toLocaleString()} · 下潜 ${runSnapshot.maxDepth}m · 已获 +${runSnapshot.coinsEarned}💰 +${runSnapshot.genesEarned}🧬`
+                        : `Score ${runSnapshot.score.toLocaleString()} · Depth ${runSnapshot.maxDepth}m · +${runSnapshot.coinsEarned}💰 +${runSnapshot.genesEarned}🧬`
+                    }
+                    actionButton={
+                      <div className="w-full h-full rounded-[1.2cqw] bg-gradient-to-r from-rose-950/95 via-amber-950/90 to-rose-950/95 border border-amber-400/55 shadow-[0_0_12px_rgba(245,158,11,0.3)] flex items-center justify-center gap-[0.7cqw] px-[1cqw]">
+                        <UiAtlasIcon
+                          iconKey="UI_BTN_GOLD_FRENZY"
+                          size={16}
+                          className="!w-[3.2cqw] !h-[3.2cqw]"
+                        />
+                        <span className="font-display font-extrabold text-[1.95cqw] text-amber-200 whitespace-nowrap leading-none">
+                          {lang === 'zh' ? '待复苏' : 'STASIS'}
+                        </span>
+                      </div>
+                    }
+                  />
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        adManager.showInterstitialAd();
-                        setReviveOffered(false);
-                      }}
-                      className="game-btn-spring w-full py-2 rounded-2xl font-display font-semibold text-xs text-slate-400 hover:text-white cursor-pointer"
-                    >
-                      {t('btn_give_up')}
-                    </button>
+                  {/* Row 2: 3-Column Sci-Fi Emergency Revive Buff Showcase */}
+                  <div className="grid grid-cols-3 gap-[1.8cqw] w-full h-[26.5%] shrink-0">
+                    <div className="rounded-[1.6cqw] bg-gradient-to-b from-[#13283c]/95 to-[#091322]/98 border border-emerald-400/40 shadow-[inset_0_1px_10px_rgba(16,185,129,0.18)] flex flex-col items-center justify-center px-[1.2cqw] text-center">
+                      <UiAtlasIcon
+                        iconKey="UI_BTN_BODY_UPGRADE"
+                        size={24}
+                        className="!w-[5.5cqw] !h-[5.5cqw] mb-[0.4cqw]"
+                      />
+                      <div className="font-display font-extrabold text-[2.1cqw] text-emerald-300 leading-tight whitespace-nowrap">
+                        {lang === 'zh' ? '100% 满血修复' : '100% Full HP'}
+                      </div>
+                      <div className="text-[1.6cqw] font-sans text-slate-300/90 mt-[0.2cqw] leading-tight whitespace-nowrap">
+                        {lang === 'zh' ? '装甲与生命全满' : 'Full Hull & Energy'}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[1.6cqw] bg-gradient-to-b from-[#2b2012]/95 to-[#120d08]/98 border border-amber-400/50 shadow-[inset_0_1px_12px_rgba(245,158,11,0.22)] flex flex-col items-center justify-center px-[1.2cqw] text-center">
+                      <UiAtlasIcon
+                        iconKey="UI_BTN_GOLD_FRENZY"
+                        size={24}
+                        className="!w-[5.5cqw] !h-[5.5cqw] mb-[0.4cqw]"
+                      />
+                      <div className="font-display font-extrabold text-[2.1cqw] text-amber-300 leading-tight whitespace-nowrap">
+                        {lang === 'zh' ? '黄金狂暴冲刺' : 'Gold Frenzy'}
+                      </div>
+                      <div className="text-[1.6cqw] font-sans text-amber-100/90 mt-[0.2cqw] leading-tight whitespace-nowrap">
+                        {lang === 'zh' ? '全属性暴走越阶' : 'Overdrive + Tier Up'}
+                      </div>
+                    </div>
+
+                    <div className="rounded-[1.6cqw] bg-gradient-to-b from-[#132342]/95 to-[#081021]/98 border border-cyan-400/40 shadow-[inset_0_1px_10px_rgba(34,211,238,0.18)] flex flex-col items-center justify-center px-[1.2cqw] text-center">
+                      <UiAtlasIcon
+                        iconKey="UI_BTN_GENE_SURGE"
+                        size={24}
+                        className="!w-[5.5cqw] !h-[5.5cqw] mb-[0.4cqw]"
+                      />
+                      <div className="font-display font-extrabold text-[2.1cqw] text-cyan-300 leading-tight whitespace-nowrap">
+                        {lang === 'zh' ? '无敌力场护盾' : 'Force Shield'}
+                      </div>
+                      <div className="text-[1.6cqw] font-sans text-slate-300/90 mt-[0.2cqw] leading-tight whitespace-nowrap">
+                        {lang === 'zh' ? '免疫水雷与撕咬' : 'Hazard Immunity'}
+                      </div>
+                    </div>
                   </div>
-                </>
+
+                  {/* Row 3: Primary Gold Video Ad Revive Octagonal Button */}
+                  <UiSettingButton
+                    settingKey="SETTING_BTN_TUTORIAL"
+                    customIconKey="UI_ICON_VIDEO_AD"
+                    dataTestId="gameover-revive-ad-btn"
+                    onClick={handleReviveWithFrenzyAd}
+                    className="w-full h-[18.0%] shrink-0"
+                    labelClassName="text-[2.75cqw]"
+                  >
+                    {t('btn_revive_ad')}
+                  </UiSettingButton>
+
+                  {/* Row 4: Secondary Steel Octagonal Give Up / Settle Run Button */}
+                  <UiSettingButton
+                    settingKey="SETTING_BTN_MAIN_MENU"
+                    dataTestId="gameover-give-up-btn"
+                    onClick={() => {
+                      adManager.showInterstitialAd();
+                      setReviveOffered(false);
+                    }}
+                    className="w-full h-[13.8%] shrink-0"
+                    labelClassName="text-[2.3cqw]"
+                  >
+                    {t('btn_give_up')}
+                  </UiSettingButton>
+                </UiSettingModalFrame>
               ) : (
-                <>
-                  <h2 className="font-display font-extrabold text-xl sm:text-2xl text-white mb-0.5 flex items-center justify-center gap-2">
-                    <UiAtlasIcon iconKey="UI_ICON_SCORE_TROPHY" size={28} />
-                    <span>{t('settlement_title')}</span>
-                  </h2>
-                  <p className="text-xs text-slate-400 mb-4 flex items-center justify-center gap-1.5 flex-wrap">
+                <UiSettingModalFrame
+                  dataTestId="gameover-settlement-modal"
+                  variant="settlement"
+                  headerIconKey="UI_ICON_SCORE_TROPHY"
+                  title={lang === 'zh' ? '狩猎结算' : 'REPORT'}
+                >
+                  {/* Row 0: Permanent Account Banked Currencies Strip */}
+                  <div className="h-[5.8%] shrink-0 flex items-center justify-center gap-[1.3cqw] text-[2.0cqw] font-sans font-bold text-slate-200/95 tracking-wide leading-none">
                     <span>
                       {lang === 'zh'
                         ? '本局金币与基因已永久存入账户：'
                         : 'Run coins & genes permanently banked:'}
                     </span>
-                    <span className="text-amber-300 font-mono-num font-bold inline-flex items-center gap-0.5">
-                      <UiAtlasIcon iconKey="UI_ICON_COIN" size={14} />
+                    <span className="text-amber-300 font-mono-num font-extrabold inline-flex items-center gap-[0.45cqw]">
+                      <UiAtlasIcon
+                        iconKey="UI_ICON_COIN"
+                        size={14}
+                        className="!w-[2.5cqw] !h-[2.5cqw]"
+                      />
                       {metaSave.bankedCoins}
                     </span>
-                    <span className="text-emerald-300 font-mono-num font-bold inline-flex items-center gap-0.5">
-                      <UiAtlasIcon iconKey="UI_ICON_GENE" size={14} />
+                    <span className="text-emerald-300 font-mono-num font-extrabold inline-flex items-center gap-[0.45cqw]">
+                      <UiAtlasIcon
+                        iconKey="UI_ICON_GENE"
+                        size={14}
+                        className="!w-[2.5cqw] !h-[2.5cqw]"
+                      />
                       {metaSave.bankedGenes}
                     </span>
-                  </p>
+                  </div>
 
-                  {/* Unified 4-Column Settlement Stat Strip (Hairline Dividers, Zero Individual Wireframe Boxes) */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-white/[0.07] rounded-2xl bg-white/[0.04] py-3 mb-4 text-center">
-                    <div className="px-2.5 py-1 sm:py-0">
-                      <div className="text-[10px] text-slate-400 flex items-center justify-center gap-1">
-                        <span>{t('stat_final_score')}</span>
-                        {runSnapshot.isNewRecord && (
-                          <span className="px-1 py-0.2 rounded bg-amber-400 text-slate-950 font-black text-[8px]">
-                            NEW!
-                          </span>
-                        )}
-                      </div>
-                      <div className="font-display font-extrabold text-base sm:text-lg text-white font-mono-num flex items-center justify-center gap-1 mt-0.5">
-                        <span>{runSnapshot.score}</span>
+                  {/* Row 1: Returning Shark Summary Card + Direct Evolve Button */}
+                  <UiSettingSharkCard
+                    dataTestId="settlement-shark-card"
+                    className="h-[21.0%]"
+                    onClick={() => setShowAtlasModal(true)}
+                    avatarContent={
+                      <SharkFormCanvasPreview
+                        sharkId={runSnapshot.activeSharkId}
+                        width={56}
+                        height={38}
+                        className="w-full h-full object-contain"
+                      />
+                    }
+                    sharkName={
+                      <span className="inline-flex items-center gap-[0.8cqw]">
+                        <span>
+                          {lang === 'zh'
+                            ? (getSharkFormById(runSnapshot.activeSharkId) ??
+                                activeHudSharkForm).nameZh
+                            : (getSharkFormById(runSnapshot.activeSharkId) ??
+                                activeHudSharkForm).nameEn}
+                        </span>
                         {runSnapshot.masteryCrownTier > 0 && (
-                          <span className="text-sm">
+                          <span className="text-[2.6cqw] leading-none">
                             {runSnapshot.masteryCrownTier === 3
                               ? '👑'
                               : runSnapshot.masteryCrownTier === 2
@@ -4834,90 +5082,168 @@ export default function App() {
                               : '🥉'}
                           </span>
                         )}
+                      </span>
+                    }
+                    subtitle={
+                      lang === 'zh'
+                        ? `强化 Lv.${hudState.activeUpgradeLevel}/10 · 咬合 T${hudState.biteTier} · 本局吞噬 ${runSnapshot.preyEaten} 条猎物`
+                        : `Lv.${hudState.activeUpgradeLevel}/10 · Bite T${hudState.biteTier} · Devoured ${runSnapshot.preyEaten} Prey`
+                    }
+                    actionButton={
+                      <UiSettingButton
+                        settingKey="SETTING_BTN_EVOLVE"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowAtlasModal(true);
+                        }}
+                        className="w-full h-full"
+                        labelClassName="text-[2.2cqw]"
+                      >
+                        {lang === 'zh' ? '进化' : 'Evolve'}
+                      </UiSettingButton>
+                    }
+                  />
+
+                  {/* Row 2: 4-Column Sci-Fi Metallic Telemetry Grid */}
+                  <div className="grid grid-cols-4 grid-rows-[minmax(0,1fr)] gap-[1.5cqw] w-full h-[21.0%] shrink-0 text-center overflow-hidden">
+                    {/* Col 1: Final Score */}
+                    <div className="rounded-[1.5cqw] bg-gradient-to-b from-[#162647]/95 to-[#091224]/98 border border-amber-400/35 shadow-[inset_0_1px_10px_rgba(251,191,36,0.14)] flex flex-col items-center justify-center px-[1cqw]">
+                      <div className="text-[1.75cqw] font-sans font-bold text-slate-300 flex items-center justify-center gap-[0.5cqw] leading-none">
+                        <span>{t('stat_final_score')}</span>
+                        {runSnapshot.isNewRecord && (
+                          <span className="px-[0.6cqw] py-[0.15cqw] rounded bg-amber-400 text-slate-950 font-black text-[1.4cqw] leading-none">
+                            NEW!
+                          </span>
+                        )}
                       </div>
-                      <div className="text-[9px] font-mono text-slate-500">
+                      <div className="font-display font-extrabold text-[2.95cqw] text-white font-mono-num flex items-center justify-center gap-[0.5cqw] mt-[0.4cqw] leading-none">
+                        <span>{runSnapshot.score}</span>
+                      </div>
+                      <div className="text-[1.55cqw] font-mono text-amber-200/80 mt-[0.35cqw] leading-none whitespace-nowrap">
                         {lang === 'zh' ? '最高' : 'PB'}:{' '}
                         {runSnapshot.personalBestScore.toLocaleString()}
                       </div>
                     </div>
 
-                    <div className="px-2.5 py-1 sm:py-0">
-                      <div className="text-[10px] text-slate-400">
+                    {/* Col 2: Max Depth */}
+                    <div className="rounded-[1.5cqw] bg-gradient-to-b from-[#132644]/95 to-[#091224]/98 border border-sky-400/35 shadow-[inset_0_1px_10px_rgba(56,189,248,0.14)] flex flex-col items-center justify-center px-[1cqw]">
+                      <div className="text-[1.75cqw] font-sans font-bold text-slate-300 leading-none">
                         {t('stat_max_depth')}
                       </div>
-                      <div className="font-display font-extrabold text-base sm:text-lg text-sky-300 font-mono-num mt-0.5">
+                      <div className="font-display font-extrabold text-[2.95cqw] text-sky-300 font-mono-num mt-[0.4cqw] leading-none">
                         {runSnapshot.maxDepth}m
                       </div>
+                      <div className="text-[1.55cqw] font-sans text-sky-200/75 mt-[0.35cqw] leading-none whitespace-nowrap">
+                        {runSnapshot.maxDepth > 1150
+                          ? lang === 'zh'
+                            ? '深渊海沟带'
+                            : 'Abyssal Trench'
+                          : runSnapshot.maxDepth > 520
+                          ? lang === 'zh'
+                            ? '暮光中层带'
+                            : 'Twilight Zone'
+                          : lang === 'zh'
+                          ? '阳光珊瑚礁'
+                          : 'Sunlit Reef'}
+                      </div>
                     </div>
 
-                    <div className="px-2.5 py-1 sm:py-0">
-                      <div className="text-[10px] text-slate-400">
+                    {/* Col 3: Run Harvest */}
+                    <div className="rounded-[1.5cqw] bg-gradient-to-b from-[#15283d]/95 to-[#091224]/98 border border-emerald-400/35 shadow-[inset_0_1px_10px_rgba(16,185,129,0.14)] flex flex-col items-center justify-center px-[1cqw]">
+                      <div className="text-[1.75cqw] font-sans font-bold text-slate-300 leading-none">
                         {lang === 'zh' ? '本局收获' : 'Harvest'}
                       </div>
-                      <div className="font-display font-extrabold text-xs sm:text-sm text-amber-300 font-mono-num flex items-center justify-center gap-1.5 mt-1">
-                        <span className="inline-flex items-center gap-0.5">
+                      <div className="font-display font-extrabold text-[2.3cqw] text-amber-300 font-mono-num flex items-center justify-center gap-[0.8cqw] mt-[0.5cqw] leading-none whitespace-nowrap">
+                        <span className="inline-flex items-center gap-[0.25cqw]">
                           +{runSnapshot.coinsEarned}
-                          <UiAtlasIcon iconKey="UI_ICON_COIN" size={13} />
+                          <UiAtlasIcon
+                            iconKey="UI_ICON_COIN"
+                            size={13}
+                            className="!w-[2.2cqw] !h-[2.2cqw]"
+                          />
                         </span>
-                        <span className="inline-flex items-center gap-0.5 text-emerald-300">
+                        <span className="inline-flex items-center gap-[0.25cqw] text-emerald-300">
                           +{runSnapshot.genesEarned}
-                          <UiAtlasIcon iconKey="UI_ICON_GENE" size={13} />
+                          <UiAtlasIcon
+                            iconKey="UI_ICON_GENE"
+                            size={13}
+                            className="!w-[2.2cqw] !h-[2.2cqw]"
+                          />
                         </span>
                       </div>
-                      {runSnapshot.masteryGenesBonus > 0 && (
-                        <div className="text-[9px] font-mono font-bold text-amber-300 mt-0.5">
-                          👑 +{runSnapshot.masteryGenesBonus}🧬
-                        </div>
-                      )}
+                      <div className="text-[1.55cqw] font-mono text-emerald-200/80 mt-[0.35cqw] leading-none whitespace-nowrap">
+                        {runSnapshot.masteryGenesBonus > 0
+                          ? `👑 +${runSnapshot.masteryGenesBonus}🧬`
+                          : lang === 'zh'
+                          ? '已永久入库'
+                          : 'Banked'}
+                      </div>
                     </div>
 
-                    <div className="px-2.5 py-1 sm:py-0">
-                      <div className="text-[10px] text-slate-400">
+                    {/* Col 4: Evolution Progress */}
+                    <div className="rounded-[1.5cqw] bg-gradient-to-b from-[#1e1b44]/95 to-[#0b0f24]/98 border border-purple-400/35 shadow-[inset_0_1px_10px_rgba(192,132,252,0.16)] flex flex-col items-center justify-center px-[1cqw]">
+                      <div className="text-[1.75cqw] font-sans font-bold text-slate-300 leading-none">
                         {lang === 'zh' ? '进化进度' : 'Evolution'}
                       </div>
-                      <div className="font-display font-extrabold text-base sm:text-lg text-purple-300 font-mono-num mt-0.5">
+                      <div className="font-display font-extrabold text-[2.95cqw] text-purple-300 font-mono-num mt-[0.4cqw] leading-none">
                         {runSnapshot.unlockedFormsCount} / 48
+                      </div>
+                      <div className="text-[1.55cqw] font-mono text-purple-200/80 mt-[0.35cqw] leading-none whitespace-nowrap">
+                        {lang === 'zh'
+                          ? `图谱加成 +${Math.max(0, (runSnapshot.unlockedFormsCount - 1) * 2)}%`
+                          : `Atlas +${Math.max(0, (runSnapshot.unlockedFormsCount - 1) * 2)}%`}
                       </div>
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setShowAtlasModal(true)}
-                    className="game-btn-spring w-full py-2.5 mb-2.5 rounded-2xl font-display font-extrabold text-xs sm:text-sm text-slate-950 bg-sky-400 hover:bg-sky-300 shadow-lg cursor-pointer flex items-center justify-center gap-2"
+                  {/* Row 3: Primary Full-Width Glowing Emerald Play Again Button */}
+                  <UiSettingButton
+                    settingKey="SETTING_BTN_RESUME"
+                    dataStart={true}
+                    dataTestId="settlement-restart-btn"
+                    onClick={() => startNewRun(false)}
+                    className="w-full h-[15.8%] shrink-0"
+                    labelClassName="text-[3.35cqw]"
                   >
-                    <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={18} />
-                    <span>
-                      {lang === 'zh'
-                        ? '进化 / 强化'
-                        : 'Evolution / Upgrade'}
-                    </span>
-                  </button>
+                    {t('btn_restart')}
+                  </UiSettingButton>
 
-                  <div className="flex flex-col sm:flex-row gap-2.5">
-                    <button
-                      type="button"
-                      data-start="true"
-                      onClick={() => startNewRun(false)}
-                      className="game-btn-spring flex-1 py-3 rounded-2xl font-display font-extrabold text-sm sm:text-base text-slate-950 bg-emerald-400 hover:bg-emerald-300 cursor-pointer flex items-center justify-center gap-1.5"
+                  {/* Row 4: Full-Width Gold Trial Mecha Leviathan Button */}
+                  <UiSettingButton
+                    settingKey="SETTING_BTN_TUTORIAL"
+                    customIconKey="UI_ICON_VIDEO_AD"
+                    dataTestId="settlement-trial-mecha-btn"
+                    onClick={handleTrialMaxMechaAd}
+                    className="w-full h-[12.6%] shrink-0"
+                    labelClassName="text-[2.35cqw]"
+                  >
+                    {lang === 'zh' ? '试驾机甲利维坦' : 'Trial Mecha'}
+                  </UiSettingButton>
+
+                  {/* Row 5: 2-Column Evolution / Upgrade + Return to Main Menu */}
+                  <div className="grid grid-cols-2 grid-rows-[minmax(0,1fr)] gap-[2.2cqw] w-full h-[12.6%] shrink-0 overflow-hidden">
+                    <UiSettingButton
+                      settingKey="SETTING_BTN_LANG"
+                      customIconKey="UI_ICON_GENE"
+                      dataTestId="settlement-evolve-btn"
+                      onClick={() => setShowAtlasModal(true)}
+                      className="w-full h-full"
+                      labelClassName="text-[2.25cqw]"
                     >
-                      <UiAtlasIcon iconKey="UI_BTN_BOOST" size={18} />
-                      <span>{t('btn_restart')}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleTrialMaxMechaAd}
-                      className="game-btn-spring flex-1 py-3 rounded-2xl font-display font-bold text-xs sm:text-sm text-slate-950 bg-amber-400 hover:bg-amber-300 cursor-pointer flex items-center justify-center gap-1.5"
+                      {lang === 'zh' ? '进化 / 强化' : 'Evolution'}
+                    </UiSettingButton>
+
+                    <UiSettingButton
+                      settingKey="SETTING_BTN_MAIN_MENU"
+                      dataTestId="settlement-main-menu-btn"
+                      onClick={() => setGameState('title')}
+                      className="w-full h-full"
+                      labelClassName="text-[2.25cqw]"
                     >
-                      <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={18} />
-                      <span>
-                        {lang === 'zh'
-                          ? '试驾机甲利维坦'
-                          : 'Trial Mecha Leviathan'}
-                      </span>
-                    </button>
+                      {lang === 'zh' ? '返回主界面' : 'Main Menu'}
+                    </UiSettingButton>
                   </div>
-                </>
+                </UiSettingModalFrame>
               )}
             </motion.div>
           </motion.div>

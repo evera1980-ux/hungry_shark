@@ -31,6 +31,8 @@
 │       ├── sharks_ec921c3b.png                # 48 阶鲨鱼进化核心精灵图（8 列 × 6 行）
 │       ├── fish2_fc857cfa.png                 # 32 种海洋猎物与巨兽核心精灵图
 │       ├── icons_f5128c12.png                 # 24 枚游戏级 UI 技能勋章与图标图集（6 列 × 4 行）
+│       ├── buttons_16e3a0cf.png               # 科幻金属中空头像数据栏（UI_PLATE_AVATAR_BAR）与绿/蓝/金三色横幅按钮图集
+│       ├── setting_83a7a273.png               # 暂停/设置弹窗 9 合 1 科幻金属框体、鲨鱼信息卡与八角按钮图集
 │       ├── bg_shallow_0_water_0e65cb68.png    # 浅海带 Layer 0：阳光丁达尔光束与焦散水体底图
 │       ├── bg_shallow_1_far_8898229a.png      # 浅海带 Layer 1：远景海底山脉拱门与沉船剪影
 │       ├── bg_shallow_2_mid_b4e0d30a.png      # 浅海带 Layer 2：中景鹿角珊瑚礁盘与紫管海绵崖壁
@@ -55,14 +57,14 @@
     ├── index.css                              # 全局字体、Tailwind v4 导入与自定义样式工具类
     ├── App.tsx                                # 顶层游戏容器、60FPS 物理仿真循环、无框图标化 HUD 与多指交互控制器
     ├── components/
-    │   ├── UiAtlasIcon.tsx                    # 6×4 UI 图标图集渲染组件与血统图标映射辅助函数
+    │   ├── UiAtlasIcon.tsx                    # UI 图集渲染组件（UiAtlasIcon / UiAvatarDataBar / UiBannerButton / UiSettingModalFrame / UiSettingSharkCard / UiSettingButton）
     │   └── SharkEvolutionAtlasModal.tsx       # 48 阶鲨鱼图谱弹窗（支持血统筛选、本体升级与新形态解锁）
     └── game/
         ├── config.ts                          # 静态世界常量、3 大深度带、32 种海洋生物基础配置
         ├── sharkEvolutionConfig.ts            # 48 阶鲨鱼进化矩阵、四重血统、三重解锁门禁、跨局存档读写
         ├── rules.ts                           # 纯函数核心规则（Lv/T 属性合成、猎物相对体型缩放、碰撞判定）
-        ├── rules.test.ts                      # 核心纯函数单元测试套件（15 项核心断言）
-        ├── spriteSheetManager.ts              # 8×6 鲨鱼精灵图 + 6×4 UI 图标图集加载、BFS 智能镂空抠图与离屏缓存
+        ├── rules.test.ts                      # 核心纯函数单元测试套件（17 项核心断言）
+        ├── spriteSheetManager.ts              # 8×6 鲨鱼精灵图 + 6×4 UI 图标 + 头像栏/横幅按钮 + 暂停界面 9 合 1 图集加载、BFS 智能镂空抠图与离屏缓存
         ├── canvasRenderer.ts                  # 鲨鱼多段脊柱游动渲染、32 种猎物骨骼渲染、状态指示环与定制图标头标
         ├── parallaxBackground.ts              # 13 张 AI 分层美术背景离屏 BFS 抠图/余弦无缝拼接与五层真视差海洋环境引擎
         ├── infiniteWorldManager.ts            # 无限水平环形世界与动态深海垂直下潜边界控制器
@@ -134,6 +136,10 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-02 | **全面升级死亡复苏与狩猎结算界面（`gameState === 'gameover'`）科幻装甲弹窗体系、优化游戏主界面顶部 HUD 与暂停界面布局**：① 为 `SETTING_MODAL_FRAME` 生成顶部梯形铭牌去暂停标纯净变体（`getUiSettingCleanModalFrameDataUrl()`），使死亡紧急复苏（`variant="revive"`）与狩猎结算（`variant="settlement"`）统一采用 `980:688` 科幻金属装甲框体、`<UiSettingSharkCard />` 实时鲨鱼展台、三联复苏增益矩阵 / 四维金属遥测铭牌与平衡八角按钮，消除横屏溢出与按钮 2+1 孤行折行；② 将局内左上角 `hud-avatar-data-bar` 缩小 30% 至 `w-[151px] sm:w-[178px] lg:w-[217px]`，并将分数组件 `hud-telemetry-pill` 水平居中且将上边缘精确对齐至头像框右侧数据板上边直线部分高度（`mt-[8.5px] sm:mt-0 sm:top-[15.5%]`），确保全分辨率下零 UI 重叠；③ 将暂停界面 `UiSettingSharkCard` 高度缩短为 `h-[23.5%] shrink-0` 使所有按钮完整收纳于框内，并修复 `Restart`/`Main Menu` 按钮图标提取与底图线性插值修补 | `src/App.tsx`, `src/components/UiAtlasIcon.tsx`, `src/game/spriteSheetManager.ts`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
+| 2026-11-01 | **调整移动端优先首页（`gameState === 'title'`）布局与中央鲨鱼水平转身动画**：将首页头像名称及数据模块（`title-avatar-data-bar`）移至左上角，并将首页头像数据模块（缩小 30% 至 `w-[203px] sm:w-[245px] md:w-[273px]`）及三枚主操作横幅按钮（立即潜入深海 / 进化 / 试驾机甲利维坦，缩小 30% 至 `w-[154px] sm:w-[140~144px] md:w-[157~162px]`）等比缩减 30%；去掉离线 HTML 下载链接与底部操作提示文字；将主标题上移至顶部区域、三枚主按钮下移至底部区域，将首页摄像机锁定于鲨鱼正中心（`sim.camera.y = shark.y`），并复用局内优化过的 **2.5D 透视水平甩尾掉头与流体力学 C 形脊柱转弯物理机制**驱动首页鲨鱼水平巡游转身 | `src/App.tsx`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
+| 2026-11-01 | **接入 `setting_83a7a273.png` 暂停弹窗 9 合 1 图集并按 `setting1.png` 重构暂停页布局**：① `spriteSheetManager.ts` 新增 `UiSettingKey` 与 `processAndSliceUiSettingsImage()`，自动抠除 `setting_83a7a273.png` 外围与弹窗框体内部深灰网格背景（`RGB(27,28,32)`），裁切出弹窗外框（`SETTING_MODAL_FRAME`）、鲨鱼信息卡（`SETTING_SHARK_CARD`）及进化/继续狩猎/语言/音效/引导/重新开始/返回主界面共 9 个高清组件；② `UiAtlasIcon.tsx` 新增 `<UiSettingModalFrame />`、`<UiSettingSharkCard />` 与 `<UiSettingButton />`；③ `App.tsx` 按 `setting1.png` 布局重构暂停界面 | `public/assets/aistudio/setting_83a7a273.png`, `src/game/spriteSheetManager.ts`, `src/components/UiAtlasIcon.tsx`, `src/App.tsx`, `src/game/rules.test.ts` |
+| 2026-11-01 | **接入 `buttons_16e3a0cf.png` 科幻金属中空头像数据栏与绿/蓝/金三色横幅按钮图集**：① `spriteSheetManager.ts` 新增 `UiBannerKey`（`UI_PLATE_AVATAR_BAR`、`UI_BAR_BTN_GREEN`、`UI_BAR_BTN_BLUE`、`UI_BAR_BTN_GOLD`）与 `processAndSliceUiBannersImage()`，通过 BFS 泛洪去底 + 左环圆心 `(0.2398W, 0.3125H)` 镂空抠图 + 6px 外发光光晕去灰底（`RGB(60,60,60)`）并完整保护右侧深海藏青数据板（`RGB(26,34,45)`）；② `UiAtlasIcon.tsx` 新增 `<UiAvatarDataBar />` 与 `<UiBannerButton />` 组件；③ `App.tsx` 全面替换首页头像数据栏与三大主按钮、局内左上角头像与血条/能量条组件，以及暂停界面/结算界面的头像栏与操作按钮 | `public/assets/aistudio/buttons_16e3a0cf.png`, `src/game/spriteSheetManager.ts`, `src/components/UiAtlasIcon.tsx`, `src/App.tsx`, `src/game/rules.test.ts` |
 | 2026-10-31 | **固化默认参数（鱼群刷新数量 `20`、猎物显示大小 `0.8`）并隐藏调参按钮（保留调参代码功能）**：① `ecosystemSpawner.ts` 将默认 `maxActivePreys` 固化为 `20`；② `rules.ts` 将默认 `debugPreySizeMultiplier` 固化为 `0.8`；③ `App.tsx` 保留全部实时调参代码与重置逻辑（重置为 `20 / 0.8`），将 `showDebugPanel` 默认设为 `false` 并隐藏标题页与局内 HUD 的 `🛠 调参` 按钮 | `src/game/ecosystemSpawner.ts`, `src/game/rules.ts`, `src/App.tsx`, `src/game/rules.test.ts` |
 | 2026-10-31 | **新增实时调参 Debug 面板（鱼群刷新数量 & 猎物显示大小实时调节器）**：① `ecosystemSpawner.ts` 新增 `syncPreyCountImmediate()`，支持实时调高/调低 `maxActivePreys`（`4 ~ 80`）并在同帧从最远端回收多余猎物或补充新鱼；② `rules.ts` 新增 `getDebugPreySizeMultiplier()` / `setDebugPreySizeMultiplier()`（`0.35x ~ 2.50x`），在 `getPreyRelativeVisualScale` 中同步缩放渲染与碰撞半径；③ `App.tsx` 新增可收起/展开的 `🛠 实时调试面板 (Debug)`，支持滑动条、快捷步进与一键重置默认 | `src/App.tsx`, `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `src/game/rules.test.ts` |
 | 2026-10-31 | **降低鱼群刷新密度与阳光浅水区零主动攻击优化**：① `ecosystemSpawner.ts` 将同屏最大猎物数 `maxActivePreys` 由 `50` 下调至 `28`，生成环扩展至 `640~1650px`，并将 `T1` 小鱼成簇概率由 `55%`（3 条扎堆）下调为 `28%`（双鱼结伴），`App.tsx` 开局迎宾小鱼由 `10` 条精简为 `5` 条、标题界面巡游鱼由 `32` 条精简为 `18` 条；② 浅水区（`0m ~ 520m`）永久移除海鳝（`green_moray_eel` 迁至 `560m ~ 1180m`）等主动冲刺攻击鱼类 | `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/parallaxBackground.ts`, `src/game/config.ts`, `src/game/rules.test.ts` |

@@ -63,14 +63,28 @@
   - **第 3 行（局内遥测与头顶状态图标）**：`UI_ICON_BOUNTY_TARGET`（深海声呐准星）、`UI_ICON_DEPTH`（下潜深度计）、`UI_ICON_COMBO_FIRE`（紫金狂暴火焰）、`UI_ICON_SCORE_TROPHY`（海神三叉戟皇冠）、`UI_ICON_DANGER_SKULL`（猩红剧毒骷髅）、`UI_ICON_VIDEO_AD`（黄金场记板播放符）。
   - **第 4 行（系统控制与四大血统徽章）**：`UI_ICON_PAUSE`（双竖线暂停圆章）、`UI_ICON_SOUND`（声波扩音器）、`UI_LINEAGE_BIO`（狂暴巨齿血统）、`UI_LINEAGE_MECHA`（深海机甲血统）、`UI_LINEAGE_ELEM`（自然元素血统）、`UI_LINEAGE_ABYSS`（深渊古神血统）。
 - **零 Emoji 原则**：全项目 HUD、图谱弹窗（`SharkEvolutionAtlasModal.tsx`）以及 Canvas 水中掉落物/头顶警报/屏幕边缘雷达指示器统一使用 `<UiAtlasIcon />` 或 `spriteSheetManager.getUiIconCanvas()` 渲染，彻底淘汰廉价 Emoji。
+- **科幻金属中空头像数据栏与三色横幅按钮图集 (`public/assets/aistudio/buttons_16e3a0cf.png`)**：
+  - 由 `spriteSheetManager.ts` 的 `processAndSliceUiBannersImage()` 自动完成 **外围暗灰底（`RGB(60,60,60)`）BFS 泛洪抠图 + 顶部头像框左环内孔 `(0.2398W, 0.3125H)` 镂空透明化 + 6px 霓虹光晕边缘反混色（Color Unmixing）+ 紧致包围盒原始长宽比裁切**：
+    1. `UI_PLATE_AVATAR_BAR`（`<UiAvatarDataBar />`）：左侧为霓虹青光金属中空圆环（内嵌动态游动的 `<SharkFormCanvasPreview />`、紫色经验进度环 `XP Ring` 与咬合阶位盾牌 `T{N}`），右侧为斜切深海藏青数据面板（承载血统世代、鲨鱼名称、首页跨局金币/基因或局内斜切 HP 生命条与冲刺能量条）。首页（`gameState === 'title'`）将该头像名称及数据模块固定于**左上角**（尺寸等比缩小 30%：`w-[203px] sm:w-[245px] md:w-[273px]`），与局内左上角 HUD 位置保持自然承接。
+    2. `UI_BAR_BTN_GREEN`（`<UiBannerButton variant="green" />`）：左侧青绿旋涡圆章 + 右侧播放三角箭头横幅按钮，用于首页「立即潜入深海」（尺寸缩小 30%：`w-[154px] sm:w-[144px] md:w-[160px]`）与结算界面「再次潜入」。
+    3. `UI_BAR_BTN_BLUE`（`<UiBannerButton variant="blue" />`）：左侧蓝色双螺旋 DNA 圆章横幅按钮，用于首页「进化 (X/48)」（尺寸缩小 30%：`w-[154px] sm:w-[140px] md:w-[157px]`）与结算界面「进化 / 强化」。
+    4. `UI_BAR_BTN_GOLD`（`<UiBannerButton variant="gold" />`）：左侧鎏金场记板圆章横幅按钮，用于首页「试驾机甲利维坦」（尺寸缩小 30%：`w-[154px] sm:w-[144px] md:w-[162px]`）、结算界面及败北界面「观看激励视频复活」。
+- **暂停弹窗 9 合 1 科幻金属框体与按钮图集 (`public/assets/aistudio/setting_83a7a273.png`，对齐 `setting1_40eadc35.png` 布局)**：
+  - 由 `spriteSheetManager.ts` 的 `processAndSliceUiSettingsImage()` 自动抠除深炭灰网格背景（`RGB(27,28,32)`）与弹窗外框内部网格（圆心 `(0.273W, 0.380H)` 镂空），裁切出 9 个独立组件：
+    1. `SETTING_MODAL_FRAME`（`<UiSettingModalFrame />`）：霓虹青紫双色金属弹窗外框，顶部内嵌梯形暂停铭牌（自带左侧圆形 `||` 图标，右侧对齐渲染 `暂停 / PAUSE`），内部内容区采用定界弹性容器（`left: 6.4%, right: 6.4%, top: 14.6%, bottom: 6.6%` + `flex-col justify-between`）与 `cqw` 容器查询字号，确保在移动端横屏（`844×390` / `667×375`）与竖屏下所有按钮 100% 收纳于暂停框内。
+    2. `SETTING_SHARK_CARD`（`<UiSettingSharkCard />`）+ `SETTING_BTN_EVOLVE`：紧凑高度（`h-[23.5%] shrink-0`）的宽幅金属鲨鱼头像信息卡，左侧内凹方框渲染实时游动鲨鱼缩略图，中部展示鲨鱼名称与 `强化等级 Lv.X/10 · 咬合 T{Y}`，右侧内嵌 DNA 图标的 `进化` 按钮。
+    3. `SETTING_BTN_RESUME`：通栏翠绿旋涡发光横幅按钮（`h-[17.5%]`，自带 `▶` 播放三角，右侧紧接 `继续狩猎`）。
+    4. `SETTING_BTN_LANG` + `SETTING_BTN_SOUND`：双列青光描边按钮（`h-[13.8%]`，分别带地球仪图标 `中 / EN` 与扬声器图标 `音效: 开/关`）。
+    5. `SETTING_BTN_TUTORIAL`：通栏金框暗纹按钮（`h-[13.8%]`，带学士帽图标 `重温新手引导`）。
+    6. `SETTING_BTN_RESTART` + `SETTING_BTN_MAIN_MENU`：底部双列钢灰八角按钮（`h-[13.2%]`，分别带刷新箭头 `重新开始` 与出口图标 `返回主界面`）。
 
 ### 3.2 极简无框 HUD 四角布局（视野留白率 >= 90%）
 遵循移动端动作游戏（MOBA / 饥饿鲨进化）“去黑盒化、图标化、状态合并”三大视觉瘦身准则：
-1. **顶部左角（一体式圆形鲨鱼头像框 + 双斜切能量条）**：
-   - **圆形头像主按钮**：叠加 `UI_AVATAR_FRAME` 科技环、外圈 SVG 紫色经验进度环（`XP Ring`）与当前鲨鱼实时精灵缩略图；左下角镶嵌 `UI_BADGE_TIER` 阶位盾牌（`T1~T8`），右下角镶嵌局内等级胶囊（`Lv.X`），顶部微浮标融合功能名显示 `图谱 X/48`（`Atlas X/48`）。**直接点击头像即可打开 48 阶进化图谱**。
-   - **紧凑双斜切条**：头像右侧仅保留 `-skew-x-12` 斜切设计的 **HP 生命条**（含受击延迟消退黄条 `ghostHp` 与血量数值）和 **BOOST 冲刺能量条**，彻底移除占屏的深色背景板。
-2. **顶部居中（单行悬浮遥测胶囊 + 3 步非阻断式新手引导条）**：
-   - 将得分（`UI_ICON_SCORE_TROPHY`）、基因（`UI_ICON_GENE`）、金币（`UI_ICON_COIN`）、深度（`UI_ICON_DEPTH`）与当前悬赏目标鱼（`UI_ICON_BOUNTY_TARGET` + `×2`）整合为**单行半透明流线胶囊**；连击火焰（`UI_ICON_COMBO_FIRE`）与黄金狂暴倒计时（`UI_BTN_GOLD_FRENZY`）仅在触发时动态浮现。
+1. **顶部左角（一体式 `UI_PLATE_AVATAR_BAR` 科幻中空圆环头像 + 右侧斜切数据板，尺寸缩小 30%：`w-[151px] sm:w-[178px] lg:w-[217px]`）**：
+   - **左侧中空金属圆环 (`ringOverlay`)**：圆环镂空窗口内居中渲染当前鲨鱼实时游动缩略图（`SharkFormCanvasPreview` `29×20`），环上叠加 SVG 紫色经验进度环（`XP Ring`）；左下角镶嵌 `UI_BADGE_TIER` 阶位盾牌（`T1~T8`），右下角镶嵌局内等级胶囊（`Lv.X`），右上角镶嵌 `图谱 X/48`（`Atlas X/48`）。**直接点击圆环（绑定 `bindMultiTouchButton`）即可打开 48 阶进化图谱**。
+   - **右侧斜切藏青数据板**：上方展示血统图标、鲨鱼名称与强化等级 `Lv.X`，下方内嵌 `-skew-x-12` 斜切设计的 **HP 生命条**（含受击延迟消退黄条 `ghostHp` 与血量数值）和 **BOOST 冲刺能量条**。
+2. **顶部居中（上边缘对齐头像组件上边直线部分的单行悬浮分数组件 `hud-telemetry-pill` + 3 步非阻断式新手引导条）**：
+   - 顶栏采用 `items-start` 布局，并将分数组件（`hud-telemetry-pill`：得分 `UI_ICON_SCORE_TROPHY`、基因 `UI_ICON_GENE`、金币 `UI_ICON_COIN`、深度 `UI_ICON_DEPTH` 与当前悬赏目标鱼 `UI_ICON_BOUNTY_TARGET`）水平居中且将**上边缘精确对齐至左上角头像数据板右侧上边直线部分高度（`mt-[8.5px] sm:mt-0 sm:top-[15.5%]`）**，确保与左上角缩小 30% 后的头像框及右上角暂停圆章保持充足安全间距、**100% 零 UI 重叠**；连击火焰（`UI_ICON_COMBO_FIRE`）与黄金狂暴倒计时（`UI_BTN_GOLD_FRENZY`）仅在触发时于下方动态浮现。
    - 新玩家首次进入（或暂停菜单点击“🎓 重温新手引导”）时，遥测胶囊下方动态浮现**非阻断式 3 步实操引导胶囊**（随时可一键跳过）。
 3. **顶部右角（单枚暂停圆章）**：
    - 局内右上角仅保留单枚 `40×40px` 的 `UI_ICON_PAUSE` 圆形按钮；语言切换、声音开关（`UI_ICON_SOUND`）与重温新手引导收纳至暂停弹窗中。
@@ -187,6 +201,10 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-02 | 全面重构死亡复苏与狩猎结算界面（`gameState === 'gameover'`）及优化局内主界面 HUD 与暂停界面：① 将死亡后的两阶段界面（`reviveOffered === true` 深海陨落紧急复苏 + `reviveOffered === false` 狩猎结算）统一纳入 `980:688` 科幻金属装甲弹窗（`<UiSettingModalFrame variant="revive" \| "settlement" />`），顶部梯形铭牌动态修补去除暂停标并居中展示骷髅/奖杯徽章与发光标题，内嵌 `<UiSettingSharkCard />` 实时鲨鱼展台、三联复苏增益卡片 / 四维金属战报遥测格及平衡排布的八角科幻按钮（彻底消除旧版 3 枚胶囊按钮 2+1 孤行折行与横屏裁切问题）；② 将游戏主界面左上角头像框组件（`hud-avatar-data-bar`）整体尺寸等比缩小 30%（`w-[151px] sm:w-[178px] lg:w-[217px]`，内嵌预览缩略图 `29×20`），并将分数组件（`hud-telemetry-pill`）水平居中且上边缘精确对齐至头像框上边直线高度（`mt-[8.5px] sm:mt-0 sm:top-[15.5%]`）；③ 将暂停弹窗内 `<UiSettingSharkCard />` 高度缩短为容器内高 `23.5%` 并修复 `SETTING_BTN_RESTART` / `SETTING_BTN_MAIN_MENU` 图标提取与同行线性插值修补 | `src/App.tsx`, `src/components/UiAtlasIcon.tsx`, `src/game/spriteSheetManager.ts`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
+| 2026-11-01 | 调整移动端优先首页（`gameState === 'title'`）布局与水平转身动画：将头像名称及数据模块（`title-avatar-data-bar`）移至首页左上角，并将首页头像模块（`w-[203px] sm:w-[245px] md:w-[273px]`）与三枚主操作横幅按钮（立即潜入深海 / 进化 / 试驾机甲利维坦，`w-[154px] sm:w-[140~144px] md:w-[157~162px]`）整体尺寸等比缩小 30%；移除按钮下方的离线 HTML 下载链接与底部操作提示文案；将游戏主标题上移至左上角头像栏下方，将三枚主操作按钮下移锚定至屏幕底部，将镜头中心对准主角鲨鱼（`sim.camera.x = shark.x, sim.camera.y = shark.y`），并在首页巡游中同步启用局内优化过的 **2.5D 透视水平甩尾掉头与流体力学 C 形脊柱转弯动画**（彻底告别首页竖直 90° 抬头/低头转圈） | `src/App.tsx`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
+| 2026-11-01 | 接入 `public/assets/aistudio/setting_83a7a273.png` 暂停弹窗 9 合 1 图集，按 `setting1_40eadc35.png` 布局重构暂停界面（`<UiSettingModalFrame />` + `<UiSettingSharkCard />` + 7 枚定制八角按钮 `<UiSettingButton />`） | `public/assets/aistudio/setting_83a7a273.png`, `src/game/spriteSheetManager.ts`, `src/components/UiAtlasIcon.tsx`, `src/App.tsx`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
+| 2026-11-01 | 接入 `public/assets/aistudio/buttons_16e3a0cf.png`（科幻中空头像数据栏 `UI_PLATE_AVATAR_BAR` 与绿/蓝/金三色横幅按钮 `UI_BAR_BTN_GREEN` / `UI_BAR_BTN_BLUE` / `UI_BAR_BTN_GOLD`），替换首页顶部头像数据栏与 3 枚主按钮、游戏内左上角头像与血条/能量条组件，以及结算界面操作按钮 | `public/assets/aistudio/buttons_16e3a0cf.png`, `src/game/spriteSheetManager.ts`, `src/components/UiAtlasIcon.tsx`, `src/App.tsx`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
 | 2026-10-31 | 按调参结论将默认「鱼群刷新数量」固化为 `20`、默认「猎物显示大小」固化为 `0.80x`，隐藏标题页与局内 HUD 的 `🛠 调参` 按钮（`showDebugPanel = false` + `hidden`），同时完整保留实时调参面板与控制器代码功能 | `src/App.tsx`, `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `docs/02-DESIGN_SPEC.md` |
 | 2026-10-31 | 新增实时调参 Debug 悬浮面板（`live-debug-panel`）：支持在标题页与局内实时滑动调节「1. 鱼群刷新数量（`4~80`）」与「2. 猎物显示大小倍率（`0.35x~2.50x`）」，内置多指触控绑定与指针事件冒泡隔离 | `src/App.tsx`, `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `docs/02-DESIGN_SPEC.md` |
 | 2026-10-31 | 修正前/中/后景相对运动方向与海床锚定纵向视差（`computeBiomeVerticalOffsets`）：消除此前因 `nearDrift` 在生态带中段（`240m`/`760m`/`1380m`）以下被 `Math.max(0, delta)` 截断归零导致的“下潜时前景静止而中景上移（相对运动方向反转）”缺陷；改为以各生态带海床底部（`680m`/`1340m`/`2100m`）为统一锚点，共享单调高度曲线 `u = Math.tanh(Math.max(0, biomeFloorY - midWorldY) / 480)` 并按 `远景 8px : 鱼群 12px : 中景 16px : 近景 28px`（`1 : 1.5 : 2 : 3.5`）严格递增分配纵向振幅，同时将海床巨藻/海鞭横向视差锁定至近景海床（`0.38x`）消除根部滑移 | `src/game/parallaxBackground.ts`, `docs/02-DESIGN_SPEC.md` |

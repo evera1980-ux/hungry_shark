@@ -32,7 +32,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     zone_twilight: '幽暗暮光中层带',
     zone_abyss: '克苏鲁深渊海沟',
 
-    control_hint: '左下虚拟摇杆 / WASD / 方向键转向 · 右下按钮 / 空格键 2倍速冲刺 · P 键暂停',
+    control_hint: '左下虚拟摇杆 / WASD / 方向键转向 · 右下按键 / 空格键 2倍速冲刺 · P键暂停',
 
     // Factions
     faction_MECHA: '赛博机械',
