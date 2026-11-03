@@ -37,14 +37,14 @@
 │       ├── bg_shallow_1_far_8898229a.png      # 浅海带 Layer 1：远景海底山脉拱门与沉船剪影
 │       ├── bg_shallow_2_mid_b4e0d30a.png      # 浅海带 Layer 2：中景鹿角珊瑚礁盘与紫管海绵崖壁
 │       ├── bg_shallow_3_near_96e92ee1.png     # 浅海带 Layer 3：近景金沙滩、珍珠巨蚌与沉没铁锚
-│       ├── bg_twilight_0_water_7d347ca5.png   # 暮光带 Layer 0：深海钴蓝幽光与生物极光水体底图
-│       ├── bg_twilight_1_far_449e76e5.png     # 暮光带 Layer 1：远景亚特兰蒂斯沉没神殿与符文拱门
-│       ├── bg_twilight_2_mid_019e225b.png     # 暮光带 Layer 2：中景巨鲸肋骨拱门、荧光蘑菇与紫晶崖
-│       ├── bg_twilight_3_near_c853fc41.png    # 暮光带 Layer 3：近景发光符文石碑、海百合与紫海鞭
-│       ├── bg_abyss_0_water_b0e53cc2.png      # 深渊带 Layer 0：黑曜石深渊热液烟雾与上浮火星水体底图
-│       ├── bg_abyss_1_far_7817748d.png        # 深渊带 Layer 1：远景海底火山巨峰与远古海怪颅骨化石
-│       ├── bg_abyss_2_mid_eff4191c.png        # 深渊带 Layer 2：中景黑烟囱热液喷口、巨型管虫与熔岩裂谷
-│       ├── bg_abyss_3_near_52736f9c.png       # 深渊带 Layer 3：近景龟裂玄武岩熔岩海床与盲蟹群落
+│       ├── bg_twilight_0_17bcb84c.png         # 暮光带 Layer 0：深海幽蓝斜射光束与生物发光微粒水体底图
+│       ├── bg_twilight_1_04f5d35f.png         # 暮光带 Layer 1：远景亚特兰蒂斯沉没柱廊神殿与发光裂谷崖壁
+│       ├── bg_twilight_2_fd5a1b33.png         # 暮光带 Layer 2：中景巨鲸肋骨拱廊、发光海葵、玻璃海绵与白珊瑚
+│       ├── bg_twilight_3_6e0dd7c1.png         # 暮光带 Layer 3：近景深海海百合、紫色海扇与沉没古陶罐海床
+│       ├── bg_abyss_0_1bbf506a.png            # 深渊带 Layer 0：黑曜石深渊热液红光与上浮火星水体底图
+│       ├── bg_abyss_1_75e4a628.png            # 深渊带 Layer 1：远景海底火山群峰、柱状玄武岩与熔岩溪流
+│       ├── bg_abyss_2_6ce66695.png            # 深渊带 Layer 2：中景黑烟囱热液喷口浓烟、红白巨型管虫与熔岩裂隙
+│       ├── bg_abyss_3_a4986280.png            # 深渊带 Layer 3：近景黑烟囱热液群、红冠管虫簇与龟裂熔岩海床
 │       └── bg_ambient_sprites_0c6882ce.png    # 4×2 海洋氛围精灵图集（沙丁鱼风暴/蝶鱼群/蝠鲼/水母/巨藻/海鞭/气泡/灯笼鱼）
 ├── docs/
 │   ├── 00-AI_CONSTRAINTS.md                   # AI 修改代码与同步更新文档的强制规范
@@ -136,6 +136,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-03 | **替换暮光深海带与深渊海沟带 8 张 21:9 超宽全景背景素材（`bg_twilight_0..3_*.png` & `bg_abyss_0..3_*.png`）**：更新 `OCEAN_LAYER_ASSET_PATHS` 资产清单、新增 `unmixHydrothermalSmokeSky` 黑烟白底解混管线，并按 `1916×821` 超宽画幅标定暮光带与深渊带三平面高度与高程比例 | `src/game/parallaxBackground.ts`, `public/assets/aistudio/bg_twilight_*.png`, `public/assets/aistudio/bg_abyss_*.png`, `docs/01-ARCHITECTURE.md`, `docs/02-DESIGN_SPEC.md` |
 | 2026-11-02 | **全面升级死亡复苏与狩猎结算界面（`gameState === 'gameover'`）科幻装甲弹窗体系、优化游戏主界面顶部 HUD 与暂停界面布局**：① 为 `SETTING_MODAL_FRAME` 生成顶部梯形铭牌去暂停标纯净变体（`getUiSettingCleanModalFrameDataUrl()`），使死亡紧急复苏（`variant="revive"`）与狩猎结算（`variant="settlement"`）统一采用 `980:688` 科幻金属装甲框体、`<UiSettingSharkCard />` 实时鲨鱼展台、三联复苏增益矩阵 / 四维金属遥测铭牌与平衡八角按钮，消除横屏溢出与按钮 2+1 孤行折行；② 将局内左上角 `hud-avatar-data-bar` 缩小 30% 至 `w-[151px] sm:w-[178px] lg:w-[217px]`，并将分数组件 `hud-telemetry-pill` 水平居中且将上边缘精确对齐至头像框右侧数据板上边直线部分高度（`mt-[8.5px] sm:mt-0 sm:top-[15.5%]`），确保全分辨率下零 UI 重叠；③ 将暂停界面 `UiSettingSharkCard` 高度缩短为 `h-[23.5%] shrink-0` 使所有按钮完整收纳于框内，并修复 `Restart`/`Main Menu` 按钮图标提取与底图线性插值修补 | `src/App.tsx`, `src/components/UiAtlasIcon.tsx`, `src/game/spriteSheetManager.ts`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
 | 2026-11-01 | **调整移动端优先首页（`gameState === 'title'`）布局与中央鲨鱼水平转身动画**：将首页头像名称及数据模块（`title-avatar-data-bar`）移至左上角，并将首页头像数据模块（缩小 30% 至 `w-[203px] sm:w-[245px] md:w-[273px]`）及三枚主操作横幅按钮（立即潜入深海 / 进化 / 试驾机甲利维坦，缩小 30% 至 `w-[154px] sm:w-[140~144px] md:w-[157~162px]`）等比缩减 30%；去掉离线 HTML 下载链接与底部操作提示文字；将主标题上移至顶部区域、三枚主按钮下移至底部区域，将首页摄像机锁定于鲨鱼正中心（`sim.camera.y = shark.y`），并复用局内优化过的 **2.5D 透视水平甩尾掉头与流体力学 C 形脊柱转弯物理机制**驱动首页鲨鱼水平巡游转身 | `src/App.tsx`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
 | 2026-11-01 | **接入 `setting_83a7a273.png` 暂停弹窗 9 合 1 图集并按 `setting1.png` 重构暂停页布局**：① `spriteSheetManager.ts` 新增 `UiSettingKey` 与 `processAndSliceUiSettingsImage()`，自动抠除 `setting_83a7a273.png` 外围与弹窗框体内部深灰网格背景（`RGB(27,28,32)`），裁切出弹窗外框（`SETTING_MODAL_FRAME`）、鲨鱼信息卡（`SETTING_SHARK_CARD`）及进化/继续狩猎/语言/音效/引导/重新开始/返回主界面共 9 个高清组件；② `UiAtlasIcon.tsx` 新增 `<UiSettingModalFrame />`、`<UiSettingSharkCard />` 与 `<UiSettingButton />`；③ `App.tsx` 按 `setting1.png` 布局重构暂停界面 | `public/assets/aistudio/setting_83a7a273.png`, `src/game/spriteSheetManager.ts`, `src/components/UiAtlasIcon.tsx`, `src/App.tsx`, `src/game/rules.test.ts` |

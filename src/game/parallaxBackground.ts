@@ -117,16 +117,16 @@ export const OCEAN_LAYER_ASSET_PATHS = {
     near: '/assets/aistudio/bg_shallow_3_near_96e92ee1.png',
   },
   twilight: {
-    water: '/assets/aistudio/bg_twilight_0_water_7d347ca5.png',
-    far: '/assets/aistudio/bg_twilight_1_far_449e76e5.png',
-    mid: '/assets/aistudio/bg_twilight_2_mid_019e225b.png',
-    near: '/assets/aistudio/bg_twilight_3_near_c853fc41.png',
+    water: '/assets/aistudio/bg_twilight_0_17bcb84c.png',
+    far: '/assets/aistudio/bg_twilight_1_04f5d35f.png',
+    mid: '/assets/aistudio/bg_twilight_2_fd5a1b33.png',
+    near: '/assets/aistudio/bg_twilight_3_6e0dd7c1.png',
   },
   abyss: {
-    water: '/assets/aistudio/bg_abyss_0_water_b0e53cc2.png',
-    far: '/assets/aistudio/bg_abyss_1_far_7817748d.png',
-    mid: '/assets/aistudio/bg_abyss_2_mid_eff4191c.png',
-    near: '/assets/aistudio/bg_abyss_3_near_52736f9c.png',
+    water: '/assets/aistudio/bg_abyss_0_1bbf506a.png',
+    far: '/assets/aistudio/bg_abyss_1_75e4a628.png',
+    mid: '/assets/aistudio/bg_abyss_2_6ce66695.png',
+    near: '/assets/aistudio/bg_abyss_3_a4986280.png',
   },
   ambientSprites: '/assets/aistudio/bg_ambient_sprites_0c6882ce.png',
 } as const;
@@ -223,22 +223,35 @@ function makeHorizontallySeamlessCanvas(
 }
 
 interface TerrainProcessOptions {
-  /** Special handling for shallow_1_far which has #FF00FF top sky and a horizontal water line at y≈512 */
+  /** Special handling for legacy shallow_1_far which had #FF00FF top sky */
   isShallowFar?: boolean;
-  /** Whether to key out enclosed pure-white holes in the upper 62% (e.g. fossil skull eye sockets) */
+  /** Whether to key out enclosed pure-white holes in the upper `maxHoleYRatio` (e.g. rock archways, coral gaps, fossil skull eye sockets) */
   punchUpperInteriorWhiteHoles?: boolean;
-  /** Target height fraction when rendered on screen */
+  /** Normalized vertical ratio [0..1] up to which enclosed pure-white holes are keyed out (default 0.62) */
+  maxHoleYRatio?: number;
+  /** Optional normalized bottom crop ratio (0..1) to trim stray artifacts at the bottom margin before processing */
+  cropBottomRatio?: number;
+  /** Optional rect [x0Ratio, y0Ratio, x1Ratio, y1Ratio] to clear stray slice-overlap artifacts */
+  clearArtifactRectRatio?: [number, number, number, number];
+  /** Whether to round off the flat-sliced top-left seamount peak in shallow.far so it has a natural dome silhouette */
+  roundTopLeftSlicedPeak?: boolean;
+  /** Whether to extend the lowest opaque terrain pixel in each column down to the bottom edge so elevated parallax planes have a 100% solid base */
+  groundBottomColumns?: boolean;
+  /** Normalized bottom band height [0..1] within which transparent bottom notches are grounded (default 0.18) */
+  groundBottomBandRatio?: number;
+  /** Unmixes soft grey/black hydrothermal smoke plumes painted against a #FFFFFF sky while preserving lower white tube worms */
+  unmixHydrothermalSmokeSky?: boolean;
+  /** Target top padding in source pixels when cropping */
   trimTopPaddingPx?: number;
 }
 
 /**
- * Processes an AI-generated terrain layer (1024x1024 JPEG/PNG with solid #FFFFFF or #FF00FF background):
- * 1. Downscales to an optimal 640px working width (reducing pixel-processing cost and per-frame texture bandwidth by 61%).
- * 2. Flood-fills from the top sky edge (and bottom edge if white margin exists, e.g. bg_abyss_3_near)
- *    so interior white artwork details (pearls, hydrothermal tube worms, crab shells) are 100% preserved.
- * 3. Smoothly despills and feathers anti-aliased JPEG edge pixels.
- * 4. Crops empty sky & bottom margin rows into a wide-aspect terrain strip.
- * 5. Applies a 14% cosine horizontal seam blend so tiled strips loop seamlessly across X.
+ * Processes an AI-generated terrain layer (either 1024x1024 square or 1916xH ultra-wide panoramic strip):
+ * 1. Preserves exact source aspect ratio with high working resolution (up to 1440px wide for panoramic strips).
+ * 2. Flood-fills from the top sky edge (and bottom edge if white margin exists) plus optional interior archway/branch holes.
+ * 3. Smoothly despills and feathers anti-aliased white/magenta edge pixels.
+ * 4. Optionally grounds bottom column notches so stacked parallax planes have a seamless solid base.
+ * 5. Crops empty sky & bottom margin rows and applies a cosine horizontal seam blend.
  */
 function processTerrainLayerToSeamlessStrip(
   img: HTMLImageElement,
@@ -246,10 +259,14 @@ function processTerrainLayerToSeamlessStrip(
 ): HTMLCanvasElement {
   const srcW = img.naturalWidth || img.width || 1024;
   const srcH = img.naturalHeight || img.height || 1024;
-  const maxDim = 640;
+  const effectiveSrcH = options.cropBottomRatio
+    ? Math.max(32, Math.round(srcH * options.cropBottomRatio))
+    : srcH;
+  const isPanoramicStrip = srcW / Math.max(1, effectiveSrcH) > 1.8;
+  const maxDim = isPanoramicStrip ? 1440 : 640;
   const scale = srcW > maxDim ? maxDim / srcW : 1;
   const w = Math.max(64, Math.round(srcW * scale));
-  const h = Math.max(64, Math.round(srcH * scale));
+  const h = Math.max(24, Math.round(effectiveSrcH * scale));
 
   const rawCanvas = document.createElement('canvas');
   rawCanvas.width = w;
@@ -257,24 +274,63 @@ function processTerrainLayerToSeamlessStrip(
   const ctx = rawCanvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return rawCanvas;
 
-  ctx.drawImage(img, 0, 0, w, h);
+  ctx.drawImage(img, 0, 0, srcW, effectiveSrcH, 0, 0, w, h);
   const imgData = ctx.getImageData(0, 0, w, h);
   const data = imgData.data;
 
+  if (options.clearArtifactRectRatio) {
+    const [rx0, ry0, rx1, ry1] = options.clearArtifactRectRatio;
+    const x0 = Math.max(0, Math.floor(w * rx0));
+    const y0 = Math.max(0, Math.floor(h * ry0));
+    const x1 = Math.min(w, Math.ceil(w * rx1));
+    const y1 = Math.min(h, Math.ceil(h * ry1));
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const idx = (y * w + x) * 4;
+        data[idx] = 255;
+        data[idx + 1] = 255;
+        data[idx + 2] = 255;
+        data[idx + 3] = 0;
+      }
+    }
+  }
+
+  // Round off the flat-sliced top-left seamount summit (x in 3.5%..15.5%) so it forms a natural organic peak
+  if (options.roundTopLeftSlicedPeak) {
+    const xStart = Math.floor(w * 0.032);
+    const xEnd = Math.ceil(w * 0.158);
+    const xCenter = (xStart + xEnd) * 0.5;
+    const xHalf = Math.max(1, (xEnd - xStart) * 0.5);
+    for (let x = xStart; x <= xEnd; x++) {
+      const nx = (x - xCenter) / xHalf;
+      const archCurve = Math.round(
+        h * (0.015 + 0.14 * nx * nx + 0.025 * Math.sin(nx * Math.PI * 2))
+      );
+      for (let y = 0; y < Math.min(h, archCurve); y++) {
+        const idx = (y * w + x) * 4;
+        data[idx] = 255;
+        data[idx + 1] = 255;
+        data[idx + 2] = 255;
+        data[idx + 3] = 0;
+      }
+    }
+  }
+
   const isBgCandidate = (idx: number): boolean => {
+    if (data[idx + 3] < 16) return true;
     const r = data[idx];
     const g = data[idx + 1];
     const b = data[idx + 2];
     const maxC = Math.max(r, g, b);
     const minC = Math.min(r, g, b);
-    // Solid white / near-white JPEG background
+    // Solid white / near-white background
     const isWhite = minC >= 218 && maxC - minC <= 32;
-    // Solid #FF00FF magenta JPEG background (used in bg_shallow_1_far)
+    // Solid #FF00FF magenta background
     const isMagenta = r >= 180 && b >= 180 && g <= 135 && r - g >= 65 && b - g >= 65;
     return isWhite || isMagenta;
   };
 
-  // 1. BFS Flood-Fill from top sky border and bottom border (if bottom has white margin like bg_abyss_3_near)
+  // 1. BFS Flood-Fill from top sky border and bottom border (if bottom has white margin)
   const visited = new Uint8Array(w * h);
   const queue = new Int32Array(w * h);
   let qHead = 0;
@@ -289,22 +345,22 @@ function processTerrainLayerToSeamlessStrip(
     }
   };
 
-  // Seed top row and upper 40% left/right edges
+  // Seed top row and upper 68% left/right edges
   for (let x = 0; x < w; x++) {
     pushSeed(x, 0);
     pushSeed(x, 1);
   }
-  for (let y = 0; y < Math.floor(h * 0.45); y++) {
+  for (let y = 0; y < Math.floor(h * 0.68); y++) {
     pushSeed(0, y);
     pushSeed(w - 1, y);
   }
 
-  // Check if bottom row is predominantly white margin (like bg_abyss_3_near_52736f9c.png)
+  // Check if bottom row has significant white margin
   let bottomWhiteCount = 0;
   for (let x = 0; x < w; x += 4) {
     if (isBgCandidate(((h - 1) * w + x) * 4)) bottomWhiteCount++;
   }
-  if (bottomWhiteCount > (w / 4) * 0.7) {
+  if (bottomWhiteCount > (w / 4) * 0.25 && !options.groundBottomColumns) {
     for (let x = 0; x < w; x++) {
       pushSeed(x, h - 1);
       pushSeed(x, h - 2);
@@ -346,15 +402,21 @@ function processTerrainLayerToSeamlessStrip(
     }
   }
 
-  // Optional: punch enclosed pure-white holes in the upper 62% (e.g. eye sockets of the fossil skull in bg_abyss_1_far)
+  // Optional: punch enclosed pure-white holes in the upper `maxHoleYRatio` (rock archways, coral branches, kelp fronds, skull sockets)
   if (options.punchUpperInteriorWhiteHoles) {
-    const maxHoleY = Math.floor(h * 0.62);
+    const holeRatio = options.maxHoleYRatio ?? 0.62;
+    const maxHoleY = Math.floor(h * holeRatio);
     for (let y = 0; y < maxHoleY; y++) {
       for (let x = 0; x < w; x++) {
         const p = y * w + x;
         if (!visited[p]) {
           const idx = p * 4;
-          if (data[idx] >= 235 && data[idx + 1] >= 235 && data[idx + 2] >= 235) {
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+          const minC = Math.min(r, g, b);
+          const maxC = Math.max(r, g, b);
+          if (minC >= 224 && maxC - minC <= 26) {
             visited[p] = 1;
           }
         }
@@ -366,6 +428,86 @@ function processTerrainLayerToSeamlessStrip(
   for (let p = 0; p < w * h; p++) {
     if (visited[p]) {
       data[p * 4 + 3] = 0;
+    }
+  }
+
+  // Optional: unmix soft grey/black hydrothermal smoke plumes painted over #FFFFFF sky
+  // while 100% preserving red-and-white tube worms in the lower volcanic bed
+  if (options.unmixHydrothermalSmokeSky) {
+    const smokeMaxY = Math.floor(h * 0.64);
+    const smokeVisited = new Uint8Array(w * h);
+    let sHead = 0;
+    let sTail = 0;
+    const isSmokeMistCandidate = (p: number, y: number): boolean => {
+      if (y >= smokeMaxY) return false;
+      const idx = p * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const minC = Math.min(r, g, b);
+      const maxC = Math.max(r, g, b);
+      return minC >= 78 && maxC - minC <= 32;
+    };
+
+    for (let y = 0; y < smokeMaxY; y++) {
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        if (visited[p]) {
+          smokeVisited[p] = 1;
+          queue[sTail++] = p;
+        }
+      }
+    }
+
+    while (sHead < sTail) {
+      const curr = queue[sHead++];
+      const cx = curr % w;
+      const cy = (curr - cx) / w;
+      const neighbors = [
+        cx > 0 ? curr - 1 : -1,
+        cx + 1 < w ? curr + 1 : -1,
+        cy > 0 ? curr - w : -1,
+        cy + 1 < smokeMaxY ? curr + w : -1,
+      ];
+      for (const n of neighbors) {
+        if (n >= 0 && !smokeVisited[n]) {
+          const ny = Math.floor(n / w);
+          if (isSmokeMistCandidate(n, ny)) {
+            smokeVisited[n] = 1;
+            queue[sTail++] = n;
+          }
+        }
+      }
+    }
+
+    for (let y = 0; y < smokeMaxY; y++) {
+      const vertFade =
+        y < h * 0.52 ? 1 : Math.max(0, (smokeMaxY - y) / Math.max(1, smokeMaxY - h * 0.52));
+      for (let x = 0; x < w; x++) {
+        const p = y * w + x;
+        if (!smokeVisited[p] || visited[p]) continue;
+        const idx = p * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const minC = Math.min(r, g, b);
+        if (minC >= 212) {
+          visited[p] = 1;
+          data[idx + 3] = 0;
+        } else {
+          const rawSmokeAlpha = Math.max(0, Math.min(1, (212 - minC) / (212 - 78)));
+          const smokeAlpha = Math.pow(rawSmokeAlpha, 1.2) * 0.92;
+          const effAlpha = (1 - vertFade) + vertFade * smokeAlpha;
+          data[idx] = Math.round(r * (1 - vertFade) + 22 * vertFade);
+          data[idx + 1] = Math.round(g * (1 - vertFade) + 24 * vertFade);
+          data[idx + 2] = Math.round(b * (1 - vertFade) + 28 * vertFade);
+          data[idx + 3] = Math.round(data[idx + 3] * effAlpha);
+          if (data[idx + 3] < 8) {
+            visited[p] = 1;
+            data[idx + 3] = 0;
+          }
+        }
+      }
     }
   }
 
@@ -393,15 +535,15 @@ function processTerrainLayerToSeamlessStrip(
         const minC = Math.min(r, g, b);
         const maxC = Math.max(r, g, b);
 
-        // Soften bright white JPEG edge fringe
-        if (minC > 175 && maxC - minC < 45) {
-          const keep = Math.max(0, Math.min(1, (235 - minC) / 60));
-          data[idx] = Math.round(r * 0.68);
+        // Soften bright white edge fringe & unmix white halo
+        if (minC > 165 && maxC - minC < 52) {
+          const keep = Math.max(0, Math.min(1, (232 - minC) / 67));
+          data[idx] = Math.round(r * 0.66);
           data[idx + 1] = Math.round(g * 0.72);
-          data[idx + 2] = Math.round(b * 0.78);
+          data[idx + 2] = Math.round(b * 0.80);
           data[idx + 3] = Math.round(data[idx + 3] * keep);
         }
-        // Soften magenta JPEG edge fringe (for bg_shallow_1_far)
+        // Soften magenta edge fringe
         if (r > g + 25 && b > g + 25) {
           const magentaExcess = Math.min(r - g, b - g);
           const keep = Math.max(0, Math.min(1, 1 - magentaExcess / 110));
@@ -413,34 +555,38 @@ function processTerrainLayerToSeamlessStrip(
     }
   }
 
-  // 3. O(W * H) single-pass horizon feathering for bg_shallow_1_far_8898229a.png:
-  // Tracks vertical distance from sky in O(1) per pixel down each column (replacing nested while loop).
-  if (options.isShallowFar) {
-    const startY = Math.floor(h * 0.42);
-    const endY = Math.floor(h * 0.68);
-    const maxScan = Math.max(24, Math.round(56 * scale));
-    const cyanRampSpan = Math.max(16, Math.round(48 * scale));
-    const solidRampSpan = Math.max(4, Math.round(7 * scale));
-
+  // 3. Optional bottom-column grounding: fills any bottom white cutout notches along the lower band
+  //    by extending the lowest opaque terrain pixel in each column downward to the bottom edge.
+  if (options.groundBottomColumns) {
+    const bandRatio = options.groundBottomBandRatio ?? 0.18;
+    const minSearchY = Math.max(4, Math.floor(h * (1 - bandRatio)));
     for (let x = 0; x < w; x++) {
-      let distFromSky = 0;
-      for (let y = startY; y < endY; y++) {
-        const p = y * w + x;
-        if (visited[p]) {
-          distFromSky = 0;
-          continue;
+      let lastSolidY = -1;
+      for (let y = h - 1; y >= minSearchY; y--) {
+        const idx = (y * w + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+        const minC = Math.min(r, g, b);
+        const maxC = Math.max(r, g, b);
+        const isWhiteBottomMargin = minC >= 212 && maxC - minC <= 34;
+        if (data[idx + 3] > 200 && !isWhiteBottomMargin) {
+          lastSolidY = y;
+          break;
         }
-        distFromSky++;
-        if (distFromSky < maxScan) {
-          const idx = p * 4;
-          const r = data[idx];
-          const g = data[idx + 1];
-          const b = data[idx + 2];
-          const isBrightCyanBackdrop = g > 145 && b > 155 && b >= r + 35;
-          const ramp = isBrightCyanBackdrop
-            ? Math.max(0, Math.min(1, (distFromSky - 4) / cyanRampSpan))
-            : Math.max(0, Math.min(1, distFromSky / solidRampSpan));
-          data[idx + 3] = Math.round(data[idx + 3] * ramp * ramp);
+      }
+      if (lastSolidY >= minSearchY && lastSolidY < h - 1) {
+        const srcY = Math.max(0, lastSolidY - 2);
+        const srcIdx = (srcY * w + x) * 4;
+        const sr = data[srcIdx];
+        const sg = data[srcIdx + 1];
+        const sb = data[srcIdx + 2];
+        for (let y = lastSolidY; y < h; y++) {
+          const dstIdx = (y * w + x) * 4;
+          data[dstIdx] = sr;
+          data[dstIdx + 1] = sg;
+          data[dstIdx + 2] = sb;
+          data[dstIdx + 3] = 255;
         }
       }
     }
@@ -462,14 +608,13 @@ function processTerrainLayerToSeamlessStrip(
     }
   }
 
-  const scaledPad = Math.max(3, Math.round((options.trimTopPaddingPx ?? 8) * scale));
-  if (maxY <= minY + 24) {
-    minY = Math.floor(h * 0.35);
+  const scaledPad = Math.max(1, Math.round((options.trimTopPaddingPx ?? 4) * scale));
+  if (maxY <= minY + 16) {
+    minY = 0;
     maxY = h - 1;
   } else {
     minY = Math.max(0, minY - scaledPad);
-    // Trim 2px inside maxY to guarantee zero bottom white border fringe
-    maxY = Math.min(h - 1, Math.max(minY + 40, maxY - 2));
+    maxY = Math.min(h - 1, Math.max(minY + 24, maxY - 1));
   }
 
   ctx.putImageData(imgData, 0, 0);
@@ -483,7 +628,93 @@ function processTerrainLayerToSeamlessStrip(
     cCtx.drawImage(rawCanvas, 0, minY, w, cropH, 0, 0, w, cropH);
   }
 
-  return makeHorizontallySeamlessCanvas(cropped, 0.14);
+  return makeHorizontallySeamlessCanvas(cropped, isPanoramicStrip ? 0.10 : 0.14);
+}
+
+/**
+ * Processes the panoramic Shallow Water Surface & Sunbeam Canopy (`bg_shallow_0_water_0e65cb68.png`, 1916x267):
+ * - Preserves full panoramic aspect ratio (up to 1440px wide).
+ * - Trims top white margin and bottom stray slice-overlap tip.
+ * - Smoothly unmixes the bottom #FFFFFF fade with a C1-continuous cosine envelope so sunbeams dissolve invisibly into the water column.
+ */
+function processShallowWaterCanopyToSeamlessStrip(
+  img: HTMLImageElement
+): HTMLCanvasElement {
+  const srcW = img.naturalWidth || img.width || 1916;
+  const srcH = img.naturalHeight || img.height || 267;
+  // Trim the top 7px white margin and bottom 21px stray rock-tip overlap
+  const cropTop = Math.round(srcH * 0.028);
+  const cropBot = Math.round(srcH * 0.905);
+  const cropSrcH = Math.max(32, cropBot - cropTop);
+
+  const maxDim = 1440;
+  const scale = srcW > maxDim ? maxDim / srcW : 1;
+  const w = Math.max(128, Math.round(srcW * scale));
+  const h = Math.max(32, Math.round(cropSrcH * scale));
+
+  const raw = document.createElement('canvas');
+  raw.width = w;
+  raw.height = h;
+  const ctx = raw.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return raw;
+
+  ctx.drawImage(img, 0, cropTop, srcW, cropSrcH, 0, 0, w, h);
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  for (let y = 0; y < h; y++) {
+    const v = y / Math.max(1, h - 1);
+    // C1-continuous cosine vertical fade starting from v=0.26 down to v=1.0 (zero hard bottom edge)
+    const verticalEnvelope =
+      v <= 0.26
+        ? 1
+        : Math.pow(Math.cos(((v - 0.26) / 0.74) * Math.PI * 0.5), 1.65);
+
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      const r = data[idx];
+      const g = data[idx + 1];
+      const b = data[idx + 2];
+      const maxC = Math.max(r, g, b);
+      const minC = Math.min(r, g, b);
+      const sat = maxC > 0 ? (maxC - minC) / maxC : 0;
+
+      // Top 6% residual white border cleanup
+      if (v < 0.06 && minC >= 236 && sat < 0.06) {
+        data[idx + 3] = 0;
+        continue;
+      }
+
+      if (v >= 0.22) {
+        const cyanInk = Math.max((255 - r) / 235, sat * 1.25);
+        const rawAlpha = Math.max(0, Math.min(1, cyanInk));
+        const unmixWeight = Math.min(1, (v - 0.22) / 0.26);
+        const effAlpha =
+          (1 - unmixWeight + unmixWeight * rawAlpha) * verticalEnvelope;
+
+        if (effAlpha <= 0.008) {
+          data[idx + 3] = 0;
+          continue;
+        }
+
+        if (rawAlpha > 0.05 && rawAlpha < 0.98) {
+          const invA = 1 / Math.max(0.24, rawAlpha);
+          const ur = Math.max(0, Math.min(255, Math.round((r - 255 * (1 - rawAlpha)) * invA)));
+          const ug = Math.max(0, Math.min(255, Math.round((g - 255 * (1 - rawAlpha)) * invA)));
+          const ub = Math.max(0, Math.min(255, Math.round((b - 255 * (1 - rawAlpha)) * invA)));
+          data[idx] = Math.round(r * (1 - unmixWeight) + ur * unmixWeight);
+          data[idx + 1] = Math.round(g * (1 - unmixWeight) + ug * unmixWeight);
+          data[idx + 2] = Math.round(b * (1 - unmixWeight) + ub * unmixWeight);
+        }
+        data[idx + 3] = Math.round(effAlpha * 255);
+      } else {
+        data[idx + 3] = 255;
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+  return makeHorizontallySeamlessCanvas(raw, 0.10);
 }
 
 /**
@@ -492,7 +723,11 @@ function processTerrainLayerToSeamlessStrip(
 function processWaterLayerToSeamlessTile(img: HTMLImageElement): HTMLCanvasElement {
   const srcW = img.naturalWidth || img.width || 1024;
   const srcH = img.naturalHeight || img.height || 1024;
-  const maxDim = 512;
+  if (srcW / Math.max(1, srcH) > 3.0) {
+    return processShallowWaterCanopyToSeamlessStrip(img);
+  }
+  const isWidescreenWater = srcW / Math.max(1, srcH) > 1.8;
+  const maxDim = isWidescreenWater ? 1024 : 512;
   const scale = srcW > maxDim ? maxDim / srcW : 1;
   const w = Math.max(64, Math.round(srcW * scale));
   const h = Math.max(64, Math.round(srcH * scale));
@@ -503,7 +738,7 @@ function processWaterLayerToSeamlessTile(img: HTMLImageElement): HTMLCanvasEleme
   if (ctx) {
     ctx.drawImage(img, 0, 0, w, h);
   }
-  return makeHorizontallySeamlessCanvas(raw, 0.16);
+  return makeHorizontallySeamlessCanvas(raw, isWidescreenWater ? 0.12 : 0.16);
 }
 
 /**
@@ -925,18 +1160,33 @@ export class ParallaxBackground {
     });
     loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.far, true, (img) => {
       this.biomePlanes[0].far = processTerrainLayerToSeamlessStrip(img, {
-        isShallowFar: true,
-        trimTopPaddingPx: 6,
+        cropBottomRatio: 0.915,
+        clearArtifactRectRatio: [0, 0.78, 0.14, 1.0],
+        roundTopLeftSlicedPeak: true,
+        punchUpperInteriorWhiteHoles: true,
+        maxHoleYRatio: 0.86,
+        groundBottomColumns: true,
+        groundBottomBandRatio: 0.24,
+        trimTopPaddingPx: 2,
       });
     });
     loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.mid, true, (img) => {
       this.biomePlanes[0].mid = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 8,
+        cropBottomRatio: 0.935,
+        punchUpperInteriorWhiteHoles: true,
+        maxHoleYRatio: 0.82,
+        groundBottomColumns: true,
+        groundBottomBandRatio: 0.12,
+        trimTopPaddingPx: 2,
       });
     });
     loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.near, true, (img) => {
       const processed = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 8,
+        punchUpperInteriorWhiteHoles: true,
+        maxHoleYRatio: 0.48,
+        groundBottomColumns: true,
+        groundBottomBandRatio: 0.18,
+        trimTopPaddingPx: 2,
       });
       this.biomePlanes[0].near = processed;
       this.layers[0] = processed;
@@ -947,46 +1197,51 @@ export class ParallaxBackground {
       this.ambientSprites = sliceAmbientSpriteSheet(img);
     });
 
-    // 3. Twilight Zone (520m ~ 1150m)
+    // 3. Twilight Zone (520m ~ 1150m — 1916x821 widescreen RGBA layers)
     loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.water, false, (img) => {
       this.biomePlanes[1].water = processWaterLayerToSeamlessTile(img);
     });
     loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.far, false, (img) => {
       this.biomePlanes[1].far = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 8,
+        trimTopPaddingPx: 4,
       });
     });
     loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.mid, false, (img) => {
       this.biomePlanes[1].mid = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 8,
+        trimTopPaddingPx: 4,
       });
     });
     loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.near, false, (img) => {
       const processed = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 8,
+        trimTopPaddingPx: 4,
       });
       this.biomePlanes[1].near = processed;
       this.layers[1] = processed;
     });
 
-    // 4. Abyss Zone (1150m+)
+    // 4. Abyss Zone (1150m+ — 1916x821 widescreen volcanic & hydrothermal layers)
     loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.water, false, (img) => {
       this.biomePlanes[2].water = processWaterLayerToSeamlessTile(img);
     });
     loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.far, false, (img) => {
       this.biomePlanes[2].far = processTerrainLayerToSeamlessStrip(img, {
-        punchUpperInteriorWhiteHoles: true,
-        trimTopPaddingPx: 8,
+        trimTopPaddingPx: 4,
       });
     });
     loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.mid, false, (img) => {
       this.biomePlanes[2].mid = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 8,
+        unmixHydrothermalSmokeSky: true,
+        groundBottomColumns: true,
+        groundBottomBandRatio: 0.14,
+        trimTopPaddingPx: 4,
       });
     });
     loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.near, false, (img) => {
       const processed = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 6,
+        unmixHydrothermalSmokeSky: true,
+        groundBottomColumns: true,
+        groundBottomBandRatio: 0.14,
+        trimTopPaddingPx: 4,
       });
       this.biomePlanes[2].near = processed;
       this.layers[2] = processed;
@@ -1014,42 +1269,45 @@ export class ParallaxBackground {
   ): { farY: number; midY: number; nearY: number } {
     const u = Math.tanh(Math.max(0, biomeFloorY - midWorldY) / 480);
     return {
-      farY: -20 + 8 * u,
-      midY: -10 + 16 * u,
+      farY: -20 + 2.5 * u,
+      midY: -10 + 14 * u,
       nearY: 28 * u,
     };
   }
 
   /**
-   * Draws a horizontally-seamless Layer 0 Water Backdrop with gentle 0.04x horizontal
-   * and 0.010x vertical parallax, maintaining constant vertical aspect ratio without
-   * stretching or bobbing when the shark swims near the surface.
+   * Draws a horizontally-seamless Layer 0 Water Backdrop anchored cleanly at the top of the viewport
+   * with ultra-subtle 0.012x horizontal and <=2px vertical parallax so the distant water surface canopy
+   * remains nearly stationary even when the shark swims up to the sea surface.
    */
   private drawSeamlessWaterBackdrop(
     ctx: CanvasRenderingContext2D,
     waterPlane: HTMLCanvasElement | undefined,
     cameraX: number,
-    cameraY: number,
-    waterTopY: number,
+    sharkDepthY: number,
     viewW: number,
     viewH: number,
     alpha: number
   ): void {
-    if (!waterPlane || alpha <= 0.01 || waterTopY >= viewH) return;
+    if (!waterPlane || alpha <= 0.01) return;
 
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    if (waterTopY > 0) {
-      ctx.beginPath();
-      ctx.rect(0, waterTopY, viewW, viewH - waterTopY);
-      ctx.clip();
-    }
-    const drawH = viewH + 24;
     const aspect = waterPlane.width / Math.max(1, waterPlane.height);
+    const isPanoramicCanopy = aspect > 3.0;
+    const refH = isPanoramicCanopy
+      ? Math.min(viewH, Math.max(360, viewW * 0.65))
+      : viewH;
+    const drawH = isPanoramicCanopy
+      ? Math.max(108, Math.min(360, Math.round(refH * 0.36)))
+      : viewH + 24;
     const tileW = Math.max(320, Math.round(drawH * aspect));
-    const scrollX = cameraX * 0.04;
+    const scrollX = cameraX * (isPanoramicCanopy ? 0.012 : 0.025);
     const startX = -(((scrollX % tileW) + tileW) % tileW);
-    const parallaxY = -Math.tanh((Math.max(0, cameraY) * 0.01) / 10) * 10;
+    const u = Math.tanh(Math.max(0, 680 - sharkDepthY) / 480);
+    const parallaxY = isPanoramicCanopy
+      ? -Math.round((1 - u) * 2)
+      : -Math.tanh((Math.max(0, sharkDepthY) * 0.01) / 10) * 6;
 
     for (let x = startX; x < viewW; x += tileW) {
       ctx.drawImage(waterPlane, Math.floor(x), parallaxY, tileW + 1, drawH);
@@ -1072,7 +1330,8 @@ export class ParallaxBackground {
     alpha: number,
     heightViewportRatio: number = 0.44,
     minHeightPx: number = 180,
-    maxHeightPx: number = 460
+    maxHeightPx: number = 460,
+    maxSkirtExtendPx?: number
   ): void {
     if (alpha <= 0.01 || !plane || plane.width <= 0 || plane.height <= 0) return;
 
@@ -1100,17 +1359,24 @@ export class ParallaxBackground {
       ctx.drawImage(plane, dx, drawY, tileW + 1, targetH);
       // Extend bottom-most row downward if vertical parallax lifted the strip above viewH
       if (drawY + targetH < viewH) {
-        ctx.drawImage(
-          plane,
-          0,
-          plane.height - 2,
-          plane.width,
-          2,
-          dx,
-          drawY + targetH - 1,
-          tileW + 1,
-          viewH - (drawY + targetH) + 2
-        );
+        const rawGap = viewH - (drawY + targetH) + 2;
+        const skirtH =
+          maxSkirtExtendPx !== undefined
+            ? Math.min(rawGap, maxSkirtExtendPx)
+            : rawGap;
+        if (skirtH > 0) {
+          ctx.drawImage(
+            plane,
+            0,
+            plane.height - 2,
+            plane.width,
+            2,
+            dx,
+            drawY + targetH - 1,
+            tileW + 1,
+            skirtH
+          );
+        }
       }
     }
 
@@ -1134,11 +1400,8 @@ export class ParallaxBackground {
   ): void {
     if (alpha <= 0.02 || verticalOffsetPx > 160) return;
 
-    const floraSprite =
-      mode === 'SHALLOW'
-        ? this.ambientSprites.GIANT_KELP
-        : this.ambientSprites.BIOLUM_SEA_WHIP;
     const bubbleSprite = this.ambientSprites.BUBBLE_STREAM;
+    if (!bubbleSprite) return;
 
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
@@ -1147,58 +1410,31 @@ export class ParallaxBackground {
     const firstWorldIdx = Math.floor((scrollX - 180) / spacing);
     const count = Math.ceil((viewW + 360) / spacing) + 1;
     const baseY = viewH + verticalOffsetPx;
-    const tSec = nowMs * 0.0018;
 
     for (let i = 0; i < count; i++) {
       const worldIdx = firstWorldIdx + i;
       const screenX = worldIdx * spacing - scrollX;
       const hash = Math.abs(Math.sin(worldIdx * 12.9898) * 43758.5453);
       const frac = hash - Math.floor(hash);
-      const swayAngle = Math.sin(tSec + worldIdx * 0.85) * 0.09;
+      const anchorX = screenX + (frac - 0.5) * 70;
+      const anchorY = baseY + 8;
 
-      if (floraSprite && floraSprite.width > 0) {
-        const targetH = mode === 'SHALLOW' ? 135 + (Math.abs(worldIdx) % 3) * 20 : 125 + (Math.abs(worldIdx) % 3) * 18;
-        const targetW = targetH * (floraSprite.width / floraSprite.height);
-        const anchorX = screenX + (frac - 0.5) * 70;
-        const anchorY = baseY + 8;
-
+      // Occasional rising bubble stream in shallow reef
+      if (mode === 'SHALLOW' && bubbleSprite && Math.abs(worldIdx) % 2 === 0) {
+        const bH = 105;
+        const bW = bH * (bubbleSprite.width / bubbleSprite.height);
+        const riseOffset = ((nowMs * 0.028 + Math.abs(worldIdx) * 45) % 90);
+        const bAlpha = Math.sin((riseOffset / 90) * Math.PI) * 0.55 * alpha;
         ctx.save();
-        ctx.translate(anchorX, anchorY);
-        ctx.rotate(swayAngle);
-        if (worldIdx % 2 === 0) {
-          ctx.scale(-1, 1);
-        }
-        ctx.drawImage(floraSprite, -targetW * 0.5, -targetH, targetW, targetH);
+        ctx.globalAlpha = Math.max(0, bAlpha);
+        ctx.drawImage(
+          bubbleSprite,
+          anchorX + 42 - bW * 0.5,
+          anchorY - 45 - riseOffset - bH,
+          bW,
+          bH
+        );
         ctx.restore();
-
-        // Occasional rising bubble stream in shallow reef
-        if (mode === 'SHALLOW' && bubbleSprite && Math.abs(worldIdx) % 2 === 0) {
-          const bH = 115;
-          const bW = bH * (bubbleSprite.width / bubbleSprite.height);
-          const riseOffset = ((nowMs * 0.028 + Math.abs(worldIdx) * 45) % 90);
-          const bAlpha = Math.sin((riseOffset / 90) * Math.PI) * 0.62 * alpha;
-          ctx.save();
-          ctx.globalAlpha = Math.max(0, bAlpha);
-          ctx.drawImage(
-            bubbleSprite,
-            anchorX + 42 - bW * 0.5,
-            anchorY - 55 - riseOffset - bH,
-            bW,
-            bH
-          );
-          ctx.restore();
-        }
-      } else if (mode === 'SHALLOW') {
-        ctx.lineCap = 'round';
-        ctx.strokeStyle = '#10b981';
-        ctx.lineWidth = 5;
-        const bx = screenX + (frac - 0.5) * 35;
-        const kelpH = 64;
-        const sway = Math.sin(tSec + worldIdx) * 16;
-        ctx.beginPath();
-        ctx.moveTo(bx, baseY);
-        ctx.quadraticCurveTo(bx + sway * 0.5, baseY - kelpH * 0.5, bx + sway, baseY - kelpH);
-        ctx.stroke();
       }
     }
     ctx.restore();
@@ -1329,112 +1565,66 @@ export class ParallaxBackground {
     }
 
     const effZoom = Math.max(0.35, renderZoom);
-    const topWorldY = cameraY - (viewH * 0.5) / effZoom;
-    const midWorldY = cameraY;
-    const botWorldY = cameraY + (viewH * 0.5) / effZoom;
-    const screenSurfaceY = viewH * 0.5 - cameraY * effZoom;
+    const depthRefY = Math.max(0, sharkY);
+    const topWorldY = Math.max(0, cameraY - (viewH * 0.5) / effZoom);
+    const midWorldY = Math.max(0, cameraY);
+    const botWorldY = Math.max(0, cameraY + (viewH * 0.5) / effZoom);
 
-    // ==================== 1. CONTINUOUS WORLD-SPACE WATER COLUMN & SKY DOME ====================
-    const waterTopY = Math.max(0, Math.floor(screenSurfaceY));
-
-    // 1A. Tropical Sky Dome & Distant Horizon Clouds when near the surface (screenSurfaceY > 0)
-    if (screenSurfaceY > 0) {
-      const skyH = Math.min(viewH, Math.ceil(screenSurfaceY) + 2);
-      const skyGrad = ctx.createLinearGradient(0, 0, 0, skyH);
-      skyGrad.addColorStop(0, '#0284c7');
-      skyGrad.addColorStop(0.52, '#38bdf8');
-      skyGrad.addColorStop(0.88, '#bae6fd');
-      skyGrad.addColorStop(1, '#e0f2fe');
-      ctx.fillStyle = skyGrad;
-      ctx.fillRect(0, 0, viewW, skyH);
-
-      const sunX =
-        viewW * 0.52 -
-        ((((cameraX * 0.03) % viewW) + viewW) % viewW - viewW * 0.5) * 0.25;
-      const sunY = Math.max(18, screenSurfaceY - 64);
-      const sunHalo = ctx.createRadialGradient(sunX, sunY, 8, sunX, sunY, 170);
-      sunHalo.addColorStop(0, 'rgba(254, 249, 195, 0.85)');
-      sunHalo.addColorStop(0.35, 'rgba(253, 230, 138, 0.32)');
-      sunHalo.addColorStop(1, 'rgba(186, 230, 253, 0)');
-      ctx.fillStyle = sunHalo;
-      ctx.fillRect(0, 0, viewW, skyH);
-
-      ctx.save();
-      ctx.fillStyle = 'rgba(14, 116, 144, 0.36)';
-      const islandSpan = 960;
-      const islStart = -((((cameraX * 0.06) % islandSpan) + islandSpan) % islandSpan);
-      for (let ix = islStart; ix < viewW; ix += islandSpan) {
-        ctx.beginPath();
-        ctx.moveTo(ix + 140, screenSurfaceY + 2);
-        ctx.quadraticCurveTo(ix + 235, screenSurfaceY - 38, ix + 310, screenSurfaceY - 14);
-        ctx.quadraticCurveTo(ix + 370, screenSurfaceY - 52, ix + 460, screenSurfaceY + 2);
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-
-    // 1B. Continuous Bathymetric Water Column Base Gradient (3 stops instead of 4)
-    if (waterTopY < viewH) {
-      const topSampleDepth = Math.max(0, topWorldY);
-      const midSampleDepth = Math.max(0, midWorldY);
-      const botSampleDepth = Math.max(0, botWorldY);
-
-      const waterGrad = ctx.createLinearGradient(0, waterTopY, 0, viewH);
-      waterGrad.addColorStop(0, sampleBathymetricWaterColor(topSampleDepth).css);
-      waterGrad.addColorStop(0.5, sampleBathymetricWaterColor(midSampleDepth).css);
-      waterGrad.addColorStop(1, sampleBathymetricWaterColor(botSampleDepth).css);
+    // ==================== 1. CONTINUOUS WORLD-SPACE WATER COLUMN ====================
+    // 1A. Continuous Bathymetric Water Column Base Gradient across full viewport
+    {
+      const waterGrad = ctx.createLinearGradient(0, 0, 0, viewH);
+      waterGrad.addColorStop(0, sampleBathymetricWaterColor(topWorldY).css);
+      waterGrad.addColorStop(0.5, sampleBathymetricWaterColor(midWorldY).css);
+      waterGrad.addColorStop(1, sampleBathymetricWaterColor(botWorldY).css);
       ctx.fillStyle = waterGrad;
-      ctx.fillRect(0, waterTopY, viewW, viewH - waterTopY);
+      ctx.fillRect(0, 0, viewW, viewH);
     }
 
-    // 1C. Layer 0 Painted Water Backdrop (`bg_{zone}_0_water`) blended seamlessly across depth zones
-    if (this.biomePlanes.length === 3 && waterTopY < viewH) {
+    // 1B. Layer 0 Painted Water Backdrop (`bg_{zone}_0_water`) blended seamlessly across depth zones
+    if (this.biomePlanes.length === 3) {
       const [shallow, twilight, abyssal] = this.biomePlanes;
 
-      if (midWorldY < 680 && shallow.water) {
+      if (depthRefY < 680 && shallow.water) {
         const wAlpha0 =
-          midWorldY < 440 ? 0.86 : Math.max(0, (1 - (midWorldY - 440) / 240) * 0.86);
+          depthRefY < 440 ? 0.94 : Math.max(0, (1 - (depthRefY - 440) / 240) * 0.94);
         this.drawSeamlessWaterBackdrop(
           ctx,
           shallow.water,
           cameraX,
-          midWorldY,
-          waterTopY,
+          depthRefY,
           viewW,
           viewH,
           wAlpha0
         );
       }
 
-      if (midWorldY > 420 && midWorldY < 1320 && twilight.water) {
+      if (depthRefY > 420 && depthRefY < 1320 && twilight.water) {
         let wAlpha1 = 0.88;
-        if (midWorldY < 660) {
-          wAlpha1 = ((midWorldY - 420) / 240) * 0.88;
-        } else if (midWorldY > 1060) {
-          wAlpha1 = (1 - (midWorldY - 1060) / 260) * 0.88;
+        if (depthRefY < 660) {
+          wAlpha1 = ((depthRefY - 420) / 240) * 0.88;
+        } else if (depthRefY > 1060) {
+          wAlpha1 = (1 - (depthRefY - 1060) / 260) * 0.88;
         }
         this.drawSeamlessWaterBackdrop(
           ctx,
           twilight.water,
           cameraX,
-          midWorldY,
-          waterTopY,
+          depthRefY,
           viewW,
           viewH,
           wAlpha1
         );
       }
 
-      if (midWorldY > 1040 && abyssal.water) {
+      if (depthRefY > 1040 && abyssal.water) {
         const wAlpha2 =
-          midWorldY < 1300 ? ((midWorldY - 1040) / 260) * 0.92 : 0.92;
+          depthRefY < 1300 ? ((depthRefY - 1040) / 260) * 0.92 : 0.92;
         this.drawSeamlessWaterBackdrop(
           ctx,
           abyssal.water,
           cameraX,
-          midWorldY,
-          waterTopY,
+          depthRefY,
           viewW,
           viewH,
           wAlpha2
@@ -1442,74 +1632,97 @@ export class ParallaxBackground {
       }
     }
 
-    // ==================== 2. BATCHED VOLUMETRIC GOD RAYS (1 GRADIENT + 1 FILL) ====================
-    const rayVisibility = Math.max(0, 1 - midWorldY / 1050);
-    if (rayVisibility > 0.02 && waterTopY < viewH) {
+    // ==================== 2. SUBTLE VOLUMETRIC GOD RAYS ====================
+    const rayVisibility = Math.max(0, 1 - depthRefY / 1050);
+    if (rayVisibility > 0.02) {
       ctx.save();
-      const tSec = nowMs * 0.00055;
-      const rayOriginY = Math.max(0, screenSurfaceY);
-      const rayEndY = Math.min(viewH, rayOriginY + viewH * 0.72);
+      const tSec = nowMs * 0.00035;
+      const rayOriginY = 0;
+      const rayEndY = viewH * 0.72;
 
-      if (rayEndY > rayOriginY + 12) {
-        ctx.globalAlpha = rayVisibility * 0.52;
-        const sharedRayGrad = ctx.createLinearGradient(0, rayOriginY, 0, rayEndY);
-        sharedRayGrad.addColorStop(0, 'rgba(254, 249, 195, 0.16)');
-        sharedRayGrad.addColorStop(0.5, 'rgba(125, 211, 252, 0.055)');
-        sharedRayGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
-        ctx.fillStyle = sharedRayGrad;
+      ctx.globalAlpha = rayVisibility * 0.32;
+      const sharedRayGrad = ctx.createLinearGradient(0, rayOriginY, 0, rayEndY);
+      sharedRayGrad.addColorStop(0, 'rgba(254, 249, 195, 0.14)');
+      sharedRayGrad.addColorStop(0.5, 'rgba(125, 211, 252, 0.045)');
+      sharedRayGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
+      ctx.fillStyle = sharedRayGrad;
 
-        const spanB = viewW + 360;
-        ctx.beginPath();
-        for (let r = 0; r < 5; r++) {
-          const baseX =
-            (((r * 310 + 90 - cameraX * 0.07) % spanB) + spanB) % spanB - 180;
-          const sway = Math.cos(tSec * 1.35 + r * 0.95) * 28;
-          ctx.moveTo(baseX, rayOriginY);
-          ctx.lineTo(baseX + 46, rayOriginY);
-          ctx.lineTo(baseX + 155 + sway, rayEndY);
-          ctx.lineTo(baseX + 42 + sway, rayEndY);
-          ctx.closePath();
-        }
-        ctx.fill();
+      const spanB = viewW + 360;
+      ctx.beginPath();
+      for (let r = 0; r < 5; r++) {
+        const baseX =
+          (((r * 310 + 90 - cameraX * 0.015) % spanB) + spanB) % spanB - 180;
+        const sway = Math.cos(tSec * 1.1 + r * 0.95) * 14;
+        ctx.moveTo(baseX, rayOriginY);
+        ctx.lineTo(baseX + 46, rayOriginY);
+        ctx.lineTo(baseX + 155 + sway, rayEndY);
+        ctx.lineTo(baseX + 42 + sway, rayEndY);
+        ctx.closePath();
       }
+      ctx.fill();
       ctx.restore();
     }
 
     // ==================== 3. LAYER 1 (FAR) -> AMBIENT SPRITES -> LAYER 2 (MID) -> LAYER 3 (NEAR) ====================
     if (this.biomePlanes.length === 3) {
       const [shallow, twilight, abyssal] = this.biomePlanes;
-      const shallowOffsets = this.computeBiomeVerticalOffsets(midWorldY, 680);
-      const twilightOffsets = this.computeBiomeVerticalOffsets(midWorldY, 1340);
-      const abyssOffsets = this.computeBiomeVerticalOffsets(midWorldY, 2100);
+      const shallowOffsets = this.computeBiomeVerticalOffsets(depthRefY, 680);
+      const twilightOffsets = this.computeBiomeVerticalOffsets(depthRefY, 1340);
+      const abyssOffsets = this.computeBiomeVerticalOffsets(depthRefY, 2100);
+
+      // Proportional reference height for the panoramic strips across all 3 biomes
+      const panoRefH = Math.min(viewH, Math.max(360, viewW * 0.65));
+
+      // Shallow (1916x267, 1916x178, 1916x175, 1916x201)
+      const shallowNearH = Math.max(82, Math.min(260, Math.round(panoRefH * 0.25)));
+      const shallowMidH = Math.max(72, Math.min(230, Math.round(panoRefH * 0.22)));
+      const shallowFarH = Math.max(76, Math.min(240, Math.round(panoRefH * 0.232)));
+      const shallowMidElevation = Math.round(shallowNearH * 0.22);
+      const shallowFarElevation = Math.round(shallowNearH * 0.42);
+
+      // Twilight (1916x821 widescreen RGBA strips: cropped ratios 50.7%, 51.6%, 43.4%)
+      const twilightNearH = Math.max(105, Math.min(280, Math.round(panoRefH * 0.30)));
+      const twilightMidH = Math.max(130, Math.min(340, Math.round(panoRefH * 0.37)));
+      const twilightFarH = Math.max(150, Math.min(390, Math.round(panoRefH * 0.42)));
+      const twilightMidElevation = Math.round(twilightNearH * 0.16);
+      const twilightFarElevation = Math.round(twilightNearH * 0.34);
+
+      // Abyss (1916x821 widescreen volcanic & hydrothermal strips: far=49.7%, mid=90.8% w/ tall smoke, near=79.7% w/ tall smoke)
+      const abyssNearH = Math.max(165, Math.min(440, Math.round(panoRefH * 0.50)));
+      const abyssMidH = Math.max(195, Math.min(510, Math.round(panoRefH * 0.58)));
+      const abyssFarH = Math.max(150, Math.min(390, Math.round(panoRefH * 0.42)));
+      const abyssMidElevation = Math.round(abyssNearH * 0.08);
+      const abyssFarElevation = Math.round(abyssNearH * 0.24);
 
       // Biome 0 Far: Sunlit Coral Reef (0m ~ 680m)
-      if (midWorldY < 700) {
+      if (depthRefY < 700) {
         const alpha0 =
-          midWorldY < 460 ? 1 : Math.max(0, 1 - (midWorldY - 460) / 220);
+          depthRefY < 460 ? 1 : Math.max(0, 1 - (depthRefY - 460) / 220);
 
-        // Layer 1: Far Seamount Arches & Sunken Galleon (0.10x horizontal, 8px vertical amplitude)
+        // Layer 1: Far Seamount Arches (0.025x horizontal — nearly stationary distant horizon)
         this.drawParallaxPlane(
           ctx,
           shallow.far,
           cameraX,
           viewW,
           viewH,
-          0.1,
-          shallowOffsets.farY,
-          alpha0 * 0.92,
-          0.56,
-          240,
-          520
+          0.025,
+          shallowOffsets.farY - shallowFarElevation,
+          alpha0 * 0.94,
+          shallowFarH / Math.max(1, viewH),
+          shallowFarH,
+          shallowFarH,
+          0
         );
       }
 
       // Biome 1 Far: Twilight Sunken Atlantean Temple (440m ~ 1340m)
-      if (midWorldY > 440 && midWorldY < 1340) {
+      if (depthRefY > 440 && depthRefY < 1340) {
         let alpha1 = 1;
-        if (midWorldY < 660) {
-          alpha1 = (midWorldY - 440) / 220;
-        } else if (midWorldY > 1080) {
-          alpha1 = 1 - (midWorldY - 1080) / 260;
+        if (depthRefY < 660) {
+          alpha1 = (depthRefY - 440) / 220;
+        } else if (depthRefY > 1080) {
+          alpha1 = 1 - (depthRefY - 1080) / 260;
         }
 
         this.drawParallaxPlane(
@@ -1518,19 +1731,20 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.1,
-          twilightOffsets.farY,
+          0.025,
+          twilightOffsets.farY - twilightFarElevation,
           alpha1 * 0.94,
-          0.58,
-          250,
-          540
+          twilightFarH / Math.max(1, viewH),
+          twilightFarH,
+          twilightFarH,
+          0
         );
       }
 
-      // Biome 2 Far: Abyssal Volcanic Peak & Prehistoric Skull (1060m+)
-      if (midWorldY > 1060) {
+      // Biome 2 Far: Abyssal Volcanic Mountain Ridge & Magma Valleys (1060m+)
+      if (depthRefY > 1060) {
         const alpha2 =
-          midWorldY < 1320 ? (midWorldY - 1060) / 260 : 1;
+          depthRefY < 1320 ? (depthRefY - 1060) / 260 : 1;
 
         this.drawParallaxPlane(
           ctx,
@@ -1538,47 +1752,49 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.1,
-          abyssOffsets.farY,
+          0.025,
+          abyssOffsets.farY - abyssFarElevation,
           alpha2 * 0.94,
-          0.62,
-          270,
-          580
+          abyssFarH / Math.max(1, viewH),
+          abyssFarH,
+          abyssFarH,
+          0
         );
       }
 
-      // Ambient Marine Schools & Jellyfish (0.16x horizontal, 12px vertical amplitude)
+      // Ambient Marine Schools & Jellyfish (0.12x horizontal, 10px vertical amplitude)
       this.drawDistantAmbientSchools(
         ctx,
         cameraX,
-        midWorldY,
+        depthRefY,
         viewW,
         viewH,
         nowMs,
         dt,
-        screenSurfaceY
+        0
       );
 
       // Biome 0 Mid & Near
-      if (midWorldY < 700) {
+      if (depthRefY < 700) {
         const alpha0 =
-          midWorldY < 460 ? 1 : Math.max(0, 1 - (midWorldY - 460) / 220);
+          depthRefY < 460 ? 1 : Math.max(0, 1 - (depthRefY - 460) / 220);
 
-        // Layer 2: Midground Coral Reef Cliffs & Purple Tube Sponges (0.22x horizontal, 16px vertical amplitude)
+        // Layer 2: Midground Coral Reef Terrace (0.18x horizontal, elevated behind Near sandbank at natural 1:1 panoramic aspect)
         this.drawParallaxPlane(
           ctx,
           shallow.mid,
           cameraX,
           viewW,
           viewH,
-          0.22,
-          shallowOffsets.midY,
+          0.18,
+          shallowOffsets.midY - shallowMidElevation,
           alpha0,
-          0.42,
-          185,
-          400
+          shallowMidH / Math.max(1, viewH),
+          shallowMidH,
+          shallowMidH,
+          0
         );
-        // Layer 3: Foreground Sandbank, Pearl Clams & Rusty Anchor (0.38x horizontal, 28px vertical amplitude)
+        // Layer 3: Foreground Sandbank, Kelp & Rusty Anchor (0.38x horizontal, anchored at seabed floor at natural 1:1 panoramic aspect)
         this.drawParallaxPlane(
           ctx,
           shallow.near,
@@ -1588,11 +1804,11 @@ export class ParallaxBackground {
           0.38,
           shallowOffsets.nearY,
           alpha0,
-          0.31,
-          135,
-          300
+          shallowNearH / Math.max(1, viewH),
+          shallowNearH,
+          shallowNearH
         );
-        // Layer 4: Swaying Giant Kelp & Rising Bubble Streams locked to Near seabed (0.38x horizontal, 28px vertical amplitude)
+        // Layer 4: Rising Bubble Streams locked to Near seabed (0.38x horizontal, 28px vertical amplitude)
         this.drawAnimatedSeabedSprites(
           ctx,
           cameraX,
@@ -1605,13 +1821,13 @@ export class ParallaxBackground {
         );
       }
 
-      // Biome 1 Mid & Near: Twilight Whale Ribcage & Glowing Rune Monoliths
-      if (midWorldY > 440 && midWorldY < 1340) {
+      // Biome 1 Mid & Near: Twilight Whale Ribcage, Crinoid Sea Lilies & Sunken Amphorae
+      if (depthRefY > 440 && depthRefY < 1340) {
         let alpha1 = 1;
-        if (midWorldY < 660) {
-          alpha1 = (midWorldY - 440) / 220;
-        } else if (midWorldY > 1080) {
-          alpha1 = 1 - (midWorldY - 1080) / 260;
+        if (depthRefY < 660) {
+          alpha1 = (depthRefY - 440) / 220;
+        } else if (depthRefY > 1080) {
+          alpha1 = 1 - (depthRefY - 1080) / 260;
         }
 
         this.drawParallaxPlane(
@@ -1620,12 +1836,13 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.22,
-          twilightOffsets.midY,
+          0.18,
+          twilightOffsets.midY - twilightMidElevation,
           alpha1,
-          0.43,
-          190,
-          410
+          twilightMidH / Math.max(1, viewH),
+          twilightMidH,
+          twilightMidH,
+          0
         );
         this.drawParallaxPlane(
           ctx,
@@ -1636,9 +1853,9 @@ export class ParallaxBackground {
           0.38,
           twilightOffsets.nearY,
           alpha1,
-          0.3,
-          130,
-          290
+          twilightNearH / Math.max(1, viewH),
+          twilightNearH,
+          twilightNearH
         );
         this.drawAnimatedSeabedSprites(
           ctx,
@@ -1652,10 +1869,10 @@ export class ParallaxBackground {
         );
       }
 
-      // Biome 2 Mid & Near: Abyssal Black Smokers, Tube Worms & Cracked Lava Crust
-      if (midWorldY > 1060) {
+      // Biome 2 Mid & Near: Abyssal Black Smokers, Giant Tube Worms & Cracked Lava Crust
+      if (depthRefY > 1060) {
         const alpha2 =
-          midWorldY < 1320 ? (midWorldY - 1060) / 260 : 1;
+          depthRefY < 1320 ? (depthRefY - 1060) / 260 : 1;
 
         this.drawParallaxPlane(
           ctx,
@@ -1663,12 +1880,13 @@ export class ParallaxBackground {
           cameraX,
           viewW,
           viewH,
-          0.22,
-          abyssOffsets.midY,
+          0.18,
+          abyssOffsets.midY - abyssMidElevation,
           alpha2,
-          0.48,
-          210,
-          460
+          abyssMidH / Math.max(1, viewH),
+          abyssMidH,
+          abyssMidH,
+          0
         );
         this.drawParallaxPlane(
           ctx,
@@ -1679,27 +1897,27 @@ export class ParallaxBackground {
           0.38,
           abyssOffsets.nearY,
           alpha2,
-          0.22,
-          95,
-          210
+          abyssNearH / Math.max(1, viewH),
+          abyssNearH,
+          abyssNearH
         );
       }
     }
 
     // ==================== 4. 3-MODE DEPTH-REACTIVE ECOLOGICAL PARTICLES ====================
     ctx.save();
-    const isAbyss = midWorldY > 1150;
-    const isTwilight = midWorldY >= 520 && midWorldY <= 1150;
+    const isAbyss = depthRefY > 1150;
+    const isTwilight = depthRefY >= 520 && depthRefY <= 1150;
     for (const b of this.bubbles) {
       const verticalDir = isTwilight && b.kind === 'MARINE_SNOW' ? 0.35 : -1;
       b.y += verticalDir * b.speedY * dt;
       b.wobblePhase += dt * 2.1;
 
-      if (b.y < Math.max(-20, screenSurfaceY + 6)) {
+      if (b.y < -20) {
         b.y = viewH + 18;
         b.x = Math.random() * viewW;
       } else if (b.y > viewH + 24) {
-        b.y = Math.max(10, screenSurfaceY + 12);
+        b.y = 10;
         b.x = Math.random() * viewW;
       }
 
@@ -1741,17 +1959,17 @@ export class ParallaxBackground {
     ctx.restore();
 
     // ==================== 5. PRE-BAKED DEPTH PRESSURE VIGNETTE & HYDROTHERMAL MAGMA UNDERGLOW ====================
-    if (midWorldY > 520) {
+    if (depthRefY > 520) {
       ctx.save();
-      const depthPressure = Math.min(1, (midWorldY - 520) / 1100);
+      const depthPressure = Math.min(1, (depthRefY - 520) / 1100);
       const vigCanvas = this.getOrCreateVignetteCanvas();
       if (vigCanvas && depthPressure > 0.02) {
         ctx.globalAlpha = depthPressure * 0.48;
         ctx.drawImage(vigCanvas, 0, 0, viewW, viewH);
       }
 
-      if (midWorldY > 1150) {
-        const magmaFactor = Math.min(1, (midWorldY - 1150) / 450);
+      if (depthRefY > 1150) {
+        const magmaFactor = Math.min(1, (depthRefY - 1150) / 450);
         const pulse = 0.78 + Math.sin(nowMs * 0.0028) * 0.22;
         ctx.globalAlpha = magmaFactor * 0.18 * pulse;
         const lavaGrad = ctx.createLinearGradient(0, viewH * 0.68, 0, viewH);

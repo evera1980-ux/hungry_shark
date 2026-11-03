@@ -2033,6 +2033,13 @@ export default function App() {
         infiniteWorldManager.update(dt, shark, sim.camera);
         sim.camera.zoom +=
           (shark.stats.cameraZoom - sim.camera.zoom) * Math.min(1, dt * 3.5);
+        // 海平面镜头上界锚定：当鲨鱼游向海平面 (shark.y -> 0) 时，镜头顶部锚定在海面水体不再向上穿出天空，
+        // 让鲨鱼在屏幕内真实游向顶部海面波浪，同时保持远景海水与远景礁石静止稳定
+        const effCamZoom = Math.max(0.35, sim.camera.zoom * aspectZoomFactor);
+        const minSurfaceCameraY = Math.max(72, (viewH * 0.5 - 76) / effCamZoom);
+        if (sim.camera.y < minSurfaceCameraY) {
+          sim.camera.y = minSurfaceCameraY;
+        }
 
         shark.maxDepthReached = Math.max(
           shark.maxDepthReached,
@@ -2986,36 +2993,6 @@ export default function App() {
       const halfSpanX = Math.ceil(viewW / Math.max(0.35, renderZoom) * 0.55) + 180;
       const surfStart = Math.floor((sim.camera.x - halfSpanX) / 120) * 120;
       const surfEnd = Math.ceil((sim.camera.x + halfSpanX) / 120) * 120;
-
-      // Vivid Sunlit Sea Surface & Animated Dual Wave Crests (only drawn when near surface!)
-      if (minY < 45) {
-        const skySurfGrad = ctx.createLinearGradient(0, -180, 0, 32);
-        skySurfGrad.addColorStop(0, 'rgba(186, 230, 253, 0.36)');
-        skySurfGrad.addColorStop(0.75, 'rgba(125, 211, 252, 0.22)');
-        skySurfGrad.addColorStop(1, 'rgba(56, 189, 248, 0)');
-        ctx.fillStyle = skySurfGrad;
-        ctx.fillRect(surfStart, -180, surfEnd - surfStart, 212);
-
-        ctx.strokeStyle = 'rgba(56, 189, 248, 0.42)';
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        for (let wx = surfStart; wx <= surfEnd; wx += 60) {
-          const wy = 24 + Math.cos(wx * 0.012 - now * 0.0024) * 7;
-          if (wx === surfStart) ctx.moveTo(wx, wy);
-          else ctx.lineTo(wx, wy);
-        }
-        ctx.stroke();
-
-        ctx.strokeStyle = 'rgba(224, 242, 254, 0.85)';
-        ctx.lineWidth = 3.5;
-        ctx.beginPath();
-        for (let wx = surfStart; wx <= surfEnd; wx += 60) {
-          const wy = 14 + Math.sin(wx * 0.015 + now * 0.0032) * 8;
-          if (wx === surfStart) ctx.moveTo(wx, wy);
-          else ctx.lineTo(wx, wy);
-        }
-        ctx.stroke();
-      }
 
       // Organic Thermocline Shimmer Wave at Ecological Depth Boundaries (only drawn when in viewport!)
       for (const z of GAME_CONFIG.zones) {
