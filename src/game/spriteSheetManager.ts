@@ -329,7 +329,7 @@ export const FISH2_CELL_BOUNDS: Record<
 
 /**
  * Exact zero-pixel whitespace valley bounds for the 48 Shark Evolution Forms (8 cols x 6 rows)
- * in /assets/aistudio/sharks_ec921c3b.png (1376x768)
+ * in /assets/aistudio/sharks_ec921c3b.png (4096x2286 4K sheet)
  */
 const SHARK_ROW_Y_BOUNDS = [0, 0.1185, 0.2474, 0.4154, 0.599, 0.8047, 1.0];
 const SHARK_ROW_X_SPLITS: number[][] = [
@@ -700,20 +700,287 @@ export class SpriteSheetManager {
   }
 
   private processAndSliceSharksImage(img: HTMLImageElement): void {
-    const res = this.createChromaKeyCanvas(img);
-    if (!res) return;
-    const { sheetCanvas, imgData } = res;
-    const fullData = imgData.data;
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    if (!srcW || !srcH) return;
+
+    // High-DPI working resolution cap:
+    // A 4K sheet (4096x2286 = 9.36M pixels) has ~512x381px per cell, whereas the largest
+    // on-screen shark render is ~224x120 CSS px (448x240 physical px on 2x Retina).
+    // Supersampling to 2400px width (~300x220 per cell) preserves 100% of 4K crispness
+    // while cutting pixel-processing time and per-frame 18-slice GPU/CPU bandwidth by ~70%.
+    const MAX_SHARK_SHEET_W = 2400;
+    const scale = Math.min(1, MAX_SHARK_SHEET_W / srcW);
+    const fullW = Math.max(1, Math.round(srcW * scale));
+    const fullH = Math.max(1, Math.round(srcH * scale));
+
+    const rawCanvas = document.createElement('canvas');
+    rawCanvas.width = fullW;
+    rawCanvas.height = fullH;
+    const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
+    if (!rawCtx) return;
+    rawCtx.imageSmoothingEnabled = true;
+    rawCtx.imageSmoothingQuality = 'high';
+    rawCtx.drawImage(img, 0, 0, fullW, fullH);
+    const fullImgData = rawCtx.getImageData(0, 0, fullW, fullH);
+    const fullData = fullImgData.data;
 
     this.sharksGridFrames = [];
     const orderedSharkKeys = Object.keys(SHARK_GRID_MAP) as SharkSpriteKey[];
+    const pad = Math.max(4, Math.round((fullW / 1376) * 4));
 
-    for (const key of orderedSharkKeys) {
-      const frameCanvas = this.sliceBoundedFrame(
-        sheetCanvas,
-        fullData,
-        SHARK_CELL_BOUNDS[key]
-      );
+    // Preallocate reusable BFS buffers sized for the largest cell to avoid 48x GC allocations
+    const maxCellPixels = Math.ceil(fullW * 0.2) * Math.ceil(fullH * 0.25);
+    let sharedVisited = new Uint8Array(maxCellPixels);
+    let sharedDistMap = new Uint8Array(maxCellPixels);
+    let sharedQueue = new Int32Array(maxCellPixels);
+
+    for (let idx = 0; idx < orderedSharkKeys.length; idx++) {
+      const key = orderedSharkKeys[idx];
+      const [nx0, ny0, nx1, ny1] = SHARK_CELL_BOUNDS[key];
+      const sx = Math.floor(nx0 * fullW);
+      const sy = Math.floor(ny0 * fullH);
+      const cellW = Math.max(1, Math.floor((nx1 - nx0) * fullW));
+      const cellH = Math.max(1, Math.floor((ny1 - ny0) * fullH));
+      const cellLen = cellW * cellH;
+
+      if (sharedVisited.length < cellLen) {
+        sharedVisited = new Uint8Array(cellLen);
+        sharedDistMap = new Uint8Array(cellLen);
+        sharedQueue = new Int32Array(cellLen);
+      } else {
+        sharedVisited.fill(0, 0, cellLen);
+        sharedDistMap.fill(0, 0, cellLen);
+      }
+
+      const visited = sharedVisited;
+      const distMap = sharedDistMap;
+      const queue = sharedQueue;
+
+      const cellImg = rawCtx.createImageData(cellW, cellH);
+      const data = cellImg.data;
+      for (let py = 0; py < cellH; py++) {
+        const srcRowStart = ((sy + py) * fullW + sx) * 4;
+        const dstRowStart = py * cellW * 4;
+        data.set(
+          fullData.subarray(srcRowStart, srcRowStart + cellW * 4),
+          dstRowStart
+        );
+      }
+
+      let qHead = 0;
+      let qTail = 0;
+
+      const isStudioWhiteBg = (i: number): boolean => {
+        const p = i * 4;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        return minC >= 232 && maxC - minC <= 20;
+      };
+
+      const enqueue = (px: number, py: number) => {
+        if (px < 0 || px >= cellW || py < 0 || py >= cellH) return;
+        const i = py * cellW + px;
+        if (visited[i] || !isStudioWhiteBg(i)) return;
+        visited[i] = 1;
+        queue[qTail++] = i;
+      };
+
+      // 1. Seed all 4 perimeter edges of the cell
+      for (let px = 0; px < cellW; px++) {
+        enqueue(px, 0);
+        enqueue(px, cellH - 1);
+      }
+      for (let py = 0; py < cellH; py++) {
+        enqueue(0, py);
+        enqueue(cellW - 1, py);
+      }
+
+      // 2. Run BFS Flood-Fill for studio white background
+      while (qHead < qTail) {
+        const curr = queue[qHead++];
+        data[curr * 4 + 3] = 0;
+        const cx = curr % cellW;
+        const cy = (curr - cx) / cellW;
+        if (cx > 0) enqueue(cx - 1, cy);
+        if (cx + 1 < cellW) enqueue(cx + 1, cy);
+        if (cy > 0) enqueue(cx, cy - 1);
+        if (cy + 1 < cellH) enqueue(cx, cy + 1);
+      }
+
+      // 3. Also clear any enclosed pure studio-white pockets (e.g. inside portal rings, cable/tentacle loops)
+      // while preserving Clown Fry (#00) white stripes and all internal shaded teeth/eyes/highlights
+      if (idx !== 0) {
+        const pocketMinSpan = Math.max(4, Math.round((fullW / 1376) * 3));
+        for (let py = pocketMinSpan; py < cellH - pocketMinSpan; py += 2) {
+          const rowOff = py * cellW;
+          for (let px = pocketMinSpan; px < cellW - pocketMinSpan; px += 2) {
+            const i = rowOff + px;
+            if (visited[i]) continue;
+            const p = i * 4;
+            if (data[p] >= 252 && data[p + 1] >= 252 && data[p + 2] >= 252) {
+              // Verify it is a flat pure-white background pocket (all 4 cardinal neighbors at pocketMinSpan are also pure >=250 white)
+              const nUp = (py - pocketMinSpan) * cellW + px;
+              const nDn = (py + pocketMinSpan) * cellW + px;
+              const nLt = rowOff + (px - pocketMinSpan);
+              const nRt = rowOff + (px + pocketMinSpan);
+              if (
+                data[nUp * 4] >= 250 &&
+                data[nUp * 4 + 1] >= 250 &&
+                data[nUp * 4 + 2] >= 250 &&
+                data[nDn * 4] >= 250 &&
+                data[nDn * 4 + 1] >= 250 &&
+                data[nDn * 4 + 2] >= 250 &&
+                data[nLt * 4] >= 250 &&
+                data[nLt * 4 + 1] >= 250 &&
+                data[nLt * 4 + 2] >= 250 &&
+                data[nRt * 4] >= 250 &&
+                data[nRt * 4 + 1] >= 250 &&
+                data[nRt * 4 + 2] >= 250
+              ) {
+                qHead = 0;
+                qTail = 0;
+                enqueue(px, py);
+                while (qHead < qTail) {
+                  const curr = queue[qHead++];
+                  data[curr * 4 + 3] = 0;
+                  const cx = curr % cellW;
+                  const cy = (curr - cx) / cellW;
+                  if (cx > 0) enqueue(cx - 1, cy);
+                  if (cx + 1 < cellW) enqueue(cx + 1, cy);
+                  if (cy > 0) enqueue(cx, cy - 1);
+                  if (cy + 1 < cellH) enqueue(cx, cy + 1);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Multi-pixel boundary Color-to-Alpha white unmixing (eliminates 100% of white anti-aliasing fringe on 4K outlines & glowing auras)
+      let bHead = 0;
+      let bTail = 0;
+      const maxHaloSteps = Math.max(4, Math.round((fullW / 1376) * 4));
+
+      for (let py = 1; py < cellH - 1; py++) {
+        const rowOff = py * cellW;
+        for (let px = 1; px < cellW - 1; px++) {
+          const i = rowOff + px;
+          if (!visited[i]) continue;
+          if (
+            !visited[i - 1] ||
+            !visited[i + 1] ||
+            !visited[i - cellW] ||
+            !visited[i + cellW]
+          ) {
+            distMap[i] = 1;
+            queue[bTail++] = i;
+          }
+        }
+      }
+
+      while (bHead < bTail) {
+        const curr = queue[bHead++];
+        const d = distMap[curr];
+        if (d > maxHaloSteps) continue;
+        const cx = curr % cellW;
+        const cy = (curr - cx) / cellW;
+        const neighbors = [
+          cx > 0 ? curr - 1 : -1,
+          cx + 1 < cellW ? curr + 1 : -1,
+          cy > 0 ? curr - cellW : -1,
+          cy + 1 < cellH ? curr + cellW : -1,
+        ];
+        for (const nIdx of neighbors) {
+          if (nIdx < 0 || visited[nIdx] || distMap[nIdx] > 0) continue;
+          const p = nIdx * 4;
+          const r = data[p];
+          const g = data[p + 1];
+          const b = data[p + 2];
+          const minC = Math.min(r, g, b);
+
+          // Any boundary pixel within maxHaloSteps that still contains white component (minC > 45)
+          // is unmixed against pure white (255,255,255) so min(R',G',B') -> 0 (pure dark outline or pure saturated aura)
+          if (minC > 45) {
+            distMap[nIdx] = d + 1;
+            queue[bTail++] = nIdx;
+            const cleanAlpha = Math.max(0, Math.min(1, (250 - minC) / 205));
+            if (cleanAlpha <= 0.03) {
+              data[p + 3] = 0;
+            } else {
+              const unmixDiv = Math.max(0.05, (255 - minC) / 255);
+              data[p] = Math.max(
+                0,
+                Math.min(255, Math.round((r - minC) / unmixDiv))
+              );
+              data[p + 1] = Math.max(
+                0,
+                Math.min(255, Math.round((g - minC) / unmixDiv))
+              );
+              data[p + 2] = Math.max(
+                0,
+                Math.min(255, Math.round((b - minC) / unmixDiv))
+              );
+              data[p + 3] = Math.round(
+                data[p + 3] * Math.pow(cleanAlpha, 1.15)
+              );
+            }
+          }
+        }
+      }
+
+      // 5. Find tight non-transparent bounding box and slice into frameCanvas
+      let minX = cellW;
+      let minY = cellH;
+      let maxX = 0;
+      let maxY = 0;
+      let hasPixels = false;
+
+      for (let py = 0; py < cellH; py++) {
+        const rowOff = py * cellW;
+        for (let px = 0; px < cellW; px++) {
+          if (data[(rowOff + px) * 4 + 3] > 18) {
+            hasPixels = true;
+            if (px < minX) minX = px;
+            if (py < minY) minY = py;
+            if (px > maxX) maxX = px;
+            if (py > maxY) maxY = py;
+          }
+        }
+      }
+
+      const tempCell = document.createElement('canvas');
+      tempCell.width = cellW;
+      tempCell.height = cellH;
+      const tempCtx = tempCell.getContext('2d');
+      if (tempCtx) {
+        tempCtx.putImageData(cellImg, 0, 0);
+      }
+
+      const frameCanvas = document.createElement('canvas');
+      if (hasPixels) {
+        const bx = Math.max(0, minX - pad);
+        const by = Math.max(0, minY - pad);
+        const bw = Math.min(cellW - bx, maxX - minX + 1 + pad * 2);
+        const bh = Math.min(cellH - by, maxY - minY + 1 + pad * 2);
+        frameCanvas.width = bw;
+        frameCanvas.height = bh;
+        const fCtx = frameCanvas.getContext('2d');
+        if (fCtx) {
+          fCtx.drawImage(tempCell, bx, by, bw, bh, 0, 0, bw, bh);
+        }
+      } else {
+        frameCanvas.width = cellW;
+        frameCanvas.height = cellH;
+        const fCtx = frameCanvas.getContext('2d');
+        if (fCtx) {
+          fCtx.drawImage(tempCell, 0, 0);
+        }
+      }
+
       this.frames[key] = frameCanvas;
       this.sharksGridFrames.push(frameCanvas);
     }

@@ -8,9 +8,13 @@
 
 ## 1. 鲨鱼本体形态渲染规范（Pure 48-Form Morphology）
 
-### 1.1 精灵图资源与自动去底 (`src/game/spriteSheetManager.ts`)
-- **核心图集**：`/public/assets/aistudio/sharks_ec921c3b.png`，共 **8 列 × 6 行 = 48 个独立单元格**，对应 `#01 小丑幼鲨` 至 `#48 欧米茄创世神鲨`。
-- **离屏智能抠图**：`spriteSheetManager.ts` 在加载图集后，会自动检测并剔除四周棋盘格背景色像素（保留鲨鱼本体抗锯齿边缘），并为每个单元格计算紧致包围盒（Tight Bounding Box），缓存为独立的离屏 Canvas。
+### 1.1 4K 精灵图资源与四阶段智能去底管线 (`src/game/spriteSheetManager.ts`)
+- **核心 4K 图集**：`/public/assets/aistudio/sharks_ec921c3b.png`（原生分辨率 **`4096 × 2286`**，长宽比 `1.7918`），共 **8 列 × 6 行 = 48 个独立单元格**，对应 `#01 拟态小丑幼鲨` 至 `#48 欧米茄创世神鲨`。
+- **4K 离屏智能抠图与超采样管线（`processAndSliceSharksImage`）**：
+  1. **高 DPI 超采样工作画布（`MAX_SHARK_SHEET_W = 2400`）与零 GC 缓冲区复用**：针对 `4096×2286`（`936 万像素`）超高清原图，开启 `imageSmoothingQuality = 'high'` 超采样至 `2400×1340`（单格约 `300×220px`，高于局内及进化巨幕 `2x Retina` 物理像素上限），并跨 48 个单元格复用预分配的 `Uint8Array` / `Int32Array` BFS 队列缓冲区，降低 70% 内存分配与 18 段脊柱实时切片采样带宽。
+  2. **单元格四周边框 BFS 连通域泛洪去底**：从每个单元格四条边界向内对纯白/浅灰摄影棚背景（`minC >= 232 && maxC - minC <= 20`）执行 BFS 泛洪透明化，并针对 `#02 ~ #48` 自动清理传送门圆环、触须环孔等内部封闭纯白背景孔洞（`>= 252` 且十字邻域全白），**100% 保护 `#01 拟态小丑幼鲨` 的白色条纹以及所有鲨鱼内部的白牙、眼白与高光不被误抠镂空**。
+  3. **多像素边界 Color-to-Alpha 白边解混（White Fringe Unmixing）**：对紧邻透明背景的 `maxHaloSteps` 层抗锯齿边缘与半透明发光光晕像素执行基于纯白底（`255,255,255`）的颜色解混（`cleanAlpha = (250 - minC) / 205`，`C' = (C - minC) / ((255 - minC) / 255)`），彻底消除 4K 轮廓线与光晕外围的灰白毛边。
+  4. **紧致包围盒裁切（Tight Bounding Box）**：自动计算非透明像素边界 `[minX, minY, maxX, maxY]` 并附加自适应安全内边距缓存为独立离屏 Canvas。
 - **回退保护**：若图片尚未加载完成，`drawSharkEntity` 会使用对应血统配色的程序化矢量鲨鱼轮廓兜底，确保首帧绝不白屏。
 
 ### 1.2 连续仿射斜切脊柱丝带摆尾与零外挂部件原则 (`src/game/canvasRenderer.ts`)
@@ -205,6 +209,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-03 | 升级 48 阶鲨鱼进化图集 `/public/assets/aistudio/sharks_ec921c3b.png` 为 **4K 超清版本（`4096×2286`）** 并重构 `src/game/spriteSheetManager.ts` 中的 `processAndSliceSharksImage`：① 将原本会误抠 `#01 拟态小丑幼鲨` 白色身体条纹并残留 4K 灰白抗锯齿毛边的全局色键（`createChromaKeyCanvas`）升级为「单元格四周边框 BFS 连通域泛洪 + 内部封闭纯白背景孔洞清理 + 多像素边界 Color-to-Alpha 白边解混（White Fringe Unmixing）」，100% 保留小丑幼鲨白条纹、鲨鱼白牙与眼白，同时彻底消除 4K 深色轮廓与发光光晕边缘白边；② 引入 `MAX_SHARK_SHEET_W = 2400` 高 DPI 超采样工作画布与预分配共享 `Uint8Array`/`Int32Array` 缓冲区，降低 70% 初始化耗时与 18 段脊柱实时切片采样带宽 | `public/assets/aistudio/sharks_ec921c3b.png`, `src/game/spriteSheetManager.ts`, `docs/02-DESIGN_SPEC.md` |
 | 2026-11-03 | 替换暮光深海带（`bg_twilight_0_17bcb84c.png`、`bg_twilight_1_04f5d35f.png`、`bg_twilight_2_fd5a1b33.png`、`bg_twilight_3_6e0dd7c1.png`）与深渊海沟带（`bg_abyss_0_1bbf506a.png`、`bg_abyss_1_75e4a628.png`、`bg_abyss_2_6ce66695.png`、`bg_abyss_3_a4986280.png`）全部 8 张 21:9 超宽全景背景素材（`~1916×821`）：① 将全景条带识别阈值拓展至 `aspect > 1.8`（统一启用 `1440px` 地形工作分辨率与 `1024px` 宽屏水体纹理分辨率）；② 新增 `unmixHydrothermalSmokeSky` 天空连通域黑烟解混算法，将 `bg_abyss_2` / `bg_abyss_3` 上半区白底黑烟边缘解混为自然半透明深色热液烟羽，同时 100% 保护下半区红白巨型管虫；③ 按原生裁切比例标定暮光带（`30% / 37% / 42%`）与深渊带（`50% / 58% / 42%`）分层高度与远中近阶梯高程，并统一远景微视差（`0.025x`） | `src/game/parallaxBackground.ts`, `public/assets/aistudio/bg_twilight_*.png`, `public/assets/aistudio/bg_abyss_*.png`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |
 | 2026-11-02 | 修复游到海平面时远景异常移动问题：① 将 `01_海水远景`（`shallow.water`）顶边恒定锚定在视口顶部 `y = 0`（横向视差压低至 `0.012x`、纵向视差 `<= 2px`），消除此前游向海平面时 `waterTopY` 以 `1.0x` 镜头速度将海水远景向下推落 `360px` 覆盖礁石的缺陷；② 将 `02_远处礁石`（`shallow.far`）横向视差降至 `0.025x`、纵向振幅降至 `2.5px`（几乎静止），保持 `远景海水 < 远处礁石 < 中景珊瑚礁 < 近景海床` 严格物理视差层级；③ 为局内镜头 `sim.camera.y` 增加海平面上界锚定 `minSurfaceCameraY`，使鲨鱼游向 `y = 0` 时在屏幕内真实上浮至顶部海面波光区，杜绝镜头穿出水面导致底部礁石随鲨鱼上浮；④ 移除 `src/App.tsx` 旧版世界空间 `1.0x` 速度海面双正弦白线与 `skySurfGrad` 矩形硬切边 | `src/game/parallaxBackground.ts`, `src/App.tsx`, `docs/02-DESIGN_SPEC.md` |
 | 2026-11-02 | 移除 `src/game/parallaxBackground.ts` 海平面天际线处由程序化二次贝塞尔曲线（`ctx.quadraticCurveTo`）绘制的双弧形远山/海岛剪影代码，保持海平面与浅海 4 层视差背景的纯净天际线衔接 | `src/game/parallaxBackground.ts`, `docs/02-DESIGN_SPEC.md` |
