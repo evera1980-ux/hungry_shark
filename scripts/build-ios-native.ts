@@ -4358,6 +4358,8 @@ public final class OceanGameScene: SKScene {
 function generateSwiftUIViews(): string {
   return `import SwiftUI
 import SpriteKit
+import AudioToolbox
+import QuartzCore
 
 // MARK: - Hex Color Helper
 extension Color {
