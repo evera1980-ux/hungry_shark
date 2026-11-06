@@ -1047,10 +1047,11 @@ public final class SpriteAtlasManager {
         if isShallowCanopy {
             for y in 0..<h {
                 let v = Double(y) / Double(max(1, h - 1))
-                // C1-continuous cosine vertical fade from v=0.22 down to v=1.0 (zero hard bottom edge)
-                let verticalEnvelope = v <= 0.22
+                // C1-continuous cosine vertical fade from v=0.18 down to v=0.95 (100% zero alpha at bottom edge)
+                let normV = min(1.0, max(0.0, (v - 0.18) / 0.76))
+                let verticalEnvelope = v <= 0.18
                     ? 1.0
-                    : pow(cos(((v - 0.22) / 0.78) * .pi * 0.5), 1.65)
+                    : (v >= 0.94 ? 0.0 : pow(cos(normV * .pi * 0.5), 1.85))
                 let rowOff = y * w
                 for x in 0..<w {
                     let idx = (rowOff + x) * 4
@@ -1287,7 +1288,7 @@ public final class SpriteAtlasManager {
         }
 
         // 5. Ground bottom columns so elevated parallax planes have a 100% solid base (zero bottom gap lines!)
-        let shouldGroundBottom = isShallowFar || isShallowMid || isShallowNear || isAbyssMid
+        let shouldGroundBottom = true
         if shouldGroundBottom {
             let bandRatio = isShallowFar ? 0.24 : (isShallowMid ? 0.14 : 0.18)
             let minSearchY = max(4, Int(Double(h) * (1.0 - bandRatio)))

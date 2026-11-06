@@ -657,6 +657,33 @@ public final class OceanGameScene: SKScene {
         }
     }
 
+    private final class AmbientOceanBubble {
+        let ringNode: SKShapeNode
+        let highlightNode: SKShapeNode
+        var x: Double
+        var y: Double
+        let r: Double
+        let speedY: Double
+        var wobblePhase: Double
+        let baseAlpha: Double
+        let kindIndex: Int // 0 = BUBBLE, 1 = MARINE_SNOW, 2 = BIO_SPORE, 3 = MAGMA_EMBER
+
+        init(ringNode: SKShapeNode, highlightNode: SKShapeNode, x: Double, y: Double, r: Double, speedY: Double, wobblePhase: Double, baseAlpha: Double, kindIndex: Int) {
+            self.ringNode = ringNode
+            self.highlightNode = highlightNode
+            self.x = x
+            self.y = y
+            self.r = r
+            self.speedY = speedY
+            self.wobblePhase = wobblePhase
+            self.baseAlpha = baseAlpha
+            self.kindIndex = kindIndex
+        }
+    }
+
+    private let bubbleContainer = SKNode()
+    private var ambientBubbles: [AmbientOceanBubble] = []
+    private var trailBubbleAccumulator: Double = 0.0
     private var activePreys: [ActivePrey] = []
     private var activeParticles: [ActiveParticle] = []
     private var activePickups: [ActivePickup] = []
@@ -673,12 +700,15 @@ public final class OceanGameScene: SKScene {
         removeAllChildren()
         addChild(waterBgNode)
         addChild(parallaxContainer)
+        bubbleContainer.zPosition = 8
+        addChild(bubbleContainer)
         addChild(worldContainer)
         addChild(fxContainer)
 
         sharkNode.zPosition = 20
         worldContainer.addChild(sharkNode)
         refreshSharkTexture()
+        initAmbientBubblesIfNeeded(viewW: Double(max(640, size.width)), viewH: Double(max(360, size.height)))
         syncPreyPopulation()
     }
 
@@ -790,7 +820,7 @@ public final class OceanGameScene: SKScene {
             }
 
             invulnTimer = max(0, invulnTimer - dt)
-            let curDepth = Int((max(0, sharkY) * 0.1).rounded())
+            let curDepth = Int(max(0, sharkY).rounded())
             if curDepth != vm.depthMeters {
                 vm.depthMeters = curDepth
                 if curDepth > vm.runMaxDepth {
@@ -825,6 +855,7 @@ public final class OceanGameScene: SKScene {
         let bgScales = GameRules.getParallaxLayerGrowthScales(relativePreyScale: smoothedRelativePreyScale)
 
         renderParallaxBackground(viewW: viewW, viewH: viewH, bgScales: bgScales)
+        stepAndRenderAmbientBubbles(viewW: viewW, viewH: viewH, bgScales: bgScales, dt: dt)
         stepAndRenderPreys(viewW: viewW, viewH: viewH, stats: stats, dt: dt, currentTime: currentTime)
         stepAndRenderDevourFX(viewW: viewW, viewH: viewH, stats: stats, dt: dt)
         renderPlayerShark(viewW: viewW, viewH: viewH, stats: stats)
@@ -863,6 +894,47 @@ public final class OceanGameScene: SKScene {
         sharkX += sharkVx * dt
         sharkY = max(46.0, min(2200.0, sharkY + sharkVy * dt))
         swimPhase += dt * (isBoosting ? 12.5 : 7.8)
+
+        // Emit swimming bubbles from shark tail (faster during Boost, shimmering Gold during Gold Frenzy!)
+        let isFrenzy = viewModel?.frenzyActive ?? false
+        let emitInterval = (isBoosting || isFrenzy) ? 0.045 : 0.16
+        trailBubbleAccumulator += dt
+        if trailBubbleAccumulator >= emitInterval {
+            trailBubbleAccumulator = 0.0
+            spawnSharkWakeBubble(stats: stats, isBoosting: isBoosting, isFrenzy: isFrenzy)
+        }
+    }
+
+    private func spawnSharkWakeBubble(stats: ComputedSharkStats, isBoosting: Bool, isFrenzy: Bool) {
+        if activeParticles.count > 44 { return }
+        let tailX = sharkX - cos(sharkAngle) * 38.0 * stats.scale + Double.random(in: -6...6)
+        let tailY = sharkY - sin(sharkAngle) * 38.0 * stats.scale + Double.random(in: -6...6)
+        let rad = isFrenzy ? Double.random(in: 3.2...6.4) : (isBoosting ? Double.random(in: 2.8...5.6) : Double.random(in: 2.0...4.0))
+        let bubble = SKShapeNode(circleOfRadius: CGFloat(rad))
+        if isFrenzy {
+            bubble.fillColor = UIColor(red: 253/255, green: 224/255, blue: 71/255, alpha: 0.88)
+            bubble.strokeColor = UIColor(red: 255/255, green: 251/255, blue: 235/255, alpha: 0.95)
+            bubble.lineWidth = 1.4
+        } else {
+            bubble.fillColor = UIColor(red: 186/255, green: 230/255, blue: 253/255, alpha: 0.22)
+            bubble.strokeColor = UIColor(red: 224/255, green: 242/255, blue: 254/255, alpha: 0.78)
+            bubble.lineWidth = 1.15
+        }
+        bubble.zPosition = 18
+        fxContainer.addChild(bubble)
+        let backVx = -cos(sharkAngle) * (isBoosting ? 42.0 : 16.0) + Double.random(in: -14...14)
+        let upVy = -Double.random(in: 22...52)
+        activeParticles.append(
+            ActiveParticle(
+                node: bubble,
+                x: tailX,
+                y: tailY,
+                vx: backVx,
+                vy: upVy,
+                maxLife: isFrenzy ? 0.58 : 0.65,
+                baseRadius: rad
+            )
+        )
     }
 
     private func renderPlayerShark(viewW: Double, viewH: Double, stats: ComputedSharkStats) {
@@ -892,6 +964,18 @@ public final class OceanGameScene: SKScene {
         sharkNode.zRotation = CGFloat(horizonPitch * (facingScaleX >= 0 ? 1.0 : -1.0))
         sharkNode.alpha = invulnTimer > 0 && Int(invulnTimer * 20) % 2 == 0 ? 0.45 : 1.0
 
+        // Gold Frenzy 24K Shimmering Gold Tint & Damage Hit-Flash (1:1 parity with Web drawSharkWithOrgans)
+        let isFrenzy = viewModel?.frenzyActive ?? false
+        if invulnTimer > 0.65 {
+            sharkNode.color = .white
+            sharkNode.colorBlendFactor = 0.72
+        } else if isFrenzy {
+            sharkNode.color = UIColor(red: 1.0, green: 0.84, blue: 0.08, alpha: 1.0)
+            sharkNode.colorBlendFactor = CGFloat(0.68 + 0.14 * sin(swimPhase * 2.2))
+        } else {
+            sharkNode.colorBlendFactor = 0.0
+        }
+
         applySpineWaveWarp(to: sharkNode, phase: swimPhase, turnBend: turnRate)
     }
 
@@ -918,7 +1002,7 @@ public final class OceanGameScene: SKScene {
     }
 
     private func classifyPreySwimGait(_ p: PreyTierConfig) -> PreySwimGait {
-        if p.isHazard && p.baseSpeed < 18 { return .RIGID_PROPULSION }
+        if p.isHazard && p.baseSpeed < 12 { return .RIGID_PROPULSION }
         if p.behavior == .SUB_PATROL { return .RIGID_PROPULSION }
         if p.behavior == .EEL_CHARGER || p.id.contains("eel") || p.id.contains("oarfish") || p.id.contains("worm") {
             return .ANGUILLIFORM
@@ -949,8 +1033,8 @@ public final class OceanGameScene: SKScene {
             for col in 0...cols {
                 let u = Float(col) / Float(cols)
                 src.append(SIMD2<Float>(u, v))
-                // Prey sprite assets face LEFT (u = 0 is snout/head, u = 1 is tail/tentacles)
-                let tailProgress = Double(u)
+                // Prey sprite assets face RIGHT (u = 1.0 is snout/head, u = 0.0 is tail/tentacles — identical to shark!)
+                let tailProgress = Double(1.0 - u)
                 let dy: Double
                 switch gait {
                 case .CARANGIFORM:
@@ -974,7 +1058,96 @@ public final class OceanGameScene: SKScene {
         node.warpGeometry = SKWarpGeometryGrid(columns: cols, rows: 1, sourcePositions: src, destinationPositions: dst)
     }
 
+    // MARK: - 42 Depth-Reactive Ambient Ocean Bubbles / Marine Snow / Bioluminescent Spores / Magma Embers
+    private func initAmbientBubblesIfNeeded(viewW: Double, viewH: Double) {
+        if !ambientBubbles.isEmpty { return }
+        bubbleContainer.removeAllChildren()
+        for i in 0..<42 {
+            let r = Double.random(in: 2.2...5.8)
+            let ring = SKShapeNode(circleOfRadius: CGFloat(r))
+            ring.lineWidth = 1.15
+
+            let spec = SKShapeNode(circleOfRadius: CGFloat(r * 0.28))
+            spec.fillColor = UIColor(white: 1.0, alpha: 0.72)
+            spec.strokeColor = .clear
+            spec.position = CGPoint(x: -r * 0.32, y: r * 0.32)
+            ring.addChild(spec)
+
+            bubbleContainer.addChild(ring)
+            ambientBubbles.append(
+                AmbientOceanBubble(
+                    ringNode: ring,
+                    highlightNode: spec,
+                    x: Double.random(in: 0...(max(800, viewW * 1.5))),
+                    y: Double.random(in: 0...(max(420, viewH))),
+                    r: r,
+                    speedY: Double.random(in: 16.0...38.0),
+                    wobblePhase: Double.random(in: 0...(Double.pi * 2)),
+                    baseAlpha: Double.random(in: 0.24...0.52),
+                    kindIndex: i % 4
+                )
+            )
+        }
+    }
+
+    private func stepAndRenderAmbientBubbles(viewW: Double, viewH: Double, bgScales: ParallaxLayerGrowthScales, dt: Double) {
+        initAmbientBubblesIfNeeded(viewW: viewW, viewH: viewH)
+        let depthRefY = max(0.0, sharkY)
+        let isAbyss = depthRefY > 1150.0
+        let isTwilight = depthRefY >= 520.0 && depthRefY <= 1150.0
+        let pScale = bgScales.particleScale
+
+        for b in ambientBubbles {
+            // In SpriteKit Y=0 is bottom and Y=viewH is top, so rising bubbles increase Y (+1.0)
+            let vertDir: Double = (isTwilight && b.kindIndex == 1) ? -0.35 : 1.0
+            b.y += vertDir * b.speedY * dt
+            b.wobblePhase += dt * 2.1
+
+            if b.y > viewH + 22.0 {
+                b.y = -16.0
+                b.x = Double.random(in: 0...viewW)
+            } else if b.y < -22.0 {
+                b.y = viewH + 16.0
+                b.x = Double.random(in: 0...viewW)
+            }
+
+            let rawX = b.x - cameraX * 0.55 * pScale + sin(b.wobblePhase) * 11.0 * pScale
+            let screenX = ((rawX.truncatingRemainder(dividingBy: viewW)) + viewW).truncatingRemainder(dividingBy: viewW)
+            b.ringNode.position = CGPoint(x: screenX, y: b.y)
+
+            if isAbyss {
+                let pulse = 0.65 + 0.35 * sin(b.wobblePhase * 1.8)
+                b.ringNode.setScale(CGFloat(pScale * 0.78))
+                b.ringNode.alpha = CGFloat(b.baseAlpha * pulse)
+                let col = (b.kindIndex == 2)
+                    ? UIColor(red: 192/255, green: 132/255, blue: 252/255, alpha: 1.0)
+                    : UIColor(red: 251/255, green: 146/255, blue: 60/255, alpha: 1.0)
+                b.ringNode.fillColor = col
+                b.ringNode.strokeColor = .clear
+                b.highlightNode.isHidden = true
+            } else if isTwilight {
+                let pulse = 0.55 + 0.45 * sin(b.wobblePhase * 1.5)
+                b.ringNode.setScale(CGFloat(pScale * 0.72))
+                b.ringNode.alpha = CGFloat(b.baseAlpha * pulse)
+                let col = (b.kindIndex == 2)
+                    ? UIColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 1.0)
+                    : UIColor(red: 148/255, green: 163/255, blue: 184/255, alpha: 0.85)
+                b.ringNode.fillColor = col
+                b.ringNode.strokeColor = .clear
+                b.highlightNode.isHidden = true
+            } else {
+                b.ringNode.setScale(CGFloat(pScale))
+                b.ringNode.alpha = CGFloat(b.baseAlpha)
+                b.ringNode.fillColor = UIColor(red: 186/255, green: 230/255, blue: 253/255, alpha: 0.18)
+                b.ringNode.strokeColor = UIColor(red: 186/255, green: 230/255, blue: 253/255, alpha: 0.90)
+                b.highlightNode.isHidden = false
+            }
+        }
+    }
+
+    // MARK: - Continuous Cross-Depth Multi-Biome Parallax Background (1:1 Parity with Web parallaxBackground.ts)
     private func renderParallaxBackground(viewW: Double, viewH: Double, bgScales: ParallaxLayerGrowthScales) {
+        let depthRefY = max(0.0, sharkY)
         let rgb = GameRules.sampleBathymetricWaterRGB(depthMeters: cameraY)
         waterBgNode.color = UIColor(red: CGFloat(rgb.x), green: CGFloat(rgb.y), blue: CGFloat(rgb.z), alpha: 1.0)
         waterBgNode.size = CGSize(width: viewW, height: viewH)
@@ -982,54 +1155,145 @@ public final class OceanGameScene: SKScene {
 
         parallaxContainer.removeAllChildren()
 
-        let zonePrefix: String
-        let biomeFloorY: Double
-        if sharkY < 520 {
-            zonePrefix = "bg_shallow"
-            biomeFloorY = 680
-        } else if sharkY < 1150 {
-            zonePrefix = "bg_twilight"
-            biomeFloorY = 1340
-        } else {
-            zonePrefix = "bg_abyss"
-            biomeFloorY = 2100
-        }
-
         let assetMap: [String: (water: String, far: String, mid: String, near: String)] = [
             "bg_shallow": ("bg_shallow_0_water_0e65cb68", "bg_shallow_1_far_8898229a", "bg_shallow_2_mid_b4e0d30a", "bg_shallow_3_near_96e92ee1"),
             "bg_twilight": ("bg_twilight_0_17bcb84c", "bg_twilight_1_04f5d35f", "bg_twilight_2_fd5a1b33", "bg_twilight_3_6e0dd7c1"),
             "bg_abyss": ("bg_abyss_0_1bbf506a", "bg_abyss_1_75e4a628", "bg_abyss_2_6ce66695", "bg_abyss_3_a4986280")
         ]
-        guard let names = assetMap[zonePrefix] else { return }
 
-        let u = tanh(max(0.0, biomeFloorY - sharkY) / 480.0)
+        // 1. Layer 0 Water Backdrops blended smoothly across depth zones (zero horizontal cutoff line!)
+        if depthRefY < 680.0,
+           let names0 = assetMap["bg_shallow"],
+           let water0 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names0.water, isWaterCanopy: true) {
+            let wAlpha0 = depthRefY < 440.0 ? 0.92 : max(0.0, (1.0 - (depthRefY - 440.0) / 240.0) * 0.92)
+            let refH = min(viewH, max(360.0, viewW * 0.65))
+            let baseCanopyH = max(96.0, min(220.0, refH * 0.32))
+            let canopyH = baseCanopyH * bgScales.waterScale
+            let u0 = tanh(max(0.0, 680.0 - depthRefY) / 480.0)
+            let canopyBottomY = viewH - canopyH + (1.0 - u0) * 4.0
+            addTiledStrip(
+                texture: water0,
+                baseTargetH: baseCanopyH,
+                scaledTargetH: canopyH,
+                bottomYFromBottom: canopyBottomY,
+                parallaxXFactor: 0.012,
+                viewW: viewW,
+                alpha: wAlpha0,
+                zPos: 1.0
+            )
+        }
+
+        if depthRefY > 420.0 && depthRefY < 1320.0,
+           let names1 = assetMap["bg_twilight"],
+           let water1 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names1.water, isWaterCanopy: true) {
+            var wAlpha1 = 0.88
+            if depthRefY < 660.0 {
+                wAlpha1 = ((depthRefY - 420.0) / 240.0) * 0.88
+            } else if depthRefY > 1060.0 {
+                wAlpha1 = (1.0 - (depthRefY - 1060.0) / 260.0) * 0.88
+            }
+            // Full-viewport water column backdrop (covers -12 to viewH+12 so it NEVER creates a horizontal cutoff line!)
+            addTiledStrip(
+                texture: water1,
+                baseTargetH: viewH + 24.0,
+                scaledTargetH: viewH + 24.0,
+                bottomYFromBottom: -12.0,
+                parallaxXFactor: 0.025,
+                viewW: viewW,
+                alpha: max(0.0, min(0.88, wAlpha1)),
+                zPos: 1.1
+            )
+        }
+
+        if depthRefY > 1040.0,
+           let names2 = assetMap["bg_abyss"],
+           let water2 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names2.water, isWaterCanopy: true) {
+            let wAlpha2 = depthRefY < 1300.0 ? ((depthRefY - 1040.0) / 260.0) * 0.92 : 0.92
+            addTiledStrip(
+                texture: water2,
+                baseTargetH: viewH + 24.0,
+                scaledTargetH: viewH + 24.0,
+                bottomYFromBottom: -12.0,
+                parallaxXFactor: 0.025,
+                viewW: viewW,
+                alpha: max(0.0, min(0.92, wAlpha2)),
+                zPos: 1.2
+            )
+        }
+
+        // 2. Layers 1, 2, 3 (Far, Mid, Near Terrain) with continuous cross-depth alpha transitions
+        if depthRefY < 700.0, let names0 = assetMap["bg_shallow"] {
+            let alpha0 = depthRefY < 460.0 ? 1.0 : max(0.0, 1.0 - (depthRefY - 460.0) / 220.0)
+            renderBiomeTerrainPlanes(
+                zonePrefix: "bg_shallow",
+                names: names0,
+                biomeFloorY: 680.0,
+                depthRefY: depthRefY,
+                alpha: alpha0,
+                viewW: viewW,
+                viewH: viewH,
+                bgScales: bgScales,
+                zBase: 2.0
+            )
+        }
+
+        if depthRefY > 440.0 && depthRefY < 1340.0, let names1 = assetMap["bg_twilight"] {
+            var alpha1 = 1.0
+            if depthRefY < 660.0 {
+                alpha1 = (depthRefY - 440.0) / 220.0
+            } else if depthRefY > 1080.0 {
+                alpha1 = 1.0 - (depthRefY - 1080.0) / 260.0
+            }
+            renderBiomeTerrainPlanes(
+                zonePrefix: "bg_twilight",
+                names: names1,
+                biomeFloorY: 1340.0,
+                depthRefY: depthRefY,
+                alpha: max(0.0, min(1.0, alpha1)),
+                viewW: viewW,
+                viewH: viewH,
+                bgScales: bgScales,
+                zBase: 3.0
+            )
+        }
+
+        if depthRefY > 1060.0, let names2 = assetMap["bg_abyss"] {
+            let alpha2 = depthRefY < 1320.0 ? (depthRefY - 1060.0) / 260.0 : 1.0
+            renderBiomeTerrainPlanes(
+                zonePrefix: "bg_abyss",
+                names: names2,
+                biomeFloorY: 2100.0,
+                depthRefY: depthRefY,
+                alpha: max(0.0, min(1.0, alpha2)),
+                viewW: viewW,
+                viewH: viewH,
+                bgScales: bgScales,
+                zBase: 4.0
+            )
+        }
+    }
+
+    private func renderBiomeTerrainPlanes(
+        zonePrefix: String,
+        names: (water: String, far: String, mid: String, near: String),
+        biomeFloorY: Double,
+        depthRefY: Double,
+        alpha: Double,
+        viewW: Double,
+        viewH: Double,
+        bgScales: ParallaxLayerGrowthScales,
+        zBase: CGFloat
+    ) {
+        if alpha <= 0.01 { return }
+        let u = tanh(max(0.0, biomeFloorY - depthRefY) / 480.0)
         let panoRefH = min(viewH, max(360.0, viewW * 0.65))
         let baseNearH = max(88.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.25 : zonePrefix == "bg_twilight" ? 0.30 : 0.48))
         let baseMidH = max(78.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.22 : zonePrefix == "bg_twilight" ? 0.37 : 0.54))
         let baseFarH = max(82.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.232 : 0.42))
 
-        if let waterTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.water, isWaterCanopy: true) {
-            let baseCanopyH = zonePrefix == "bg_shallow" ? min(78.0, viewH * 0.21) : viewH
-            let canopyH = baseCanopyH * bgScales.waterScale
-            let surfaceLift = max(0.0, cameraY - 40.0) * 0.38
-            let canopyBottomY = viewH - canopyH + surfaceLift
-            if canopyBottomY < viewH {
-                addTiledStrip(
-                    texture: waterTex,
-                    baseTargetH: baseCanopyH,
-                    scaledTargetH: canopyH,
-                    bottomYFromBottom: canopyBottomY,
-                    parallaxXFactor: 0.012,
-                    viewW: viewW,
-                    alpha: zonePrefix == "bg_shallow" ? 0.90 : 0.94,
-                    zPos: 1
-                )
-            }
-        }
-
         if let farTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.far) {
             let farH = baseFarH * bgScales.farScale
-            let farBottomY = (baseNearH * 0.38 - (-20.0 + 2.5 * u)) * bgScales.nearScale
+            let farBottomY = min(0.0, (baseNearH * 0.32 - (-20.0 + 2.5 * u)) * bgScales.nearScale - farH * 0.12)
             addTiledStrip(
                 texture: farTex,
                 baseTargetH: baseFarH,
@@ -1037,14 +1301,14 @@ public final class OceanGameScene: SKScene {
                 bottomYFromBottom: farBottomY,
                 parallaxXFactor: 0.025,
                 viewW: viewW,
-                alpha: 0.94,
-                zPos: 2
+                alpha: alpha * 0.94,
+                zPos: zBase + 0.1
             )
         }
 
         if let midTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.mid) {
             let midH = baseMidH * bgScales.midScale
-            let midBottomY = (baseNearH * 0.20 - (-10.0 + 14.0 * u)) * bgScales.nearScale
+            let midBottomY = min(0.0, (baseNearH * 0.16 - (-10.0 + 14.0 * u)) * bgScales.nearScale - midH * 0.08)
             addTiledStrip(
                 texture: midTex,
                 baseTargetH: baseMidH,
@@ -1052,8 +1316,8 @@ public final class OceanGameScene: SKScene {
                 bottomYFromBottom: midBottomY,
                 parallaxXFactor: 0.18,
                 viewW: viewW,
-                alpha: 1.0,
-                zPos: 3
+                alpha: alpha,
+                zPos: zBase + 0.2
             )
         }
 
@@ -1067,8 +1331,8 @@ public final class OceanGameScene: SKScene {
                 bottomYFromBottom: nearBottomY,
                 parallaxXFactor: 0.38,
                 viewW: viewW,
-                alpha: 1.0,
-                zPos: 4
+                alpha: alpha,
+                zPos: zBase + 0.3
             )
         }
     }
@@ -1097,7 +1361,7 @@ public final class OceanGameScene: SKScene {
         while startX < viewW {
             let node = SKSpriteNode(texture: texture)
             node.anchorPoint = CGPoint(x: 0, y: 0)
-            node.size = CGSize(width: tileW, height: ceil(scaledTargetH))
+            node.size = CGSize(width: tileW + 2.0, height: ceil(scaledTargetH))
             node.position = CGPoint(x: startX, y: floor(bottomYFromBottom))
             node.alpha = CGFloat(alpha)
             node.zPosition = zPos
@@ -1673,8 +1937,8 @@ public final class OceanGameScene: SKScene {
             p.node.size = CGSize(width: drawW, height: drawH)
             p.node.position = CGPoint(x: screenX, y: screenY)
 
-            // Smooth horizontal flip + hydrodynamic pitch along velocity vector
-            let facingSign: Double = p.vx >= 0 ? -1.0 : 1.0
+            // Smooth horizontal flip (prey sprites face RIGHT in sheet: +1 when vx >= 0, -1 when vx < 0) + hydrodynamic pitch
+            let facingSign: Double = p.vx >= 0 ? 1.0 : -1.0
             let pitchAngle = max(-0.48, min(0.48, atan2(-p.vy, max(12.0, abs(p.vx)))))
             if gait == .MEDUSOID_JET {
                 let pulseStretch = 1.0 + 0.12 * sin(p.phase * 1.3)
@@ -1684,7 +1948,18 @@ public final class OceanGameScene: SKScene {
             } else {
                 p.node.xScale = CGFloat(facingSign)
                 p.node.yScale = 1.0
-                p.node.zRotation = CGFloat(pitchAngle * (p.vx >= 0 ? 1.0 : -1.0))
+                p.node.zRotation = CGFloat(pitchAngle * facingSign)
+            }
+
+            // Gold Frenzy & Golden Mutant 24K Gold Shimmer Tint (1:1 parity with Web drawPreyEntity)
+            if vm.frenzyActive || p.mutation == .GOLDEN_SWARM {
+                p.node.color = UIColor(red: 1.0, green: 0.85, blue: 0.12, alpha: 1.0)
+                p.node.colorBlendFactor = CGFloat(0.66 + 0.14 * sin(p.phase * 1.8))
+            } else if p.mutation == .ABYSS_BEHEMOTH {
+                p.node.color = UIColor(red: 0.68, green: 0.28, blue: 0.98, alpha: 1.0)
+                p.node.colorBlendFactor = 0.45
+            } else {
+                p.node.colorBlendFactor = 0.0
             }
 
             applyPreySpineWaveWarp(to: p.node, prey: p)

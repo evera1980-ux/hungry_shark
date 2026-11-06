@@ -110,6 +110,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-06 | **iOS 原生端 5 项体验与视效对齐 Web 端**：① 全平台鲨鱼与 33 种猎物基础游动速度下调 50%（`baseSharkSpeed = 140`，按住冲刺速度 `280` 等于原常态速度）；② 修复 iOS 猎物鱼头尾朝向与脊柱波动方向反转问题（原图集全部鱼类面朝右侧 `u = 1.0` 为鱼头、`u = 0.0` 为鱼尾，修正 `tailProgress = 1.0 - u` 且 `facingSign = vx >= 0 ? 1 : -1`）；③ 1:1 复刻 Web `parallaxBackground.ts` 跨深度带连续 Alpha 混合过渡（`420m~680m` 浅海↔暮光、`1040m~1340m` 暮光↔深渊），移除暮光/深渊水幕 `surfaceLift` 半屏抬升导致的屏幕中部水平断层线，并修复 HUD 深度显示系数；④ 补齐 iOS 海水泡泡系统（42 颗随深度自适应形态的环境上浮气泡/发光孢子/深渊余烬 + 鲨鱼游动/冲刺尾流气泡）；⑤ 补齐 iOS 黄金狂暴（Gold Frenzy）24K 流光金鲨鱼本体染色、全屏猎物鎏金转化与金色尾流粒子特效 | `src/game/config.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-06 | 修复 Xcode 编译时 `OceanGameScene.swift` 中 `ComputedSharkStats.magnetRadius`（原误写为 `magnetRadiusBonus`）与 `PreyBehavior.MINE_HAZARD`（原误写为 `.MINE_STATIC`）的字段/枚举名不匹配问题，并补充跨语言模型字段契约对齐检查项 | `scripts/build-ios-native.ts`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-05 | 首次创建《移动端与跨平台原生移植避坑指南》，系统总结 iOS 真机调试中发现的 10 大跨平台问题（UI 图集去底与切片、多语言 `{count}/{mult}` 占位符、HUD 遮挡主角、背景水平/垂直分界线、猎物生物力学步态与曲线轨迹、进化图谱连续惯性转轮、吞噬五位一体特效等）及 12 项上线必检清单 | `scripts/build-ios-native.ts`, `src/game/i18n.ts`, `src/App.tsx`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 
