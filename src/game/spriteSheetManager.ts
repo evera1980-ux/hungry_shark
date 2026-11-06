@@ -1733,52 +1733,54 @@ export class SpriteSheetManager {
         }
       }
 
-      // 3-Slice widen SETTING_SHARK_CARD to 6.05:1 (matching setting1.png) while keeping
-      // the left recessed square avatar frame (0..26%) and right chamfered edge (90..100%) 1:1 unstretched!
+      // 5-Slice widen SETTING_SHARK_CARD to 6.05:1 while also widening the left recessed avatar frame
+      // so horizontal shark sprites fit 100% inside the recessed frame without overflowing!
       if (key === 'SETTING_SHARK_CARD' && bw > 20 && bh > 10) {
         const targetW = Math.round(bh * 6.05);
         if (targetW > bw) {
-          const leftCapW = Math.round(bw * 0.26);
-          const rightCapW = Math.round(bw * 0.1);
-          const midSrcW = Math.max(1, bw - leftCapW - rightCapW);
-          const midDstW = Math.max(1, targetW - leftCapW - rightCapW);
+          const s1W = Math.round(bw * 0.085);
+          const s2W = Math.round(bw * 0.09);
+          const s3W = Math.round(bw * 0.085);
+          const s5W = Math.round(bw * 0.1);
+          const s4W = Math.max(1, bw - s1W - s2W - s3W - s5W);
+
+          const extraAvatarW = Math.round(bh * 0.54);
+          const dstS2W = s2W + extraAvatarW;
+          const dstS4W = Math.max(1, targetW - s1W - dstS2W - s3W - s5W);
 
           const widened = document.createElement('canvas');
           widened.width = targetW;
           widened.height = bh;
           const wCtx = widened.getContext('2d');
           if (wCtx) {
+            let srcX = 0;
+            let dstX = 0;
+            // Slice 1: Left card border + left rim of recessed avatar box
+            wCtx.drawImage(frameCanvas, srcX, 0, s1W, bh, dstX, 0, s1W, bh);
+            srcX += s1W;
+            dstX += s1W;
+            // Slice 2: Uniform middle of recessed avatar box (widened)
+            wCtx.drawImage(frameCanvas, srcX, 0, s2W, bh, dstX, 0, dstS2W, bh);
+            srcX += s2W;
+            dstX += dstS2W;
+            // Slice 3: Right rim of recessed avatar box
+            wCtx.drawImage(frameCanvas, srcX, 0, s3W, bh, dstX, 0, s3W, bh);
+            srcX += s3W;
+            dstX += s3W;
+            // Slice 4: Uniform middle of right card body
+            wCtx.drawImage(frameCanvas, srcX, 0, s4W, bh, dstX, 0, dstS4W, bh);
+            srcX += s4W;
+            dstX += dstS4W;
+            // Slice 5: Right chamfered border of card
             wCtx.drawImage(
               frameCanvas,
+              bw - s5W,
               0,
-              0,
-              leftCapW,
+              s5W,
               bh,
+              dstX,
               0,
-              0,
-              leftCapW,
-              bh
-            );
-            wCtx.drawImage(
-              frameCanvas,
-              leftCapW,
-              0,
-              midSrcW,
-              bh,
-              leftCapW,
-              0,
-              midDstW,
-              bh
-            );
-            wCtx.drawImage(
-              frameCanvas,
-              bw - rightCapW,
-              0,
-              rightCapW,
-              bh,
-              targetW - rightCapW,
-              0,
-              rightCapW,
+              s5W,
               bh
             );
             frameCanvas = widened;

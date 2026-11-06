@@ -1618,27 +1618,56 @@ public final class SpriteAtlasManager {
             guard let patchedCG = ctx.makeImage(),
                   let tightCG = patchedCG.cropping(to: CGRect(x: minX, y: minY, width: bw, height: bh)) else { continue }
 
-            // Special 3-slice horizontal widening for SETTING_SHARK_CARD (widen to 6.05:1 aspect ratio)
+            // Special 5-slice horizontal widening for SETTING_SHARK_CARD:
+            // Widens BOTH the left recessed shark avatar frame (so horizontal sharks fit 100% inside the box)
+            // AND the right data body to match the 4.80:1 card aspect ratio!
             if key == "SETTING_SHARK_CARD" {
-                let targetW = max(bw, Int((Double(bh) * 6.05).rounded()))
-                let leftCap = Int((Double(bw) * 0.26).rounded(.down))
-                let rightCap = Int((Double(bw) * 0.10).rounded(.down))
-                let srcMidW = max(1, bw - leftCap - rightCap)
-                let dstMidW = max(1, targetW - leftCap - rightCap)
+                let targetW = max(bw, Int((Double(bh) * 4.80).rounded()))
+                let s1W = Int((Double(bw) * 0.085).rounded(.down))
+                let s2W = Int((Double(bw) * 0.090).rounded(.down))
+                let s3W = Int((Double(bw) * 0.085).rounded(.down))
+                let s5W = Int((Double(bw) * 0.100).rounded(.down))
+                let s4W = max(1, bw - s1W - s2W - s3W - s5W)
+
+                let extraAvatarW = Int((Double(bh) * 0.50).rounded())
+                let dstS2W = s2W + extraAvatarW
+                let dstS4W = max(1, targetW - s1W - dstS2W - s3W - s5W)
 
                 let format = UIGraphicsImageRendererFormat()
                 format.scale = 1.0
                 format.opaque = false
                 let renderer = UIGraphicsImageRenderer(size: CGSize(width: targetW, height: bh), format: format)
                 let wideImg = renderer.image { _ in
-                    if let leftCG = tightCG.cropping(to: CGRect(x: 0, y: 0, width: leftCap, height: bh)) {
-                        UIImage(cgImage: leftCG).draw(in: CGRect(x: 0, y: 0, width: leftCap, height: bh))
+                    var srcX = 0
+                    var dstX = 0
+
+                    // Slice 1: Left card border + left rim of recessed avatar box
+                    if let c1 = tightCG.cropping(to: CGRect(x: srcX, y: 0, width: s1W, height: bh)) {
+                        UIImage(cgImage: c1).draw(in: CGRect(x: dstX, y: 0, width: s1W, height: bh))
                     }
-                    if let midCG = tightCG.cropping(to: CGRect(x: leftCap, y: 0, width: srcMidW, height: bh)) {
-                        UIImage(cgImage: midCG).draw(in: CGRect(x: leftCap, y: 0, width: dstMidW, height: bh))
+                    srcX += s1W; dstX += s1W
+
+                    // Slice 2: Uniform middle of recessed avatar box (widened so horizontal shark fits inside!)
+                    if let c2 = tightCG.cropping(to: CGRect(x: srcX, y: 0, width: s2W, height: bh)) {
+                        UIImage(cgImage: c2).draw(in: CGRect(x: dstX, y: 0, width: dstS2W, height: bh))
                     }
-                    if let rightCG = tightCG.cropping(to: CGRect(x: bw - rightCap, y: 0, width: rightCap, height: bh)) {
-                        UIImage(cgImage: rightCG).draw(in: CGRect(x: targetW - rightCap, y: 0, width: rightCap, height: bh))
+                    srcX += s2W; dstX += dstS2W
+
+                    // Slice 3: Right rim of recessed avatar box
+                    if let c3 = tightCG.cropping(to: CGRect(x: srcX, y: 0, width: s3W, height: bh)) {
+                        UIImage(cgImage: c3).draw(in: CGRect(x: dstX, y: 0, width: s3W, height: bh))
+                    }
+                    srcX += s3W; dstX += s3W
+
+                    // Slice 4: Uniform middle of right card body
+                    if let c4 = tightCG.cropping(to: CGRect(x: srcX, y: 0, width: s4W, height: bh)) {
+                        UIImage(cgImage: c4).draw(in: CGRect(x: dstX, y: 0, width: dstS4W, height: bh))
+                    }
+                    srcX += s4W; dstX += dstS4W
+
+                    // Slice 5: Right chamfered border of card
+                    if let c5 = tightCG.cropping(to: CGRect(x: bw - s5W, y: 0, width: s5W, height: bh)) {
+                        UIImage(cgImage: c5).draw(in: CGRect(x: dstX, y: 0, width: s5W, height: bh))
                     }
                 }
                 uiSettingImages[key] = wideImg
@@ -3026,6 +3055,12 @@ public final class OceanGameScene: SKScene {
         lastUpdateTime = currentTime
         guard let vm = viewModel else { return }
 
+        // Pause background SpriteKit simulation & @Published mutations while the Evolution Atlas modal is open
+        // so SwiftUI dedicates 100% of main-thread 120Hz budget to the rotary wheel gesture & inertia!
+        if vm.showEvolutionAtlas {
+            return
+        }
+
         let viewW = Double(max(320, size.width))
         let viewH = Double(max(240, size.height))
         let stats = vm.currentStats
@@ -3046,12 +3081,16 @@ public final class OceanGameScene: SKScene {
         biteAnim = max(0.0, biteAnim - dt * 3.8)
         cameraShakeTrauma = max(0.0, cameraShakeTrauma - dt * 2.8)
 
-        // Smooth ghost HP bar decay
+        // Smooth ghost HP bar decay (only mutate @Published when value meaningfully changes to avoid 120Hz SwiftUI view invalidation!)
         let curHpPct = max(0, min(100, (vm.hp / max(1, vm.maxHp)) * 100.0))
+        let nextGhostPct: Double
         if vm.ghostHpPct > curHpPct {
-            vm.ghostHpPct = max(curHpPct, vm.ghostHpPct - dt * 28.0)
+            nextGhostPct = max(curHpPct, vm.ghostHpPct - dt * 28.0)
         } else {
-            vm.ghostHpPct = curHpPct
+            nextGhostPct = curHpPct
+        }
+        if abs(vm.ghostHpPct - nextGhostPct) > 0.05 {
+            vm.ghostHpPct = nextGhostPct
         }
 
         // 1. Update Shark Physics (Title screen patrol vs In-game hunting)
@@ -4783,16 +4822,16 @@ public struct UiSettingSharkCardView<RightContent: View>: View {
                     .frame(width: width, height: height)
             }
 
-            // Left Circular Medallion Window (left: 4.8%, width: 12.8%, top: 10.5%, height: 79%)
-            SharkPreviewView(form: form, width: height * 0.72, height: height * 0.50)
-                .frame(width: height * 0.76, height: height * 0.76)
-                .clipShape(Circle())
-                .position(x: width * 0.112, y: height * 0.50)
+            // Left Wide Recessed Rectangular Avatar Window (left: 2.7%..26.0%, center x: 14.35%, width: 23.3%)
+            SharkPreviewView(form: form, width: width * 0.195, height: height * 0.56)
+                .frame(width: width * 0.218, height: height * 0.64)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .position(x: width * 0.1435, y: height * 0.50)
 
-            // Right Content Slot (left: 19.5%, right: 5.5%)
+            // Right Content Slot (left: 28.5%, right: 5.5%, center x: 61.5%, width: 66.0%)
             rightContent()
-                .frame(width: width * 0.74, height: height * 0.78)
-                .position(x: width * 0.57, y: height * 0.50)
+                .frame(width: width * 0.66, height: height * 0.78)
+                .position(x: width * 0.615, y: height * 0.50)
         }
         .frame(width: width, height: height)
     }
@@ -5896,19 +5935,22 @@ public struct EvolutionAtlasSheetView: View {
     @State private var wheelVelocity: Double = 0.0 // slots per second
     @State private var wheelTargetSlot: Double? = nil
     @State private var isDraggingWheel: Bool = false
+    @State private var dragHasMoved: Bool = false
     @State private var dragBaseWheelPos: Double? = nil
     @State private var dragStartTime: TimeInterval = 0.0
     @State private var inheritedWheelVelocity: Double = 0.0
     @State private var dragTouchSamples: [(pos: Double, time: TimeInterval)] = []
     @State private var lastTickIndex: Int = 0
+    @State private var lastTickFeedbackTime: TimeInterval = 0.0
+    @State private var lastPhysicsFrameTime: TimeInterval = 0.0
+    @State private var selectionFeedback = UISelectionFeedbackGenerator()
 
-    // iPhone Alarm Clock (UIPickerView) Drum Physics Constants:
-    // UIKit UIScrollView.DecelerationRate.normal = 0.998/ms (~2.00 s^-1); UIPickerView drum = 0.9978/ms (lambda = 2.20 s^-1)
-    private let pickerDecelLambda: Double = 2.20
-    private let pickerPxPerSlot: Double = 46.0
-    private let pickerMaxVelocity: Double = 38.0
-    private let wheelSlotOffsets: [Int] = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
-    private let wheelPhysicsTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
+    // iPhone Alarm Clock (UIPickerView) Drum Physics Constants (1:1 Parity with Web SharkEvolutionAtlasModal.tsx):
+    // UIKit UIScrollView.DecelerationRate.normal = 0.998/ms (~2.00 s^-1); UIPickerView drum = 0.9978/ms (lambda = 2.05 s^-1)
+    private let pickerDecelLambda: Double = 2.05
+    private let pickerPxPerSlot: Double = 34.0
+    private let pickerMaxVelocity: Double = 42.0
+    private let wheelPhysicsTimer = Timer.publish(every: 1.0 / 120.0, on: .main, in: .common).autoconnect()
 
     private var inspectedForm: SharkFormConfig {
         let total = GameConfigGenerated.sharkForms.count
@@ -5925,27 +5967,45 @@ public struct EvolutionAtlasSheetView: View {
         }
         if roundedSlot != lastTickIndex {
             lastTickIndex = roundedSlot
-            UISelectionFeedbackGenerator().selectionChanged()
-            vm.playUiTick()
+            let now = CACurrentMediaTime()
+            // Throttle haptic & audio tick to >= 24ms interval so high-speed 40-slot spins never block the 120Hz main thread
+            if now - lastTickFeedbackTime >= 0.024 {
+                lastTickFeedbackTime = now
+                selectionFeedback.selectionChanged()
+                selectionFeedback.prepare()
+                if vm.save.soundEnabled {
+                    AudioServicesPlaySystemSound(1104)
+                }
+            }
         }
     }
 
     private func snapWheel(to targetPosition: Double) {
         let snapped = targetPosition.rounded()
+        lastPhysicsFrameTime = CACurrentMediaTime()
         wheelTargetSlot = snapped
         wheelVelocity = (snapped - wheelPosition) * pickerDecelLambda * 1.35
     }
 
     private func stepWheelPhysics() {
-        guard !isDraggingWheel else { return }
-        guard let target = wheelTargetSlot else { return }
+        guard !isDraggingWheel else {
+            lastPhysicsFrameTime = CACurrentMediaTime()
+            return
+        }
+        guard let target = wheelTargetSlot else {
+            lastPhysicsFrameTime = CACurrentMediaTime()
+            return
+        }
 
-        let dt = 1.0 / 60.0
+        let now = CACurrentMediaTime()
+        let dt = lastPhysicsFrameTime <= 0 ? (1.0 / 60.0) : min(0.045, max(0.001, now - lastPhysicsFrameTime))
+        lastPhysicsFrameTime = now
+
         let rem = target - wheelPosition
         let absRem = abs(rem)
 
         if absRem > 0.26 {
-            // Phase 1: Authentic iPhone Alarm (UIPickerView) Exponential Drum Glide (d = 0.9978/ms, lambda = 2.20 s^-1)
+            // Phase 1: Authentic iPhone Alarm (UIPickerView) Exponential Drum Glide
             // with subtle mechanical detent ratchet modulation across each slot boundary
             let baseExpVel = rem * pickerDecelLambda
             let ratchetMod = 1.0 + 0.075 * cos(2.0 * .pi * wheelPosition)
@@ -6017,8 +6077,14 @@ public struct EvolutionAtlasSheetView: View {
                     // 2. Main Split Stage (Left/Top: Giant Aquarium + Continuous Rotary Wheel; Right/Bottom: De-Boxed Command Deck)
                     if isLandscape {
                         HStack(spacing: 0) {
-                            aquariumAndArcDialStage(form: form, check: check, lineageMeta: lineageMeta, curLv: curLv)
-                                .frame(width: geo.size.width * 0.50)
+                            aquariumAndArcDialStage(
+                                form: form,
+                                check: check,
+                                lineageMeta: lineageMeta,
+                                curLv: curLv,
+                                stageWidth: geo.size.width * 0.50
+                            )
+                            .frame(width: geo.size.width * 0.50)
                             Divider().background(Color.cyan.opacity(0.18))
                             commandDeckPanel(
                                 form: form,
@@ -6033,8 +6099,14 @@ public struct EvolutionAtlasSheetView: View {
                         }
                     } else {
                         VStack(spacing: 0) {
-                            aquariumAndArcDialStage(form: form, check: check, lineageMeta: lineageMeta, curLv: curLv)
-                                .frame(height: geo.size.height * 0.48)
+                            aquariumAndArcDialStage(
+                                form: form,
+                                check: check,
+                                lineageMeta: lineageMeta,
+                                curLv: curLv,
+                                stageWidth: geo.size.width
+                            )
+                            .frame(height: geo.size.height * 0.48)
                             Divider().background(Color.cyan.opacity(0.18))
                             commandDeckPanel(
                                 form: form,
@@ -6056,6 +6128,8 @@ public struct EvolutionAtlasSheetView: View {
             wheelVelocity = 0.0
             wheelTargetSlot = nil
             lastTickIndex = vm.activeSharkForm.index
+            lastPhysicsFrameTime = CACurrentMediaTime()
+            selectionFeedback.prepare()
         }
         .onReceive(wheelPhysicsTimer) { _ in
             stepWheelPhysics()
@@ -6131,12 +6205,134 @@ public struct EvolutionAtlasSheetView: View {
         }
     }
 
+    // MARK: - Unified Touch/Drag Gesture Handler (1:1 Parity with Web handleStagePointerDown/Move/Up)
+    private func makeWheelDragGesture(stageWidth: CGFloat, allowArcTapSelection: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .local)
+            .onChanged { val in
+                let now = val.time.timeIntervalSinceReferenceDate
+                let tx = Double(val.translation.width)
+                let ty = Double(val.translation.height)
+
+                if !isDraggingWheel || dragBaseWheelPos == nil {
+                    isDraggingWheel = true
+                    dragHasMoved = false
+                    inheritedWheelVelocity = abs(wheelVelocity) > 2.0 ? wheelVelocity : 0.0
+                    wheelTargetSlot = nil
+                    wheelVelocity = 0.0
+                    dragBaseWheelPos = wheelPosition
+                    dragStartTime = now
+                    dragTouchSamples = [(pos: wheelPosition, time: now)]
+                    selectionFeedback.prepare()
+                }
+
+                if abs(tx) > 4.0 || abs(ty) > 4.0 {
+                    dragHasMoved = true
+                }
+
+                let startPos = dragBaseWheelPos ?? wheelPosition
+                let rawPos = startPos - tx / pickerPxPerSlot
+                dragTouchSamples.append((pos: rawPos, time: now))
+                while dragTouchSamples.count > 10, let first = dragTouchSamples.first, (now - first.time) > 0.12 {
+                    dragTouchSamples.removeFirst()
+                }
+
+                let firstSample = dragTouchSamples.first ?? (pos: rawPos, time: now)
+                let dtSec = max(0.008, now - firstSample.time)
+                let dragVel = (rawPos - firstSample.pos) / dtSec
+
+                // Subtle slow-drag magnetic detent dwell across each integer slot (like iPhone Alarm drum)
+                let detentStrength = max(0.0, 1.0 - abs(dragVel) / 3.2) * 0.055
+                let displayPos = rawPos - detentStrength * sin(2.0 * .pi * rawPos)
+
+                wheelPosition = displayPos
+                wheelVelocity = dragVel
+                fireDetentFeedbackIfCrossed(at: displayPos)
+            }
+            .onEnded { val in
+                let now = val.time.timeIntervalSinceReferenceDate
+                let startPos = dragBaseWheelPos ?? wheelPosition
+                let moved = dragHasMoved
+                isDraggingWheel = false
+                dragHasMoved = false
+                dragBaseWheelPos = nil
+                lastPhysicsFrameTime = CACurrentMediaTime()
+
+                // If user tapped without dragging (< 4pt movement), resolve tapped shark slot on the arc
+                if !moved && allowArcTapSelection {
+                    let maxHalfSpan = min(186.0, Double(stageWidth) * 0.44)
+                    let pxPerArcSlot = max(24.0, maxHalfSpan / 3.05)
+                    let dxFromCenter = Double(val.startLocation.x - stageWidth * 0.5)
+                    let tappedSlotOffset = (dxFromCenter / pxPerArcSlot).rounded()
+                    if abs(tappedSlotOffset) >= 1.0 && abs(tappedSlotOffset) <= 3.0 {
+                        let baseTarget = wheelPosition.rounded()
+                        snapWheel(to: baseTarget + tappedSlotOffset)
+                        dragTouchSamples.removeAll()
+                        return
+                    }
+                }
+
+                let latest = dragTouchSamples.last ?? (pos: wheelPosition, time: now)
+                let pauseBeforeLiftSec = max(0.0, now - latest.time)
+                var releaseVel: Double = 0.0
+
+                if pauseBeforeLiftSec < 0.095 && dragTouchSamples.count >= 2 {
+                    var anchor = dragTouchSamples[0]
+                    for idx in stride(from: dragTouchSamples.count - 2, through: 0, by: -1) {
+                        anchor = dragTouchSamples[idx]
+                        if (latest.time - anchor.time) >= 0.030 {
+                            break
+                        }
+                    }
+                    let windowSec = latest.time - anchor.time
+                    if windowSec >= 0.005 {
+                        releaseVel = (latest.pos - anchor.pos) / windowSec
+                    }
+                }
+
+                // Blend UIKit's hardware-predicted end translation for crisp short thumb flicks
+                if pauseBeforeLiftSec < 0.095 {
+                    let predictedExtraDx = Double(val.predictedEndTranslation.width - val.translation.width)
+                    let predictedEndPos = startPos - Double(val.predictedEndTranslation.width) / pickerPxPerSlot
+                    let systemThrowVel = (predictedEndPos - wheelPosition) * pickerDecelLambda
+                    let extraThrowVel = (-predictedExtraDx / pickerPxPerSlot) * pickerDecelLambda * 0.95
+                    let bestSystemVel = abs(extraThrowVel) > abs(systemThrowVel) ? extraThrowVel : systemThrowVel
+                    if abs(bestSystemVel) > abs(releaseVel) {
+                        releaseVel = releaseVel * 0.30 + bestSystemVel * 0.70
+                    }
+                }
+
+                // Multi-flick momentum stacking (just like spinning the iPhone Alarm minute wheel repeatedly!)
+                let gestureDuration = now - dragStartTime
+                if gestureDuration < 0.28 && abs(releaseVel) > 1.8 && (releaseVel * inheritedWheelVelocity > 0) {
+                    releaseVel += inheritedWheelVelocity * 0.72
+                }
+                releaseVel = max(-pickerMaxVelocity, min(pickerMaxVelocity, releaseVel))
+                dragTouchSamples.removeAll()
+
+                let targetSlot: Double
+                if abs(releaseVel) > 1.05 {
+                    let projected = wheelPosition + releaseVel / pickerDecelLambda
+                    var roundedTarget = projected.rounded()
+                    if roundedTarget == wheelPosition.rounded() {
+                        roundedTarget += releaseVel > 0 ? 1.0 : -1.0
+                    }
+                    targetSlot = roundedTarget
+                } else {
+                    targetSlot = wheelPosition.rounded()
+                }
+
+                wheelTargetSlot = targetSlot
+                wheelVelocity = (targetSlot - wheelPosition) * pickerDecelLambda
+            }
+    }
+
     // MARK: - Left/Top: Giant Aquarium Spotlight + Silky-Smooth Continuous Rotary Wheel
     private func aquariumAndArcDialStage(
         form: SharkFormConfig,
         check: UnlockCheckResult,
         lineageMeta: SharkLineageMeta?,
-        curLv: Int
+        curLv: Int,
+        stageWidth: CGFloat
     ) -> some View {
         let lineageIconKey: String = {
             switch form.lineage {
@@ -6203,7 +6399,7 @@ public struct EvolutionAtlasSheetView: View {
 
             Spacer(minLength: 2)
 
-            // Center Giant Shark Spotlight with Left / Right Step Arrows
+            // Center Giant Shark Spotlight with Left / Right Step Arrows (Center Spotlight also draggable!)
             HStack {
                 Button {
                     let base = wheelTargetSlot ?? wheelPosition.rounded()
@@ -6234,6 +6430,8 @@ public struct EvolutionAtlasSheetView: View {
                     SharkPreviewView(form: form, width: 220, height: 118, locked: !check.isUnlocked && !check.canUnlockNow)
                         .shadow(color: Color(hex: form.glowColorHex).opacity(0.55), radius: 14)
                 }
+                .contentShape(Rectangle())
+                .highPriorityGesture(makeWheelDragGesture(stageWidth: stageWidth, allowArcTapSelection: false))
 
                 Spacer()
 
@@ -6253,182 +6451,110 @@ public struct EvolutionAtlasSheetView: View {
 
             Spacer(minLength: 2)
 
-            // Bottom Silky-Smooth Continuous Rotary Wheel (iPhone Alarm UIPickerView Drum Physics)
+            // Bottom Silky-Smooth Continuous Rotary Wheel (1:1 Parabolic Arc & Stable View Identity with Web SharkEvolutionAtlasModal.tsx)
             GeometryReader { dialGeo in
                 let dialW = dialGeo.size.width
                 let dialH = dialGeo.size.height
                 let total = GameConfigGenerated.sharkForms.count
-                let baseInt = Int(floor(wheelPosition))
-                let frac = wheelPosition - Double(baseInt)
+                let centerSlot = Int(wheelPosition.rounded())
+                let visibleRawSlots = Array((centerSlot - 4)...(centerSlot + 4))
+                let maxHalfSpan = min(186.0, Double(dialW) * 0.44)
 
                 ZStack {
-                    // Glowing Outer & Inner Compass Rim Tracks
+                    // Upper & Lower Curved Compass Rim Tracks (1:1 with Web SVG paths)
                     Path { path in
-                        path.move(to: CGPoint(x: dialW * 0.04, y: dialH * 0.90))
+                        path.move(to: CGPoint(x: dialW * 0.05, y: dialH * 0.68))
                         path.addQuadCurve(
-                            to: CGPoint(x: dialW * 0.96, y: dialH * 0.90),
-                            control: CGPoint(x: dialW * 0.50, y: dialH * 0.02)
+                            to: CGPoint(x: dialW * 0.95, y: dialH * 0.68),
+                            control: CGPoint(x: dialW * 0.50, y: dialH * 0.14)
                         )
                     }
-                    .stroke(Color.cyan.opacity(0.32), style: StrokeStyle(lineWidth: 1.6, dash: [6, 4]))
+                    .stroke(Color.cyan.opacity(0.32), lineWidth: 1.75)
 
-                    // Top-Center Selection Pointer Triangle
-                    Text("▼")
-                        .font(.system(size: 9, weight: .black))
-                        .foregroundColor(.cyan)
-                        .position(x: dialW * 0.50, y: dialH * 0.08)
+                    Path { path in
+                        path.move(to: CGPoint(x: dialW * 0.03, y: dialH * 0.78))
+                        path.addQuadCurve(
+                            to: CGPoint(x: dialW * 0.97, y: dialH * 0.78),
+                            control: CGPoint(x: dialW * 0.50, y: dialH * 0.24)
+                        )
+                    }
+                    .stroke(Color.cyan.opacity(0.14), style: StrokeStyle(lineWidth: 1.0, dash: [4, 6]))
 
-                    ForEach(wheelSlotOffsets, id: \\.self) { k in
-                        let rawIdx = baseInt + k
+                    // Key by stable virtual slot rawIdx so SwiftUI NEVER swaps shark textures across integer boundaries!
+                    ForEach(visibleRawSlots, id: \\.self) { rawIdx in
                         let itemIdx = ((rawIdx % total) + total) % total
                         let itemForm = GameConfigGenerated.sharkForms[itemIdx]
                         let itemUnlocked = vm.save.unlockedSharkIds.contains(itemForm.id)
-                        let relOffset = Double(k) - frac
-                        let absOff = abs(relOffset)
+                        let isActive = vm.save.selectedSharkId == itemForm.id
+                        let slotPos = Double(rawIdx) - wheelPosition
+                        let absSlot = abs(slotPos)
 
-                        if absOff <= 3.65 {
-                            let angleDeg = relOffset * 20.5
-                            let angleRad = angleDeg * .pi / 180.0
-                            let xPct = 0.50 + sin(angleRad) * 0.44
-                            let yPct = 0.34 + (1.0 - cos(angleRad)) * 0.88
-                            let scale = CGFloat(max(0.46, 1.15 - absOff * 0.19))
-                            let opacity = max(0.18, 1.0 - max(0.0, absOff - 2.3) * 0.65)
-                            let isCenter = absOff < 0.45
+                        if absSlot <= 3.65 {
+                            let isCenter = absSlot < 0.45
+                            let xOffset = (slotPos / 3.05) * maxHalfSpan
+                            let normalizedX = min(1.25, absSlot / 3.05)
+                            let yOffset = -4.0 + normalizedX * normalizedX * 18.0
+                            let rotDeg = slotPos * 6.5
+                            let scale = CGFloat(max(0.60, 1.12 - absSlot * 0.14))
+                            let edgeOpacity = max(0.15, 1.0 - max(0.0, absSlot - 2.4) * 0.70)
+                            let nodeOpacity = itemUnlocked ? edgeOpacity : edgeOpacity * 0.65
 
                             VStack(spacing: 2) {
                                 ZStack {
                                     Circle()
                                         .fill(
                                             isCenter
-                                                ? Color(red: 8/255, green: 36/255, blue: 72/255).opacity(0.96)
-                                                : Color(red: 2/255, green: 10/255, blue: 28/255).opacity(0.86)
+                                                ? Color.cyan.opacity(0.22)
+                                                : (isActive ? Color.green.opacity(0.16) : Color.white.opacity(0.04))
                                         )
-                                        .frame(width: 54, height: 54)
+                                        .frame(width: 46, height: 46)
                                         .overlay(
                                             Circle().stroke(
-                                                isCenter ? Color.cyan : (itemUnlocked ? Color.cyan.opacity(0.42) : Color.white.opacity(0.15)),
-                                                lineWidth: isCenter ? 2.4 : 1.0
+                                                isCenter ? Color.cyan.opacity(0.85) : (isActive ? Color.green.opacity(0.55) : Color.clear),
+                                                lineWidth: isCenter ? 1.8 : 1.0
                                             )
                                         )
-                                        .shadow(color: isCenter ? Color.cyan.opacity(0.55) : .clear, radius: 8)
-                                    SharkPreviewView(form: itemForm, width: 46, height: 28, locked: !itemUnlocked)
+                                        .shadow(color: isCenter ? Color.cyan.opacity(0.65) : .clear, radius: 10)
+
+                                    if isCenter {
+                                        Circle()
+                                            .fill(Color.cyan)
+                                            .frame(width: 5, height: 5)
+                                            .shadow(color: .cyan, radius: 4)
+                                            .offset(y: -25)
+                                    } else if isActive {
+                                        Circle()
+                                            .fill(Color.green)
+                                            .frame(width: 5, height: 5)
+                                            .offset(x: 15, y: -15)
+                                    }
+
+                                    SharkPreviewView(form: itemForm, width: 38, height: 22, locked: !itemUnlocked)
                                 }
                                 Text(vm.lang == "zh" ? itemForm.nameZh : itemForm.nameEn)
-                                    .font(.system(size: 8.5, weight: .black))
-                                    .foregroundColor(isCenter ? .white : .gray)
+                                    .font(.system(size: 8.5, weight: isCenter ? .black : .bold))
+                                    .foregroundColor(isCenter ? .white : Color.white.opacity(0.55))
                                     .lineLimit(1)
                             }
                             .scaleEffect(scale)
-                            .rotationEffect(.degrees(angleDeg * 0.42))
-                            .opacity(opacity)
-                            .contentShape(Circle())
-                            .onTapGesture {
-                                isDraggingWheel = false
-                                dragBaseWheelPos = nil
-                                snapWheel(to: Double(rawIdx))
-                            }
-                            .position(x: dialW * CGFloat(xPct), y: dialH * CGFloat(yPct))
-                            .zIndex(10.0 - absOff)
+                            .rotationEffect(.degrees(rotDeg))
+                            .opacity(nodeOpacity)
+                            .position(
+                                x: dialW * 0.50 + CGFloat(xOffset),
+                                y: dialH * 0.48 + CGFloat(yOffset)
+                            )
+                            .zIndex(isCenter ? 35.0 : (25.0 - absSlot * 3.0))
+                            .allowsHitTesting(false)
                         }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .highPriorityGesture(makeWheelDragGesture(stageWidth: dialW, allowArcTapSelection: true))
             }
-            .frame(height: 114)
+            .frame(height: 86)
             .padding(.bottom, 6)
         }
-        .contentShape(Rectangle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 3)
-                .onChanged { val in
-                    let now = Date().timeIntervalSinceReferenceDate
-                    let tx = Double(val.translation.width)
-
-                    if !isDraggingWheel || dragBaseWheelPos == nil {
-                        isDraggingWheel = true
-                        inheritedWheelVelocity = abs(wheelVelocity) > 2.0 ? wheelVelocity : 0.0
-                        wheelTargetSlot = nil
-                        wheelVelocity = 0.0
-                        dragBaseWheelPos = wheelPosition
-                        dragStartTime = now
-                        dragTouchSamples = [(pos: wheelPosition, time: now)]
-                    }
-
-                    let startPos = dragBaseWheelPos ?? wheelPosition
-                    let rawPos = startPos - tx / pickerPxPerSlot
-                    dragTouchSamples.append((pos: rawPos, time: now))
-                    while dragTouchSamples.count > 10, let first = dragTouchSamples.first, (now - first.time) > 0.12 {
-                        dragTouchSamples.removeFirst()
-                    }
-
-                    let firstSample = dragTouchSamples.first ?? (pos: rawPos, time: now)
-                    let dtSec = max(0.008, now - firstSample.time)
-                    let dragVel = (rawPos - firstSample.pos) / dtSec
-
-                    // Subtle slow-drag magnetic detent dwell across each integer slot (like iPhone Alarm drum)
-                    let detentStrength = max(0.0, 1.0 - abs(dragVel) / 3.2) * 0.055
-                    let displayPos = rawPos - detentStrength * sin(2.0 * .pi * rawPos)
-
-                    wheelPosition = displayPos
-                    wheelVelocity = dragVel
-                    fireDetentFeedbackIfCrossed(at: displayPos)
-                }
-                .onEnded { val in
-                    let now = Date().timeIntervalSinceReferenceDate
-                    let startPos = dragBaseWheelPos ?? wheelPosition
-                    isDraggingWheel = false
-                    dragBaseWheelPos = nil
-
-                    let latest = dragTouchSamples.last ?? (pos: wheelPosition, time: now)
-                    let pauseBeforeLiftSec = now - latest.time
-                    var releaseVel: Double = 0.0
-
-                    if pauseBeforeLiftSec < 0.085 && dragTouchSamples.count >= 2 {
-                        var anchor = dragTouchSamples[0]
-                        for idx in stride(from: dragTouchSamples.count - 2, through: 0, by: -1) {
-                            anchor = dragTouchSamples[idx]
-                            if (latest.time - anchor.time) >= 0.032 {
-                                break
-                            }
-                        }
-                        let windowSec = latest.time - anchor.time
-                        if windowSec >= 0.006 {
-                            releaseVel = (latest.pos - anchor.pos) / windowSec
-                        }
-                    }
-
-                    // Also blend SwiftUI's predictedEndTranslation for ultra-fast short flicks
-                    if pauseBeforeLiftSec < 0.085 {
-                        let predictedEndPos = startPos - Double(val.predictedEndTranslation.width) / pickerPxPerSlot
-                        let systemThrowVel = (predictedEndPos - wheelPosition) * pickerDecelLambda
-                        if abs(systemThrowVel) > abs(releaseVel) {
-                            releaseVel = releaseVel * 0.35 + systemThrowVel * 0.65
-                        }
-                    }
-
-                    // Multi-flick momentum stacking (just like spinning the iPhone Alarm minute wheel repeatedly!)
-                    let gestureDuration = now - dragStartTime
-                    if gestureDuration < 0.26 && abs(releaseVel) > 2.2 && (releaseVel * inheritedWheelVelocity > 0) {
-                        releaseVel += inheritedWheelVelocity * 0.68
-                    }
-                    releaseVel = max(-pickerMaxVelocity, min(pickerMaxVelocity, releaseVel))
-                    dragTouchSamples.removeAll()
-
-                    let targetSlot: Double
-                    if abs(releaseVel) > 1.15 {
-                        let projected = wheelPosition + releaseVel / pickerDecelLambda
-                        var roundedTarget = projected.rounded()
-                        if roundedTarget == wheelPosition.rounded() {
-                            roundedTarget += releaseVel > 0 ? 1.0 : -1.0
-                        }
-                        targetSlot = roundedTarget
-                    } else {
-                        targetSlot = wheelPosition.rounded()
-                    }
-
-                    wheelTargetSlot = targetSlot
-                    wheelVelocity = (targetSlot - wheelPosition) * pickerDecelLambda
-                }
-        )
     }
 
     // MARK: - Right/Bottom: De-Boxed Command Deck (Trait + 4-Col Stat Strip + 3-Col Mastery Crowns + Gate/Reinforce + Actions)

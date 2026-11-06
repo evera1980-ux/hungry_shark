@@ -463,14 +463,14 @@ export const UiSettingSharkCard: React.FC<UiSettingSharkCardProps> = ({
         />
       )}
 
-      {/* Left Recessed Square Avatar Slot (compact height inside shortened shark card) */}
+      {/* Left Wide Recessed Rectangular Avatar Slot (encloses full horizontal shark inside the recessed frame) */}
       <div
-        className="absolute z-10 flex items-center justify-center overflow-hidden pointer-events-none"
+        className="absolute z-10 flex items-center justify-center overflow-hidden pointer-events-none p-[3px]"
         style={{
-          left: '2.0%',
-          width: '12.8%',
-          top: '13.0%',
-          bottom: '11.0%',
+          left: '2.3%',
+          width: '18.8%',
+          top: '15.0%',
+          bottom: '15.0%',
         }}
       >
         {avatarContent}
@@ -480,7 +480,7 @@ export const UiSettingSharkCard: React.FC<UiSettingSharkCardProps> = ({
       <div
         className="absolute z-10 flex flex-col justify-center text-left overflow-hidden"
         style={{
-          left: '16.8%',
+          left: '23.2%',
           right: '23.4%',
           top: '10%',
           bottom: '10%',

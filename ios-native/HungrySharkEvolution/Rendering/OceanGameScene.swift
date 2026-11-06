@@ -742,6 +742,12 @@ public final class OceanGameScene: SKScene {
         lastUpdateTime = currentTime
         guard let vm = viewModel else { return }
 
+        // Pause background SpriteKit simulation & @Published mutations while the Evolution Atlas modal is open
+        // so SwiftUI dedicates 100% of main-thread 120Hz budget to the rotary wheel gesture & inertia!
+        if vm.showEvolutionAtlas {
+            return
+        }
+
         let viewW = Double(max(320, size.width))
         let viewH = Double(max(240, size.height))
         let stats = vm.currentStats
@@ -762,12 +768,16 @@ public final class OceanGameScene: SKScene {
         biteAnim = max(0.0, biteAnim - dt * 3.8)
         cameraShakeTrauma = max(0.0, cameraShakeTrauma - dt * 2.8)
 
-        // Smooth ghost HP bar decay
+        // Smooth ghost HP bar decay (only mutate @Published when value meaningfully changes to avoid 120Hz SwiftUI view invalidation!)
         let curHpPct = max(0, min(100, (vm.hp / max(1, vm.maxHp)) * 100.0))
+        let nextGhostPct: Double
         if vm.ghostHpPct > curHpPct {
-            vm.ghostHpPct = max(curHpPct, vm.ghostHpPct - dt * 28.0)
+            nextGhostPct = max(curHpPct, vm.ghostHpPct - dt * 28.0)
         } else {
-            vm.ghostHpPct = curHpPct
+            nextGhostPct = curHpPct
+        }
+        if abs(vm.ghostHpPct - nextGhostPct) > 0.05 {
+            vm.ghostHpPct = nextGhostPct
         }
 
         // 1. Update Shark Physics (Title screen patrol vs In-game hunting)

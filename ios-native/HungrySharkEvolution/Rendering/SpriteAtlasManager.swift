@@ -747,27 +747,56 @@ public final class SpriteAtlasManager {
             guard let patchedCG = ctx.makeImage(),
                   let tightCG = patchedCG.cropping(to: CGRect(x: minX, y: minY, width: bw, height: bh)) else { continue }
 
-            // Special 3-slice horizontal widening for SETTING_SHARK_CARD (widen to 6.05:1 aspect ratio)
+            // Special 5-slice horizontal widening for SETTING_SHARK_CARD:
+            // Widens BOTH the left recessed shark avatar frame (so horizontal sharks fit 100% inside the box)
+            // AND the right data body to match the 4.80:1 card aspect ratio!
             if key == "SETTING_SHARK_CARD" {
-                let targetW = max(bw, Int((Double(bh) * 6.05).rounded()))
-                let leftCap = Int((Double(bw) * 0.26).rounded(.down))
-                let rightCap = Int((Double(bw) * 0.10).rounded(.down))
-                let srcMidW = max(1, bw - leftCap - rightCap)
-                let dstMidW = max(1, targetW - leftCap - rightCap)
+                let targetW = max(bw, Int((Double(bh) * 4.80).rounded()))
+                let s1W = Int((Double(bw) * 0.085).rounded(.down))
+                let s2W = Int((Double(bw) * 0.090).rounded(.down))
+                let s3W = Int((Double(bw) * 0.085).rounded(.down))
+                let s5W = Int((Double(bw) * 0.100).rounded(.down))
+                let s4W = max(1, bw - s1W - s2W - s3W - s5W)
+
+                let extraAvatarW = Int((Double(bh) * 0.50).rounded())
+                let dstS2W = s2W + extraAvatarW
+                let dstS4W = max(1, targetW - s1W - dstS2W - s3W - s5W)
 
                 let format = UIGraphicsImageRendererFormat()
                 format.scale = 1.0
                 format.opaque = false
                 let renderer = UIGraphicsImageRenderer(size: CGSize(width: targetW, height: bh), format: format)
                 let wideImg = renderer.image { _ in
-                    if let leftCG = tightCG.cropping(to: CGRect(x: 0, y: 0, width: leftCap, height: bh)) {
-                        UIImage(cgImage: leftCG).draw(in: CGRect(x: 0, y: 0, width: leftCap, height: bh))
+                    var srcX = 0
+                    var dstX = 0
+
+                    // Slice 1: Left card border + left rim of recessed avatar box
+                    if let c1 = tightCG.cropping(to: CGRect(x: srcX, y: 0, width: s1W, height: bh)) {
+                        UIImage(cgImage: c1).draw(in: CGRect(x: dstX, y: 0, width: s1W, height: bh))
                     }
-                    if let midCG = tightCG.cropping(to: CGRect(x: leftCap, y: 0, width: srcMidW, height: bh)) {
-                        UIImage(cgImage: midCG).draw(in: CGRect(x: leftCap, y: 0, width: dstMidW, height: bh))
+                    srcX += s1W; dstX += s1W
+
+                    // Slice 2: Uniform middle of recessed avatar box (widened so horizontal shark fits inside!)
+                    if let c2 = tightCG.cropping(to: CGRect(x: srcX, y: 0, width: s2W, height: bh)) {
+                        UIImage(cgImage: c2).draw(in: CGRect(x: dstX, y: 0, width: dstS2W, height: bh))
                     }
-                    if let rightCG = tightCG.cropping(to: CGRect(x: bw - rightCap, y: 0, width: rightCap, height: bh)) {
-                        UIImage(cgImage: rightCG).draw(in: CGRect(x: targetW - rightCap, y: 0, width: rightCap, height: bh))
+                    srcX += s2W; dstX += dstS2W
+
+                    // Slice 3: Right rim of recessed avatar box
+                    if let c3 = tightCG.cropping(to: CGRect(x: srcX, y: 0, width: s3W, height: bh)) {
+                        UIImage(cgImage: c3).draw(in: CGRect(x: dstX, y: 0, width: s3W, height: bh))
+                    }
+                    srcX += s3W; dstX += s3W
+
+                    // Slice 4: Uniform middle of right card body
+                    if let c4 = tightCG.cropping(to: CGRect(x: srcX, y: 0, width: s4W, height: bh)) {
+                        UIImage(cgImage: c4).draw(in: CGRect(x: dstX, y: 0, width: dstS4W, height: bh))
+                    }
+                    srcX += s4W; dstX += dstS4W
+
+                    // Slice 5: Right chamfered border of card
+                    if let c5 = tightCG.cropping(to: CGRect(x: bw - s5W, y: 0, width: s5W, height: bh)) {
+                        UIImage(cgImage: c5).draw(in: CGRect(x: dstX, y: 0, width: s5W, height: bh))
                     }
                 }
                 uiSettingImages[key] = wideImg

@@ -4785,8 +4785,8 @@ export default function App() {
                   avatarContent={
                     <SharkFormCanvasPreview
                       sharkId={activeHudSharkForm.id}
-                      width={56}
-                      height={38}
+                      width={84}
+                      height={48}
                       className="w-full h-full object-contain"
                     />
                   }
@@ -4931,8 +4931,8 @@ export default function App() {
                     avatarContent={
                       <SharkFormCanvasPreview
                         sharkId={runSnapshot.activeSharkId}
-                        width={56}
-                        height={38}
+                        width={84}
+                        height={48}
                         className="w-full h-full object-contain"
                       />
                     }
@@ -5080,8 +5080,8 @@ export default function App() {
                     avatarContent={
                       <SharkFormCanvasPreview
                         sharkId={runSnapshot.activeSharkId}
-                        width={56}
-                        height={38}
+                        width={84}
+                        height={48}
                         className="w-full h-full object-contain"
                       />
                     }
