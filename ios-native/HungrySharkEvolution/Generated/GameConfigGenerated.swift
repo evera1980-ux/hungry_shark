@@ -2848,7 +2848,27 @@ public enum GameConfigGenerated {
         "btn_supply_short": "空投宝箱",
         "btn_overdrive_short": "{cost} 狂暴",
         "btn_surge_short": "{cost} 跃迁",
-        "landscape_rotate_hint": "建议横屏握持体验最佳深海狩猎视野"
+        "landscape_rotate_hint": "建议横屏握持体验最佳深海狩猎视野",
+        "title_sub_short": "48阶深海基因破茧 · 摇杆吞噬进化",
+        "hud_mobile_boost": "冲刺",
+        "hud_heat_lv0": "常规捕猎",
+        "hud_heat_lv1": "猎杀升温",
+        "hud_heat_lv2": "嗜血沸腾",
+        "hud_heat_lv3": "深渊暴走",
+        "onboard_step1_title": "左手滑动摇杆，吞噬 3 条小鱼",
+        "onboard_step2_title": "右手按住右下角【冲刺】加速游动",
+        "onboard_step3_title": "点击右下角【强化】提升鲨鱼等级",
+        "onboard_done_title": "教学完成！尽情吞噬进化吧！",
+        "onboard_skip": "跳过",
+        "pause_title": "深海战术暂停",
+        "btn_quit": "返回主界面",
+        "revive_title": "深海紧急救援",
+        "revive_desc": "是否立即唤醒远古狂暴基因，满血复活并开启黄金磁铁狂暴？",
+        "btn_decline_revive": "直接结算本局",
+        "gameover_sub": "本局捕食与基因进化数据统计",
+        "stat_survival": "存活时长",
+        "stat_peak_combo": "最高连击",
+        "btn_play_again": "再次捕食"
     ]
 
     public static let i18nEn: [String: String] = [
@@ -3016,6 +3036,26 @@ public enum GameConfigGenerated {
         "btn_supply_short": "Supply Drop",
         "btn_overdrive_short": "{cost} Frenzy",
         "btn_surge_short": "{cost} Surge",
-        "landscape_rotate_hint": "Rotate to landscape for the best hunting view"
+        "landscape_rotate_hint": "Rotate to landscape for the best hunting view",
+        "title_sub_short": "48-Form Deep-Sea Evolution · Devour & Evolve",
+        "hud_mobile_boost": "BOOST",
+        "hud_heat_lv0": "STEADY HUNT",
+        "hud_heat_lv1": "WARMING UP",
+        "hud_heat_lv2": "BLOODLUST",
+        "hud_heat_lv3": "ABYSS FRENZY",
+        "onboard_step1_title": "Drag left joystick to devour 3 small fish",
+        "onboard_step2_title": "Hold bottom-right [BOOST] to sprint",
+        "onboard_step3_title": "Tap [UPGRADE] to reinforce your shark",
+        "onboard_done_title": "Tutorial complete! Rule the ocean!",
+        "onboard_skip": "Skip",
+        "pause_title": "TACTICAL PAUSE",
+        "btn_quit": "MAIN MENU",
+        "revive_title": "EMERGENCY RESCUE",
+        "revive_desc": "Awaken ancient frenzy genes now for a full-HP revive + Gold Frenzy?",
+        "btn_decline_revive": "END RUN",
+        "gameover_sub": "Predation & Genetic Evolution Summary",
+        "stat_survival": "Survival Time",
+        "stat_peak_combo": "Peak Combo",
+        "btn_play_again": "HUNT AGAIN"
     ]
 }

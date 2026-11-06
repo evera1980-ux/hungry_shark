@@ -18,6 +18,7 @@
 | [`docs/02-DESIGN_SPEC.md`](./docs/02-DESIGN_SPEC.md) | **渲染、UI/UX 与移动端多指交互规范** | 修改鲨鱼/猎物渲染、HUD 布局、多点触控事件、视差背景或音效规范时 |
 | [`docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`](./docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md) | **核心数值策划案（Lv/T 计算、48阶进化、经济、生态深度）** | 修改任何计算公式、升级消耗、属性成长、猎物体型算法、鱼类深度分布时 |
 | [`docs/04-COLLABORATION_AND_DEPLOYMENT.md`](./docs/04-COLLABORATION_AND_DEPLOYMENT.md) | **多人协同流程、单元测试与 Vercel 部署手册** | 修改 `package.json` 依赖、构建脚本、分支策略、测试用例或部署配置时 |
+| [`docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md`](./docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md) | **移动端与跨平台原生移植避坑指南（iOS/Android/小游戏）** | 修改 `scripts/build-ios-native.ts`、跨平台图集处理、多语言模板或移动端适配逻辑时 |
 
 ---
 
@@ -34,6 +35,7 @@ AI 在修改以下任一源代码文件时，**必须在同一次任务中检查
 | `src/game/infiniteProgressionManager.ts` | [`docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`](./docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md)（第 7 节：无限成长与深渊变异公式） |
 | `src/game/canvasRenderer.ts` / `src/game/spriteSheetManager.ts` | [`docs/02-DESIGN_SPEC.md`](./docs/02-DESIGN_SPEC.md)（第 1~2 节：48 阶精灵图裁切、无外挂部件纯净躯体渲染、猎物渲染与尺寸一致性） |
 | `src/App.tsx` | [`docs/01-ARCHITECTURE.md`](./docs/01-ARCHITECTURE.md)（主循环与 HUD 同步）及 [`docs/02-DESIGN_SPEC.md`](./docs/02-DESIGN_SPEC.md)（第 3~4 节：HUD 布局、移动端多点触控 `bindMultiTouchButton` 与虚拟摇杆规范） |
+| `scripts/build-ios-native.ts` / `src/game/i18n.ts` | [`docs/04-COLLABORATION_AND_DEPLOYMENT.md`](./docs/04-COLLABORATION_AND_DEPLOYMENT.md)（第 5 节：纯原生 iOS 工程生成）及 [`docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md`](./docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md) |
 | `package.json` / `.npmrc` / `vite.config.ts` | [`docs/04-COLLABORATION_AND_DEPLOYMENT.md`](./docs/04-COLLABORATION_AND_DEPLOYMENT.md)（依赖管理、构建与 Vercel 部署章节） |
 
 ---

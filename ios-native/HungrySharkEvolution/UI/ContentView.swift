@@ -292,12 +292,20 @@ public struct UiAvatarDataBarView: View {
                                 )
                             )
                             .frame(width: barW * CGFloat(hpPct), height: barH * 0.50)
-                        HStack {
-                            Text(vm.frenzyActive ? "🔥 FRENZY" : (hpPct < 0.28 ? "⚠️ DANGER" : "HP"))
-                                .font(.system(size: 7.5, weight: .black))
-                            Spacer()
+                        HStack(spacing: 2) {
+                            Text(
+                                vm.frenzyActive
+                                    ? (vm.lang == "zh" ? "🔥 狂暴" : "🔥 FRENZY")
+                                    : (hpPct < 0.28 ? (vm.lang == "zh" ? "⚠️ 濒危" : "⚠️ LOW HP") : "HP")
+                            )
+                            .font(.system(size: 7.5, weight: .black))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                            Spacer(minLength: 2)
                             Text("\(Int(vm.hp))/\(Int(vm.maxHp))")
                                 .font(.system(size: 7.5, weight: .black, design: .monospaced))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
@@ -317,14 +325,17 @@ public struct UiAvatarDataBarView: View {
                                 )
                             )
                             .frame(width: barW * CGFloat(energyPct), height: barH * 0.32)
-                        HStack {
-                            Text("⚡ BOOST")
+                        HStack(spacing: 2) {
+                            Text("⚡ \(vm.t("hud_mobile_boost"))")
                                 .font(.system(size: 6.5, weight: .black))
                                 .foregroundColor(.cyan)
-                            Spacer()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                            Spacer(minLength: 2)
                             Text("\(Int(energyPct * 100))%")
                                 .font(.system(size: 6.5, weight: .black, design: .monospaced))
                                 .foregroundColor(.white)
+                                .lineLimit(1)
                         }
                         .padding(.horizontal, 5)
                         .frame(width: barW)
@@ -584,10 +595,10 @@ public struct ContentView: View {
                         scene.refreshSharkTexture()
                     }
 
-                // 2. Top HUD Bar (Row 1: Frameless Avatar Bar + Telemetry Pill + Pause Button; Row 2: Combo / Frenzy / Onboarding)
-                VStack(spacing: 6) {
+                // 2. Top HUD Bar (Row 1: Frameless Avatar Bar + Telemetry Pill + Pause Button; Row 2: Compact Combo / Frenzy Pills)
+                VStack(spacing: 3) {
                     HStack(alignment: .top, spacing: 8) {
-                        UiAvatarDataBarView(vm: vm, height: isCompactH ? 58 : 66)
+                        UiAvatarDataBarView(vm: vm, height: isCompactH ? 56 : 64)
                         Spacer(minLength: 4)
                         if vm.gameState == "playing" {
                             telemetryPill(isCompact: isCompactH)
@@ -596,10 +607,11 @@ public struct ContentView: View {
                         }
                     }
                     .padding(.horizontal, 12)
-                    .padding(.top, 8)
+                    .padding(.top, 6)
 
                     if vm.gameState == "playing" {
                         hudRow2Overlays
+                            .allowsHitTesting(false)
                     }
                     Spacer()
                 }
@@ -609,7 +621,7 @@ public struct ContentView: View {
                     titleScreenOverlay(geo: geo)
                 }
 
-                // 4. In-Game Multi-Touch Sonar Joystick (Bottom-Left) + 90° MOBA Skill Fan (Bottom-Right)
+                // 4. In-Game Multi-Touch Sonar Joystick (Bottom-Left) + Onboarding Guide (Bottom-Center) + 90° MOBA Skill Fan (Bottom-Right)
                 if vm.gameState == "playing" {
                     VStack {
                         Spacer()
@@ -617,7 +629,12 @@ public struct ContentView: View {
                             sonarJoystick
                                 .padding(.leading, 26)
                                 .padding(.bottom, 18)
-                            Spacer()
+                            Spacer(minLength: 6)
+                            if vm.onboardingStep != .DONE {
+                                onboardingBottomBanner
+                                    .padding(.bottom, 14)
+                            }
+                            Spacer(minLength: 6)
                             mobaSkillFan
                                 .padding(.trailing, 22)
                                 .padding(.bottom, 16)
@@ -823,99 +840,116 @@ public struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - HUD Row 2 (Combo / Frenzy / 3-Step Onboarding Tutorial)
+    // MARK: - HUD Row 2 (Compact Combo & Frenzy Pills docked right under Top Telemetry Bar)
     private var hudRow2Overlays: some View {
-        VStack(spacing: 5) {
-            HStack(spacing: 10) {
-                if vm.comboCount > 1 {
-                    HStack(spacing: 5) {
-                        UiAtlasIconView(iconKey: "UI_ICON_COMBO_FIRE", size: 20)
-                        Text("\(vm.comboCount)x \(vm.t("hud_combo"))")
-                            .font(.system(size: 12, weight: .black))
-                            .foregroundColor(.white)
-                        if vm.huntingHeatBuff.heatLevel > 0 {
-                            Text("\(vm.t(vm.huntingHeatBuff.labelKey)) · ⚡+\(Int((vm.huntingHeatBuff.speedMultiplier - 1.0) * 100))%")
-                                .font(.system(size: 10, weight: .heavy))
-                                .foregroundColor(.yellow)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(LinearGradient(colors: [.orange.opacity(0.88), .red.opacity(0.88)], startPoint: .leading, endPoint: .trailing))
-                            .overlay(Capsule().stroke(Color.yellow, lineWidth: 1.2))
-                    )
-                }
-
-                if vm.frenzyActive {
-                    Text("🔥 \(vm.t("hud_frenzy")) · \(String(format: "%.1fs", vm.frenzyTimer))")
-                        .font(.system(size: 12, weight: .black))
-                        .foregroundColor(.yellow)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule()
-                                .fill(Color.red.opacity(0.85))
-                                .overlay(Capsule().stroke(Color.yellow, lineWidth: 1.5))
-                        )
-                }
-            }
-
-            // 3-Step Onboarding Tutorial Banner
-            if vm.onboardingStep != .DONE {
-                HStack(spacing: 10) {
-                    if vm.onboardingStep == .EAT_SMALL_FISH {
-                        Text("🎯")
-                        Text(vm.t("onboard_step1_title"))
-                            .font(.system(size: 11, weight: .black))
-                            .foregroundColor(.cyan)
-                        Text("(\(vm.onboardingEatCount)/3)")
-                            .font(.system(size: 11, weight: .black, design: .monospaced))
-                            .foregroundColor(.yellow)
-                    } else if vm.onboardingStep == .HOLD_BOOST {
-                        Text("⚡")
-                        Text(vm.t("onboard_step2_title"))
-                            .font(.system(size: 11, weight: .black))
-                            .foregroundColor(.yellow)
-                        Text(String(format: "(%.1f/1.2s)", vm.onboardingBoostSeconds))
-                            .font(.system(size: 11, weight: .black, design: .monospaced))
-                            .foregroundColor(.white)
-                    } else if vm.onboardingStep == .HANDS_ON_UPGRADE {
-                        Text("💪")
-                        Text(vm.t("onboard_step3_title"))
-                            .font(.system(size: 11, weight: .black))
-                            .foregroundColor(.mint)
-                    } else if vm.onboardingStep == .CELEBRATE {
-                        Text("🎉")
-                        Text(vm.t("onboard_done_title"))
-                            .font(.system(size: 11, weight: .black))
+        HStack(spacing: 8) {
+            if vm.comboCount > 1 {
+                let comboText = vm.t(
+                    "hud_combo",
+                    [
+                        "count": "\(vm.comboCount)",
+                        "mult": String(format: "%.1f", vm.huntingHeatBuff.scoreMultiplier)
+                    ]
+                )
+                HStack(spacing: 4) {
+                    UiAtlasIconView(iconKey: "UI_ICON_COMBO_FIRE", size: 15)
+                    Text(comboText)
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundColor(.white)
+                    if vm.huntingHeatBuff.heatLevel > 0 {
+                        Text("· \(vm.t(vm.huntingHeatBuff.labelKey)) ⚡+\(Int((vm.huntingHeatBuff.speedMultiplier - 1.0) * 100))%")
+                            .font(.system(size: 9, weight: .heavy))
                             .foregroundColor(.yellow)
                     }
-
-                    if vm.onboardingStep != .CELEBRATE {
-                        Button {
-                            vm.skipOnboardingTutorial()
-                        } label: {
-                            Text(vm.t("onboard_skip"))
-                                .font(.system(size: 9.5, weight: .bold))
-                                .foregroundColor(.white.opacity(0.85))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.white.opacity(0.15)))
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 5)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 2.5)
                 .background(
                     Capsule()
-                        .fill(Color(red: 2/255, green: 12/255, blue: 32/255).opacity(0.84))
-                        .overlay(Capsule().stroke(Color.cyan.opacity(0.55), lineWidth: 1.2))
+                        .fill(LinearGradient(colors: [.orange.opacity(0.84), .red.opacity(0.84)], startPoint: .leading, endPoint: .trailing))
+                        .overlay(Capsule().stroke(Color.yellow.opacity(0.85), lineWidth: 1))
                 )
             }
+
+            if vm.frenzyActive {
+                Text("🔥 \(vm.t("hud_frenzy")) · \(String(format: "%.1fs", vm.frenzyTimer))")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.yellow)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 2.5)
+                    .background(
+                        Capsule()
+                            .fill(Color.red.opacity(0.84))
+                            .overlay(Capsule().stroke(Color.yellow, lineWidth: 1))
+                    )
+            }
         }
+    }
+
+    // MARK: - Bottom-Center Compact Onboarding Guide Pill (Never blocks the swimming shark!)
+    private var onboardingBottomBanner: some View {
+        HStack(spacing: 7) {
+            if vm.onboardingStep == .EAT_SMALL_FISH {
+                Text("🎯")
+                    .font(.system(size: 11))
+                Text(vm.t("onboard_step1_title"))
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.cyan)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text("(\(vm.onboardingEatCount)/3)")
+                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                    .foregroundColor(.yellow)
+            } else if vm.onboardingStep == .HOLD_BOOST {
+                Text("⚡")
+                    .font(.system(size: 11))
+                Text(vm.t("onboard_step2_title"))
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.yellow)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text(String(format: "(%.1f/1.2s)", vm.onboardingBoostSeconds))
+                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                    .foregroundColor(.white)
+            } else if vm.onboardingStep == .HANDS_ON_UPGRADE {
+                Text("💪")
+                    .font(.system(size: 11))
+                Text(vm.t("onboard_step3_title"))
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.mint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            } else if vm.onboardingStep == .CELEBRATE {
+                Text("🎉")
+                    .font(.system(size: 11))
+                Text(vm.t("onboard_done_title"))
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.yellow)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+
+            if vm.onboardingStep != .CELEBRATE {
+                Button {
+                    vm.skipOnboardingTutorial()
+                } label: {
+                    Text(vm.t("onboard_skip"))
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.white.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(Color(red: 2/255, green: 12/255, blue: 32/255).opacity(0.82))
+                .overlay(Capsule().stroke(Color.cyan.opacity(0.5), lineWidth: 1))
+        )
     }
 
     // MARK: - Bottom-Left Sonar Virtual Joystick (using UI_JOYSTICK_BASE & UI_JOYSTICK_KNOB from icons_f5128c12.png)
@@ -1082,6 +1116,8 @@ public struct ContentView: View {
                     Text(vm.t("hud_mobile_boost"))
                         .font(.system(size: 10, weight: .black))
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Color.black.opacity(0.78)))
@@ -1532,19 +1568,35 @@ public struct ContentView: View {
     }
 }
 
-// MARK: - 3. 48-Shark Evolution Atlas Modal (100% replication of src/components/SharkEvolutionAtlasModal.tsx)
+// MARK: - 3. 48-Shark Evolution Atlas Modal (Silky-Smooth Continuous Rotary Wheel + Command Deck)
 
 public struct EvolutionAtlasSheetView: View {
     @ObservedObject var vm: GameViewModel
     @State private var inspectedIndex: Int = 0
-    @State private var floatPhase: Double = 0
+    @State private var wheelPosition: Double = 0.0
+    @State private var dragBaseWheelPos: Double? = nil
+    @State private var lastTickIndex: Int = 0
 
-    private let arcOffsets: [Int] = [-3, -2, -1, 0, 1, 2, 3]
+    private let wheelSlotOffsets: [Int] = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
 
     private var inspectedForm: SharkFormConfig {
         let total = GameConfigGenerated.sharkForms.count
         let norm = ((inspectedIndex % total) + total) % total
         return GameConfigGenerated.sharkForms[norm]
+    }
+
+    private func snapWheel(to targetPosition: Double) {
+        let total = GameConfigGenerated.sharkForms.count
+        let snapped = targetPosition.rounded()
+        let normIdx = ((Int(snapped) % total) + total) % total
+        withAnimation(.interpolatingSpring(stiffness: 170, damping: 22)) {
+            wheelPosition = snapped
+            inspectedIndex = normIdx
+        }
+        if lastTickIndex != normIdx {
+            lastTickIndex = normIdx
+            vm.playUiTick()
+        }
     }
 
     public var body: some View {
@@ -1589,7 +1641,7 @@ public struct EvolutionAtlasSheetView: View {
 
                     Divider().background(Color.cyan.opacity(0.2))
 
-                    // 2. Main Split Stage (Left/Top: Giant Aquarium + 7-Slot Curved Arc Dial; Right/Bottom: De-Boxed Command Deck)
+                    // 2. Main Split Stage (Left/Top: Giant Aquarium + Continuous Rotary Wheel; Right/Bottom: De-Boxed Command Deck)
                     if isLandscape {
                         HStack(spacing: 0) {
                             aquariumAndArcDialStage(form: form, check: check, lineageMeta: lineageMeta, curLv: curLv)
@@ -1627,6 +1679,8 @@ public struct EvolutionAtlasSheetView: View {
         }
         .onAppear {
             inspectedIndex = vm.activeSharkForm.index
+            wheelPosition = Double(vm.activeSharkForm.index)
+            lastTickIndex = vm.activeSharkForm.index
         }
     }
 
@@ -1699,7 +1753,7 @@ public struct EvolutionAtlasSheetView: View {
         }
     }
 
-    // MARK: - Left/Top: Giant Aquarium Spotlight + 7-Slot Curved Semi-Circular Compass Arc Dial
+    // MARK: - Left/Top: Giant Aquarium Spotlight + Silky-Smooth Continuous Rotary Wheel
     private func aquariumAndArcDialStage(
         form: SharkFormConfig,
         check: UnlockCheckResult,
@@ -1774,8 +1828,7 @@ public struct EvolutionAtlasSheetView: View {
             // Center Giant Shark Spotlight with Left / Right Step Arrows
             HStack {
                 Button {
-                    vm.playUiTick()
-                    inspectedIndex = (inspectedIndex + 47) % 48
+                    snapWheel(to: wheelPosition.rounded() - 1.0)
                 } label: {
                     Text("◀")
                         .font(.system(size: 16, weight: .black))
@@ -1806,8 +1859,7 @@ public struct EvolutionAtlasSheetView: View {
                 Spacer()
 
                 Button {
-                    vm.playUiTick()
-                    inspectedIndex = (inspectedIndex + 1) % 48
+                    snapWheel(to: wheelPosition.rounded() + 1.0)
                 } label: {
                     Text("▶")
                         .font(.system(size: 16, weight: .black))
@@ -1821,82 +1873,113 @@ public struct EvolutionAtlasSheetView: View {
 
             Spacer(minLength: 2)
 
-            // Bottom 7-Shark Curved Semi-Circular Compass Arc Dial (ARC_OFFSETS = [-3, -2, -1, 0, 1, 2, 3])
+            // Bottom Silky-Smooth Continuous Rotary Wheel (Fractional offsets + Drag Inertia + Spring Snapping)
             GeometryReader { dialGeo in
                 let dialW = dialGeo.size.width
                 let dialH = dialGeo.size.height
+                let total = GameConfigGenerated.sharkForms.count
+                let baseInt = Int(floor(wheelPosition))
+                let frac = wheelPosition - Double(baseInt)
+
                 ZStack {
-                    // Subtle Semi-Circular Compass Rim
+                    // Glowing Outer & Inner Compass Rim Tracks
                     Path { path in
-                        path.move(to: CGPoint(x: dialW * 0.06, y: dialH * 0.88))
+                        path.move(to: CGPoint(x: dialW * 0.04, y: dialH * 0.90))
                         path.addQuadCurve(
-                            to: CGPoint(x: dialW * 0.94, y: dialH * 0.88),
-                            control: CGPoint(x: dialW * 0.50, y: dialH * 0.05)
+                            to: CGPoint(x: dialW * 0.96, y: dialH * 0.90),
+                            control: CGPoint(x: dialW * 0.50, y: dialH * 0.02)
                         )
                     }
-                    .stroke(Color.cyan.opacity(0.28), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    .stroke(Color.cyan.opacity(0.32), style: StrokeStyle(lineWidth: 1.6, dash: [6, 4]))
 
-                    ForEach(arcOffsets, id: \.self) { offset in
-                        let total = GameConfigGenerated.sharkForms.count
-                        let itemIdx = ((inspectedIndex + offset) % total + total) % total
+                    // Top-Center Selection Pointer Triangle
+                    Text("▼")
+                        .font(.system(size: 9, weight: .black))
+                        .foregroundColor(.cyan)
+                        .position(x: dialW * 0.50, y: dialH * 0.08)
+
+                    ForEach(wheelSlotOffsets, id: \.self) { k in
+                        let rawIdx = baseInt + k
+                        let itemIdx = ((rawIdx % total) + total) % total
                         let itemForm = GameConfigGenerated.sharkForms[itemIdx]
                         let itemUnlocked = vm.save.unlockedSharkIds.contains(itemForm.id)
-                        let isCenter = offset == 0
-                        let absOff = abs(offset)
+                        let relOffset = Double(k) - frac
+                        let absOff = abs(relOffset)
 
-                        let angleDeg = Double(offset) * 21.5
-                        let angleRad = angleDeg * .pi / 180.0
-                        let xPct = 0.50 + sin(angleRad) * 0.44
-                        let yPct = 0.34 + (1.0 - cos(angleRad)) * 0.88
-                        let scale: CGFloat = isCenter ? 1.12 : (absOff == 1 ? 0.86 : (absOff == 2 ? 0.70 : 0.56))
+                        if absOff <= 3.65 {
+                            let angleDeg = relOffset * 20.5
+                            let angleRad = angleDeg * .pi / 180.0
+                            let xPct = 0.50 + sin(angleRad) * 0.44
+                            let yPct = 0.34 + (1.0 - cos(angleRad)) * 0.88
+                            let scale = CGFloat(max(0.46, 1.15 - absOff * 0.19))
+                            let opacity = max(0.18, 1.0 - max(0.0, absOff - 2.3) * 0.65)
+                            let isCenter = absOff < 0.45
 
-                        Button {
-                            vm.playUiTick()
-                            inspectedIndex = itemIdx
-                        } label: {
-                            VStack(spacing: 2) {
-                                ZStack {
-                                    Circle()
-                                        .fill(
-                                            isCenter
-                                                ? Color(red: 8/255, green: 36/255, blue: 72/255).opacity(0.95)
-                                                : Color(red: 2/255, green: 10/255, blue: 28/255).opacity(0.85)
-                                        )
-                                        .frame(width: 54, height: 54)
-                                        .overlay(
-                                            Circle().stroke(
-                                                isCenter ? Color.cyan : (itemUnlocked ? Color.cyan.opacity(0.4) : Color.white.opacity(0.15)),
-                                                lineWidth: isCenter ? 2.2 : 1.0
+                            Button {
+                                snapWheel(to: Double(rawIdx))
+                            } label: {
+                                VStack(spacing: 2) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(
+                                                isCenter
+                                                    ? Color(red: 8/255, green: 36/255, blue: 72/255).opacity(0.96)
+                                                    : Color(red: 2/255, green: 10/255, blue: 28/255).opacity(0.86)
                                             )
-                                        )
-                                    SharkPreviewView(form: itemForm, width: 46, height: 28, locked: !itemUnlocked)
+                                            .frame(width: 54, height: 54)
+                                            .overlay(
+                                                Circle().stroke(
+                                                    isCenter ? Color.cyan : (itemUnlocked ? Color.cyan.opacity(0.42) : Color.white.opacity(0.15)),
+                                                    lineWidth: isCenter ? 2.4 : 1.0
+                                                )
+                                            )
+                                            .shadow(color: isCenter ? Color.cyan.opacity(0.55) : .clear, radius: 8)
+                                        SharkPreviewView(form: itemForm, width: 46, height: 28, locked: !itemUnlocked)
+                                    }
+                                    Text(vm.lang == "zh" ? itemForm.nameZh : itemForm.nameEn)
+                                        .font(.system(size: 8.5, weight: .black))
+                                        .foregroundColor(isCenter ? .white : .gray)
+                                        .lineLimit(1)
                                 }
-                                Text(vm.lang == "zh" ? itemForm.nameZh : itemForm.nameEn)
-                                    .font(.system(size: 8.5, weight: .black))
-                                    .foregroundColor(isCenter ? .white : .gray)
-                                    .lineLimit(1)
+                                .scaleEffect(scale)
+                                .rotationEffect(.degrees(angleDeg * 0.42))
+                                .opacity(opacity)
                             }
-                            .scaleEffect(scale)
+                            .buttonStyle(.plain)
+                            .position(x: dialW * CGFloat(xPct), y: dialH * CGFloat(yPct))
+                            .zIndex(10.0 - absOff)
                         }
-                        .buttonStyle(.plain)
-                        .position(x: dialW * CGFloat(xPct), y: dialH * CGFloat(yPct))
                     }
                 }
                 .contentShape(Rectangle())
                 .gesture(
-                    DragGesture(minimumDistance: 14)
-                        .onEnded { val in
-                            if val.translation.width < -20 {
-                                vm.playUiTick()
-                                inspectedIndex = (inspectedIndex + 1) % 48
-                            } else if val.translation.width > 20 {
-                                vm.playUiTick()
-                                inspectedIndex = (inspectedIndex + 47) % 48
+                    DragGesture(minimumDistance: 2)
+                        .onChanged { val in
+                            if dragBaseWheelPos == nil {
+                                dragBaseWheelPos = wheelPosition
                             }
+                            let startPos = dragBaseWheelPos ?? wheelPosition
+                            let newPos = startPos - Double(val.translation.width) / 56.0
+                            wheelPosition = newPos
+                            let curIdx = ((Int(newPos.rounded()) % total) + total) % total
+                            if curIdx != inspectedIndex {
+                                inspectedIndex = curIdx
+                            }
+                            if curIdx != lastTickIndex {
+                                lastTickIndex = curIdx
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }
+                        }
+                        .onEnded { val in
+                            let startPos = dragBaseWheelPos ?? wheelPosition
+                            dragBaseWheelPos = nil
+                            let predictedPos = startPos - Double(val.predictedEndTranslation.width) / 56.0
+                            let clampedTarget = max(wheelPosition - 6.0, min(wheelPosition + 6.0, predictedPos))
+                            snapWheel(to: clampedTarget)
                         }
                 )
             }
-            .frame(height: 112)
+            .frame(height: 114)
             .padding(.bottom, 6)
         }
     }

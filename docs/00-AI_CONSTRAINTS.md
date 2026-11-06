@@ -83,3 +83,4 @@ AI 在动手写任何一行代码前，必须按顺序确认：
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
 | 2026-10-26 | 初始化 AI 协同约束规范与代码-文档强制同步机制 | `AGENTS.md`, `CLAUDE.md`, `docs/00-AI_CONSTRAINTS.md` |
+| 2026-11-05 | 新增《05. 移动端与跨平台原生移植避坑指南》索引映射，将多语言模板完整性、背景无缝解混平铺、猎物非线性步态与五位一体吞噬特效纳入跨平台移植核查红线 | `AGENTS.md`, `docs/00-AI_CONSTRAINTS.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |

@@ -1001,14 +1001,9 @@ public final class SpriteAtlasManager {
         guard let rawImg = loadBundledImage(named: assetName) else { return nil }
         let processed: UIImage
         if isWaterCanopy {
-            processed = rawImg
+            processed = processWaterLayerToSeamlessTile(rawImg, assetName: assetName) ?? rawImg
         } else {
-            processed = sliceAndKeyNormalizedCell(
-                from: rawImg,
-                bounds: SIMD4<Double>(0, 0, 1, 1),
-                preserveInteriorWhite: true,
-                topSkyOnly: true
-            ) ?? rawImg
+            processed = processTerrainLayerToSeamlessStrip(rawImg, assetName: assetName) ?? rawImg
         }
         let tex = SKTexture(image: processed)
         tex.filteringMode = .linear
@@ -1798,6 +1793,444 @@ public final class SpriteAtlasManager {
         guard let outCG = ctx.makeImage() else { return nil }
         return UIImage(cgImage: outCG)
     }
+
+    /// Synthesizes a horizontally-seamless tile from an RGBA pixel buffer by cross-fading a seamRatio overlap band
+    /// using a cosine weight curve (zero vertical seam lines between repeated tiles).
+    private func makeHorizontallySeamlessImage(
+        rgba sBuf: [UInt8],
+        width sw: Int,
+        height sh: Int,
+        seamRatio: Double
+    ) -> UIImage? {
+        let overlap = max(12, min(sw / 4, Int((Double(sw) * seamRatio).rounded())))
+        let outW = max(16, sw - overlap)
+        var oBuf = [UInt8](repeating: 0, count: outW * sh * 4)
+
+        for y in 0..<sh {
+            let rowIn = y * sw
+            let rowOut = y * outW
+            for x in 0..<outW {
+                let dstIdx = (rowOut + x) * 4
+                if x < overlap {
+                    let t = (Double(x) + 0.5) / Double(overlap)
+                    let wLeft = 0.5 - 0.5 * cos(.pi * t)
+                    let wRight = 1.0 - wLeft
+
+                    let idxL = (rowIn + x) * 4
+                    let idxR = (rowIn + outW + x) * 4
+
+                    // Unpremultiply before blending, then repremultiply
+                    let aL = Double(sBuf[idxL + 3]) / 255.0
+                    let aR = Double(sBuf[idxR + 3]) / 255.0
+                    let outA = aL * wLeft + aR * wRight
+
+                    if outA <= 0.002 {
+                        oBuf[dstIdx] = 0
+                        oBuf[dstIdx + 1] = 0
+                        oBuf[dstIdx + 2] = 0
+                        oBuf[dstIdx + 3] = 0
+                    } else {
+                        let rL = aL > 0.01 ? Double(sBuf[idxL]) / aL : 0.0
+                        let gL = aL > 0.01 ? Double(sBuf[idxL + 1]) / aL : 0.0
+                        let bL = aL > 0.01 ? Double(sBuf[idxL + 2]) / aL : 0.0
+                        let rR = aR > 0.01 ? Double(sBuf[idxR]) / aR : 0.0
+                        let gR = aR > 0.01 ? Double(sBuf[idxR + 1]) / aR : 0.0
+                        let bR = aR > 0.01 ? Double(sBuf[idxR + 2]) / aR : 0.0
+
+                        let weightL = (aL * wLeft) / outA
+                        let weightR = (aR * wRight) / outA
+                        let rMix = (rL * weightL + rR * weightR) * outA
+                        let gMix = (gL * weightL + gR * weightR) * outA
+                        let bMix = (bL * weightL + bR * weightR) * outA
+
+                        oBuf[dstIdx] = UInt8(max(0.0, min(255.0, rMix.rounded())))
+                        oBuf[dstIdx + 1] = UInt8(max(0.0, min(255.0, gMix.rounded())))
+                        oBuf[dstIdx + 2] = UInt8(max(0.0, min(255.0, bMix.rounded())))
+                        oBuf[dstIdx + 3] = UInt8(max(0.0, min(255.0, (outA * 255.0).rounded())))
+                    }
+                } else {
+                    let idxS = (rowIn + x) * 4
+                    oBuf[dstIdx] = sBuf[idxS]
+                    oBuf[dstIdx + 1] = sBuf[idxS + 1]
+                    oBuf[dstIdx + 2] = sBuf[idxS + 2]
+                    oBuf[dstIdx + 3] = sBuf[idxS + 3]
+                }
+            }
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &oBuf,
+            width: outW,
+            height: sh,
+            bitsPerComponent: 8,
+            bytesPerRow: outW * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ), let cgOut = ctx.makeImage() else {
+            return nil
+        }
+        return UIImage(cgImage: cgOut)
+    }
+
+    /// Processes Layer 0 Water Canopy ('bg_shallow_0_water', 'bg_twilight_0', 'bg_abyss_0'):
+    /// - Trims top/bottom white margins and right-edge white border on 'bg_shallow_0_water'
+    /// - Smoothly unmixes the bottom #FFFFFF fade using a C1 cosine vertical envelope so sunbeams dissolve invisibly into the water column (zero horizontal cutoff line!)
+    /// - Applies cosine horizontal cross-fading so repeated tiles have zero vertical seam lines!
+    private func processWaterLayerToSeamlessTile(_ image: UIImage, assetName: String) -> UIImage? {
+        guard let cgImg = image.cgImage else { return nil }
+        let srcW = cgImg.width
+        let srcH = cgImg.height
+        let isShallowCanopy = assetName.contains("shallow_0_water") || (Double(srcW) / Double(max(1, srcH)) > 3.0)
+
+        let cropLeft = isShallowCanopy ? Int((Double(srcW) * 0.012).rounded()) : 0
+        let cropRight = isShallowCanopy ? Int((Double(srcW) * 0.968).rounded()) : srcW
+        let cropTop = isShallowCanopy ? Int((Double(srcH) * 0.032).rounded()) : 0
+        let cropBot = isShallowCanopy ? Int((Double(srcH) * 0.902).rounded()) : srcH
+        let cropW = max(64, cropRight - cropLeft)
+        let cropH = max(32, cropBot - cropTop)
+
+        guard let croppedCG = cgImg.cropping(to: CGRect(x: cropLeft, y: cropTop, width: cropW, height: cropH)) else {
+            return nil
+        }
+
+        let maxDim = isShallowCanopy ? 1280 : 768
+        let scale = cropW > maxDim ? Double(maxDim) / Double(cropW) : 1.0
+        let w = max(64, Int((Double(cropW) * scale).rounded()))
+        let h = max(32, Int((Double(cropH) * scale).rounded()))
+
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        if isShallowCanopy {
+            for y in 0..<h {
+                let v = Double(y) / Double(max(1, h - 1))
+                // C1-continuous cosine vertical fade from v=0.22 down to v=1.0 (zero hard bottom edge)
+                let verticalEnvelope = v <= 0.22
+                    ? 1.0
+                    : pow(cos(((v - 0.22) / 0.78) * .pi * 0.5), 1.65)
+                let rowOff = y * w
+                for x in 0..<w {
+                    let idx = (rowOff + x) * 4
+                    let r = Double(rgba[idx])
+                    let g = Double(rgba[idx + 1])
+                    let b = Double(rgba[idx + 2])
+                    let maxC = max(r, max(g, b))
+                    let minC = min(r, min(g, b))
+                    let sat = maxC > 0 ? (maxC - minC) / maxC : 0.0
+
+                    // Strip any residual neutral white pixels near the top/sides
+                    if minC >= 232.0 && sat < 0.08 {
+                        rgba[idx] = 0
+                        rgba[idx + 1] = 0
+                        rgba[idx + 2] = 0
+                        rgba[idx + 3] = 0
+                        continue
+                    }
+
+                    if v >= 0.18 {
+                        let cyanInk = max((255.0 - r) / 235.0, sat * 1.25)
+                        let rawAlpha = max(0.0, min(1.0, cyanInk))
+                        let unmixWeight = min(1.0, (v - 0.18) / 0.26)
+                        let effAlpha = (1.0 - unmixWeight + unmixWeight * rawAlpha) * verticalEnvelope
+                        if effAlpha <= 0.008 {
+                            rgba[idx] = 0
+                            rgba[idx + 1] = 0
+                            rgba[idx + 2] = 0
+                            rgba[idx + 3] = 0
+                            continue
+                        }
+                        var outR = r
+                        var outG = g
+                        var outB = b
+                        if rawAlpha > 0.05 && rawAlpha < 0.98 {
+                            let invA = 1.0 / max(0.24, rawAlpha)
+                            let ur = max(0.0, min(255.0, (r - 255.0 * (1.0 - rawAlpha)) * invA))
+                            let ug = max(0.0, min(255.0, (g - 255.0 * (1.0 - rawAlpha)) * invA))
+                            let ub = max(0.0, min(255.0, (b - 255.0 * (1.0 - rawAlpha)) * invA))
+                            outR = r * (1.0 - unmixWeight) + ur * unmixWeight
+                            outG = g * (1.0 - unmixWeight) + ug * unmixWeight
+                            outB = b * (1.0 - unmixWeight) + ub * unmixWeight
+                        }
+                        // Store premultiplied RGBA
+                        rgba[idx] = UInt8(max(0.0, min(255.0, (outR * effAlpha).rounded())))
+                        rgba[idx + 1] = UInt8(max(0.0, min(255.0, (outG * effAlpha).rounded())))
+                        rgba[idx + 2] = UInt8(max(0.0, min(255.0, (outB * effAlpha).rounded())))
+                        rgba[idx + 3] = UInt8(max(0.0, min(255.0, (effAlpha * 255.0).rounded())))
+                    }
+                }
+            }
+        }
+
+        return makeHorizontallySeamlessImage(rgba: rgba, width: w, height: h, seamRatio: isShallowCanopy ? 0.10 : 0.14)
+    }
+
+    /// Processes Far / Mid / Near Ocean Terrain Layers ('bg_{zone}_{1|2|3}') with 1:1 parity to 'parallaxBackground.ts':
+    /// - Applies bottom margin crop (0.915 on 'shallow_1_far', 0.935 on 'shallow_2_mid')
+    /// - Clears slice-overlap artifact rect [0, 0.78, 0.14, 1.0] and rounds flat top-left peak on 'shallow_1_far'
+    /// - Runs BFS sky flood-fill + punches enclosed white coral/archway holes ('punchUpperInteriorWhiteHoles')
+    /// - Despills 2px white/magenta boundary halo
+    /// - Grounds bottom column notches ('groundBottomColumns') so stacked parallax layers have a 100% solid base
+    /// - Trims vertical [minY, maxY] and applies cosine horizontal seam blending ('makeHorizontallySeamlessImage')
+    private func processTerrainLayerToSeamlessStrip(_ image: UIImage, assetName: String) -> UIImage? {
+        guard let cgImg = image.cgImage else { return nil }
+        let srcW = cgImg.width
+        let srcH = cgImg.height
+
+        let isShallowFar = assetName.contains("shallow_1_far")
+        let isShallowMid = assetName.contains("shallow_2_mid")
+        let isShallowNear = assetName.contains("shallow_3_near")
+        let isAbyssMid = assetName.contains("abyss_2")
+
+        let cropBottomRatio: Double = isShallowFar ? 0.915 : (isShallowMid ? 0.935 : 1.0)
+        // Also trim 1% off left/right raw edges if there is any thin border artifact
+        let cropX0 = Int((Double(srcW) * 0.006).rounded())
+        let cropX1 = Int((Double(srcW) * 0.994).rounded())
+        let effSrcW = max(64, cropX1 - cropX0)
+        let effSrcH = max(32, Int((Double(srcH) * cropBottomRatio).rounded()))
+
+        guard let croppedCG = cgImg.cropping(to: CGRect(x: cropX0, y: 0, width: effSrcW, height: effSrcH)) else {
+            return nil
+        }
+
+        let isPanoramic = Double(effSrcW) / Double(max(1, effSrcH)) > 1.8
+        let maxDim = isPanoramic ? 1280 : 640
+        let scale = effSrcW > maxDim ? Double(maxDim) / Double(effSrcW) : 1.0
+        let w = max(64, Int((Double(effSrcW) * scale).rounded()))
+        let h = max(24, Int((Double(effSrcH) * scale).rounded()))
+
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        // 1. Clear stray slice-overlap artifact rect & round top-left flat-sliced seamount peak on shallow_1_far
+        if isShallowFar {
+            let rx1 = Int((Double(w) * 0.14).rounded(.up))
+            let ry0 = Int((Double(h) * 0.78).rounded(.down))
+            for y in max(0, ry0)..<h {
+                for x in 0..<min(w, rx1) {
+                    let p = (y * w + x) * 4
+                    rgba[p] = 255; rgba[p + 1] = 255; rgba[p + 2] = 255; rgba[p + 3] = 0
+                }
+            }
+            let xStart = Int((Double(w) * 0.032).rounded(.down))
+            let xEnd = Int((Double(w) * 0.158).rounded(.up))
+            let xCenter = Double(xStart + xEnd) * 0.5
+            let xHalf = max(1.0, Double(xEnd - xStart) * 0.5)
+            for x in max(0, xStart)...min(w - 1, xEnd) {
+                let nx = (Double(x) - xCenter) / xHalf
+                let archCurve = Int((Double(h) * (0.015 + 0.14 * nx * nx + 0.025 * sin(nx * .pi * 2.0))).rounded())
+                for y in 0..<min(h, max(0, archCurve)) {
+                    let p = (y * w + x) * 4
+                    rgba[p] = 255; rgba[p + 1] = 255; rgba[p + 2] = 255; rgba[p + 3] = 0
+                }
+            }
+        }
+
+        // 2. BFS Flood-Fill from top sky border and upper 68% left/right edges
+        var visited = [UInt8](repeating: 0, count: w * h)
+        var queue = [Int](repeating: 0, count: w * h)
+        var qHead = 0
+        var qTail = 0
+
+        func isBgCandidate(_ i: Int) -> Bool {
+            let p = i * 4
+            if rgba[p + 3] < 16 { return true }
+            let r = Int(rgba[p])
+            let g = Int(rgba[p + 1])
+            let b = Int(rgba[p + 2])
+            let maxC = max(r, max(g, b))
+            let minC = min(r, min(g, b))
+            let isWhite = minC >= 216 && (maxC - minC) <= 32
+            let isMagenta = r >= 180 && b >= 180 && g <= 135 && (r - g) >= 65 && (b - g) >= 65
+            return isWhite || isMagenta
+        }
+
+        func pushSeed(_ x: Int, _ y: Int) {
+            if x < 0 || x >= w || y < 0 || y >= h { return }
+            let i = y * w + x
+            if visited[i] != 0 || !isBgCandidate(i) { return }
+            visited[i] = 1
+            queue[qTail] = i
+            qTail += 1
+        }
+
+        for x in 0..<w {
+            pushSeed(x, 0)
+            pushSeed(x, min(h - 1, 1))
+        }
+        let maxSideY = Int(Double(h) * 0.68)
+        for y in 0..<maxSideY {
+            pushSeed(0, y)
+            pushSeed(w - 1, y)
+        }
+
+        while qHead < qTail {
+            let curr = queue[qHead]
+            qHead += 1
+            let cx = curr % w
+            let cy = (curr - cx) / w
+            if cx > 0 { pushSeed(cx - 1, cy) }
+            if cx + 1 < w { pushSeed(cx + 1, cy) }
+            if cy > 0 { pushSeed(cx, cy - 1) }
+            if cy + 1 < h { pushSeed(cx, cy + 1) }
+        }
+
+        // 3. Punch enclosed white holes in upper coral/rock archways on shallow layers
+        if isShallowFar || isShallowMid || isShallowNear {
+            let holeRatio = isShallowFar ? 0.86 : (isShallowMid ? 0.82 : 0.48)
+            let maxHoleY = Int(Double(h) * holeRatio)
+            for y in 0..<min(h, maxHoleY) {
+                let rowOff = y * w
+                for x in 0..<w {
+                    let i = rowOff + x
+                    if visited[i] == 0 {
+                        let p = i * 4
+                        let r = Int(rgba[p])
+                        let g = Int(rgba[p + 1])
+                        let b = Int(rgba[p + 2])
+                        let minC = min(r, min(g, b))
+                        let maxC = max(r, max(g, b))
+                        if minC >= 224 && (maxC - minC) <= 26 {
+                            visited[i] = 1
+                        }
+                    }
+                }
+            }
+        }
+
+        for i in 0..<(w * h) {
+            if visited[i] != 0 {
+                let p = i * 4
+                rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
+            }
+        }
+
+        // 4. Despill & feather 2px boundary halo around removed sky/background
+        if h > 2 && w > 2 {
+            for y in 1..<(h - 1) {
+                let rowOff = y * w
+                for x in 1..<(w - 1) {
+                    let i = rowOff + x
+                    if visited[i] != 0 { continue }
+                    let hasTrans = visited[i - 1] != 0 || visited[i + 1] != 0 || visited[i - w] != 0 || visited[i + w] != 0
+                    if hasTrans {
+                        let p = i * 4
+                        let r = Double(rgba[p])
+                        let g = Double(rgba[p + 1])
+                        let b = Double(rgba[p + 2])
+                        let minC = min(r, min(g, b))
+                        let maxC = max(r, max(g, b))
+                        if minC > 155.0 && (maxC - minC) < 55.0 {
+                            let keep = max(0.0, min(1.0, (232.0 - minC) / 77.0))
+                            rgba[p] = UInt8((r * 0.66 * keep).rounded())
+                            rgba[p + 1] = UInt8((g * 0.72 * keep).rounded())
+                            rgba[p + 2] = UInt8((b * 0.80 * keep).rounded())
+                            rgba[p + 3] = UInt8((Double(rgba[p + 3]) * keep).rounded())
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Ground bottom columns so elevated parallax planes have a 100% solid base (zero bottom gap lines!)
+        let shouldGroundBottom = isShallowFar || isShallowMid || isShallowNear || isAbyssMid
+        if shouldGroundBottom {
+            let bandRatio = isShallowFar ? 0.24 : (isShallowMid ? 0.14 : 0.18)
+            let minSearchY = max(4, Int(Double(h) * (1.0 - bandRatio)))
+            for x in 0..<w {
+                var lastSolidY = -1
+                for y in stride(from: h - 1, through: minSearchY, by: -1) {
+                    let p = (y * w + x) * 4
+                    let r = Int(rgba[p])
+                    let g = Int(rgba[p + 1])
+                    let b = Int(rgba[p + 2])
+                    let minC = min(r, min(g, b))
+                    let maxC = max(r, max(g, b))
+                    let isWhiteMargin = minC >= 210 && (maxC - minC) <= 34
+                    if rgba[p + 3] > 200 && !isWhiteMargin {
+                        lastSolidY = y
+                        break
+                    }
+                }
+                if lastSolidY >= minSearchY && lastSolidY < h - 1 {
+                    let srcY = max(0, lastSolidY - 2)
+                    let sp = (srcY * w + x) * 4
+                    let sr = rgba[sp], sg = rgba[sp + 1], sb = rgba[sp + 2]
+                    for y in lastSolidY..<h {
+                        let dp = (y * w + x) * 4
+                        rgba[dp] = sr; rgba[dp + 1] = sg; rgba[dp + 2] = sb; rgba[dp + 3] = 255
+                    }
+                }
+            }
+        }
+
+        // 6. Find vertical opaque bounding box [minY, maxY] to trim empty sky & bottom margin rows
+        var minY = h - 1
+        var maxY = 0
+        for y in 0..<h {
+            var opaqueCount = 0
+            let rowOff = y * w
+            for x in stride(from: 0, to: w, by: 2) {
+                if rgba[(rowOff + x) * 4 + 3] > 28 {
+                    opaqueCount += 1
+                }
+            }
+            if opaqueCount >= 4 {
+                if y < minY { minY = y }
+                if y > maxY { maxY = y }
+            }
+        }
+
+        if maxY <= minY + 16 {
+            minY = 0
+            maxY = h - 1
+        } else {
+            minY = max(0, minY - 2)
+            maxY = min(h - 1, max(minY + 24, maxY - 1))
+        }
+
+        let cropH = maxY - minY + 1
+        var croppedRgba = [UInt8](repeating: 0, count: w * cropH * 4)
+        for y in 0..<cropH {
+            let srcOff = (minY + y) * w * 4
+            let dstOff = y * w * 4
+            for byteIdx in 0..<(w * 4) {
+                croppedRgba[dstOff + byteIdx] = rgba[srcOff + byteIdx]
+            }
+        }
+
+        return makeHorizontallySeamlessImage(
+            rgba: croppedRgba,
+            width: w,
+            height: cropH,
+            seamRatio: isPanoramic ? 0.10 : 0.14
+        )
+    }
 }
 `;
 }
@@ -1922,6 +2355,11 @@ public final class GameViewModel: ObservableObject {
         var text = dict[key] ?? GameConfigGenerated.i18nEn[key] ?? key
         for (k, v) in params {
             text = text.replacingOccurrences(of: "{\\(k)}", with: v)
+        }
+        // Guarantee no uninterpolated {var} placeholder ever leaks into the UI
+        if text.contains("{"), let regex = try? NSRegularExpression(pattern: "\\\\{[a-zA-Z0-9_]+\\\\}") {
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "").trimmingCharacters(in: .whitespaces)
         }
         return text
     }
@@ -2133,7 +2571,7 @@ public final class GameViewModel: ObservableObject {
         save.bankedGenes -= cost
         geneSurgeUseCount += 1
         let bonusXp = Int((Double(xpRequired) * 0.55).rounded())
-        addXp(bonusXp)
+        _ = addXp(bonusXp)
         hp = min(maxHp, hp + 35)
         energy = maxEnergy
         persistSave()
@@ -2204,11 +2642,14 @@ public final class GameViewModel: ObservableObject {
         _ = unlockSharkForm(nextTarget.form)
     }
 
-    public func addXp(_ amount: Int) {
+    @discardableResult
+    public func addXp(_ amount: Int) -> Bool {
         xp += amount
+        var leveledUp = false
         while xp >= xpRequired {
             xp -= xpRequired
             inRunLevel += 1
+            leveledUp = true
             if inRunLevel > save.bestInRunLevel {
                 save.bestInRunLevel = inRunLevel
             }
@@ -2217,6 +2658,7 @@ public final class GameViewModel: ObservableObject {
             energy = min(maxEnergy, energy + maxEnergy * 0.50)
             playSuccessSound()
         }
+        return leveledUp
     }
 
     // MARK: - Onboarding Controls
@@ -2314,7 +2756,7 @@ public final class GameViewModel: ObservableObject {
     }
 }
 
-/// Native SpriteKit (Metal-Accelerated) Ocean Simulation & 5-Layer Parallax Scene
+/// Native SpriteKit (Metal-Accelerated) Ocean Simulation, 5-Layer Parallax & Devour FX Scene
 @MainActor
 public final class OceanGameScene: SKScene {
     public weak var viewModel: GameViewModel?
@@ -2329,17 +2771,29 @@ public final class OceanGameScene: SKScene {
     private var facingDir: Double = 1
     private var facingScaleX: Double = 1
     private var turnRate: Double = 0
+    private var biteAnim: Double = 0
+    private var cameraShakeTrauma: Double = 0
     private var invulnTimer: Double = 0
     private var cameraX: Double = 0
     private var cameraY: Double = 220
     private var smoothedRelativePreyScale: Double = 1.0
     private var lastUpdateTime: TimeInterval = 0
     private var survivalAccumulator: Double = 0
+    private var lastTrackedGameState: String = ""
 
     private let waterBgNode = SKSpriteNode()
     private let parallaxContainer = SKNode()
     private let worldContainer = SKNode()
+    private let fxContainer = SKNode()
     private let sharkNode = SKSpriteNode()
+
+    private enum PreySwimGait {
+        case CARANGIFORM
+        case ANGUILLIFORM
+        case MEDUSOID_JET
+        case PUFFER_BUOYANT
+        case RIGID_PROPULSION
+    }
 
     private final class ActivePrey {
         let config: PreyTierConfig
@@ -2349,8 +2803,13 @@ public final class OceanGameScene: SKScene {
         var vx: Double
         var vy: Double
         var phase: Double
+        var stateTimer: Double
         var armorHp: Int
         var mutation: PreyMutationVariant
+        var inflateRatio: Double
+        let cruiseDepthCenter: Double
+        let cruiseAmpY: Double
+        let cruiseFreq: Double
 
         init(config: PreyTierConfig, node: SKSpriteNode, x: Double, y: Double, vx: Double, vy: Double, mutation: PreyMutationVariant) {
             self.config = config
@@ -2360,13 +2819,87 @@ public final class OceanGameScene: SKScene {
             self.vx = vx
             self.vy = vy
             self.phase = Double.random(in: 0...(Double.pi * 2))
+            self.stateTimer = Double.random(in: 0...4.0)
             self.armorHp = 2
             self.mutation = mutation
+            self.inflateRatio = 0.0
+            self.cruiseDepthCenter = max(config.minDepth + 35.0, min(config.maxDepth - 35.0, y))
+            self.cruiseAmpY = Double.random(in: 36.0...92.0)
+            self.cruiseFreq = Double.random(in: 0.72...1.35)
+        }
+    }
+
+    private final class ActiveParticle {
+        let node: SKShapeNode
+        var x: Double
+        var y: Double
+        var vx: Double
+        var vy: Double
+        var life: Double
+        let maxLife: Double
+        let baseRadius: Double
+        let isRing: Bool
+
+        init(node: SKShapeNode, x: Double, y: Double, vx: Double, vy: Double, maxLife: Double, baseRadius: Double, isRing: Bool = false) {
+            self.node = node
+            self.x = x
+            self.y = y
+            self.vx = vx
+            self.vy = vy
+            self.life = maxLife
+            self.maxLife = maxLife
+            self.baseRadius = baseRadius
+            self.isRing = isRing
+        }
+    }
+
+    private final class ActivePickup {
+        let isGene: Bool
+        let value: Int
+        let node: SKSpriteNode
+        var x: Double
+        var y: Double
+        var vx: Double
+        var vy: Double
+        var spinPhase: Double
+        var life: Double
+
+        init(isGene: Bool, value: Int, node: SKSpriteNode, x: Double, y: Double, vx: Double, vy: Double) {
+            self.isGene = isGene
+            self.value = value
+            self.node = node
+            self.x = x
+            self.y = y
+            self.vx = vx
+            self.vy = vy
+            self.spinPhase = Double.random(in: 0...(Double.pi * 2))
+            self.life = 11.0
+        }
+    }
+
+    private final class ActiveFloatText {
+        let node: SKLabelNode
+        var x: Double
+        var y: Double
+        var vy: Double
+        var life: Double
+        let maxLife: Double
+
+        init(node: SKLabelNode, x: Double, y: Double, vy: Double, maxLife: Double) {
+            self.node = node
+            self.x = x
+            self.y = y
+            self.vy = vy
+            self.life = maxLife
+            self.maxLife = maxLife
         }
     }
 
     private var activePreys: [ActivePrey] = []
-    private let maxActivePreys = 20
+    private var activeParticles: [ActiveParticle] = []
+    private var activePickups: [ActivePickup] = []
+    private var activeFloatTexts: [ActiveFloatText] = []
+    private let maxActivePreys = 22
 
     public override func didMove(to view: SKView) {
         backgroundColor = UIColor(red: 6/255, green: 148/255, blue: 194/255, alpha: 1)
@@ -2379,6 +2912,7 @@ public final class OceanGameScene: SKScene {
         addChild(waterBgNode)
         addChild(parallaxContainer)
         addChild(worldContainer)
+        addChild(fxContainer)
 
         sharkNode.zPosition = 20
         worldContainer.addChild(sharkNode)
@@ -2404,9 +2938,21 @@ public final class OceanGameScene: SKScene {
         let viewH = Double(max(240, size.height))
         let stats = vm.currentStats
 
+        // Reset shark to comfortable mid-shallow depth when starting a new run
+        if vm.gameState != lastTrackedGameState {
+            if vm.gameState == "playing" && lastTrackedGameState == "title" {
+                sharkY = max(145.0, min(260.0, sharkY))
+                cameraY = sharkY
+            }
+            lastTrackedGameState = vm.gameState
+        }
+
         if sharkNode.texture == nil || vm.lastRenderedSpriteKey != vm.activeSharkForm.spriteKey {
             refreshSharkTexture()
         }
+
+        biteAnim = max(0.0, biteAnim - dt * 3.8)
+        cameraShakeTrauma = max(0.0, cameraShakeTrauma - dt * 2.8)
 
         // Smooth ghost HP bar decay
         let curHpPct = max(0, min(100, (vm.hp / max(1, vm.maxHp)) * 100.0))
@@ -2419,7 +2965,7 @@ public final class OceanGameScene: SKScene {
         // 1. Update Shark Physics (Title screen patrol vs In-game hunting)
         if vm.gameState == "title" {
             let patrolDir: Double = cos(currentTime * 0.95) >= 0 ? 1.0 : -1.0
-            let inputY = sin(currentTime * 2.2) * 0.12 + max(-0.18, min(0.18, (240.0 - sharkY) * 0.008))
+            let inputY = sin(currentTime * 2.2) * 0.12 + max(-0.18, min(0.18, (210.0 - sharkY) * 0.008))
             stepSharkKinematics(inputX: patrolDir, inputY: inputY, isBoosting: false, stats: stats, dt: dt)
         } else if vm.gameState == "playing" && vm.simAd == nil {
             survivalAccumulator += dt
@@ -2494,13 +3040,18 @@ public final class OceanGameScene: SKScene {
             }
         }
 
-        // 2. Sea-Surface Locked Camera Tracking (prevents sky gap & reef lift at surface)
-        let effZoom = stats.cameraZoom
-        let minSurfaceCameraY = max(72.0, (viewH * 0.5 - 76.0) / effZoom)
+        // 2. Sea-Surface Locked Camera Tracking (keeps shark centered below top HUD bars!)
+        let minSurfaceCameraY = 40.0
         let targetCamX = sharkX + cos(sharkAngle) * 58.0
-        let targetCamY = max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 32.0)
+        let targetCamY = max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0)
         cameraX += (targetCamX - cameraX) * min(1.0, dt * 6.5)
         cameraY += (targetCamY - cameraY) * min(1.0, dt * 6.5)
+
+        if cameraShakeTrauma > 0.01 {
+            let shakeMag = cameraShakeTrauma * cameraShakeTrauma * 9.0
+            cameraX += Double.random(in: -shakeMag...shakeMag)
+            cameraY += Double.random(in: -shakeMag...shakeMag)
+        }
 
         // 3. Smooth Optical Growth Shrinking of Far / Mid / Near Background Layers
         let targetRelScale = stats.relativePreyScale
@@ -2513,6 +3064,7 @@ public final class OceanGameScene: SKScene {
 
         renderParallaxBackground(viewW: viewW, viewH: viewH, bgScales: bgScales)
         stepAndRenderPreys(viewW: viewW, viewH: viewH, stats: stats, dt: dt, currentTime: currentTime)
+        stepAndRenderDevourFX(viewW: viewW, viewH: viewH, stats: stats, dt: dt)
         renderPlayerShark(viewW: viewW, viewH: viewH, stats: stats)
     }
 
@@ -2547,14 +3099,16 @@ public final class OceanGameScene: SKScene {
         sharkVx = cos(sharkAngle) * speed
         sharkVy = sin(sharkAngle) * speed
         sharkX += sharkVx * dt
-        sharkY = max(28.0, min(2200.0, sharkY + sharkVy * dt))
+        sharkY = max(46.0, min(2200.0, sharkY + sharkVy * dt))
         swimPhase += dt * (isBoosting ? 12.5 : 7.8)
     }
 
     private func renderPlayerShark(viewW: Double, viewH: Double, stats: ComputedSharkStats) {
         let zoom = stats.cameraZoom
-        let screenX = viewW * 0.5 + (sharkX - cameraX) * zoom
-        let screenY = viewH * 0.5 - (sharkY - cameraY) * zoom
+        let biteSnap = sin(biteAnim * .pi)
+        let lungeWorld = biteSnap * 14.0 * stats.scale
+        let screenX = viewW * 0.5 + (sharkX + cos(sharkAngle) * lungeWorld - cameraX) * zoom
+        let screenY = viewH * 0.5 - (sharkY + sin(sharkAngle) * lungeWorld - cameraY) * zoom
 
         let drawW = GameRules.sharkBaseDrawSize * stats.scale * zoom
         let texAspect: Double
@@ -2569,10 +3123,10 @@ public final class OceanGameScene: SKScene {
         sharkNode.position = CGPoint(x: screenX, y: screenY)
 
         let absFacing = max(0.15, abs(facingScaleX))
-        let perspectiveScaleX = (0.42 + 0.58 * pow(absFacing, 0.8)) * (facingScaleX >= 0 ? 1.0 : -1.0)
+        let perspectiveScaleX = (0.42 + 0.58 * pow(absFacing, 0.8)) * (1.0 + biteSnap * 0.14) * (facingScaleX >= 0 ? 1.0 : -1.0)
         let horizonPitch = atan2(-sin(sharkAngle), abs(cos(sharkAngle)))
         sharkNode.xScale = CGFloat(perspectiveScaleX)
-        sharkNode.yScale = 1.0
+        sharkNode.yScale = CGFloat(1.0 + biteSnap * 0.11)
         sharkNode.zRotation = CGFloat(horizonPitch * (facingScaleX >= 0 ? 1.0 : -1.0))
         sharkNode.alpha = invulnTimer > 0 && Int(invulnTimer * 20) % 2 == 0 ? 0.45 : 1.0
 
@@ -2596,6 +3150,63 @@ public final class OceanGameScene: SKScene {
                 let waveDy = sin(phase - tailProgress * 2.15 * .pi) * 0.09 * env
                 let cBendDy = -max(-0.8, min(0.8, turnBend)) * 0.14 * pow(tailProgress, 1.72)
                 dst.append(SIMD2<Float>(u, v + Float(waveDy + cBendDy)))
+            }
+        }
+        node.warpGeometry = SKWarpGeometryGrid(columns: cols, rows: 1, sourcePositions: src, destinationPositions: dst)
+    }
+
+    private func classifyPreySwimGait(_ p: PreyTierConfig) -> PreySwimGait {
+        if p.isHazard && p.baseSpeed < 18 { return .RIGID_PROPULSION }
+        if p.behavior == .SUB_PATROL { return .RIGID_PROPULSION }
+        if p.behavior == .EEL_CHARGER || p.id.contains("eel") || p.id.contains("oarfish") || p.id.contains("worm") {
+            return .ANGUILLIFORM
+        }
+        if p.behavior == .PUFFER_INFLATE || p.id.contains("puffer") || p.id.contains("crab") || p.id.contains("isopod") || p.id.contains("starfish") {
+            return .PUFFER_BUOYANT
+        }
+        if p.id.contains("jelly") || p.id.contains("squid") || p.id.contains("octopus") || p.id.contains("nautilus") || p.behavior == .KRAKEN_BOSS {
+            return .MEDUSOID_JET
+        }
+        return .CARANGIFORM
+    }
+
+    private func applyPreySpineWaveWarp(to node: SKSpriteNode, prey: ActivePrey) {
+        let gait = classifyPreySwimGait(prey.config)
+        if gait == .RIGID_PROPULSION {
+            node.warpGeometry = nil
+            return
+        }
+        let cols = 7
+        var src: [SIMD2<Float>] = []
+        var dst: [SIMD2<Float>] = []
+        src.reserveCapacity((cols + 1) * 2)
+        dst.reserveCapacity((cols + 1) * 2)
+
+        for row in 0...1 {
+            let v = Float(row)
+            for col in 0...cols {
+                let u = Float(col) / Float(cols)
+                src.append(SIMD2<Float>(u, v))
+                // Prey sprite assets face LEFT (u = 0 is snout/head, u = 1 is tail/tentacles)
+                let tailProgress = Double(u)
+                let dy: Double
+                switch gait {
+                case .CARANGIFORM:
+                    let env = 0.02 * tailProgress + 0.98 * pow(tailProgress, 2.05)
+                    dy = sin(prey.phase * 1.45 - tailProgress * 2.1 * .pi) * 0.095 * env
+                case .ANGUILLIFORM:
+                    let env = 0.14 + 0.86 * pow(tailProgress, 1.15)
+                    dy = sin(prey.phase * 1.65 - tailProgress * 3.1 * .pi) * 0.125 * env
+                case .MEDUSOID_JET:
+                    let env = pow(tailProgress, 1.55)
+                    dy = sin(prey.phase * 1.2 - tailProgress * 1.7 * .pi) * 0.105 * env
+                case .PUFFER_BUOYANT:
+                    let env = pow(tailProgress, 2.2)
+                    dy = sin(prey.phase * 1.85 - tailProgress * 1.9 * .pi) * 0.065 * env
+                case .RIGID_PROPULSION:
+                    dy = 0
+                }
+                dst.append(SIMD2<Float>(u, v + Float(dy)))
             }
         }
         node.warpGeometry = SKWarpGeometryGrid(columns: cols, rows: 1, sourcePositions: src, destinationPositions: dst)
@@ -2636,18 +3247,22 @@ public final class OceanGameScene: SKScene {
         let baseFarH = max(82.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.232 : 0.42))
 
         if let waterTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.water, isWaterCanopy: true) {
-            let baseCanopyH = zonePrefix == "bg_shallow" ? panoRefH * 0.36 : viewH
+            let baseCanopyH = zonePrefix == "bg_shallow" ? min(78.0, viewH * 0.21) : viewH
             let canopyH = baseCanopyH * bgScales.waterScale
-            addTiledStrip(
-                texture: waterTex,
-                baseTargetH: baseCanopyH,
-                scaledTargetH: canopyH,
-                bottomYFromBottom: viewH - canopyH,
-                parallaxXFactor: 0.012,
-                viewW: viewW,
-                alpha: 0.92,
-                zPos: 1
-            )
+            let surfaceLift = max(0.0, cameraY - 40.0) * 0.38
+            let canopyBottomY = viewH - canopyH + surfaceLift
+            if canopyBottomY < viewH {
+                addTiledStrip(
+                    texture: waterTex,
+                    baseTargetH: baseCanopyH,
+                    scaledTargetH: canopyH,
+                    bottomYFromBottom: canopyBottomY,
+                    parallaxXFactor: 0.012,
+                    viewW: viewW,
+                    alpha: zonePrefix == "bg_shallow" ? 0.90 : 0.94,
+                    zPos: 1
+                )
+            }
         }
 
         if let farTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.far) {
@@ -2710,18 +3325,18 @@ public final class OceanGameScene: SKScene {
         guard texSize.height > 0 else { return }
         let aspect = Double(texSize.width / texSize.height)
         let baseTileW = max(256.0, baseTargetH * aspect)
-        let tileW = max(148.0, scaledTargetH * aspect)
+        let tileW = ceil(max(148.0, scaledTargetH * aspect))
 
         let rawPhase = (cameraX * parallaxXFactor) / baseTileW
         let normPhase = (rawPhase.truncatingRemainder(dividingBy: 1.0) + 1.0).truncatingRemainder(dividingBy: 1.0)
         let centerAnchorX = viewW * 0.5 - normPhase * tileW
-        var startX = ((centerAnchorX.truncatingRemainder(dividingBy: tileW) + tileW).truncatingRemainder(dividingBy: tileW)) - tileW
+        var startX = floor(((centerAnchorX.truncatingRemainder(dividingBy: tileW) + tileW).truncatingRemainder(dividingBy: tileW)) - tileW)
 
         while startX < viewW {
             let node = SKSpriteNode(texture: texture)
             node.anchorPoint = CGPoint(x: 0, y: 0)
-            node.size = CGSize(width: tileW + 1.5, height: scaledTargetH)
-            node.position = CGPoint(x: startX, y: bottomYFromBottom)
+            node.size = CGSize(width: tileW, height: ceil(scaledTargetH))
+            node.position = CGPoint(x: startX, y: floor(bottomYFromBottom))
             node.alpha = CGFloat(alpha)
             node.zPosition = zPos
             parallaxContainer.addChild(node)
@@ -2731,7 +3346,7 @@ public final class OceanGameScene: SKScene {
 
     private func syncPreyPopulation() {
         while activePreys.count < maxActivePreys {
-            spawnOnePrey(nearShark: activePreys.count < 6)
+            spawnOnePrey(nearShark: activePreys.count < 7)
         }
     }
 
@@ -2744,7 +3359,7 @@ public final class OceanGameScene: SKScene {
             return targetDepth >= p.minDepth && targetDepth <= p.maxDepth
         }
         let chosen = candidates.randomElement() ?? GameConfigGenerated.preyTiers[0]
-        let dist = nearShark ? Double.random(in: 240...520) : Double.random(in: 640...1450)
+        let dist = nearShark ? Double.random(in: 220...480) : Double.random(in: 580...1400)
         let ang = Double.random(in: 0...(Double.pi * 2))
         let px = sharkX + cos(ang) * dist
         let py = max(chosen.minDepth, min(chosen.maxDepth, sharkY + sin(ang) * dist * 0.6))
@@ -2763,10 +3378,246 @@ public final class OceanGameScene: SKScene {
                 x: px,
                 y: py,
                 vx: dir * chosen.baseSpeed,
-                vy: 0,
+                vy: sin(ang) * chosen.baseSpeed * 0.25,
                 mutation: Double.random(in: 0...1) < 0.08 ? .GOLDEN_SWARM : .NONE
             )
         )
+    }
+
+    // MARK: - Devour Particles, Spinning Coin/Gene Pickups & Floating Combat Text
+    private func spawnDevourParticles(x: Double, y: Double, preyTier: Int, isGolden: Bool) {
+        // 1. Expanding Devour Shockwave Ring
+        let ringNode = SKShapeNode(circleOfRadius: 10)
+        ringNode.strokeColor = isGolden
+            ? UIColor(red: 253/255, green: 224/255, blue: 71/255, alpha: 0.95)
+            : UIColor(red: 74/255, green: 222/255, blue: 128/255, alpha: 0.90)
+        ringNode.fillColor = .clear
+        ringNode.lineWidth = 2.6
+        ringNode.zPosition = 26
+        fxContainer.addChild(ringNode)
+        activeParticles.append(
+            ActiveParticle(node: ringNode, x: x, y: y, vx: 0, vy: 0, maxLife: 0.34, baseRadius: 10, isRing: true)
+        )
+
+        // 2. Bursting Green/Teal Devour Slime Bubbles & Golden Sparks
+        let count = min(22, 10 + preyTier * 2)
+        for i in 0..<count {
+            let ang = Double.random(in: 0...(Double.pi * 2))
+            let spd = Double.random(in: 65...255)
+            let rad = Double.random(in: 2.8...6.8)
+            let dot = SKShapeNode(circleOfRadius: CGFloat(rad))
+            if isGolden || i % 3 == 0 {
+                dot.fillColor = UIColor(red: 250/255, green: 204/255, blue: 21/255, alpha: 1.0)
+                dot.strokeColor = UIColor.white.withAlphaComponent(0.7)
+            } else if i % 2 == 0 {
+                dot.fillColor = UIColor(red: 74/255, green: 222/255, blue: 128/255, alpha: 0.95)
+                dot.strokeColor = UIColor(red: 187/255, green: 247/255, blue: 208/255, alpha: 0.8)
+            } else {
+                dot.fillColor = UIColor(red: 45/255, green: 212/255, blue: 191/255, alpha: 0.95)
+                dot.strokeColor = UIColor(red: 153/255, green: 246/255, blue: 228/255, alpha: 0.8)
+            }
+            dot.lineWidth = 1.0
+            dot.zPosition = 25
+            fxContainer.addChild(dot)
+            activeParticles.append(
+                ActiveParticle(
+                    node: dot,
+                    x: x,
+                    y: y,
+                    vx: cos(ang) * spd,
+                    vy: sin(ang) * spd - Double.random(in: 12...45),
+                    maxLife: Double.random(in: 0.36...0.68),
+                    baseRadius: rad
+                )
+            )
+        }
+    }
+
+    private func spawnDevourPickups(x: Double, y: Double, coinGain: Int, geneGain: Int) {
+        let coinCount = min(4, max(1, (coinGain + 3) / 4))
+        let baseCoinVal = max(1, coinGain / coinCount)
+        for i in 0..<coinCount {
+            let val = (i == coinCount - 1) ? max(1, coinGain - baseCoinVal * (coinCount - 1)) : baseCoinVal
+            let node = SKSpriteNode()
+            if let img = SpriteAtlasManager.shared.uiIconImage(for: "UI_ICON_COIN") {
+                node.texture = SKTexture(image: img)
+            }
+            node.size = CGSize(width: 22, height: 22)
+            node.zPosition = 24
+            fxContainer.addChild(node)
+            let ang = Double.random(in: 0...(Double.pi * 2))
+            let spd = Double.random(in: 75...165)
+            activePickups.append(
+                ActivePickup(
+                    isGene: false,
+                    value: val,
+                    node: node,
+                    x: x + cos(ang) * 10.0,
+                    y: y + sin(ang) * 10.0,
+                    vx: cos(ang) * spd,
+                    vy: sin(ang) * spd - 35.0
+                )
+            )
+        }
+
+        if geneGain > 0 {
+            let node = SKSpriteNode()
+            if let img = SpriteAtlasManager.shared.uiIconImage(for: "UI_ICON_GENE") {
+                node.texture = SKTexture(image: img)
+            }
+            node.size = CGSize(width: 24, height: 24)
+            node.zPosition = 24
+            fxContainer.addChild(node)
+            let ang = Double.random(in: 0...(Double.pi * 2))
+            activePickups.append(
+                ActivePickup(
+                    isGene: true,
+                    value: geneGain,
+                    node: node,
+                    x: x,
+                    y: y,
+                    vx: cos(ang) * 120.0,
+                    vy: sin(ang) * 120.0 - 45.0
+                )
+            )
+        }
+    }
+
+    private func spawnFloatingText(x: Double, y: Double, text: String, color: UIColor, fontSize: CGFloat = 14) {
+        if activeFloatTexts.count > 16 {
+            let oldest = activeFloatTexts.removeFirst()
+            oldest.node.removeFromParent()
+        }
+        let lbl = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        lbl.text = text
+        lbl.fontSize = fontSize
+        lbl.fontColor = color
+        lbl.verticalAlignmentMode = .center
+        lbl.horizontalAlignmentMode = .center
+        lbl.zPosition = 30
+        fxContainer.addChild(lbl)
+        activeFloatTexts.append(
+            ActiveFloatText(node: lbl, x: x, y: y, vy: -52.0, maxLife: 0.95)
+        )
+    }
+
+    private func stepAndRenderDevourFX(viewW: Double, viewH: Double, stats: ComputedSharkStats, dt: Double) {
+        guard let vm = viewModel else { return }
+        let zoom = stats.cameraZoom
+
+        // 1. Update & Render Devour Burst Particles
+        var pIdx = activeParticles.count - 1
+        while pIdx >= 0 {
+            let pt = activeParticles[pIdx]
+            pt.life -= dt
+            if pt.life <= 0 {
+                pt.node.removeFromParent()
+                activeParticles.remove(at: pIdx)
+                pIdx -= 1
+                continue
+            }
+            let progress = 1.0 - (pt.life / pt.maxLife)
+            if pt.isRing {
+                let scale = 1.0 + progress * 3.8
+                pt.node.setScale(CGFloat(scale))
+                pt.node.alpha = CGFloat(max(0.0, 1.0 - progress))
+            } else {
+                pt.x += pt.vx * dt
+                pt.y += pt.vy * dt
+                pt.vx *= 0.92
+                pt.vy = pt.vy * 0.92 - 18.0 * dt
+                pt.node.setScale(CGFloat(max(0.2, 1.0 - progress * 0.65)))
+                pt.node.alpha = CGFloat(max(0.0, 1.0 - progress * 0.85))
+            }
+            let sx = viewW * 0.5 + (pt.x - cameraX) * zoom
+            let sy = viewH * 0.5 - (pt.y - cameraY) * zoom
+            pt.node.position = CGPoint(x: sx, y: sy)
+            pIdx -= 1
+        }
+
+        // 2. Update & Render 3D Spinning Coin & Gene Pickups with Magnetic Pull
+        let magnetR = (vm.frenzyActive ? 390.0 : 220.0) + stats.magnetRadiusBonus
+        var kIdx = activePickups.count - 1
+        while kIdx >= 0 {
+            let pk = activePickups[kIdx]
+            pk.life -= dt
+            pk.spinPhase += dt * 9.5
+            let dx = sharkX - pk.x
+            let dy = sharkY - pk.y
+            let dist = hypot(dx, dy)
+
+            if dist < magnetR && dist > 1.0 {
+                let pullSpeed = vm.frenzyActive ? 620.0 : 410.0
+                pk.vx += (dx / dist) * pullSpeed * dt * 5.2
+                pk.vy += (dy / dist) * pullSpeed * dt * 5.2
+            } else {
+                pk.vx *= 0.94
+                pk.vy = pk.vy * 0.94 - 8.0 * dt
+            }
+            pk.x += pk.vx * dt
+            pk.y += pk.vy * dt
+
+            if dist < 38.0 * stats.scale || pk.life <= 0 {
+                if dist < 38.0 * stats.scale {
+                    if pk.isGene {
+                        vm.save.bankedGenes += pk.value
+                        vm.runGenesEarned += pk.value
+                        spawnFloatingText(
+                            x: pk.x,
+                            y: pk.y - 12,
+                            text: "+\\(pk.value) 🧬",
+                            color: UIColor(red: 110/255, green: 231/255, blue: 183/255, alpha: 1.0),
+                            fontSize: 13
+                        )
+                    } else {
+                        vm.save.bankedCoins += pk.value
+                        vm.runCoinsEarned += pk.value
+                        spawnFloatingText(
+                            x: pk.x,
+                            y: pk.y - 10,
+                            text: "+\\(pk.value) 🪙",
+                            color: UIColor(red: 253/255, green: 224/255, blue: 71/255, alpha: 1.0),
+                            fontSize: 12
+                        )
+                    }
+                }
+                pk.node.removeFromParent()
+                activePickups.remove(at: kIdx)
+                kIdx -= 1
+                continue
+            }
+
+            let sx = viewW * 0.5 + (pk.x - cameraX) * zoom
+            let sy = viewH * 0.5 - (pk.y - cameraY) * zoom
+            pk.node.position = CGPoint(x: sx, y: sy)
+            // 3D coin flip / crystal spin effect
+            pk.node.xScale = CGFloat(0.35 + 0.65 * abs(cos(pk.spinPhase)))
+            pk.node.yScale = 1.0
+            kIdx -= 1
+        }
+
+        // 3. Update & Render Floating Combat Text Popups
+        var fIdx = activeFloatTexts.count - 1
+        while fIdx >= 0 {
+            let ft = activeFloatTexts[fIdx]
+            ft.life -= dt
+            if ft.life <= 0 {
+                ft.node.removeFromParent()
+                activeFloatTexts.remove(at: fIdx)
+                fIdx -= 1
+                continue
+            }
+            ft.y += ft.vy * dt
+            ft.vy *= 0.94
+            let progress = 1.0 - (ft.life / ft.maxLife)
+            let popScale = progress < 0.18 ? (0.65 + (progress / 0.18) * 0.48) : (1.13 - (progress - 0.18) * 0.22)
+            let sx = viewW * 0.5 + (ft.x - cameraX) * zoom
+            let sy = viewH * 0.5 - (ft.y - cameraY) * zoom
+            ft.node.position = CGPoint(x: sx, y: sy)
+            ft.node.setScale(CGFloat(max(0.5, popScale)))
+            ft.node.alpha = CGFloat(min(1.0, ft.life / (ft.maxLife * 0.42)))
+            fIdx -= 1
+        }
     }
 
     private func stepAndRenderPreys(viewW: Double, viewH: Double, stats: ComputedSharkStats, dt: Double, currentTime: TimeInterval) {
@@ -2777,9 +3628,10 @@ public final class OceanGameScene: SKScene {
         var idx = activePreys.count - 1
         while idx >= 0 {
             let p = activePreys[idx]
-            p.phase += dt * 5.2
-            p.x += p.vx * dt
-            p.y = max(p.config.minDepth, min(p.config.maxDepth, p.y + sin(p.phase) * 14.0 * dt))
+            let gait = classifyPreySwimGait(p.config)
+            let speedNorm = max(0.65, min(2.4, hypot(p.vx, p.vy) / max(18.0, p.config.baseSpeed)))
+            p.phase += dt * 5.4 * speedNorm
+            p.stateTimer += dt
 
             let dx = p.x - sharkX
             let dy = p.y - sharkY
@@ -2797,29 +3649,143 @@ public final class OceanGameScene: SKScene {
                 sharkStats: stats,
                 mutationVariant: p.mutation
             )
-            let hitRadius = p.config.radius * visualScale + 26.0 * stats.scale
+            let encounterPreview = GameRules.resolvePreyEncounter(
+                prey: p.config,
+                sharkStats: stats,
+                isBoosting: vm.isBoostingHeld && vm.energy > 2.0,
+                frenzyActive: vm.frenzyActive,
+                mutationVariant: p.mutation
+            )
 
-            if vm.gameState == "playing" && vm.simAd == nil && dist < hitRadius {
-                let outcome = GameRules.resolvePreyEncounter(
-                    prey: p.config,
-                    sharkStats: stats,
-                    isBoosting: vm.isBoostingHeld && vm.energy > 2.0,
-                    frenzyActive: vm.frenzyActive,
-                    mutationVariant: p.mutation
-                )
-                if outcome == .DEVOUR {
+            // Biomechanical Non-Linear Trajectory AI (1:1 parity with src/App.tsx)
+            let dirSign: Double = p.vx >= 0 ? 1.0 : -1.0
+            switch p.config.behavior {
+            case .SCHOOL_FLEE:
+                if dist < 250 && encounterPreview == .DEVOUR && dist > 1.0 {
+                    let fleeAng = atan2(dy, dx) + sin(p.phase * 1.9) * 0.42
+                    let fleeSpd = p.config.baseSpeed * 1.62
+                    p.vx += (cos(fleeAng) * fleeSpd - p.vx) * min(1.0, dt * 5.0)
+                    p.vy += (sin(fleeAng) * fleeSpd - p.vy) * min(1.0, dt * 5.0)
+                } else {
+                    let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq + p.phase * 0.25) * p.cruiseAmpY
+                    let desiredVy = (targetY - p.y) * 1.55 + cos(p.phase * 0.85) * p.config.baseSpeed * 0.42
+                    let desiredVx = dirSign * p.config.baseSpeed * (0.86 + 0.26 * sin(p.stateTimer * 1.4))
+                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.2)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.2)
+                }
+            case .PUFFER_INFLATE:
+                let targetInflate = dist < 195 ? 1.0 : 0.0
+                p.inflateRatio += (targetInflate - p.inflateRatio) * min(1.0, dt * 4.5)
+                let targetY = p.cruiseDepthCenter + sin(p.stateTimer * 0.95) * (p.cruiseAmpY * 0.72)
+                let desiredVy = (targetY - p.y) * 1.25 + sin(p.phase * 0.75) * 28.0
+                let desiredVx = dirSign * p.config.baseSpeed * (1.0 - p.inflateRatio * 0.35)
+                p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
+                p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
+            case .EEL_CHARGER:
+                if dist < 310 && encounterPreview != .DEVOUR && dist > 1.0 {
+                    let atkAng = atan2(-dy, -dx) + sin(p.phase * 2.1) * 0.28
+                    let atkSpd = p.config.baseSpeed * 1.48
+                    p.vx += (cos(atkAng) * atkSpd - p.vx) * min(1.0, dt * 4.2)
+                    p.vy += (sin(atkAng) * atkSpd - p.vy) * min(1.0, dt * 4.2)
+                } else {
+                    let desiredVy = cos(p.phase * 1.15) * p.config.baseSpeed * 0.62
+                    let desiredVx = dirSign * p.config.baseSpeed
+                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.5)
+                }
+            case .MINE_STATIC:
+                p.vx = sin(p.stateTimer * 0.8 + p.phase * 0.2) * 8.0
+                p.vy = cos(p.stateTimer * 1.1 + p.phase * 0.3) * 12.0
+            default:
+                if gait == .MEDUSOID_JET {
+                    let jetPulse = 0.45 + 0.85 * pow(max(0.0, sin(p.phase * 0.65)), 2.0)
+                    let desiredVx = dirSign * p.config.baseSpeed * jetPulse
+                    let desiredVy = -abs(sin(p.phase * 0.65)) * p.config.baseSpeed * 0.48 + cos(p.stateTimer * 0.9) * 26.0
+                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 4.0)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 4.0)
+                } else {
+                    let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq) * p.cruiseAmpY
+                    let desiredVy = (targetY - p.y) * 1.35 + sin(p.phase * 0.72) * p.config.baseSpeed * 0.38
+                    let desiredVx = dirSign * p.config.baseSpeed * (0.88 + 0.22 * cos(p.stateTimer * 1.1))
+                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 2.8)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 2.8)
+                }
+            }
+
+            // Jaw Suction Pull: pull devourable prey straight into the shark's open jaws when close!
+            let suctionRadius = (88.0 + stats.magnetRadiusBonus * 0.35) * stats.scale
+            let mouthX = sharkX + cos(sharkAngle) * 28.0 * stats.scale
+            let mouthY = sharkY + sin(sharkAngle) * 28.0 * stats.scale
+            let mouthDist = hypot(mouthX - p.x, mouthY - p.y)
+            if vm.gameState == "playing" && encounterPreview == .DEVOUR && mouthDist < suctionRadius && mouthDist > 1.0 {
+                let pullStrength = (1.0 - mouthDist / suctionRadius) * 540.0
+                p.x += ((mouthX - p.x) / mouthDist) * pullStrength * dt
+                p.y += ((mouthY - p.y) / mouthDist) * pullStrength * dt
+                if biteAnim < 0.35 {
+                    biteAnim = 0.55
+                }
+            }
+
+            p.x += p.vx * dt
+            p.y += p.vy * dt
+            if p.y < p.config.minDepth + 14.0 {
+                p.y = p.config.minDepth + 14.0
+                p.vy = abs(p.vy) * 0.65 + 18.0
+            } else if p.y > p.config.maxDepth - 14.0 {
+                p.y = p.config.maxDepth - 14.0
+                p.vy = -abs(p.vy) * 0.65 - 18.0
+            }
+
+            let postDx = p.x - sharkX
+            let postDy = p.y - sharkY
+            let postDist = hypot(postDx, postDy)
+            let hitRadius = p.config.radius * visualScale + 28.0 * stats.scale
+
+            if vm.gameState == "playing" && vm.simAd == nil && postDist < hitRadius {
+                if encounterPreview == .DEVOUR {
+                    biteAnim = 1.0
+                    cameraShakeTrauma = min(1.0, cameraShakeTrauma + (p.config.tier >= 4 ? 0.36 : 0.16))
+
                     let mult = p.mutation == .GOLDEN_SWARM ? 3 : 1
                     let heatScoreMult = vm.huntingHeatBuff.scoreMultiplier
-                    vm.score += Int((Double(p.config.scoreValue * mult) * heatScoreMult).rounded())
-                    let coinGain = max(1, Int((Double(p.config.coinValue * mult) * stats.coinYieldMultiplier).rounded()))
-                    vm.save.bankedCoins += coinGain
-                    vm.runCoinsEarned += coinGain
+                    let scoreGain = Int((Double(p.config.scoreValue * mult) * heatScoreMult).rounded())
+                    vm.score += scoreGain
 
-                    if p.config.geneValue > 0 && (p.mutation == .GOLDEN_SWARM || Double.random(in: 0...1) < 0.35) {
-                        let geneGain = max(1, Int((Double(p.config.geneValue) * stats.geneYieldMultiplier).rounded()))
-                        vm.save.bankedGenes += geneGain
-                        vm.runGenesEarned += geneGain
+                    let coinGain = max(1, Int((Double(p.config.coinValue * mult) * stats.coinYieldMultiplier).rounded()))
+                    var geneGain = 0
+                    if p.config.geneValue > 0 && (p.mutation == .GOLDEN_SWARM || Double.random(in: 0...1) < 0.38) {
+                        geneGain = max(1, Int((Double(p.config.geneValue) * stats.geneYieldMultiplier).rounded()))
                     }
+
+                    // Spawn devour particles, spinning coin/gene pickups & floating combat text
+                    spawnDevourParticles(x: p.x, y: p.y, preyTier: p.config.tier, isGolden: p.mutation == .GOLDEN_SWARM)
+                    spawnDevourPickups(x: p.x, y: p.y, coinGain: coinGain, geneGain: geneGain)
+
+                    vm.comboCount += 1
+                    vm.comboTimer = 4.2
+                    if vm.comboCount > vm.runPeakCombo {
+                        vm.runPeakCombo = vm.comboCount
+                    }
+
+                    let devourLabel: String
+                    if p.mutation == .GOLDEN_SWARM {
+                        devourLabel = vm.lang == "zh" ? "✨ 黄金吞噬! +\\(scoreGain)" : "✨ GOLDEN! +\\(scoreGain)"
+                    } else if vm.comboCount >= 3 {
+                        devourLabel = vm.lang == "zh"
+                            ? "一口吞噬! +\\(scoreGain) · x\\(vm.comboCount)🔥"
+                            : "CHOMP! +\\(scoreGain) · x\\(vm.comboCount)🔥"
+                    } else {
+                        devourLabel = "+\\(scoreGain)"
+                    }
+                    spawnFloatingText(
+                        x: p.x,
+                        y: p.y - 14,
+                        text: devourLabel,
+                        color: p.mutation == .GOLDEN_SWARM
+                            ? UIColor(red: 250/255, green: 204/255, blue: 21/255, alpha: 1.0)
+                            : UIColor(red: 74/255, green: 222/255, blue: 128/255, alpha: 1.0),
+                        fontSize: vm.comboCount >= 5 ? 15 : 13
+                    )
 
                     // Target Bounty check
                     if p.config.id == vm.targetBountyPreyId {
@@ -2831,6 +3797,13 @@ public final class OceanGameScene: SKScene {
                             vm.runGenesEarned += 3
                             vm.pickNewBountyPrey()
                             vm.playSuccessSound()
+                            spawnFloatingText(
+                                x: sharkX,
+                                y: sharkY - 34,
+                                text: vm.lang == "zh" ? "🎯 悬赏达成! +45🪙 +3🧬" : "🎯 BOUNTY! +45🪙 +3🧬",
+                                color: UIColor(red: 253/255, green: 224/255, blue: 71/255, alpha: 1.0),
+                                fontSize: 15
+                            )
                         }
                     }
 
@@ -2842,6 +3815,13 @@ public final class OceanGameScene: SKScene {
                             vm.frenzyActive = true
                             vm.frenzyTimer = GameConfigGenerated.frenzyDuration + stats.frenzyDurationBonus
                             vm.recomputeCurrentSharkStats()
+                            spawnFloatingText(
+                                x: sharkX,
+                                y: sharkY - 40,
+                                text: vm.lang == "zh" ? "🔥 黄金狂暴觉醒!" : "🔥 GOLDEN FRENZY!",
+                                color: UIColor.yellow,
+                                fontSize: 16
+                            )
                         }
                     }
 
@@ -2855,44 +3835,72 @@ public final class OceanGameScene: SKScene {
                     }
 
                     vm.hp = min(vm.maxHp, vm.hp + p.config.hpRestore * stats.devourHealMultiplier)
-                    vm.addXp(p.config.xpValue * mult)
-                    vm.comboCount += 1
-                    vm.comboTimer = 4.2
-                    if vm.comboCount > vm.runPeakCombo {
-                        vm.runPeakCombo = vm.comboCount
+                    if vm.addXp(p.config.xpValue * mult) {
+                        spawnFloatingText(
+                            x: sharkX,
+                            y: sharkY - 38,
+                            text: vm.lang == "zh" ? "⚡ LV.\\(vm.inRunLevel) 体型成长!" : "⚡ LV.\\(vm.inRunLevel) SIZE UP!",
+                            color: UIColor.cyan,
+                            fontSize: 16
+                        )
                     }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     p.node.removeFromParent()
                     activePreys.remove(at: idx)
                     idx -= 1
                     continue
-                } else if outcome == .ARMOR_CRUSH {
+                } else if encounterPreview == .ARMOR_CRUSH {
                     p.armorHp -= 1
+                    biteAnim = 0.85
+                    cameraShakeTrauma = min(1.0, cameraShakeTrauma + 0.42)
                     invulnTimer = 0.45
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     if p.armorHp <= 0 {
                         vm.score += p.config.scoreValue * 2
-                        let gGain = p.config.geneValue * 2
-                        vm.save.bankedGenes += gGain
-                        vm.runGenesEarned += gGain
-                        vm.addXp(Int(Double(p.config.xpValue) * 1.5))
+                        let gGain = max(1, p.config.geneValue * 2)
+                        spawnDevourParticles(x: p.x, y: p.y, preyTier: p.config.tier + 2, isGolden: true)
+                        spawnDevourPickups(x: p.x, y: p.y, coinGain: p.config.coinValue * 2, geneGain: gGain)
+                        spawnFloatingText(
+                            x: p.x,
+                            y: p.y - 16,
+                            text: vm.lang == "zh" ? "💥 破甲粉碎! +\\(p.config.scoreValue * 2)" : "💥 ARMOR CRUSH! +\\(p.config.scoreValue * 2)",
+                            color: UIColor.cyan,
+                            fontSize: 15
+                        )
+                        _ = vm.addXp(Int(Double(p.config.xpValue) * 1.5))
                         p.node.removeFromParent()
                         activePreys.remove(at: idx)
                         idx -= 1
                         continue
                     } else {
-                        p.x += (dx / max(1.0, dist)) * 65.0
+                        spawnFloatingText(
+                            x: p.x,
+                            y: p.y - 14,
+                            text: vm.lang == "zh" ? "⚡ 护甲裂纹!" : "⚡ ARMOR CRACK!",
+                            color: UIColor.orange,
+                            fontSize: 13
+                        )
+                        p.x += (postDx / max(1.0, postDist)) * 65.0
                     }
                 } else if invulnTimer <= 0 {
                     vm.hp = max(0, vm.hp - p.config.damageOnFail * stats.damageTakenMultiplier)
                     invulnTimer = 0.85
+                    cameraShakeTrauma = min(1.0, cameraShakeTrauma + 0.48)
+                    spawnFloatingText(
+                        x: sharkX,
+                        y: sharkY - 26,
+                        text: vm.lang == "zh" ? "⚠️ 体型过大! 需T\\(p.config.tier)" : "⚠️ NEED T\\(p.config.tier)!",
+                        color: UIColor(red: 248/255, green: 113/255, blue: 113/255, alpha: 1.0),
+                        fontSize: 14
+                    )
                     UINotificationFeedbackGenerator().notificationOccurred(.warning)
                 }
             }
 
             let screenX = viewW * 0.5 + (p.x - cameraX) * zoom
             let screenY = viewH * 0.5 - (p.y - cameraY) * zoom
-            let drawW = p.config.radius * GameRules.preyRadiusToDrawSize * visualScale * zoom
+            let inflateScale = 1.0 + p.inflateRatio * 0.38
+            let drawW = p.config.radius * GameRules.preyRadiusToDrawSize * visualScale * inflateScale * zoom
             let texAspect: Double
             if let tex = p.node.texture, tex.size().height > 0 {
                 texAspect = Double(tex.size().width / tex.size().height)
@@ -2902,7 +3910,22 @@ public final class OceanGameScene: SKScene {
             let drawH = drawW / max(0.85, min(2.2, texAspect))
             p.node.size = CGSize(width: drawW, height: drawH)
             p.node.position = CGPoint(x: screenX, y: screenY)
-            p.node.xScale = p.vx >= 0 ? -1.0 : 1.0
+
+            // Smooth horizontal flip + hydrodynamic pitch along velocity vector
+            let facingSign: Double = p.vx >= 0 ? -1.0 : 1.0
+            let pitchAngle = max(-0.48, min(0.48, atan2(-p.vy, max(12.0, abs(p.vx)))))
+            if gait == .MEDUSOID_JET {
+                let pulseStretch = 1.0 + 0.12 * sin(p.phase * 1.3)
+                p.node.xScale = CGFloat(facingSign * (1.0 / pulseStretch))
+                p.node.yScale = CGFloat(pulseStretch)
+                p.node.zRotation = CGFloat(sin(p.phase * 0.65) * 0.14)
+            } else {
+                p.node.xScale = CGFloat(facingSign)
+                p.node.yScale = 1.0
+                p.node.zRotation = CGFloat(pitchAngle * (p.vx >= 0 ? 1.0 : -1.0))
+            }
+
+            applyPreySpineWaveWarp(to: p.node, prey: p)
             idx -= 1
         }
     }
@@ -3205,12 +4228,20 @@ public struct UiAvatarDataBarView: View {
                                 )
                             )
                             .frame(width: barW * CGFloat(hpPct), height: barH * 0.50)
-                        HStack {
-                            Text(vm.frenzyActive ? "🔥 FRENZY" : (hpPct < 0.28 ? "⚠️ DANGER" : "HP"))
-                                .font(.system(size: 7.5, weight: .black))
-                            Spacer()
+                        HStack(spacing: 2) {
+                            Text(
+                                vm.frenzyActive
+                                    ? (vm.lang == "zh" ? "🔥 狂暴" : "🔥 FRENZY")
+                                    : (hpPct < 0.28 ? (vm.lang == "zh" ? "⚠️ 濒危" : "⚠️ LOW HP") : "HP")
+                            )
+                            .font(.system(size: 7.5, weight: .black))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                            Spacer(minLength: 2)
                             Text("\\(Int(vm.hp))/\\(Int(vm.maxHp))")
                                 .font(.system(size: 7.5, weight: .black, design: .monospaced))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
@@ -3230,14 +4261,17 @@ public struct UiAvatarDataBarView: View {
                                 )
                             )
                             .frame(width: barW * CGFloat(energyPct), height: barH * 0.32)
-                        HStack {
-                            Text("⚡ BOOST")
+                        HStack(spacing: 2) {
+                            Text("⚡ \\(vm.t("hud_mobile_boost"))")
                                 .font(.system(size: 6.5, weight: .black))
                                 .foregroundColor(.cyan)
-                            Spacer()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                            Spacer(minLength: 2)
                             Text("\\(Int(energyPct * 100))%")
                                 .font(.system(size: 6.5, weight: .black, design: .monospaced))
                                 .foregroundColor(.white)
+                                .lineLimit(1)
                         }
                         .padding(.horizontal, 5)
                         .frame(width: barW)
@@ -3497,10 +4531,10 @@ public struct ContentView: View {
                         scene.refreshSharkTexture()
                     }
 
-                // 2. Top HUD Bar (Row 1: Frameless Avatar Bar + Telemetry Pill + Pause Button; Row 2: Combo / Frenzy / Onboarding)
-                VStack(spacing: 6) {
+                // 2. Top HUD Bar (Row 1: Frameless Avatar Bar + Telemetry Pill + Pause Button; Row 2: Compact Combo / Frenzy Pills)
+                VStack(spacing: 3) {
                     HStack(alignment: .top, spacing: 8) {
-                        UiAvatarDataBarView(vm: vm, height: isCompactH ? 58 : 66)
+                        UiAvatarDataBarView(vm: vm, height: isCompactH ? 56 : 64)
                         Spacer(minLength: 4)
                         if vm.gameState == "playing" {
                             telemetryPill(isCompact: isCompactH)
@@ -3509,10 +4543,11 @@ public struct ContentView: View {
                         }
                     }
                     .padding(.horizontal, 12)
-                    .padding(.top, 8)
+                    .padding(.top, 6)
 
                     if vm.gameState == "playing" {
                         hudRow2Overlays
+                            .allowsHitTesting(false)
                     }
                     Spacer()
                 }
@@ -3522,7 +4557,7 @@ public struct ContentView: View {
                     titleScreenOverlay(geo: geo)
                 }
 
-                // 4. In-Game Multi-Touch Sonar Joystick (Bottom-Left) + 90° MOBA Skill Fan (Bottom-Right)
+                // 4. In-Game Multi-Touch Sonar Joystick (Bottom-Left) + Onboarding Guide (Bottom-Center) + 90° MOBA Skill Fan (Bottom-Right)
                 if vm.gameState == "playing" {
                     VStack {
                         Spacer()
@@ -3530,7 +4565,12 @@ public struct ContentView: View {
                             sonarJoystick
                                 .padding(.leading, 26)
                                 .padding(.bottom, 18)
-                            Spacer()
+                            Spacer(minLength: 6)
+                            if vm.onboardingStep != .DONE {
+                                onboardingBottomBanner
+                                    .padding(.bottom, 14)
+                            }
+                            Spacer(minLength: 6)
                             mobaSkillFan
                                 .padding(.trailing, 22)
                                 .padding(.bottom, 16)
@@ -3736,99 +4776,116 @@ public struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - HUD Row 2 (Combo / Frenzy / 3-Step Onboarding Tutorial)
+    // MARK: - HUD Row 2 (Compact Combo & Frenzy Pills docked right under Top Telemetry Bar)
     private var hudRow2Overlays: some View {
-        VStack(spacing: 5) {
-            HStack(spacing: 10) {
-                if vm.comboCount > 1 {
-                    HStack(spacing: 5) {
-                        UiAtlasIconView(iconKey: "UI_ICON_COMBO_FIRE", size: 20)
-                        Text("\\(vm.comboCount)x \\(vm.t("hud_combo"))")
-                            .font(.system(size: 12, weight: .black))
-                            .foregroundColor(.white)
-                        if vm.huntingHeatBuff.heatLevel > 0 {
-                            Text("\\(vm.t(vm.huntingHeatBuff.labelKey)) · ⚡+\\(Int((vm.huntingHeatBuff.speedMultiplier - 1.0) * 100))%")
-                                .font(.system(size: 10, weight: .heavy))
-                                .foregroundColor(.yellow)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(LinearGradient(colors: [.orange.opacity(0.88), .red.opacity(0.88)], startPoint: .leading, endPoint: .trailing))
-                            .overlay(Capsule().stroke(Color.yellow, lineWidth: 1.2))
-                    )
-                }
-
-                if vm.frenzyActive {
-                    Text("🔥 \\(vm.t("hud_frenzy")) · \\(String(format: "%.1fs", vm.frenzyTimer))")
-                        .font(.system(size: 12, weight: .black))
-                        .foregroundColor(.yellow)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule()
-                                .fill(Color.red.opacity(0.85))
-                                .overlay(Capsule().stroke(Color.yellow, lineWidth: 1.5))
-                        )
-                }
-            }
-
-            // 3-Step Onboarding Tutorial Banner
-            if vm.onboardingStep != .DONE {
-                HStack(spacing: 10) {
-                    if vm.onboardingStep == .EAT_SMALL_FISH {
-                        Text("🎯")
-                        Text(vm.t("onboard_step1_title"))
-                            .font(.system(size: 11, weight: .black))
-                            .foregroundColor(.cyan)
-                        Text("(\\(vm.onboardingEatCount)/3)")
-                            .font(.system(size: 11, weight: .black, design: .monospaced))
-                            .foregroundColor(.yellow)
-                    } else if vm.onboardingStep == .HOLD_BOOST {
-                        Text("⚡")
-                        Text(vm.t("onboard_step2_title"))
-                            .font(.system(size: 11, weight: .black))
-                            .foregroundColor(.yellow)
-                        Text(String(format: "(%.1f/1.2s)", vm.onboardingBoostSeconds))
-                            .font(.system(size: 11, weight: .black, design: .monospaced))
-                            .foregroundColor(.white)
-                    } else if vm.onboardingStep == .HANDS_ON_UPGRADE {
-                        Text("💪")
-                        Text(vm.t("onboard_step3_title"))
-                            .font(.system(size: 11, weight: .black))
-                            .foregroundColor(.mint)
-                    } else if vm.onboardingStep == .CELEBRATE {
-                        Text("🎉")
-                        Text(vm.t("onboard_done_title"))
-                            .font(.system(size: 11, weight: .black))
+        HStack(spacing: 8) {
+            if vm.comboCount > 1 {
+                let comboText = vm.t(
+                    "hud_combo",
+                    [
+                        "count": "\\(vm.comboCount)",
+                        "mult": String(format: "%.1f", vm.huntingHeatBuff.scoreMultiplier)
+                    ]
+                )
+                HStack(spacing: 4) {
+                    UiAtlasIconView(iconKey: "UI_ICON_COMBO_FIRE", size: 15)
+                    Text(comboText)
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundColor(.white)
+                    if vm.huntingHeatBuff.heatLevel > 0 {
+                        Text("· \\(vm.t(vm.huntingHeatBuff.labelKey)) ⚡+\\(Int((vm.huntingHeatBuff.speedMultiplier - 1.0) * 100))%")
+                            .font(.system(size: 9, weight: .heavy))
                             .foregroundColor(.yellow)
                     }
-
-                    if vm.onboardingStep != .CELEBRATE {
-                        Button {
-                            vm.skipOnboardingTutorial()
-                        } label: {
-                            Text(vm.t("onboard_skip"))
-                                .font(.system(size: 9.5, weight: .bold))
-                                .foregroundColor(.white.opacity(0.85))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.white.opacity(0.15)))
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 5)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 2.5)
                 .background(
                     Capsule()
-                        .fill(Color(red: 2/255, green: 12/255, blue: 32/255).opacity(0.84))
-                        .overlay(Capsule().stroke(Color.cyan.opacity(0.55), lineWidth: 1.2))
+                        .fill(LinearGradient(colors: [.orange.opacity(0.84), .red.opacity(0.84)], startPoint: .leading, endPoint: .trailing))
+                        .overlay(Capsule().stroke(Color.yellow.opacity(0.85), lineWidth: 1))
                 )
             }
+
+            if vm.frenzyActive {
+                Text("🔥 \\(vm.t("hud_frenzy")) · \\(String(format: "%.1fs", vm.frenzyTimer))")
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.yellow)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 2.5)
+                    .background(
+                        Capsule()
+                            .fill(Color.red.opacity(0.84))
+                            .overlay(Capsule().stroke(Color.yellow, lineWidth: 1))
+                    )
+            }
         }
+    }
+
+    // MARK: - Bottom-Center Compact Onboarding Guide Pill (Never blocks the swimming shark!)
+    private var onboardingBottomBanner: some View {
+        HStack(spacing: 7) {
+            if vm.onboardingStep == .EAT_SMALL_FISH {
+                Text("🎯")
+                    .font(.system(size: 11))
+                Text(vm.t("onboard_step1_title"))
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.cyan)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text("(\\(vm.onboardingEatCount)/3)")
+                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                    .foregroundColor(.yellow)
+            } else if vm.onboardingStep == .HOLD_BOOST {
+                Text("⚡")
+                    .font(.system(size: 11))
+                Text(vm.t("onboard_step2_title"))
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.yellow)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Text(String(format: "(%.1f/1.2s)", vm.onboardingBoostSeconds))
+                    .font(.system(size: 10, weight: .black, design: .monospaced))
+                    .foregroundColor(.white)
+            } else if vm.onboardingStep == .HANDS_ON_UPGRADE {
+                Text("💪")
+                    .font(.system(size: 11))
+                Text(vm.t("onboard_step3_title"))
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.mint)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            } else if vm.onboardingStep == .CELEBRATE {
+                Text("🎉")
+                    .font(.system(size: 11))
+                Text(vm.t("onboard_done_title"))
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.yellow)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+
+            if vm.onboardingStep != .CELEBRATE {
+                Button {
+                    vm.skipOnboardingTutorial()
+                } label: {
+                    Text(vm.t("onboard_skip"))
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Capsule().fill(Color.white.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 4)
+        .background(
+            Capsule()
+                .fill(Color(red: 2/255, green: 12/255, blue: 32/255).opacity(0.82))
+                .overlay(Capsule().stroke(Color.cyan.opacity(0.5), lineWidth: 1))
+        )
     }
 
     // MARK: - Bottom-Left Sonar Virtual Joystick (using UI_JOYSTICK_BASE & UI_JOYSTICK_KNOB from icons_f5128c12.png)
@@ -3995,6 +5052,8 @@ public struct ContentView: View {
                     Text(vm.t("hud_mobile_boost"))
                         .font(.system(size: 10, weight: .black))
                         .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .background(Capsule().fill(Color.black.opacity(0.78)))
@@ -4445,19 +5504,35 @@ public struct ContentView: View {
     }
 }
 
-// MARK: - 3. 48-Shark Evolution Atlas Modal (100% replication of src/components/SharkEvolutionAtlasModal.tsx)
+// MARK: - 3. 48-Shark Evolution Atlas Modal (Silky-Smooth Continuous Rotary Wheel + Command Deck)
 
 public struct EvolutionAtlasSheetView: View {
     @ObservedObject var vm: GameViewModel
     @State private var inspectedIndex: Int = 0
-    @State private var floatPhase: Double = 0
+    @State private var wheelPosition: Double = 0.0
+    @State private var dragBaseWheelPos: Double? = nil
+    @State private var lastTickIndex: Int = 0
 
-    private let arcOffsets: [Int] = [-3, -2, -1, 0, 1, 2, 3]
+    private let wheelSlotOffsets: [Int] = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
 
     private var inspectedForm: SharkFormConfig {
         let total = GameConfigGenerated.sharkForms.count
         let norm = ((inspectedIndex % total) + total) % total
         return GameConfigGenerated.sharkForms[norm]
+    }
+
+    private func snapWheel(to targetPosition: Double) {
+        let total = GameConfigGenerated.sharkForms.count
+        let snapped = targetPosition.rounded()
+        let normIdx = ((Int(snapped) % total) + total) % total
+        withAnimation(.interpolatingSpring(stiffness: 170, damping: 22)) {
+            wheelPosition = snapped
+            inspectedIndex = normIdx
+        }
+        if lastTickIndex != normIdx {
+            lastTickIndex = normIdx
+            vm.playUiTick()
+        }
     }
 
     public var body: some View {
@@ -4502,7 +5577,7 @@ public struct EvolutionAtlasSheetView: View {
 
                     Divider().background(Color.cyan.opacity(0.2))
 
-                    // 2. Main Split Stage (Left/Top: Giant Aquarium + 7-Slot Curved Arc Dial; Right/Bottom: De-Boxed Command Deck)
+                    // 2. Main Split Stage (Left/Top: Giant Aquarium + Continuous Rotary Wheel; Right/Bottom: De-Boxed Command Deck)
                     if isLandscape {
                         HStack(spacing: 0) {
                             aquariumAndArcDialStage(form: form, check: check, lineageMeta: lineageMeta, curLv: curLv)
@@ -4540,6 +5615,8 @@ public struct EvolutionAtlasSheetView: View {
         }
         .onAppear {
             inspectedIndex = vm.activeSharkForm.index
+            wheelPosition = Double(vm.activeSharkForm.index)
+            lastTickIndex = vm.activeSharkForm.index
         }
     }
 
@@ -4612,7 +5689,7 @@ public struct EvolutionAtlasSheetView: View {
         }
     }
 
-    // MARK: - Left/Top: Giant Aquarium Spotlight + 7-Slot Curved Semi-Circular Compass Arc Dial
+    // MARK: - Left/Top: Giant Aquarium Spotlight + Silky-Smooth Continuous Rotary Wheel
     private func aquariumAndArcDialStage(
         form: SharkFormConfig,
         check: UnlockCheckResult,
@@ -4687,8 +5764,7 @@ public struct EvolutionAtlasSheetView: View {
             // Center Giant Shark Spotlight with Left / Right Step Arrows
             HStack {
                 Button {
-                    vm.playUiTick()
-                    inspectedIndex = (inspectedIndex + 47) % 48
+                    snapWheel(to: wheelPosition.rounded() - 1.0)
                 } label: {
                     Text("◀")
                         .font(.system(size: 16, weight: .black))
@@ -4719,8 +5795,7 @@ public struct EvolutionAtlasSheetView: View {
                 Spacer()
 
                 Button {
-                    vm.playUiTick()
-                    inspectedIndex = (inspectedIndex + 1) % 48
+                    snapWheel(to: wheelPosition.rounded() + 1.0)
                 } label: {
                     Text("▶")
                         .font(.system(size: 16, weight: .black))
@@ -4734,82 +5809,113 @@ public struct EvolutionAtlasSheetView: View {
 
             Spacer(minLength: 2)
 
-            // Bottom 7-Shark Curved Semi-Circular Compass Arc Dial (ARC_OFFSETS = [-3, -2, -1, 0, 1, 2, 3])
+            // Bottom Silky-Smooth Continuous Rotary Wheel (Fractional offsets + Drag Inertia + Spring Snapping)
             GeometryReader { dialGeo in
                 let dialW = dialGeo.size.width
                 let dialH = dialGeo.size.height
+                let total = GameConfigGenerated.sharkForms.count
+                let baseInt = Int(floor(wheelPosition))
+                let frac = wheelPosition - Double(baseInt)
+
                 ZStack {
-                    // Subtle Semi-Circular Compass Rim
+                    // Glowing Outer & Inner Compass Rim Tracks
                     Path { path in
-                        path.move(to: CGPoint(x: dialW * 0.06, y: dialH * 0.88))
+                        path.move(to: CGPoint(x: dialW * 0.04, y: dialH * 0.90))
                         path.addQuadCurve(
-                            to: CGPoint(x: dialW * 0.94, y: dialH * 0.88),
-                            control: CGPoint(x: dialW * 0.50, y: dialH * 0.05)
+                            to: CGPoint(x: dialW * 0.96, y: dialH * 0.90),
+                            control: CGPoint(x: dialW * 0.50, y: dialH * 0.02)
                         )
                     }
-                    .stroke(Color.cyan.opacity(0.28), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    .stroke(Color.cyan.opacity(0.32), style: StrokeStyle(lineWidth: 1.6, dash: [6, 4]))
 
-                    ForEach(arcOffsets, id: \\.self) { offset in
-                        let total = GameConfigGenerated.sharkForms.count
-                        let itemIdx = ((inspectedIndex + offset) % total + total) % total
+                    // Top-Center Selection Pointer Triangle
+                    Text("▼")
+                        .font(.system(size: 9, weight: .black))
+                        .foregroundColor(.cyan)
+                        .position(x: dialW * 0.50, y: dialH * 0.08)
+
+                    ForEach(wheelSlotOffsets, id: \\.self) { k in
+                        let rawIdx = baseInt + k
+                        let itemIdx = ((rawIdx % total) + total) % total
                         let itemForm = GameConfigGenerated.sharkForms[itemIdx]
                         let itemUnlocked = vm.save.unlockedSharkIds.contains(itemForm.id)
-                        let isCenter = offset == 0
-                        let absOff = abs(offset)
+                        let relOffset = Double(k) - frac
+                        let absOff = abs(relOffset)
 
-                        let angleDeg = Double(offset) * 21.5
-                        let angleRad = angleDeg * .pi / 180.0
-                        let xPct = 0.50 + sin(angleRad) * 0.44
-                        let yPct = 0.34 + (1.0 - cos(angleRad)) * 0.88
-                        let scale: CGFloat = isCenter ? 1.12 : (absOff == 1 ? 0.86 : (absOff == 2 ? 0.70 : 0.56))
+                        if absOff <= 3.65 {
+                            let angleDeg = relOffset * 20.5
+                            let angleRad = angleDeg * .pi / 180.0
+                            let xPct = 0.50 + sin(angleRad) * 0.44
+                            let yPct = 0.34 + (1.0 - cos(angleRad)) * 0.88
+                            let scale = CGFloat(max(0.46, 1.15 - absOff * 0.19))
+                            let opacity = max(0.18, 1.0 - max(0.0, absOff - 2.3) * 0.65)
+                            let isCenter = absOff < 0.45
 
-                        Button {
-                            vm.playUiTick()
-                            inspectedIndex = itemIdx
-                        } label: {
-                            VStack(spacing: 2) {
-                                ZStack {
-                                    Circle()
-                                        .fill(
-                                            isCenter
-                                                ? Color(red: 8/255, green: 36/255, blue: 72/255).opacity(0.95)
-                                                : Color(red: 2/255, green: 10/255, blue: 28/255).opacity(0.85)
-                                        )
-                                        .frame(width: 54, height: 54)
-                                        .overlay(
-                                            Circle().stroke(
-                                                isCenter ? Color.cyan : (itemUnlocked ? Color.cyan.opacity(0.4) : Color.white.opacity(0.15)),
-                                                lineWidth: isCenter ? 2.2 : 1.0
+                            Button {
+                                snapWheel(to: Double(rawIdx))
+                            } label: {
+                                VStack(spacing: 2) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(
+                                                isCenter
+                                                    ? Color(red: 8/255, green: 36/255, blue: 72/255).opacity(0.96)
+                                                    : Color(red: 2/255, green: 10/255, blue: 28/255).opacity(0.86)
                                             )
-                                        )
-                                    SharkPreviewView(form: itemForm, width: 46, height: 28, locked: !itemUnlocked)
+                                            .frame(width: 54, height: 54)
+                                            .overlay(
+                                                Circle().stroke(
+                                                    isCenter ? Color.cyan : (itemUnlocked ? Color.cyan.opacity(0.42) : Color.white.opacity(0.15)),
+                                                    lineWidth: isCenter ? 2.4 : 1.0
+                                                )
+                                            )
+                                            .shadow(color: isCenter ? Color.cyan.opacity(0.55) : .clear, radius: 8)
+                                        SharkPreviewView(form: itemForm, width: 46, height: 28, locked: !itemUnlocked)
+                                    }
+                                    Text(vm.lang == "zh" ? itemForm.nameZh : itemForm.nameEn)
+                                        .font(.system(size: 8.5, weight: .black))
+                                        .foregroundColor(isCenter ? .white : .gray)
+                                        .lineLimit(1)
                                 }
-                                Text(vm.lang == "zh" ? itemForm.nameZh : itemForm.nameEn)
-                                    .font(.system(size: 8.5, weight: .black))
-                                    .foregroundColor(isCenter ? .white : .gray)
-                                    .lineLimit(1)
+                                .scaleEffect(scale)
+                                .rotationEffect(.degrees(angleDeg * 0.42))
+                                .opacity(opacity)
                             }
-                            .scaleEffect(scale)
+                            .buttonStyle(.plain)
+                            .position(x: dialW * CGFloat(xPct), y: dialH * CGFloat(yPct))
+                            .zIndex(10.0 - absOff)
                         }
-                        .buttonStyle(.plain)
-                        .position(x: dialW * CGFloat(xPct), y: dialH * CGFloat(yPct))
                     }
                 }
                 .contentShape(Rectangle())
                 .gesture(
-                    DragGesture(minimumDistance: 14)
-                        .onEnded { val in
-                            if val.translation.width < -20 {
-                                vm.playUiTick()
-                                inspectedIndex = (inspectedIndex + 1) % 48
-                            } else if val.translation.width > 20 {
-                                vm.playUiTick()
-                                inspectedIndex = (inspectedIndex + 47) % 48
+                    DragGesture(minimumDistance: 2)
+                        .onChanged { val in
+                            if dragBaseWheelPos == nil {
+                                dragBaseWheelPos = wheelPosition
                             }
+                            let startPos = dragBaseWheelPos ?? wheelPosition
+                            let newPos = startPos - Double(val.translation.width) / 56.0
+                            wheelPosition = newPos
+                            let curIdx = ((Int(newPos.rounded()) % total) + total) % total
+                            if curIdx != inspectedIndex {
+                                inspectedIndex = curIdx
+                            }
+                            if curIdx != lastTickIndex {
+                                lastTickIndex = curIdx
+                                UISelectionFeedbackGenerator().selectionChanged()
+                            }
+                        }
+                        .onEnded { val in
+                            let startPos = dragBaseWheelPos ?? wheelPosition
+                            dragBaseWheelPos = nil
+                            let predictedPos = startPos - Double(val.predictedEndTranslation.width) / 56.0
+                            let clampedTarget = max(wheelPosition - 6.0, min(wheelPosition + 6.0, predictedPos))
+                            snapWheel(to: clampedTarget)
                         }
                 )
             }
-            .frame(height: 112)
+            .frame(height: 114)
             .padding(.bottom, 6)
         }
     }

@@ -2175,10 +2175,15 @@ export default function App() {
           const inJawSuctionZone =
             canEatNow && !prey.config.isHazard && distToMouthPre < suctionRadius;
 
-          // Distinct AI Behavior Policies per Prey Archetype
+          // Distinct AI Behavior Policies per Prey Archetype (with organic curved trajectories)
+          const dirSign = prey.vx >= 0 ? 1 : -1;
+          const uidSeed = (prey.uid % 17) * 0.37;
           switch (prey.config.behavior) {
             case 'DRIFT_SWARM': {
-              prey.vy = Math.sin(prey.phase * 1.5) * 28;
+              // Pulsing jellyfish bell-jet propulsion + horizontal current weave
+              const pulse = Math.sin(prey.phase * 1.6 + uidSeed);
+              prey.vx = dirSign * prey.config.baseSpeed * (0.65 + 0.35 * Math.cos(prey.phase * 0.7));
+              prey.vy = (pulse > 0 ? -pulse * 36 : -pulse * 18) + Math.cos(prey.phase * 0.85) * 14;
               break;
             }
             case 'SCHOOL_FLEE': {
@@ -2192,30 +2197,51 @@ export default function App() {
                 shark.stats.biteTier >= effectivePreyTier &&
                 !inJawSuctionZone
               ) {
-                const fleeAngle = Math.atan2(prey.y - shark.y, prey.x - shark.x);
+                const fleeAngle =
+                  Math.atan2(prey.y - shark.y, prey.x - shark.x) +
+                  Math.sin(prey.phase * 2.4 + uidSeed) * 0.28;
                 prey.vx = Math.cos(fleeAngle) * prey.config.baseSpeed * fleeMult;
                 prey.vy = Math.sin(fleeAngle) * prey.config.baseSpeed * fleeMult;
+              } else {
+                // Natural S-curve schooling trajectory when undisturbed
+                const cruiseSpeed =
+                  prey.config.baseSpeed * (0.88 + 0.18 * Math.sin(prey.phase * 0.9 + uidSeed));
+                const curvePitch =
+                  Math.sin(prey.phase * 1.15 + uidSeed) * 0.34 +
+                  Math.cos(prey.phase * 0.52 + uidSeed) * 0.16;
+                prey.vx = dirSign * Math.cos(curvePitch) * cruiseSpeed;
+                prey.vy = Math.sin(curvePitch) * cruiseSpeed;
               }
               break;
             }
             case 'PUFFER_INFLATE': {
               prey.isInflated = distToShark < 190;
               if (prey.isInflated && !inJawSuctionZone) {
-                const fleeAngle = Math.atan2(prey.y - shark.y, prey.x - shark.x);
+                const fleeAngle =
+                  Math.atan2(prey.y - shark.y, prey.x - shark.x) +
+                  Math.sin(prey.phase * 1.8) * 0.22;
                 prey.vx = Math.cos(fleeAngle) * prey.config.baseSpeed * 1.15;
                 prey.vy = Math.sin(fleeAngle) * prey.config.baseSpeed * 1.15;
+              } else {
+                // Buoyant figure-8 bobbing trajectory
+                prey.vx = dirSign * prey.config.baseSpeed * (0.85 + 0.15 * Math.cos(prey.phase * 0.8));
+                prey.vy =
+                  Math.sin(prey.phase * 1.35 + uidSeed) * 26 +
+                  Math.cos(prey.phase * 0.65) * 12;
               }
               break;
             }
             case 'SUB_PATROL': {
-              prey.vy = Math.cos(prey.phase * 0.8) * 35;
+              prey.vx = dirSign * prey.config.baseSpeed * (0.92 + 0.08 * Math.sin(prey.phase * 0.5));
+              prey.vy = Math.cos(prey.phase * 0.8 + uidSeed) * 38;
               break;
             }
             case 'EEL_CHARGER': {
               // Shallow Sanctuary Protection: eels never actively charge at players swimming in the shallow zone (<= 520m)
               if (shark.y <= 520 || prey.y <= 520) {
                 prey.telegraphTimer = 0;
-                prey.vy = Math.sin(prey.phase * 1.2) * 18;
+                prey.vx = dirSign * prey.config.baseSpeed * 0.9;
+                prey.vy = Math.sin(prey.phase * 1.45 + uidSeed) * 32;
                 break;
               }
               if (distToShark < 290 && prey.telegraphTimer <= 0) {
@@ -2228,12 +2254,15 @@ export default function App() {
                   prey.vx = Math.cos(atkAngle) * prey.config.baseSpeed * 1.85;
                   prey.vy = Math.sin(atkAngle) * prey.config.baseSpeed * 1.85;
                 }
+              } else {
+                // Serpentine S-slither trajectory while patrolling
+                prey.vy = Math.sin(prey.phase * 1.65 + uidSeed) * 36;
               }
               break;
             }
             case 'MINE_HAZARD': {
-              prey.vx = Math.sin(prey.phase * 0.6) * 12;
-              prey.vy = Math.cos(prey.phase * 0.9) * 12;
+              prey.vx = Math.sin(prey.phase * 0.6 + uidSeed) * 12;
+              prey.vy = Math.cos(prey.phase * 0.9 + uidSeed) * 12;
               if (distToShark < 150) {
                 prey.telegraphTimer = 0.4;
               } else {
@@ -2259,6 +2288,10 @@ export default function App() {
                     : -0.75;
                 prey.vx = Math.cos(dirAngle) * prey.config.baseSpeed * mult;
                 prey.vy = Math.sin(dirAngle) * prey.config.baseSpeed * mult;
+              } else {
+                // Deep sweeping S-glide when patrolling
+                prey.vx = dirSign * prey.config.baseSpeed * (0.9 + 0.1 * Math.cos(prey.phase * 0.6));
+                prey.vy = Math.sin(prey.phase * 0.95 + uidSeed) * 28;
               }
               break;
             }

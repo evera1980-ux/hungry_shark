@@ -130,14 +130,9 @@ public final class SpriteAtlasManager {
         guard let rawImg = loadBundledImage(named: assetName) else { return nil }
         let processed: UIImage
         if isWaterCanopy {
-            processed = rawImg
+            processed = processWaterLayerToSeamlessTile(rawImg, assetName: assetName) ?? rawImg
         } else {
-            processed = sliceAndKeyNormalizedCell(
-                from: rawImg,
-                bounds: SIMD4<Double>(0, 0, 1, 1),
-                preserveInteriorWhite: true,
-                topSkyOnly: true
-            ) ?? rawImg
+            processed = processTerrainLayerToSeamlessStrip(rawImg, assetName: assetName) ?? rawImg
         }
         let tex = SKTexture(image: processed)
         tex.filteringMode = .linear
@@ -926,5 +921,443 @@ public final class SpriteAtlasManager {
 
         guard let outCG = ctx.makeImage() else { return nil }
         return UIImage(cgImage: outCG)
+    }
+
+    /// Synthesizes a horizontally-seamless tile from an RGBA pixel buffer by cross-fading a seamRatio overlap band
+    /// using a cosine weight curve (zero vertical seam lines between repeated tiles).
+    private func makeHorizontallySeamlessImage(
+        rgba sBuf: [UInt8],
+        width sw: Int,
+        height sh: Int,
+        seamRatio: Double
+    ) -> UIImage? {
+        let overlap = max(12, min(sw / 4, Int((Double(sw) * seamRatio).rounded())))
+        let outW = max(16, sw - overlap)
+        var oBuf = [UInt8](repeating: 0, count: outW * sh * 4)
+
+        for y in 0..<sh {
+            let rowIn = y * sw
+            let rowOut = y * outW
+            for x in 0..<outW {
+                let dstIdx = (rowOut + x) * 4
+                if x < overlap {
+                    let t = (Double(x) + 0.5) / Double(overlap)
+                    let wLeft = 0.5 - 0.5 * cos(.pi * t)
+                    let wRight = 1.0 - wLeft
+
+                    let idxL = (rowIn + x) * 4
+                    let idxR = (rowIn + outW + x) * 4
+
+                    // Unpremultiply before blending, then repremultiply
+                    let aL = Double(sBuf[idxL + 3]) / 255.0
+                    let aR = Double(sBuf[idxR + 3]) / 255.0
+                    let outA = aL * wLeft + aR * wRight
+
+                    if outA <= 0.002 {
+                        oBuf[dstIdx] = 0
+                        oBuf[dstIdx + 1] = 0
+                        oBuf[dstIdx + 2] = 0
+                        oBuf[dstIdx + 3] = 0
+                    } else {
+                        let rL = aL > 0.01 ? Double(sBuf[idxL]) / aL : 0.0
+                        let gL = aL > 0.01 ? Double(sBuf[idxL + 1]) / aL : 0.0
+                        let bL = aL > 0.01 ? Double(sBuf[idxL + 2]) / aL : 0.0
+                        let rR = aR > 0.01 ? Double(sBuf[idxR]) / aR : 0.0
+                        let gR = aR > 0.01 ? Double(sBuf[idxR + 1]) / aR : 0.0
+                        let bR = aR > 0.01 ? Double(sBuf[idxR + 2]) / aR : 0.0
+
+                        let weightL = (aL * wLeft) / outA
+                        let weightR = (aR * wRight) / outA
+                        let rMix = (rL * weightL + rR * weightR) * outA
+                        let gMix = (gL * weightL + gR * weightR) * outA
+                        let bMix = (bL * weightL + bR * weightR) * outA
+
+                        oBuf[dstIdx] = UInt8(max(0.0, min(255.0, rMix.rounded())))
+                        oBuf[dstIdx + 1] = UInt8(max(0.0, min(255.0, gMix.rounded())))
+                        oBuf[dstIdx + 2] = UInt8(max(0.0, min(255.0, bMix.rounded())))
+                        oBuf[dstIdx + 3] = UInt8(max(0.0, min(255.0, (outA * 255.0).rounded())))
+                    }
+                } else {
+                    let idxS = (rowIn + x) * 4
+                    oBuf[dstIdx] = sBuf[idxS]
+                    oBuf[dstIdx + 1] = sBuf[idxS + 1]
+                    oBuf[dstIdx + 2] = sBuf[idxS + 2]
+                    oBuf[dstIdx + 3] = sBuf[idxS + 3]
+                }
+            }
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &oBuf,
+            width: outW,
+            height: sh,
+            bitsPerComponent: 8,
+            bytesPerRow: outW * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ), let cgOut = ctx.makeImage() else {
+            return nil
+        }
+        return UIImage(cgImage: cgOut)
+    }
+
+    /// Processes Layer 0 Water Canopy ('bg_shallow_0_water', 'bg_twilight_0', 'bg_abyss_0'):
+    /// - Trims top/bottom white margins and right-edge white border on 'bg_shallow_0_water'
+    /// - Smoothly unmixes the bottom #FFFFFF fade using a C1 cosine vertical envelope so sunbeams dissolve invisibly into the water column (zero horizontal cutoff line!)
+    /// - Applies cosine horizontal cross-fading so repeated tiles have zero vertical seam lines!
+    private func processWaterLayerToSeamlessTile(_ image: UIImage, assetName: String) -> UIImage? {
+        guard let cgImg = image.cgImage else { return nil }
+        let srcW = cgImg.width
+        let srcH = cgImg.height
+        let isShallowCanopy = assetName.contains("shallow_0_water") || (Double(srcW) / Double(max(1, srcH)) > 3.0)
+
+        let cropLeft = isShallowCanopy ? Int((Double(srcW) * 0.012).rounded()) : 0
+        let cropRight = isShallowCanopy ? Int((Double(srcW) * 0.968).rounded()) : srcW
+        let cropTop = isShallowCanopy ? Int((Double(srcH) * 0.032).rounded()) : 0
+        let cropBot = isShallowCanopy ? Int((Double(srcH) * 0.902).rounded()) : srcH
+        let cropW = max(64, cropRight - cropLeft)
+        let cropH = max(32, cropBot - cropTop)
+
+        guard let croppedCG = cgImg.cropping(to: CGRect(x: cropLeft, y: cropTop, width: cropW, height: cropH)) else {
+            return nil
+        }
+
+        let maxDim = isShallowCanopy ? 1280 : 768
+        let scale = cropW > maxDim ? Double(maxDim) / Double(cropW) : 1.0
+        let w = max(64, Int((Double(cropW) * scale).rounded()))
+        let h = max(32, Int((Double(cropH) * scale).rounded()))
+
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        if isShallowCanopy {
+            for y in 0..<h {
+                let v = Double(y) / Double(max(1, h - 1))
+                // C1-continuous cosine vertical fade from v=0.22 down to v=1.0 (zero hard bottom edge)
+                let verticalEnvelope = v <= 0.22
+                    ? 1.0
+                    : pow(cos(((v - 0.22) / 0.78) * .pi * 0.5), 1.65)
+                let rowOff = y * w
+                for x in 0..<w {
+                    let idx = (rowOff + x) * 4
+                    let r = Double(rgba[idx])
+                    let g = Double(rgba[idx + 1])
+                    let b = Double(rgba[idx + 2])
+                    let maxC = max(r, max(g, b))
+                    let minC = min(r, min(g, b))
+                    let sat = maxC > 0 ? (maxC - minC) / maxC : 0.0
+
+                    // Strip any residual neutral white pixels near the top/sides
+                    if minC >= 232.0 && sat < 0.08 {
+                        rgba[idx] = 0
+                        rgba[idx + 1] = 0
+                        rgba[idx + 2] = 0
+                        rgba[idx + 3] = 0
+                        continue
+                    }
+
+                    if v >= 0.18 {
+                        let cyanInk = max((255.0 - r) / 235.0, sat * 1.25)
+                        let rawAlpha = max(0.0, min(1.0, cyanInk))
+                        let unmixWeight = min(1.0, (v - 0.18) / 0.26)
+                        let effAlpha = (1.0 - unmixWeight + unmixWeight * rawAlpha) * verticalEnvelope
+                        if effAlpha <= 0.008 {
+                            rgba[idx] = 0
+                            rgba[idx + 1] = 0
+                            rgba[idx + 2] = 0
+                            rgba[idx + 3] = 0
+                            continue
+                        }
+                        var outR = r
+                        var outG = g
+                        var outB = b
+                        if rawAlpha > 0.05 && rawAlpha < 0.98 {
+                            let invA = 1.0 / max(0.24, rawAlpha)
+                            let ur = max(0.0, min(255.0, (r - 255.0 * (1.0 - rawAlpha)) * invA))
+                            let ug = max(0.0, min(255.0, (g - 255.0 * (1.0 - rawAlpha)) * invA))
+                            let ub = max(0.0, min(255.0, (b - 255.0 * (1.0 - rawAlpha)) * invA))
+                            outR = r * (1.0 - unmixWeight) + ur * unmixWeight
+                            outG = g * (1.0 - unmixWeight) + ug * unmixWeight
+                            outB = b * (1.0 - unmixWeight) + ub * unmixWeight
+                        }
+                        // Store premultiplied RGBA
+                        rgba[idx] = UInt8(max(0.0, min(255.0, (outR * effAlpha).rounded())))
+                        rgba[idx + 1] = UInt8(max(0.0, min(255.0, (outG * effAlpha).rounded())))
+                        rgba[idx + 2] = UInt8(max(0.0, min(255.0, (outB * effAlpha).rounded())))
+                        rgba[idx + 3] = UInt8(max(0.0, min(255.0, (effAlpha * 255.0).rounded())))
+                    }
+                }
+            }
+        }
+
+        return makeHorizontallySeamlessImage(rgba: rgba, width: w, height: h, seamRatio: isShallowCanopy ? 0.10 : 0.14)
+    }
+
+    /// Processes Far / Mid / Near Ocean Terrain Layers ('bg_{zone}_{1|2|3}') with 1:1 parity to 'parallaxBackground.ts':
+    /// - Applies bottom margin crop (0.915 on 'shallow_1_far', 0.935 on 'shallow_2_mid')
+    /// - Clears slice-overlap artifact rect [0, 0.78, 0.14, 1.0] and rounds flat top-left peak on 'shallow_1_far'
+    /// - Runs BFS sky flood-fill + punches enclosed white coral/archway holes ('punchUpperInteriorWhiteHoles')
+    /// - Despills 2px white/magenta boundary halo
+    /// - Grounds bottom column notches ('groundBottomColumns') so stacked parallax layers have a 100% solid base
+    /// - Trims vertical [minY, maxY] and applies cosine horizontal seam blending ('makeHorizontallySeamlessImage')
+    private func processTerrainLayerToSeamlessStrip(_ image: UIImage, assetName: String) -> UIImage? {
+        guard let cgImg = image.cgImage else { return nil }
+        let srcW = cgImg.width
+        let srcH = cgImg.height
+
+        let isShallowFar = assetName.contains("shallow_1_far")
+        let isShallowMid = assetName.contains("shallow_2_mid")
+        let isShallowNear = assetName.contains("shallow_3_near")
+        let isAbyssMid = assetName.contains("abyss_2")
+
+        let cropBottomRatio: Double = isShallowFar ? 0.915 : (isShallowMid ? 0.935 : 1.0)
+        // Also trim 1% off left/right raw edges if there is any thin border artifact
+        let cropX0 = Int((Double(srcW) * 0.006).rounded())
+        let cropX1 = Int((Double(srcW) * 0.994).rounded())
+        let effSrcW = max(64, cropX1 - cropX0)
+        let effSrcH = max(32, Int((Double(srcH) * cropBottomRatio).rounded()))
+
+        guard let croppedCG = cgImg.cropping(to: CGRect(x: cropX0, y: 0, width: effSrcW, height: effSrcH)) else {
+            return nil
+        }
+
+        let isPanoramic = Double(effSrcW) / Double(max(1, effSrcH)) > 1.8
+        let maxDim = isPanoramic ? 1280 : 640
+        let scale = effSrcW > maxDim ? Double(maxDim) / Double(effSrcW) : 1.0
+        let w = max(64, Int((Double(effSrcW) * scale).rounded()))
+        let h = max(24, Int((Double(effSrcH) * scale).rounded()))
+
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        // 1. Clear stray slice-overlap artifact rect & round top-left flat-sliced seamount peak on shallow_1_far
+        if isShallowFar {
+            let rx1 = Int((Double(w) * 0.14).rounded(.up))
+            let ry0 = Int((Double(h) * 0.78).rounded(.down))
+            for y in max(0, ry0)..<h {
+                for x in 0..<min(w, rx1) {
+                    let p = (y * w + x) * 4
+                    rgba[p] = 255; rgba[p + 1] = 255; rgba[p + 2] = 255; rgba[p + 3] = 0
+                }
+            }
+            let xStart = Int((Double(w) * 0.032).rounded(.down))
+            let xEnd = Int((Double(w) * 0.158).rounded(.up))
+            let xCenter = Double(xStart + xEnd) * 0.5
+            let xHalf = max(1.0, Double(xEnd - xStart) * 0.5)
+            for x in max(0, xStart)...min(w - 1, xEnd) {
+                let nx = (Double(x) - xCenter) / xHalf
+                let archCurve = Int((Double(h) * (0.015 + 0.14 * nx * nx + 0.025 * sin(nx * .pi * 2.0))).rounded())
+                for y in 0..<min(h, max(0, archCurve)) {
+                    let p = (y * w + x) * 4
+                    rgba[p] = 255; rgba[p + 1] = 255; rgba[p + 2] = 255; rgba[p + 3] = 0
+                }
+            }
+        }
+
+        // 2. BFS Flood-Fill from top sky border and upper 68% left/right edges
+        var visited = [UInt8](repeating: 0, count: w * h)
+        var queue = [Int](repeating: 0, count: w * h)
+        var qHead = 0
+        var qTail = 0
+
+        func isBgCandidate(_ i: Int) -> Bool {
+            let p = i * 4
+            if rgba[p + 3] < 16 { return true }
+            let r = Int(rgba[p])
+            let g = Int(rgba[p + 1])
+            let b = Int(rgba[p + 2])
+            let maxC = max(r, max(g, b))
+            let minC = min(r, min(g, b))
+            let isWhite = minC >= 216 && (maxC - minC) <= 32
+            let isMagenta = r >= 180 && b >= 180 && g <= 135 && (r - g) >= 65 && (b - g) >= 65
+            return isWhite || isMagenta
+        }
+
+        func pushSeed(_ x: Int, _ y: Int) {
+            if x < 0 || x >= w || y < 0 || y >= h { return }
+            let i = y * w + x
+            if visited[i] != 0 || !isBgCandidate(i) { return }
+            visited[i] = 1
+            queue[qTail] = i
+            qTail += 1
+        }
+
+        for x in 0..<w {
+            pushSeed(x, 0)
+            pushSeed(x, min(h - 1, 1))
+        }
+        let maxSideY = Int(Double(h) * 0.68)
+        for y in 0..<maxSideY {
+            pushSeed(0, y)
+            pushSeed(w - 1, y)
+        }
+
+        while qHead < qTail {
+            let curr = queue[qHead]
+            qHead += 1
+            let cx = curr % w
+            let cy = (curr - cx) / w
+            if cx > 0 { pushSeed(cx - 1, cy) }
+            if cx + 1 < w { pushSeed(cx + 1, cy) }
+            if cy > 0 { pushSeed(cx, cy - 1) }
+            if cy + 1 < h { pushSeed(cx, cy + 1) }
+        }
+
+        // 3. Punch enclosed white holes in upper coral/rock archways on shallow layers
+        if isShallowFar || isShallowMid || isShallowNear {
+            let holeRatio = isShallowFar ? 0.86 : (isShallowMid ? 0.82 : 0.48)
+            let maxHoleY = Int(Double(h) * holeRatio)
+            for y in 0..<min(h, maxHoleY) {
+                let rowOff = y * w
+                for x in 0..<w {
+                    let i = rowOff + x
+                    if visited[i] == 0 {
+                        let p = i * 4
+                        let r = Int(rgba[p])
+                        let g = Int(rgba[p + 1])
+                        let b = Int(rgba[p + 2])
+                        let minC = min(r, min(g, b))
+                        let maxC = max(r, max(g, b))
+                        if minC >= 224 && (maxC - minC) <= 26 {
+                            visited[i] = 1
+                        }
+                    }
+                }
+            }
+        }
+
+        for i in 0..<(w * h) {
+            if visited[i] != 0 {
+                let p = i * 4
+                rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
+            }
+        }
+
+        // 4. Despill & feather 2px boundary halo around removed sky/background
+        if h > 2 && w > 2 {
+            for y in 1..<(h - 1) {
+                let rowOff = y * w
+                for x in 1..<(w - 1) {
+                    let i = rowOff + x
+                    if visited[i] != 0 { continue }
+                    let hasTrans = visited[i - 1] != 0 || visited[i + 1] != 0 || visited[i - w] != 0 || visited[i + w] != 0
+                    if hasTrans {
+                        let p = i * 4
+                        let r = Double(rgba[p])
+                        let g = Double(rgba[p + 1])
+                        let b = Double(rgba[p + 2])
+                        let minC = min(r, min(g, b))
+                        let maxC = max(r, max(g, b))
+                        if minC > 155.0 && (maxC - minC) < 55.0 {
+                            let keep = max(0.0, min(1.0, (232.0 - minC) / 77.0))
+                            rgba[p] = UInt8((r * 0.66 * keep).rounded())
+                            rgba[p + 1] = UInt8((g * 0.72 * keep).rounded())
+                            rgba[p + 2] = UInt8((b * 0.80 * keep).rounded())
+                            rgba[p + 3] = UInt8((Double(rgba[p + 3]) * keep).rounded())
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Ground bottom columns so elevated parallax planes have a 100% solid base (zero bottom gap lines!)
+        let shouldGroundBottom = isShallowFar || isShallowMid || isShallowNear || isAbyssMid
+        if shouldGroundBottom {
+            let bandRatio = isShallowFar ? 0.24 : (isShallowMid ? 0.14 : 0.18)
+            let minSearchY = max(4, Int(Double(h) * (1.0 - bandRatio)))
+            for x in 0..<w {
+                var lastSolidY = -1
+                for y in stride(from: h - 1, through: minSearchY, by: -1) {
+                    let p = (y * w + x) * 4
+                    let r = Int(rgba[p])
+                    let g = Int(rgba[p + 1])
+                    let b = Int(rgba[p + 2])
+                    let minC = min(r, min(g, b))
+                    let maxC = max(r, max(g, b))
+                    let isWhiteMargin = minC >= 210 && (maxC - minC) <= 34
+                    if rgba[p + 3] > 200 && !isWhiteMargin {
+                        lastSolidY = y
+                        break
+                    }
+                }
+                if lastSolidY >= minSearchY && lastSolidY < h - 1 {
+                    let srcY = max(0, lastSolidY - 2)
+                    let sp = (srcY * w + x) * 4
+                    let sr = rgba[sp], sg = rgba[sp + 1], sb = rgba[sp + 2]
+                    for y in lastSolidY..<h {
+                        let dp = (y * w + x) * 4
+                        rgba[dp] = sr; rgba[dp + 1] = sg; rgba[dp + 2] = sb; rgba[dp + 3] = 255
+                    }
+                }
+            }
+        }
+
+        // 6. Find vertical opaque bounding box [minY, maxY] to trim empty sky & bottom margin rows
+        var minY = h - 1
+        var maxY = 0
+        for y in 0..<h {
+            var opaqueCount = 0
+            let rowOff = y * w
+            for x in stride(from: 0, to: w, by: 2) {
+                if rgba[(rowOff + x) * 4 + 3] > 28 {
+                    opaqueCount += 1
+                }
+            }
+            if opaqueCount >= 4 {
+                if y < minY { minY = y }
+                if y > maxY { maxY = y }
+            }
+        }
+
+        if maxY <= minY + 16 {
+            minY = 0
+            maxY = h - 1
+        } else {
+            minY = max(0, minY - 2)
+            maxY = min(h - 1, max(minY + 24, maxY - 1))
+        }
+
+        let cropH = maxY - minY + 1
+        var croppedRgba = [UInt8](repeating: 0, count: w * cropH * 4)
+        for y in 0..<cropH {
+            let srcOff = (minY + y) * w * 4
+            let dstOff = y * w * 4
+            for byteIdx in 0..<(w * 4) {
+                croppedRgba[dstOff + byteIdx] = rgba[srcOff + byteIdx]
+            }
+        }
+
+        return makeHorizontallySeamlessImage(
+            rgba: croppedRgba,
+            width: w,
+            height: cropH,
+            seamRatio: isPanoramic ? 0.10 : 0.14
+        )
     }
 }

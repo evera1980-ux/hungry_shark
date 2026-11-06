@@ -123,5 +123,4 @@ npm run build:ios
 | 2026-10-26 | 创建多人协同开发、单测说明与 Vercel 部署参数手册 | `package.json`, `.npmrc`, `src/game/rules.test.ts` |
 | 2026-11-05 | 新增 `npm run build:ios` 纯原生 iOS (Swift + SpriteKit Metal + SwiftUI，零 WebView) 工程生成器与 Xcode 编译文档 | `scripts/build-ios-native.ts`, `package.json`, `ios-native/` |
 | 2026-11-05 | 100% 复刻 iOS 原生工程 UI 图集切分 (`buttons_16e3a0cf` / `icons_f5128c12` / `setting_83a7a273`)、中英双语 `I18N`、声呐摇杆与 90° 技能轮盘、暂停/复活/结算弹窗及 7 槽位弧形罗盘 48 阶进化图谱 | `scripts/build-ios-native.ts`, `ios-native/` |
-
-
+| 2026-11-05 | 修复 iOS 真机实测 6 大问题（多语言占位符 `{count}/{mult}`、HUD 遮挡游动鲨鱼、5 层视差背景无缝去白底与平铺分界线修复、猎物 5 步态网格变形与非线性轨迹、进化图谱连续惯性弹簧转轮、五位一体吞噬特效还原）并沉淀《05. 移动端与跨平台原生移植避坑指南》 | `scripts/build-ios-native.ts`, `src/game/i18n.ts`, `src/App.tsx`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
