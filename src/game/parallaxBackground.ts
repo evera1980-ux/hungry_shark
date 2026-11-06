@@ -1,3 +1,5 @@
+import { getParallaxLayerGrowthScales } from './rules';
+
 export interface AmbientBubble {
   x: number;
   y: number;
@@ -1009,6 +1011,7 @@ export class ParallaxBackground {
   private vignetteCanvas: HTMLCanvasElement | null = null;
   private bubbles: AmbientBubble[] = [];
   private schools: AmbientBackgroundSchool[] = [];
+  private smoothedRelativePreyScale: number = 1.0;
 
   constructor() {
     const kinds: AmbientBubble['kind'][] = [
@@ -1265,20 +1268,22 @@ export class ParallaxBackground {
    */
   private computeBiomeVerticalOffsets(
     midWorldY: number,
-    biomeFloorY: number
+    biomeFloorY: number,
+    nearScale: number = 1.0
   ): { farY: number; midY: number; nearY: number } {
     const u = Math.tanh(Math.max(0, biomeFloorY - midWorldY) / 480);
     return {
-      farY: -20 + 2.5 * u,
-      midY: -10 + 14 * u,
-      nearY: 28 * u,
+      farY: (-20 + 2.5 * u) * nearScale,
+      midY: (-10 + 14 * u) * nearScale,
+      nearY: 28 * u * nearScale,
     };
   }
 
   /**
    * Draws a horizontally-seamless Layer 0 Water Backdrop anchored cleanly at the top of the viewport
    * with ultra-subtle 0.012x horizontal and <=2px vertical parallax so the distant water surface canopy
-   * remains nearly stationary even when the shark swims up to the sea surface.
+   * remains nearly stationary even when the shark swims up to the sea surface, while shrinking subtly (`waterScale`)
+   * around the viewport center as the shark grows.
    */
   private drawSeamlessWaterBackdrop(
     ctx: CanvasRenderingContext2D,
@@ -1287,7 +1292,8 @@ export class ParallaxBackground {
     sharkDepthY: number,
     viewW: number,
     viewH: number,
-    alpha: number
+    alpha: number,
+    layerScale: number = 1.0
   ): void {
     if (!waterPlane || alpha <= 0.01) return;
 
@@ -1298,12 +1304,18 @@ export class ParallaxBackground {
     const refH = isPanoramicCanopy
       ? Math.min(viewH, Math.max(360, viewW * 0.65))
       : viewH;
-    const drawH = isPanoramicCanopy
+    const baseDrawH = isPanoramicCanopy
       ? Math.max(108, Math.min(360, Math.round(refH * 0.36)))
       : viewH + 24;
-    const tileW = Math.max(320, Math.round(drawH * aspect));
-    const scrollX = cameraX * (isPanoramicCanopy ? 0.012 : 0.025);
-    const startX = -(((scrollX % tileW) + tileW) % tileW);
+    const drawH = isPanoramicCanopy
+      ? Math.max(88, Math.round(baseDrawH * layerScale))
+      : viewH + 24;
+    const baseTileW = Math.max(320, Math.round(baseDrawH * aspect));
+    const tileW = Math.max(240, Math.round(drawH * aspect));
+    const scrollFactor = isPanoramicCanopy ? 0.012 : 0.025;
+    const normPhase = (((cameraX * scrollFactor) / baseTileW) % 1 + 1) % 1;
+    const centerAnchorX = viewW * 0.5 - normPhase * tileW;
+    const startX = (((centerAnchorX % tileW) + tileW) % tileW) - tileW;
     const u = Math.tanh(Math.max(0, 680 - sharkDepthY) / 480);
     const parallaxY = isPanoramicCanopy
       ? -Math.round((1 - u) * 2)
@@ -1317,7 +1329,9 @@ export class ParallaxBackground {
 
   /**
    * Draws a single transparent parallax terrain plane seamlessly tiled across X,
-   * preserving natural artwork proportions and coupling vertical offset to camera depth.
+   * preserving natural artwork proportions, coupling vertical offset to camera depth,
+   * and scaling by `layerScale` (`nearScale < midScale < farScale`) around the viewport center
+   * with zero horizontal phase jump when the shark levels up or evolves.
    */
   private drawParallaxPlane(
     ctx: CanvasRenderingContext2D,
@@ -1331,7 +1345,8 @@ export class ParallaxBackground {
     heightViewportRatio: number = 0.44,
     minHeightPx: number = 180,
     maxHeightPx: number = 460,
-    maxSkirtExtendPx?: number
+    maxSkirtExtendPx?: number,
+    layerScale: number = 1.0
   ): void {
     if (alpha <= 0.01 || !plane || plane.width <= 0 || plane.height <= 0) return;
 
@@ -1339,11 +1354,16 @@ export class ParallaxBackground {
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
 
     const aspect = plane.width / plane.height;
-    const targetH = Math.max(
+    const baseTargetH = Math.max(
       minHeightPx,
       Math.min(maxHeightPx, Math.round(viewH * heightViewportRatio))
     );
-    const tileW = Math.max(256, Math.round(targetH * aspect));
+    const targetH = Math.max(
+      Math.max(36, Math.round(minHeightPx * layerScale)),
+      Math.round(baseTargetH * layerScale)
+    );
+    const baseTileW = Math.max(256, Math.round(baseTargetH * aspect));
+    const tileW = Math.max(148, Math.round(targetH * aspect));
     const drawY = viewH - targetH + verticalOffsetPx;
 
     if (drawY >= viewH + 8) {
@@ -1351,8 +1371,9 @@ export class ParallaxBackground {
       return;
     }
 
-    const scrollX = cameraX * parallaxXFactor;
-    const startX = -(((scrollX % tileW) + tileW) % tileW);
+    const normPhase = (((cameraX * parallaxXFactor) / baseTileW) % 1 + 1) % 1;
+    const centerAnchorX = viewW * 0.5 - normPhase * tileW;
+    const startX = (((centerAnchorX % tileW) + tileW) % tileW) - tileW;
 
     for (let x = startX; x < viewW; x += tileW) {
       const dx = Math.floor(x);
@@ -1386,7 +1407,7 @@ export class ParallaxBackground {
   /**
    * Draws live swaying kelp (`GIANT_KELP`), glowing twilight sea-whips (`BIOLUM_SEA_WHIP`),
    * and rising bubble columns (`BUBBLE_STREAM`) sliced from `bg_ambient_sprites` and locked
-   * to the foreground seabed plane (`0.38x` horizontal & `nearY` vertical parallax) so roots never slide.
+   * to the foreground seabed plane (`0.38x` horizontal, `nearY` vertical & `nearScale` size) so roots never slide.
    */
   private drawAnimatedSeabedSprites(
     ctx: CanvasRenderingContext2D,
@@ -1396,7 +1417,8 @@ export class ParallaxBackground {
     nowMs: number,
     verticalOffsetPx: number,
     alpha: number,
-    mode: 'SHALLOW' | 'TWILIGHT'
+    mode: 'SHALLOW' | 'TWILIGHT',
+    nearScale: number = 1.0
   ): void {
     if (alpha <= 0.02 || verticalOffsetPx > 160) return;
 
@@ -1405,32 +1427,34 @@ export class ParallaxBackground {
 
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-    const spacing = 360;
-    const scrollX = cameraX * 0.38;
-    const firstWorldIdx = Math.floor((scrollX - 180) / spacing);
-    const count = Math.ceil((viewW + 360) / spacing) + 1;
+    const baseSpacing = 360;
+    const spacing = Math.max(160, baseSpacing * nearScale);
+    const centerWorldIdx = (cameraX * 0.38) / baseSpacing;
+    const halfSpanIdx = Math.ceil((viewW * 0.5 + 220) / spacing);
+    const firstWorldIdx = Math.floor(centerWorldIdx) - halfSpanIdx;
+    const lastWorldIdx = Math.ceil(centerWorldIdx) + halfSpanIdx;
     const baseY = viewH + verticalOffsetPx;
 
-    for (let i = 0; i < count; i++) {
-      const worldIdx = firstWorldIdx + i;
-      const screenX = worldIdx * spacing - scrollX;
+    for (let worldIdx = firstWorldIdx; worldIdx <= lastWorldIdx; worldIdx++) {
+      const screenX = viewW * 0.5 + (worldIdx - centerWorldIdx) * spacing;
       const hash = Math.abs(Math.sin(worldIdx * 12.9898) * 43758.5453);
       const frac = hash - Math.floor(hash);
-      const anchorX = screenX + (frac - 0.5) * 70;
-      const anchorY = baseY + 8;
+      const anchorX = screenX + (frac - 0.5) * 70 * nearScale;
+      const anchorY = baseY + 8 * nearScale;
 
       // Occasional rising bubble stream in shallow reef
       if (mode === 'SHALLOW' && bubbleSprite && Math.abs(worldIdx) % 2 === 0) {
-        const bH = 105;
+        const bH = 105 * nearScale;
         const bW = bH * (bubbleSprite.width / bubbleSprite.height);
-        const riseOffset = ((nowMs * 0.028 + Math.abs(worldIdx) * 45) % 90);
-        const bAlpha = Math.sin((riseOffset / 90) * Math.PI) * 0.55 * alpha;
+        const riseOffset =
+          ((nowMs * 0.028 + Math.abs(worldIdx) * 45) % 90) * nearScale;
+        const bAlpha = Math.sin((riseOffset / (90 * nearScale)) * Math.PI) * 0.55 * alpha;
         ctx.save();
         ctx.globalAlpha = Math.max(0, bAlpha);
         ctx.drawImage(
           bubbleSprite,
-          anchorX + 42 - bW * 0.5,
-          anchorY - 45 - riseOffset - bH,
+          anchorX + 42 * nearScale - bW * 0.5,
+          anchorY - 45 * nearScale - riseOffset - bH,
           bW,
           bH
         );
@@ -1443,7 +1467,7 @@ export class ParallaxBackground {
   /**
    * Draws distant atmospheric marine life (`bg_ambient_sprites`: sardine baitballs, butterflyfish schools,
    * manta rays, glowing moon jellyfish, and deep-sea lanternfish) in the mid-far water column (`0.16x` horizontal,
-   * `12px` vertical amplitude between Far `8px` and Mid `16px`) at reduced atmospheric contrast.
+   * `12px` vertical amplitude between Far `8px` and Mid `16px`) scaled by `ambientScale` as the shark grows.
    */
   private drawDistantAmbientSchools(
     ctx: CanvasRenderingContext2D,
@@ -1453,7 +1477,9 @@ export class ParallaxBackground {
     viewH: number,
     nowMs: number,
     dt: number,
-    screenSurfaceY: number
+    screenSurfaceY: number,
+    ambientScale: number = 1.0,
+    nearScale: number = 1.0
   ): void {
     if (sharkY > 1280) return;
 
@@ -1484,11 +1510,11 @@ export class ParallaxBackground {
       sc.phase += dt * 2.4;
 
       const baseX =
-        (((sc.x - cameraX * 0.16) % wrapW) + wrapW) % wrapW - 210;
+        (((sc.x - cameraX * 0.16 * ambientScale) % wrapW) + wrapW) % wrapW - 210;
       const zoneFloorY = sc.zone === 0 ? 680 : 1340;
       const u = Math.tanh(Math.max(0, zoneFloorY - sharkY) / 480);
-      const schoolParallaxY = -6 + 12 * u;
-      const bobY = Math.sin(sc.phase * 0.65) * 9;
+      const schoolParallaxY = (-6 + 12 * u) * nearScale;
+      const bobY = Math.sin(sc.phase * 0.65) * 9 * ambientScale;
       const baseY = viewH * sc.y + schoolParallaxY + bobY;
 
       const distBelowSurface = baseY - (screenSurfaceY + 38);
@@ -1509,8 +1535,8 @@ export class ParallaxBackground {
         ctx.globalAlpha = baseOpacity * effectiveFade;
         ctx.translate(baseX, baseY);
 
-        const drawW = sprite.width * sc.scale;
-        const drawH = sprite.height * sc.scale;
+        const drawW = sprite.width * sc.scale * ambientScale;
+        const drawH = sprite.height * sc.scale * ambientScale;
 
         if (sc.spriteKind === 'SARDINE_BAITBALL') {
           ctx.rotate(nowMs * 0.00035 * sc.dir);
@@ -1533,12 +1559,20 @@ export class ParallaxBackground {
         for (let f = 0; f < sc.count; f++) {
           const fx =
             baseX +
-            Math.cos(f * 1.9 + sc.phase * 0.25) * sc.spreadX +
-            f * 7 * -sc.dir;
+            Math.cos(f * 1.9 + sc.phase * 0.25) * sc.spreadX * ambientScale +
+            f * 7 * -sc.dir * ambientScale;
           const fy =
-            baseY + Math.sin(f * 2.3 + sc.phase * 0.4) * sc.spreadY;
+            baseY + Math.sin(f * 2.3 + sc.phase * 0.4) * sc.spreadY * ambientScale;
           ctx.beginPath();
-          ctx.ellipse(fx, fy, 5.5, 2.2, 0, 0, Math.PI * 2);
+          ctx.ellipse(
+            fx,
+            fy,
+            5.5 * ambientScale,
+            2.2 * ambientScale,
+            0,
+            0,
+            Math.PI * 2
+          );
           ctx.fill();
         }
       }
@@ -1547,7 +1581,9 @@ export class ParallaxBackground {
   }
 
   /**
-   * Renders the complete 5-layer depth-continuous AI-illustrated ocean environment.
+   * Renders the complete 5-layer depth-continuous AI-illustrated ocean environment,
+   * dynamically shrinking Far (`0.868x`), Mid (`0.730x`), Ambient (`0.670x`), and Near (`0.580x`)
+   * planes in optical depth proportion as the shark grows (`relativePreyScale`: 1.00 -> 0.40).
    */
   public render(
     ctx: CanvasRenderingContext2D,
@@ -1558,11 +1594,29 @@ export class ParallaxBackground {
     nowMs: number,
     dt: number,
     cameraY: number = sharkY,
-    renderZoom: number = 1
+    renderZoom: number = 1,
+    relativePreyScale: number = 1.0
   ): void {
     if (this.biomePlanes.length < 3) {
       this.load();
     }
+
+    const targetRelScale = Number.isFinite(relativePreyScale)
+      ? Math.max(0.4, Math.min(1.0, relativePreyScale))
+      : 1.0;
+    if (
+      dt <= 0 ||
+      Math.abs(targetRelScale - this.smoothedRelativePreyScale) > 0.35
+    ) {
+      this.smoothedRelativePreyScale = targetRelScale;
+    } else {
+      const lerpFactor = Math.min(1, dt * 4.5);
+      this.smoothedRelativePreyScale +=
+        (targetRelScale - this.smoothedRelativePreyScale) * lerpFactor;
+    }
+    const bgScales = getParallaxLayerGrowthScales(
+      this.smoothedRelativePreyScale
+    );
 
     const effZoom = Math.max(0.35, renderZoom);
     const depthRefY = Math.max(0, sharkY);
@@ -1595,7 +1649,8 @@ export class ParallaxBackground {
           depthRefY,
           viewW,
           viewH,
-          wAlpha0
+          wAlpha0,
+          bgScales.waterScale
         );
       }
 
@@ -1613,7 +1668,8 @@ export class ParallaxBackground {
           depthRefY,
           viewW,
           viewH,
-          wAlpha1
+          wAlpha1,
+          bgScales.waterScale
         );
       }
 
@@ -1627,7 +1683,8 @@ export class ParallaxBackground {
           depthRefY,
           viewW,
           viewH,
-          wAlpha2
+          wAlpha2,
+          bgScales.waterScale
         );
       }
     }
@@ -1638,7 +1695,7 @@ export class ParallaxBackground {
       ctx.save();
       const tSec = nowMs * 0.00035;
       const rayOriginY = 0;
-      const rayEndY = viewH * 0.72;
+      const rayEndY = viewH * 0.72 * bgScales.waterScale;
 
       ctx.globalAlpha = rayVisibility * 0.32;
       const sharedRayGrad = ctx.createLinearGradient(0, rayOriginY, 0, rayEndY);
@@ -1654,9 +1711,9 @@ export class ParallaxBackground {
           (((r * 310 + 90 - cameraX * 0.015) % spanB) + spanB) % spanB - 180;
         const sway = Math.cos(tSec * 1.1 + r * 0.95) * 14;
         ctx.moveTo(baseX, rayOriginY);
-        ctx.lineTo(baseX + 46, rayOriginY);
-        ctx.lineTo(baseX + 155 + sway, rayEndY);
-        ctx.lineTo(baseX + 42 + sway, rayEndY);
+        ctx.lineTo(baseX + 46 * bgScales.waterScale, rayOriginY);
+        ctx.lineTo(baseX + (155 + sway) * bgScales.waterScale, rayEndY);
+        ctx.lineTo(baseX + (42 + sway) * bgScales.waterScale, rayEndY);
         ctx.closePath();
       }
       ctx.fill();
@@ -1666,9 +1723,21 @@ export class ParallaxBackground {
     // ==================== 3. LAYER 1 (FAR) -> AMBIENT SPRITES -> LAYER 2 (MID) -> LAYER 3 (NEAR) ====================
     if (this.biomePlanes.length === 3) {
       const [shallow, twilight, abyssal] = this.biomePlanes;
-      const shallowOffsets = this.computeBiomeVerticalOffsets(depthRefY, 680);
-      const twilightOffsets = this.computeBiomeVerticalOffsets(depthRefY, 1340);
-      const abyssOffsets = this.computeBiomeVerticalOffsets(depthRefY, 2100);
+      const shallowOffsets = this.computeBiomeVerticalOffsets(
+        depthRefY,
+        680,
+        bgScales.nearScale
+      );
+      const twilightOffsets = this.computeBiomeVerticalOffsets(
+        depthRefY,
+        1340,
+        bgScales.nearScale
+      );
+      const abyssOffsets = this.computeBiomeVerticalOffsets(
+        depthRefY,
+        2100,
+        bgScales.nearScale
+      );
 
       // Proportional reference height for the panoramic strips across all 3 biomes
       const panoRefH = Math.min(viewH, Math.max(360, viewW * 0.65));
@@ -1677,29 +1746,41 @@ export class ParallaxBackground {
       const shallowNearH = Math.max(82, Math.min(260, Math.round(panoRefH * 0.25)));
       const shallowMidH = Math.max(72, Math.min(230, Math.round(panoRefH * 0.22)));
       const shallowFarH = Math.max(76, Math.min(240, Math.round(panoRefH * 0.232)));
-      const shallowMidElevation = Math.round(shallowNearH * 0.22);
-      const shallowFarElevation = Math.round(shallowNearH * 0.42);
+      const shallowMidElevation = Math.round(
+        shallowNearH * bgScales.nearScale * 0.22
+      );
+      const shallowFarElevation = Math.round(
+        shallowNearH * bgScales.nearScale * 0.42
+      );
 
       // Twilight (1916x821 widescreen RGBA strips: cropped ratios 50.7%, 51.6%, 43.4%)
       const twilightNearH = Math.max(105, Math.min(280, Math.round(panoRefH * 0.30)));
       const twilightMidH = Math.max(130, Math.min(340, Math.round(panoRefH * 0.37)));
       const twilightFarH = Math.max(150, Math.min(390, Math.round(panoRefH * 0.42)));
-      const twilightMidElevation = Math.round(twilightNearH * 0.16);
-      const twilightFarElevation = Math.round(twilightNearH * 0.34);
+      const twilightMidElevation = Math.round(
+        twilightNearH * bgScales.nearScale * 0.16
+      );
+      const twilightFarElevation = Math.round(
+        twilightNearH * bgScales.nearScale * 0.34
+      );
 
       // Abyss (1916x821 widescreen volcanic & hydrothermal strips: far=49.7%, mid=90.8% w/ tall smoke, near=79.7% w/ tall smoke)
       const abyssNearH = Math.max(165, Math.min(440, Math.round(panoRefH * 0.50)));
       const abyssMidH = Math.max(195, Math.min(510, Math.round(panoRefH * 0.58)));
       const abyssFarH = Math.max(150, Math.min(390, Math.round(panoRefH * 0.42)));
-      const abyssMidElevation = Math.round(abyssNearH * 0.08);
-      const abyssFarElevation = Math.round(abyssNearH * 0.24);
+      const abyssMidElevation = Math.round(
+        abyssNearH * bgScales.nearScale * 0.08
+      );
+      const abyssFarElevation = Math.round(
+        abyssNearH * bgScales.nearScale * 0.24
+      );
 
       // Biome 0 Far: Sunlit Coral Reef (0m ~ 680m)
       if (depthRefY < 700) {
         const alpha0 =
           depthRefY < 460 ? 1 : Math.max(0, 1 - (depthRefY - 460) / 220);
 
-        // Layer 1: Far Seamount Arches (0.025x horizontal — nearly stationary distant horizon)
+        // Layer 1: Far Seamount Arches (0.025x horizontal — nearly stationary distant horizon, shrinks least: 0.868x)
         this.drawParallaxPlane(
           ctx,
           shallow.far,
@@ -1712,7 +1793,8 @@ export class ParallaxBackground {
           shallowFarH / Math.max(1, viewH),
           shallowFarH,
           shallowFarH,
-          0
+          0,
+          bgScales.farScale
         );
       }
 
@@ -1737,7 +1819,8 @@ export class ParallaxBackground {
           twilightFarH / Math.max(1, viewH),
           twilightFarH,
           twilightFarH,
-          0
+          0,
+          bgScales.farScale
         );
       }
 
@@ -1758,11 +1841,12 @@ export class ParallaxBackground {
           abyssFarH / Math.max(1, viewH),
           abyssFarH,
           abyssFarH,
-          0
+          0,
+          bgScales.farScale
         );
       }
 
-      // Ambient Marine Schools & Jellyfish (0.12x horizontal, 10px vertical amplitude)
+      // Ambient Marine Schools & Jellyfish (0.16x horizontal, scaled by ambientScale: 1.00 -> 0.67x)
       this.drawDistantAmbientSchools(
         ctx,
         cameraX,
@@ -1771,7 +1855,9 @@ export class ParallaxBackground {
         viewH,
         nowMs,
         dt,
-        0
+        0,
+        bgScales.ambientScale,
+        bgScales.nearScale
       );
 
       // Biome 0 Mid & Near
@@ -1779,7 +1865,7 @@ export class ParallaxBackground {
         const alpha0 =
           depthRefY < 460 ? 1 : Math.max(0, 1 - (depthRefY - 460) / 220);
 
-        // Layer 2: Midground Coral Reef Terrace (0.18x horizontal, elevated behind Near sandbank at natural 1:1 panoramic aspect)
+        // Layer 2: Midground Coral Reef Terrace (0.18x horizontal, shrinks moderately: 1.00 -> 0.73x)
         this.drawParallaxPlane(
           ctx,
           shallow.mid,
@@ -1792,9 +1878,10 @@ export class ParallaxBackground {
           shallowMidH / Math.max(1, viewH),
           shallowMidH,
           shallowMidH,
-          0
+          0,
+          bgScales.midScale
         );
-        // Layer 3: Foreground Sandbank, Kelp & Rusty Anchor (0.38x horizontal, anchored at seabed floor at natural 1:1 panoramic aspect)
+        // Layer 3: Foreground Sandbank, Kelp & Rusty Anchor (0.38x horizontal, shrinks most: 1.00 -> 0.58x)
         this.drawParallaxPlane(
           ctx,
           shallow.near,
@@ -1806,9 +1893,11 @@ export class ParallaxBackground {
           alpha0,
           shallowNearH / Math.max(1, viewH),
           shallowNearH,
-          shallowNearH
+          shallowNearH,
+          undefined,
+          bgScales.nearScale
         );
-        // Layer 4: Rising Bubble Streams locked to Near seabed (0.38x horizontal, 28px vertical amplitude)
+        // Layer 4: Rising Bubble Streams locked to Near seabed (0.38x horizontal, scaled by nearScale)
         this.drawAnimatedSeabedSprites(
           ctx,
           cameraX,
@@ -1817,7 +1906,8 @@ export class ParallaxBackground {
           nowMs,
           shallowOffsets.nearY,
           alpha0,
-          'SHALLOW'
+          'SHALLOW',
+          bgScales.nearScale
         );
       }
 
@@ -1842,7 +1932,8 @@ export class ParallaxBackground {
           twilightMidH / Math.max(1, viewH),
           twilightMidH,
           twilightMidH,
-          0
+          0,
+          bgScales.midScale
         );
         this.drawParallaxPlane(
           ctx,
@@ -1855,7 +1946,9 @@ export class ParallaxBackground {
           alpha1,
           twilightNearH / Math.max(1, viewH),
           twilightNearH,
-          twilightNearH
+          twilightNearH,
+          undefined,
+          bgScales.nearScale
         );
         this.drawAnimatedSeabedSprites(
           ctx,
@@ -1865,7 +1958,8 @@ export class ParallaxBackground {
           nowMs,
           twilightOffsets.nearY,
           alpha1,
-          'TWILIGHT'
+          'TWILIGHT',
+          bgScales.nearScale
         );
       }
 
@@ -1886,7 +1980,8 @@ export class ParallaxBackground {
           abyssMidH / Math.max(1, viewH),
           abyssMidH,
           abyssMidH,
-          0
+          0,
+          bgScales.midScale
         );
         this.drawParallaxPlane(
           ctx,
@@ -1899,7 +1994,9 @@ export class ParallaxBackground {
           alpha2,
           abyssNearH / Math.max(1, viewH),
           abyssNearH,
-          abyssNearH
+          abyssNearH,
+          undefined,
+          bgScales.nearScale
         );
       }
     }
@@ -1908,6 +2005,7 @@ export class ParallaxBackground {
     ctx.save();
     const isAbyss = depthRefY > 1150;
     const isTwilight = depthRefY >= 520 && depthRefY <= 1150;
+    const pScale = bgScales.particleScale;
     for (const b of this.bubbles) {
       const verticalDir = isTwilight && b.kind === 'MARINE_SNOW' ? 0.35 : -1;
       b.y += verticalDir * b.speedY * dt;
@@ -1922,23 +2020,24 @@ export class ParallaxBackground {
       }
 
       const screenX =
-        (((b.x - cameraX * 0.55 + Math.sin(b.wobblePhase) * 11) % viewW) +
+        (((b.x - cameraX * 0.55 * pScale + Math.sin(b.wobblePhase) * 11 * pScale) % viewW) +
           viewW) %
         viewW;
+      const effR = b.r * pScale;
 
       if (isAbyss) {
         const pulse = 0.65 + Math.sin(b.wobblePhase * 1.8) * 0.35;
         ctx.globalAlpha = b.alpha * pulse;
         ctx.fillStyle = b.kind === 'BIO_SPORE' ? '#c084fc' : '#fb923c';
         ctx.beginPath();
-        ctx.arc(screenX, b.y, b.r * 0.72, 0, Math.PI * 2);
+        ctx.arc(screenX, b.y, effR * 0.72, 0, Math.PI * 2);
         ctx.fill();
       } else if (isTwilight) {
         const pulse = 0.55 + Math.sin(b.wobblePhase * 1.5) * 0.45;
         ctx.globalAlpha = b.alpha * pulse;
         ctx.fillStyle = b.kind === 'BIO_SPORE' ? '#22d3ee' : '#94a3b8';
         ctx.beginPath();
-        ctx.arc(screenX, b.y, b.r * 0.62, 0, Math.PI * 2);
+        ctx.arc(screenX, b.y, effR * 0.62, 0, Math.PI * 2);
         ctx.fill();
       } else {
         ctx.globalAlpha = b.alpha;
@@ -1946,13 +2045,13 @@ export class ParallaxBackground {
         ctx.fillStyle = 'rgba(186, 230, 253, 0.16)';
         ctx.lineWidth = 1.15;
         ctx.beginPath();
-        ctx.arc(screenX, b.y, b.r, 0, Math.PI * 2);
+        ctx.arc(screenX, b.y, effR, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
 
         ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
         ctx.beginPath();
-        ctx.arc(screenX - b.r * 0.32, b.y - b.r * 0.32, b.r * 0.24, 0, Math.PI * 2);
+        ctx.arc(screenX - effR * 0.32, b.y - effR * 0.32, effR * 0.24, 0, Math.PI * 2);
         ctx.fill();
       }
     }

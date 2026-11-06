@@ -1711,7 +1711,12 @@ export default function App() {
       if (gameStateRef.current === 'title') {
         // Title Screen Hero Patrol: uses the exact in-game Hydrodynamic Horizontal Whip-Turn & 2.5D Spinal C-Bend physics
         const selectedId = metaSaveRef.current.selectedSharkId;
-        if (shark.sharkFormId !== selectedId) {
+        const selectedUpgLv =
+          metaSaveRef.current.sharkUpgradeLevels[selectedId] ?? 1;
+        if (
+          shark.sharkFormId !== selectedId ||
+          shark.stats.upgradeLevel !== selectedUpgLv
+        ) {
           shark.sharkFormId = selectedId;
           shark.stats = recomputeSharkStats(1, false, selectedId);
         }
@@ -2961,7 +2966,7 @@ export default function App() {
       ctx.save();
       ctx.scale(scaleX, scaleY);
 
-      // 5-Layer Multi-Plane Depth-Continuous Ocean Environment
+      // 5-Layer Multi-Plane Depth-Continuous Ocean Environment (with Far/Mid/Near optical growth shrinking)
       parallaxBackground.render(
         ctx,
         sim.camera.x,
@@ -2971,7 +2976,8 @@ export default function App() {
         now,
         dt,
         sim.camera.y,
-        renderZoom
+        renderZoom,
+        shark.stats.relativePreyScale
       );
 
       // Camera transform with trauma-squared screen shake

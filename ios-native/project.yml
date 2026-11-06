@@ -1,0 +1,28 @@
+name: HungrySharkEvolution
+options:
+  bundleIdPrefix: com.deepsea.hungryshark
+  deploymentTarget:
+    iOS: "16.0"
+  xcodeVersion: "15.0"
+targets:
+  HungrySharkEvolution:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: HungrySharkEvolution
+        excludes:
+          - "Resources/Assets/*.png"
+      - path: HungrySharkEvolution/Resources/Assets
+        type: folder
+        buildPhase: resources
+    info:
+      path: HungrySharkEvolution/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.deepsea.hungryshark.evolution
+        MARKETING_VERSION: 1.0.0
+        CURRENT_PROJECT_VERSION: 1
+        SWIFT_VERSION: 5.9
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_FILE: HungrySharkEvolution/Info.plist

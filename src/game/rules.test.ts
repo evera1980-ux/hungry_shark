@@ -11,6 +11,7 @@ import {
   pickEvolutionChoices,
   getMaxMechaLoadout,
   getDepthZone,
+  getParallaxLayerGrowthScales,
 } from './rules';
 import {
   createDefaultMetaSave,
@@ -1025,5 +1026,39 @@ test('UI_BANNER_BOUNDS (buttons_16e3a0cf.png) defines 4 non-overlapping normaliz
   }
 });
 
+test('getParallaxLayerGrowthScales shrinks Near > Ambient > Mid > Far > Water in strict optical depth proportion as shark grows', () => {
+  const starterStats = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false, 1.0, 1);
+  assert.equal(starterStats.relativePreyScale, 1.0);
+  const starterScales = getParallaxLayerGrowthScales(starterStats.relativePreyScale);
+  assert.equal(starterScales.growthProgress, 0);
+  assert.equal(starterScales.waterScale, 1.0);
+  assert.equal(starterScales.farScale, 1.0);
+  assert.equal(starterScales.midScale, 1.0);
+  assert.equal(starterScales.ambientScale, 1.0);
+  assert.equal(starterScales.nearScale, 1.0);
 
+  // Mid-game evolution (Gen 3 #17 Lv.5 upgrade, in-run Lv.6)
+  const midGameStats = computeEvolvedSharkStats(6, 'shark_16_armor_plating', 5, false, 1.0, 17);
+  const midScales = getParallaxLayerGrowthScales(midGameStats.relativePreyScale);
+  assert.ok(midScales.growthProgress > 0.5 && midScales.growthProgress < 1.0);
+  assert.ok(
+    midGameStats.relativePreyScale < midScales.nearScale &&
+      midScales.nearScale < midScales.ambientScale &&
+      midScales.ambientScale < midScales.midScale &&
+      midScales.midScale < midScales.farScale &&
+      midScales.farScale < midScales.waterScale &&
+      midScales.waterScale < 1.0,
+    'Background layers must obey strict optical depth shrinking hierarchy: Prey < Near < Ambient < Mid < Far < Water < 1.0'
+  );
 
+  // Max leviathan growth (Gen 6 #48 Omega Devourer Lv.10 upgrade, in-run Lv.12 -> relativePreyScale = 0.40)
+  const omegaStats = computeEvolvedSharkStats(12, 'shark_47_omega_devourer', 10, false, 1.0, 48);
+  assert.equal(omegaStats.relativePreyScale, 0.4);
+  const maxScales = getParallaxLayerGrowthScales(omegaStats.relativePreyScale);
+  assert.equal(maxScales.growthProgress, 1);
+  assert.equal(maxScales.nearScale, 0.58);     // -42.0% shrink (0.70 weight)
+  assert.equal(maxScales.ambientScale, 0.67);  // -33.0% shrink (0.55 weight)
+  assert.equal(maxScales.midScale, 0.73);      // -27.0% shrink (0.45 weight)
+  assert.equal(maxScales.farScale, 0.868);     // -13.2% shrink (0.22 weight)
+  assert.equal(maxScales.waterScale, 0.91);    //  -9.0% shrink (0.15 weight)
+});

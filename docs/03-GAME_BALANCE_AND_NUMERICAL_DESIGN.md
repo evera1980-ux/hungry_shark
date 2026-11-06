@@ -125,6 +125,20 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
   1. **常态下（`frenzyActive === false`）**：100% 遵守“小于自己即可吞、大于等于自己即受伤”的视觉铁律。
   2. **黄金狂暴期间（`frenzyActive === true` 特例）**：所有猎物**保持进入黄金阶段前的原始体型大小不变**（巨兽依然庞大，并环绕金色虚线盛宴光环与 `★T{N}` 标记），玩家操控金光鲨鱼直接撞碎并一口生吞比自己还大的深海巨兽！
 
+### 3.5 鲨鱼成长驱动的远/中/近景光学分级缩小公式 (`getParallaxLayerGrowthScales`)
+- **设计原理**：当鲨鱼变大时，如果仅缩小猎物而海底礁石、铁锚、珊瑚与沉船保持原尺寸不变，玩家缺乏海底环境参照物的尺度反馈。根据透视光学原理（镜头拉远 $\Delta d$ 时，角直径变化率与景深距离 $d$ 成反比），`src/game/rules.ts` 中的 `getParallaxLayerGrowthScales(relativePreyScale)` 将鲨鱼成长缩小量 $\Delta S = \text{clamp}(1 - \text{relativePreyScale},\; 0,\; 0.60)$ 按景深距离权重分配给各背景层：
+  $$S_{\text{layer}} = 1 - w_{\text{layer}} \times \Delta S$$
+- **各层缩小权重与满阶巨兽缩放比速查表**（远:中:近变小比率为 **`0.22 : 0.45 : 0.70` $\approx$ `1 : 2.05 : 3.18`**）：
+  | 景深层级 | 对应函数字段 | 缩小权重 $w_{\text{layer}}$ | 初始幼鲨 (`relativePreyScale = 1.00`) | 中期成长 (`relativePreyScale = 0.68`) | 满阶巨兽 (`relativePreyScale = 0.40`) | 最大缩小幅度 |
+  | :--- | :--- | :---: | :---: | :---: | :---: | :---: |
+  | **猎物参照层** | `relativePreyScale` | `1.00` | `1.000x` | `0.680x` | `0.400x` | **-60.0%** |
+  | **近景海床层 (Near)** | `nearScale` | **`0.70`** | `1.000x` | `0.776x` | **`0.580x`** | **-42.0%** |
+  | **远景氛围生物 (Ambient)** | `ambientScale` | **`0.55`** | `1.000x` | `0.824x` | **`0.670x`** | **-33.0%** |
+  | **中景礁崖层 (Mid)** | `midScale` | **`0.45`** | `1.000x` | `0.856x` | **`0.730x`** | **-27.0%** |
+  | **水体气泡微粒 (Particle)** | `particleScale` | **`0.45`** | `1.000x` | `0.856x` | **`0.730x`** | **-27.0%** |
+  | **远景山脉/遗迹 (Far)** | `farScale` | **`0.22`** | `1.000x` | `0.930x` | **`0.868x`** | **-13.2%** |
+  | **海面焦散光幕 (Water)** | `waterScale` | **`0.15`** | `1.000x` | `0.952x` | **`0.910x`** | **-9.0%** |
+
 ---
 
 ## 4. 48 阶鲨鱼本体进化矩阵与三重门禁系统
@@ -238,6 +252,7 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-05 | **新增第 3.5 节“鲨鱼成长驱动的远/中/近景光学分级缩小公式 (`getParallaxLayerGrowthScales`)”**：按景深距离权重（`近景 0.70 > 远景鱼群 0.55 > 中景 0.45 > 远景 0.22 > 海面水幕 0.15`）将 `relativePreyScale`（`1.00 -> 0.40`）映射为各背景视差层的动态缩放比（满阶时近景 `0.58x`、中景 `0.73x`、远景 `0.868x`），使鲨鱼长大时近处海床铁锚/珊瑚明显变小并自然显露更开阔的中远景深海奇观 | `src/game/rules.ts`, `src/game/parallaxBackground.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/02-DESIGN_SPEC.md` |
 | 2026-10-31 | **固化默认鱼群刷新数量 `20` 与猎物显示大小 `0.8`（保留调参功能、隐藏调参按钮）**：`ecosystemSpawner.ts` 默认 `maxActivePreys` 设为 `20`，`rules.ts` 默认 `debugPreySizeMultiplier` 设为 `0.8`，`App.tsx` 默认隐藏调参面板与调参按钮并保留全部实时调参代码 | `src/game/ecosystemSpawner.ts`, `src/game/rules.ts`, `src/App.tsx`, `src/game/rules.test.ts` |
 | 2026-10-31 | **新增实时调参 Debug 调节器（`debugPreySizeMultiplier` & `syncPreyCountImmediate`）**：`rules.ts` 新增 `getDebugPreySizeMultiplier` / `setDebugPreySizeMultiplier`（支持 `0.35x ~ 2.50x` 实时缩放 `getPreyRelativeVisualScale` 输出，保持渲染与碰撞半径同步）；`ecosystemSpawner.ts` 新增 `syncPreyCountImmediate` 支持 `4 ~ 80` 同屏鱼数实时增删 | `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/rules.test.ts` |
 | 2026-10-31 | **降低同屏鱼群刷新密度 & 浅水区永久移除鳗鱼等主动攻击鱼类**：① `ecosystemSpawner.ts` 将 `maxActivePreys` 由 `50` 下调至 `28`、生成环扩展为 `640~1650px`、`T1` 成簇概率由 `55%`（3 条一簇）降为 `28%`（双鱼结伴），`App.tsx` 开局迎宾小鱼由 `10` 条减至 `5` 条、标题巡游鱼由 `32` 条减至 `18` 条；② 将 `green_moray_eel`（剧毒海鳝，`EEL_CHARGER`）栖息深度由 `130m~520m` 迁移至暮光带 `560m~1180m`，浅水区（`depth <= 520m`）全程永久屏蔽主动攻击鱼类 | `src/game/config.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/parallaxBackground.ts`, `src/game/rules.test.ts` |

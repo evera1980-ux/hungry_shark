@@ -176,6 +176,55 @@ export function getPreyRelativeVisualScale(
   );
 }
 
+export interface ParallaxLayerGrowthScales {
+  /** Normalized growth shrink progress in [0, 1] (0 at starter Lv.1 fry, 1 at max leviathan growth where relativePreyScale = 0.40) */
+  growthProgress: number;
+  /** Layer 0: Sea surface sunbeam canopy scale (1.000 -> 0.910, shrinks by up to 9%) */
+  waterScale: number;
+  /** Layer 1: Distant seamounts / Atlantean ruins / volcanic ridge scale (1.000 -> 0.868, shrinks by up to 13.2%) */
+  farScale: number;
+  /** Layer 2A: Mid-distance coral cliffs / whale ribcage / black smokers scale (1.000 -> 0.730, shrinks by up to 27%) */
+  midScale: number;
+  /** Layer 2B: Ambient marine life schools / manta rays / jellyfish scale (1.000 -> 0.670, shrinks by up to 33%) */
+  ambientScale: number;
+  /** Layer 3: Immediate foreground seabed (anchors, clams, amphorae, tube worms, bubbles) scale (1.000 -> 0.580, shrinks by up to 42%) */
+  nearScale: number;
+  /** Layer 4: Water column floating bubble / spore particle scale (1.000 -> 0.730, shrinks by up to 27%) */
+  particleScale: number;
+}
+
+/**
+ * Computes optically depth-attenuated background layer shrink ratios coupled to the shark's growth (`relativePreyScale`: 1.00 -> 0.40).
+ *
+ * Optical Perspective Principle (`Shrink Weight: Near 0.70 > Ambient 0.55 > Mid 0.45 > Far 0.22 > Water 0.15`):
+ * - As the shark grows larger and the virtual underwater camera pulls back, objects closest to the shark's swimming plane
+ *   (`Near` seabed anchors, giant clams, amphorae, hydrothermal tube worms) shrink the most (`1.00x -> 0.58x`, -42%),
+ *   making the shark visibly tower over the immediate seabed.
+ * - Mid-distance terrain (`Mid` coral terraces, whale ribcages, black smokers) shrinks moderately (`1.00x -> 0.73x`, -27%),
+ *   and ambient background fish schools shrink to `0.67x` (-33%).
+ * - Distant horizon mountains and ruins (`Far`, kilometres away) shrink the least (`1.00x -> 0.868x`, -13.2%),
+ *   preserving grand macro-scale depth and naturally revealing more of the midground and distant scenery behind the receding foreground.
+ */
+export function getParallaxLayerGrowthScales(
+  relativePreyScale: number = 1.0
+): ParallaxLayerGrowthScales {
+  const clampedRel = Number.isFinite(relativePreyScale)
+    ? Math.max(0.4, Math.min(1.0, relativePreyScale))
+    : 1.0;
+  const shrinkDelta = Math.max(0, 1.0 - clampedRel); // 0.00 -> 0.60
+
+  return {
+    growthProgress: Number(Math.min(1, shrinkDelta / 0.6).toFixed(3)),
+    waterScale: Number((1.0 - shrinkDelta * 0.15).toFixed(3)),
+    farScale: Number((1.0 - shrinkDelta * 0.22).toFixed(3)),
+    midScale: Number((1.0 - shrinkDelta * 0.45).toFixed(3)),
+    ambientScale: Number((1.0 - shrinkDelta * 0.55).toFixed(3)),
+    nearScale: Number((1.0 - shrinkDelta * 0.70).toFixed(3)),
+    particleScale: Number((1.0 - shrinkDelta * 0.45).toFixed(3)),
+  };
+}
+
+
 export function computeSharkStats(
   level: number,
   equipped: EquippedOrgansMap,
