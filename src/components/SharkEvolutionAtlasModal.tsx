@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { soundFX } from '../game/audio';
 import { Lang } from '../game/i18n';
 import { computeEvolvedSharkStats } from '../game/rules';
 import {
@@ -31,6 +32,16 @@ interface SharkEvolutionAtlasModalProps {
 const TOTAL_SHARKS = SHARK_EVOLUTION_FORMS.length; // 48
 const ARC_OFFSETS = [-4, -3, -2, -1, 0, 1, 2, 3, 4] as const;
 
+/**
+ * iPhone Alarm Clock (UIPickerView) Drum Physics Constants:
+ * - UIKit UIScrollViewDecelerationRateNormal = 0.998/ms (~2.00 s^-1)
+ * - UIPickerView drum with magnetic detent ratchet = 0.9978/ms (lambda = 2.20 s^-1)
+ * - Natural stopping distance for release velocity v0 (slots/s): delta = v0 / IPHONE_PICKER_DECEL_LAMBDA
+ */
+const IPHONE_PICKER_DECEL_LAMBDA = 2.2;
+const IPHONE_PICKER_PX_PER_SLOT = 48; // 48px drag = 1 shark slot (matches iPhone 44-48pt picker row pitch)
+const IPHONE_PICKER_MAX_VELOCITY = 38; // max slots/sec on multi-flick momentum stacking
+
 function wrapIndex(idx: number): number {
   return ((idx % TOTAL_SHARKS) + TOTAL_SHARKS) % TOTAL_SHARKS;
 }
@@ -41,6 +52,11 @@ function shortestRingDelta(fromIdx: number, toIdx: number): number {
   if (d > TOTAL_SHARKS / 2) d -= TOTAL_SHARKS;
   if (d < -TOTAL_SHARKS / 2) d += TOTAL_SHARKS;
   return d;
+}
+
+interface TouchHistorySample {
+  wheelPos: number;
+  timeMs: number;
 }
 
 export const SharkEvolutionAtlasModal: React.FC<
@@ -78,7 +94,7 @@ export const SharkEvolutionAtlasModal: React.FC<
     liveRunMaxDepth,
   ]);
 
-  // Continuous floating-point wheel position (supports infinite rotation + momentum inertia)
+  // Continuous floating-point wheel position (supports infinite rotation + iPhone Alarm drum inertia)
   const initialIndex = useMemo(() => {
     if (readyToEvolveSharks.length > 0) {
       return readyToEvolveSharks[0].index;
@@ -93,6 +109,7 @@ export const SharkEvolutionAtlasModal: React.FC<
   const wheelPosRef = useRef<number>(initialIndex);
   const wheelVelRef = useRef<number>(0); // slots per second
   const targetSlotRef = useRef<number | null>(null);
+  const lastDetentSlotRef = useRef<number>(initialIndex);
   const rafIdRef = useRef<number | null>(null);
   const lastFrameTimeRef = useRef<number>(0);
 
@@ -102,22 +119,38 @@ export const SharkEvolutionAtlasModal: React.FC<
     isDragging: boolean;
     pointerId: number | null;
     startX: number;
+    startTimeMs: number;
     startWheelPos: number;
-    lastX: number;
-    lastTime: number;
-    velocitySlotsPerSec: number;
+    inheritedVel: number;
+    samples: TouchHistorySample[];
     hasMoved: boolean;
   }>({
     isDragging: false,
     pointerId: null,
     startX: 0,
+    startTimeMs: 0,
     startWheelPos: initialIndex,
-    lastX: 0,
-    lastTime: 0,
-    velocitySlotsPerSec: 0,
+    inheritedVel: 0,
+    samples: [],
     hasMoved: false,
   });
   const lastWheelTimeRef = useRef<number>(0);
+
+  const fireDetentTickIfCrossed = useCallback((newPos: number, currentVel: number) => {
+    const curDetent = Math.round(newPos);
+    if (curDetent !== lastDetentSlotRef.current) {
+      lastDetentSlotRef.current = curDetent;
+      const speedNorm = Math.min(1.5, Math.max(0.2, Math.abs(currentVel) / 14));
+      soundFX.playWheelDetentTick(speedNorm);
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        try {
+          navigator.vibrate(3);
+        } catch {
+          // Ignore vibration permission errors
+        }
+      }
+    }
+  }, []);
 
   const stopPhysicsLoop = useCallback(() => {
     if (rafIdRef.current !== null) {
@@ -126,13 +159,21 @@ export const SharkEvolutionAtlasModal: React.FC<
     }
   }, []);
 
-  // 60FPS physical momentum coasting + critically-damped spring snap loop
+  /**
+   * iPhone Alarm Clock (UIPickerView) 60FPS Drum Deceleration & Magnetic Detent Lock-In Loop:
+   * 1. Pre-projected exact integer detent slot `target` ensures the exponential decay curve
+   *    (d = 0.9978/ms, lambda = 2.20 s^-1) lands precisely on the center of a shark slot.
+   * 2. While |target - pos| > 0.26, velocity follows the exact UIKit exponential glide `v = (target - pos) * lambda`
+   *    with subtle mechanical detent ratchet modulation across each slot boundary.
+   * 3. Within the final 0.26 slot of the target, an overdamped magnetic detent notch pulls the wheel
+   *    smoothly into exact 0.000 alignment without bounce.
+   */
   const startPhysicsLoop = useCallback(() => {
     if (rafIdRef.current !== null) return;
     lastFrameTimeRef.current = performance.now();
 
     const stepPhysics = (now: number) => {
-      const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameTimeRef.current) / 1000));
+      const dt = Math.min(0.045, Math.max(0.001, (now - lastFrameTimeRef.current) / 1000));
       lastFrameTimeRef.current = now;
 
       if (dragStateRef.current.isDragging) {
@@ -142,36 +183,44 @@ export const SharkEvolutionAtlasModal: React.FC<
 
       let pos = wheelPosRef.current;
       let vel = wheelVelRef.current;
-      const target = targetSlotRef.current;
+      const target =
+        targetSlotRef.current !== null
+          ? targetSlotRef.current
+          : Math.round(pos + vel / IPHONE_PICKER_DECEL_LAMBDA);
+      targetSlotRef.current = target;
 
-      if (target !== null) {
-        // Critically-damped spring attraction + momentum toward target integer slot
-        const disp = target - pos;
-        const stiffness = 145;
-        const damping = 21;
-        const accel = disp * stiffness - vel * damping;
+      const rem = target - pos;
+      const absRem = Math.abs(rem);
+
+      if (absRem > 0.26) {
+        // Phase 1: UIPickerView Exponential Drum Glide (d = 0.9978/ms) + subtle per-slot ratchet notch feel
+        const baseExpVel = rem * IPHONE_PICKER_DECEL_LAMBDA;
+        const ratchetMod = 1 + 0.075 * Math.cos(2 * Math.PI * pos);
+        const desiredVel = baseExpVel * ratchetMod;
+        vel += (desiredVel - vel) * Math.min(1, dt * 24);
+        pos += vel * dt;
+      } else {
+        // Phase 2: Final Magnetic Detent Notch Lock-In (overdamped, zero overshoot)
+        const detentStiffness = 115;
+        const detentDamping = 22.5;
+        const accel = rem * detentStiffness - vel * detentDamping;
         vel += accel * dt;
         pos += vel * dt;
 
-        if (Math.abs(disp) < 0.003 && Math.abs(vel) < 0.02) {
+        if (Math.abs(target - pos) < 0.002 && Math.abs(vel) < 0.015) {
           pos = target;
           vel = 0;
           targetSlotRef.current = null;
           wheelPosRef.current = pos;
           wheelVelRef.current = 0;
+          fireDetentTickIfCrossed(pos, 0.35);
           setWheelPos(pos);
           rafIdRef.current = null;
           return;
         }
-      } else {
-        // Free momentum coasting with exponential hydrodynamic friction, then engage spring snap
-        pos += vel * dt;
-        vel *= Math.exp(-4.2 * dt);
-        if (Math.abs(vel) < 2.2) {
-          targetSlotRef.current = Math.round(pos + vel * 0.14);
-        }
       }
 
+      fireDetentTickIfCrossed(pos, vel);
       wheelPosRef.current = pos;
       wheelVelRef.current = vel;
       setWheelPos(pos);
@@ -179,19 +228,17 @@ export const SharkEvolutionAtlasModal: React.FC<
     };
 
     rafIdRef.current = requestAnimationFrame(stepPhysics);
-  }, []);
+  }, [fireDetentTickIfCrossed]);
 
   useEffect(() => {
     return () => stopPhysicsLoop();
   }, [stopPhysicsLoop]);
 
   const animateToSlot = useCallback(
-    (targetSlot: number, initialBoostVel: number = 0) => {
+    (targetSlot: number) => {
       const snappedTarget = Math.round(targetSlot);
       targetSlotRef.current = snappedTarget;
-      if (initialBoostVel !== 0) {
-        wheelVelRef.current = initialBoostVel;
-      }
+      wheelVelRef.current = (snappedTarget - wheelPosRef.current) * IPHONE_PICKER_DECEL_LAMBDA * 1.35;
       startPhysicsLoop();
     },
     [startPhysicsLoop]
@@ -228,22 +275,27 @@ export const SharkEvolutionAtlasModal: React.FC<
 
   const handleStagePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button')) return;
+    // Capture existing spin velocity for iPhone-style multi-flick momentum stacking
+    const existingVel = wheelVelRef.current;
     stopPhysicsLoop();
     targetSlotRef.current = null;
+    wheelVelRef.current = 0;
+
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
       // Ignore synthetic pointer capture errors
     }
     const now = performance.now();
+    const curPos = wheelPosRef.current;
     dragStateRef.current = {
       isDragging: true,
       pointerId: e.pointerId,
       startX: e.clientX,
-      startWheelPos: wheelPosRef.current,
-      lastX: e.clientX,
-      lastTime: now,
-      velocitySlotsPerSec: 0,
+      startTimeMs: now,
+      startWheelPos: curPos,
+      inheritedVel: Math.abs(existingVel) > 2.0 ? existingVel : 0,
+      samples: [{ wheelPos: curPos, timeMs: now }],
       hasMoved: false,
     };
   };
@@ -254,25 +306,32 @@ export const SharkEvolutionAtlasModal: React.FC<
       return;
     }
     const now = performance.now();
-    const dt = Math.max(0.004, (now - st.lastTime) / 1000);
-    const stepDx = e.clientX - st.lastX;
     const totalDx = e.clientX - st.startX;
-    st.lastX = e.clientX;
-    st.lastTime = now;
 
-    if (Math.abs(totalDx) > 5) {
+    if (Math.abs(totalDx) > 4) {
       st.hasMoved = true;
     }
 
-    // 56px horizontal drag = 1 full shark slot along the rotary arc dial
-    const pxPerSlot = 56;
-    const instVelSlots = (-stepDx / pxPerSlot) / dt;
-    st.velocitySlotsPerSec = st.velocitySlotsPerSec * 0.55 + instVelSlots * 0.45;
+    const rawPos = st.startWheelPos - totalDx / IPHONE_PICKER_PX_PER_SLOT;
+    // Maintain a rolling 120ms window of touch samples for noise-free UIPickerView release velocity
+    st.samples.push({ wheelPos: rawPos, timeMs: now });
+    while (st.samples.length > 10 && now - st.samples[0].timeMs > 120) {
+      st.samples.shift();
+    }
 
-    const nextPos = st.startWheelPos - totalDx / pxPerSlot;
-    wheelPosRef.current = nextPos;
-    wheelVelRef.current = st.velocitySlotsPerSec;
-    setWheelPos(nextPos);
+    // Estimate instantaneous drag velocity for slow-drag magnetic detent feel
+    const first = st.samples[0];
+    const dtSec = Math.max(0.008, (now - first.timeMs) / 1000);
+    const dragVel = (rawPos - first.wheelPos) / dtSec;
+
+    // Subtle magnetic detent dwell when dragging slowly across slots (like iPhone Alarm drum)
+    const detentStrength = Math.max(0, 1 - Math.abs(dragVel) / 3.2) * 0.055;
+    const displayPos = rawPos - detentStrength * Math.sin(2 * Math.PI * rawPos);
+
+    fireDetentTickIfCrossed(displayPos, dragVel);
+    wheelPosRef.current = displayPos;
+    wheelVelRef.current = dragVel;
+    setWheelPos(displayPos);
   };
 
   const finishStagePointerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -281,37 +340,77 @@ export const SharkEvolutionAtlasModal: React.FC<
       return;
     }
     const now = performance.now();
-    const idleTime = (now - st.lastTime) / 1000;
     st.isDragging = false;
     st.pointerId = null;
 
-    // Decay velocity if finger paused before lifting
-    const releaseVel =
-      idleTime > 0.09
-        ? 0
-        : Math.max(-18, Math.min(18, st.velocitySlotsPerSec));
-    wheelVelRef.current = releaseVel;
+    const samples = st.samples;
+    const latest = samples[samples.length - 1] ?? {
+      wheelPos: wheelPosRef.current,
+      timeMs: now,
+    };
+    const pauseBeforeLiftMs = now - latest.timeMs;
 
-    if (Math.abs(releaseVel) > 1.2) {
-      // Momentum coasting across multiple sharks, then spring-settle onto predicted integer slot
-      const predictedSlot = Math.round(
-        wheelPosRef.current + Math.max(-8, Math.min(8, releaseVel * 0.26))
-      );
-      targetSlotRef.current = predictedSlot;
-    } else {
-      targetSlotRef.current = Math.round(wheelPosRef.current);
+    // Compute release velocity over the last 30ms..95ms touch window (eliminates lift jitter)
+    let releaseVel = 0;
+    if (pauseBeforeLiftMs < 85 && samples.length >= 2) {
+      let anchor = samples[0];
+      for (let i = samples.length - 2; i >= 0; i--) {
+        const ageMs = latest.timeMs - samples[i].timeMs;
+        anchor = samples[i];
+        if (ageMs >= 32) break;
+      }
+      const windowSec = (latest.timeMs - anchor.timeMs) / 1000;
+      if (windowSec >= 0.006) {
+        releaseVel = (latest.wheelPos - anchor.wheelPos) / windowSec;
+      }
     }
+
+    // Multi-flick momentum stacking: if the wheel was already spinning in the same direction, stack velocity!
+    const gestureDurationMs = now - st.startTimeMs;
+    if (
+      gestureDurationMs < 260 &&
+      Math.abs(releaseVel) > 2.2 &&
+      Math.sign(releaseVel) === Math.sign(st.inheritedVel)
+    ) {
+      releaseVel += st.inheritedVel * 0.68;
+    }
+    releaseVel = Math.max(
+      -IPHONE_PICKER_MAX_VELOCITY,
+      Math.min(IPHONE_PICKER_MAX_VELOCITY, releaseVel)
+    );
+
+    const curPos = wheelPosRef.current;
+    let targetSlot: number;
+    if (Math.abs(releaseVel) > 1.15) {
+      // Exact UIPickerView analytical stopping target: x_target = round(x_0 + v_0 / lambda)
+      const projected = curPos + releaseVel / IPHONE_PICKER_DECEL_LAMBDA;
+      targetSlot = Math.round(projected);
+      if (targetSlot === Math.round(curPos)) {
+        targetSlot += releaseVel > 0 ? 1 : -1;
+      }
+    } else {
+      targetSlot = Math.round(curPos);
+    }
+
+    targetSlotRef.current = targetSlot;
+    wheelVelRef.current = (targetSlot - curPos) * IPHONE_PICKER_DECEL_LAMBDA;
     startPhysicsLoop();
   };
 
   const handleStageWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    e.preventDefault();
     const now = performance.now();
-    if (now - lastWheelTimeRef.current < 90) return;
+    if (now - lastWheelTimeRef.current < 45) return;
     const dominantDelta =
       Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    if (Math.abs(dominantDelta) > 8) {
+    if (Math.abs(dominantDelta) > 4) {
       lastWheelTimeRef.current = now;
-      stepCarousel(dominantDelta > 0 ? 1 : -1);
+      const stepSlots = Math.sign(dominantDelta) * Math.min(3, Math.max(1, Math.round(Math.abs(dominantDelta) / 42)));
+      const baseTarget =
+        targetSlotRef.current !== null
+          ? targetSlotRef.current
+          : Math.round(wheelPosRef.current);
+      animateToSlot(baseTarget + stepSlots);
     }
   };
 

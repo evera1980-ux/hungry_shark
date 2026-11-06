@@ -150,6 +150,31 @@ class SoundSystem {
     osc.start(now);
     osc.stop(now + 0.16);
   }
+
+  /** iPhone Alarm Picker (UIPickerView) mechanical ratchet detent tick sound */
+  public playWheelDetentTick(speedRatio: number = 0.5): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const clampedSpeed = Math.max(0.15, Math.min(1.5, speedRatio));
+
+    // Short damped mechanical escapement click (1180Hz -> 360Hz in 14ms)
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    const startFreq = 1080 + clampedSpeed * 180;
+    osc.frequency.setValueAtTime(startFreq, now);
+    osc.frequency.exponentialRampToValueAtTime(340, now + 0.015);
+
+    const peakGain = Math.min(0.14, 0.055 + clampedSpeed * 0.045);
+    gain.gain.setValueAtTime(peakGain, now);
+    gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.016);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.017);
+  }
 }
 
 export const soundFX = new SoundSystem();

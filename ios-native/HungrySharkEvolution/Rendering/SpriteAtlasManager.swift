@@ -81,6 +81,27 @@ public final class SpriteAtlasManager {
         if let settingSheet = loadBundledImage(named: "setting_83a7a273") {
             sliceUiSettingSheet(settingSheet)
         }
+
+        // 6. Pre-process & GPU-warm all 12 Multi-Biome Ocean Parallax Layers up front (zero stutter when diving to Twilight/Abyss!)
+        let oceanLayers: [(name: String, isWater: Bool)] = [
+            ("bg_shallow_0_water_0e65cb68", true),
+            ("bg_shallow_1_far_8898229a", false),
+            ("bg_shallow_2_mid_b4e0d30a", false),
+            ("bg_shallow_3_near_96e92ee1", false),
+            ("bg_twilight_0_17bcb84c", true),
+            ("bg_twilight_1_04f5d35f", false),
+            ("bg_twilight_2_fd5a1b33", false),
+            ("bg_twilight_3_6e0dd7c1", false),
+            ("bg_abyss_0_1bbf506a", true),
+            ("bg_abyss_1_75e4a628", false),
+            ("bg_abyss_2_6ce66695", false),
+            ("bg_abyss_3_a4986280", false)
+        ]
+        for layer in oceanLayers {
+            _ = oceanParallaxTexture(named: layer.name, isWaterCanopy: layer.isWater)
+        }
+        let allGpuTextures = Array(sharkTextures.values) + Array(preyTextures.values) + Array(oceanLayerTextures.values)
+        SKTexture.preload(allGpuTextures) {}
     }
 
     public func sharkTexture(for spriteKey: String) -> SKTexture? {
@@ -1037,10 +1058,10 @@ public final class SpriteAtlasManager {
         let srcH = cgImg.height
         let isShallowCanopy = assetName.contains("shallow_0_water") || (Double(srcW) / Double(max(1, srcH)) > 3.0)
 
-        let cropLeft = isShallowCanopy ? Int((Double(srcW) * 0.012).rounded()) : 0
-        let cropRight = isShallowCanopy ? Int((Double(srcW) * 0.968).rounded()) : srcW
-        let cropTop = isShallowCanopy ? Int((Double(srcH) * 0.032).rounded()) : 0
-        let cropBot = isShallowCanopy ? Int((Double(srcH) * 0.902).rounded()) : srcH
+        let cropLeft = Int((Double(srcW) * (isShallowCanopy ? 0.012 : 0.010)).rounded())
+        let cropRight = Int((Double(srcW) * (isShallowCanopy ? 0.968 : 0.990)).rounded())
+        let cropTop = Int((Double(srcH) * (isShallowCanopy ? 0.032 : 0.008)).rounded())
+        let cropBot = Int((Double(srcH) * (isShallowCanopy ? 0.902 : 0.992)).rounded())
         let cropW = max(64, cropRight - cropLeft)
         let cropH = max(32, cropBot - cropTop)
 

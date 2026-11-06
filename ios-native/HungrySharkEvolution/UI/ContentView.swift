@@ -1578,10 +1578,16 @@ public struct EvolutionAtlasSheetView: View {
     @State private var wheelTargetSlot: Double? = nil
     @State private var isDraggingWheel: Bool = false
     @State private var dragBaseWheelPos: Double? = nil
-    @State private var lastDragTranslationX: Double = 0.0
-    @State private var lastDragTimestamp: Date = Date()
+    @State private var dragStartTime: TimeInterval = 0.0
+    @State private var inheritedWheelVelocity: Double = 0.0
+    @State private var dragTouchSamples: [(pos: Double, time: TimeInterval)] = []
     @State private var lastTickIndex: Int = 0
 
+    // iPhone Alarm Clock (UIPickerView) Drum Physics Constants:
+    // UIKit UIScrollView.DecelerationRate.normal = 0.998/ms (~2.00 s^-1); UIPickerView drum = 0.9978/ms (lambda = 2.20 s^-1)
+    private let pickerDecelLambda: Double = 2.20
+    private let pickerPxPerSlot: Double = 46.0
+    private let pickerMaxVelocity: Double = 38.0
     private let wheelSlotOffsets: [Int] = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
     private let wheelPhysicsTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
@@ -1591,60 +1597,60 @@ public struct EvolutionAtlasSheetView: View {
         return GameConfigGenerated.sharkForms[norm]
     }
 
-    private func snapWheel(to targetPosition: Double, initialVelocity: Double = 0.0) {
+    private func fireDetentFeedbackIfCrossed(at position: Double) {
+        let total = GameConfigGenerated.sharkForms.count
+        let roundedSlot = Int(position.rounded())
+        let curIdx = ((roundedSlot % total) + total) % total
+        if curIdx != inspectedIndex {
+            inspectedIndex = curIdx
+        }
+        if roundedSlot != lastTickIndex {
+            lastTickIndex = roundedSlot
+            UISelectionFeedbackGenerator().selectionChanged()
+            vm.playUiTick()
+        }
+    }
+
+    private func snapWheel(to targetPosition: Double) {
         let snapped = targetPosition.rounded()
         wheelTargetSlot = snapped
-        if abs(initialVelocity) > 0.01 {
-            wheelVelocity = initialVelocity
-        }
+        wheelVelocity = (snapped - wheelPosition) * pickerDecelLambda * 1.35
     }
 
     private func stepWheelPhysics() {
         guard !isDraggingWheel else { return }
-        let dt = 1.0 / 60.0
-        let total = GameConfigGenerated.sharkForms.count
+        guard let target = wheelTargetSlot else { return }
 
-        if let target = wheelTargetSlot {
-            let disp = target - wheelPosition
-            let stiffness = 145.0
-            let damping = 21.0
-            let accel = disp * stiffness - wheelVelocity * damping
+        let dt = 1.0 / 60.0
+        let rem = target - wheelPosition
+        let absRem = abs(rem)
+
+        if absRem > 0.26 {
+            // Phase 1: Authentic iPhone Alarm (UIPickerView) Exponential Drum Glide (d = 0.9978/ms, lambda = 2.20 s^-1)
+            // with subtle mechanical detent ratchet modulation across each slot boundary
+            let baseExpVel = rem * pickerDecelLambda
+            let ratchetMod = 1.0 + 0.075 * cos(2.0 * .pi * wheelPosition)
+            let desiredVel = baseExpVel * ratchetMod
+            wheelVelocity += (desiredVel - wheelVelocity) * min(1.0, dt * 24.0)
+            wheelPosition += wheelVelocity * dt
+        } else {
+            // Phase 2: Final Magnetic Detent Notch Lock-In (overdamped, zero overshoot)
+            let detentStiffness = 115.0
+            let detentDamping = 22.5
+            let accel = rem * detentStiffness - wheelVelocity * detentDamping
             wheelVelocity += accel * dt
             wheelPosition += wheelVelocity * dt
 
-            let curIdx = ((Int(wheelPosition.rounded()) % total) + total) % total
-            if curIdx != inspectedIndex {
-                inspectedIndex = curIdx
-            }
-            if curIdx != lastTickIndex {
-                lastTickIndex = curIdx
-                UISelectionFeedbackGenerator().selectionChanged()
-                vm.playUiTick()
-            }
-
-            if abs(disp) < 0.003 && abs(wheelVelocity) < 0.02 {
+            if abs(target - wheelPosition) < 0.002 && abs(wheelVelocity) < 0.015 {
                 wheelPosition = target
                 wheelVelocity = 0.0
                 wheelTargetSlot = nil
-            }
-        } else if abs(wheelVelocity) > 0.01 {
-            wheelPosition += wheelVelocity * dt
-            wheelVelocity *= exp(-4.2 * dt)
-
-            let curIdx = ((Int(wheelPosition.rounded()) % total) + total) % total
-            if curIdx != inspectedIndex {
-                inspectedIndex = curIdx
-            }
-            if curIdx != lastTickIndex {
-                lastTickIndex = curIdx
-                UISelectionFeedbackGenerator().selectionChanged()
-                vm.playUiTick()
-            }
-
-            if abs(wheelVelocity) < 2.2 {
-                wheelTargetSlot = (wheelPosition + wheelVelocity * 0.14).rounded()
+                fireDetentFeedbackIfCrossed(at: target)
+                return
             }
         }
+
+        fireDetentFeedbackIfCrossed(at: wheelPosition)
     }
 
     public var body: some View {
@@ -1881,7 +1887,8 @@ public struct EvolutionAtlasSheetView: View {
             // Center Giant Shark Spotlight with Left / Right Step Arrows
             HStack {
                 Button {
-                    snapWheel(to: wheelPosition.rounded() - 1.0)
+                    let base = wheelTargetSlot ?? wheelPosition.rounded()
+                    snapWheel(to: base - 1.0)
                 } label: {
                     Text("◀")
                         .font(.system(size: 16, weight: .black))
@@ -1912,7 +1919,8 @@ public struct EvolutionAtlasSheetView: View {
                 Spacer()
 
                 Button {
-                    snapWheel(to: wheelPosition.rounded() + 1.0)
+                    let base = wheelTargetSlot ?? wheelPosition.rounded()
+                    snapWheel(to: base + 1.0)
                 } label: {
                     Text("▶")
                         .font(.system(size: 16, weight: .black))
@@ -1926,7 +1934,7 @@ public struct EvolutionAtlasSheetView: View {
 
             Spacer(minLength: 2)
 
-            // Bottom Silky-Smooth Continuous Rotary Wheel (Fractional offsets + Drag Inertia + Spring Snapping)
+            // Bottom Silky-Smooth Continuous Rotary Wheel (iPhone Alarm UIPickerView Drum Physics)
             GeometryReader { dialGeo in
                 let dialW = dialGeo.size.width
                 let dialH = dialGeo.size.height
@@ -2011,60 +2019,95 @@ public struct EvolutionAtlasSheetView: View {
         }
         .contentShape(Rectangle())
         .simultaneousGesture(
-            DragGesture(minimumDistance: 4)
+            DragGesture(minimumDistance: 3)
                 .onChanged { val in
-                    let total = GameConfigGenerated.sharkForms.count
-                    let now = Date()
+                    let now = Date().timeIntervalSinceReferenceDate
                     let tx = Double(val.translation.width)
-                    let pxPerSlot = 52.0
 
                     if !isDraggingWheel || dragBaseWheelPos == nil {
                         isDraggingWheel = true
+                        inheritedWheelVelocity = abs(wheelVelocity) > 2.0 ? wheelVelocity : 0.0
                         wheelTargetSlot = nil
-                        dragBaseWheelPos = wheelPosition
-                        lastDragTranslationX = tx
-                        lastDragTimestamp = now
                         wheelVelocity = 0.0
-                    } else {
-                        let dt = max(0.004, now.timeIntervalSince(lastDragTimestamp))
-                        let stepDx = tx - lastDragTranslationX
-                        let instVel = (-stepDx / pxPerSlot) / dt
-                        wheelVelocity = wheelVelocity * 0.55 + instVel * 0.45
-                        lastDragTranslationX = tx
-                        lastDragTimestamp = now
+                        dragBaseWheelPos = wheelPosition
+                        dragStartTime = now
+                        dragTouchSamples = [(pos: wheelPosition, time: now)]
                     }
 
                     let startPos = dragBaseWheelPos ?? wheelPosition
-                    let newPos = startPos - tx / pxPerSlot
-                    wheelPosition = newPos
-                    let curIdx = ((Int(newPos.rounded()) % total) + total) % total
-                    if curIdx != inspectedIndex {
-                        inspectedIndex = curIdx
+                    let rawPos = startPos - tx / pickerPxPerSlot
+                    dragTouchSamples.append((pos: rawPos, time: now))
+                    while dragTouchSamples.count > 10, let first = dragTouchSamples.first, (now - first.time) > 0.12 {
+                        dragTouchSamples.removeFirst()
                     }
-                    if curIdx != lastTickIndex {
-                        lastTickIndex = curIdx
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        vm.playUiTick()
-                    }
+
+                    let firstSample = dragTouchSamples.first ?? (pos: rawPos, time: now)
+                    let dtSec = max(0.008, now - firstSample.time)
+                    let dragVel = (rawPos - firstSample.pos) / dtSec
+
+                    // Subtle slow-drag magnetic detent dwell across each integer slot (like iPhone Alarm drum)
+                    let detentStrength = max(0.0, 1.0 - abs(dragVel) / 3.2) * 0.055
+                    let displayPos = rawPos - detentStrength * sin(2.0 * .pi * rawPos)
+
+                    wheelPosition = displayPos
+                    wheelVelocity = dragVel
+                    fireDetentFeedbackIfCrossed(at: displayPos)
                 }
                 .onEnded { val in
-                    let pxPerSlot = 52.0
+                    let now = Date().timeIntervalSinceReferenceDate
                     let startPos = dragBaseWheelPos ?? wheelPosition
                     isDraggingWheel = false
                     dragBaseWheelPos = nil
 
-                    let predictedEndPos = startPos - Double(val.predictedEndTranslation.width) / pxPerSlot
-                    let extraThrowSlots = max(-8.5, min(8.5, predictedEndPos - wheelPosition))
-                    let idleSec = Date().timeIntervalSince(lastDragTimestamp)
-                    let releaseVel = idleSec > 0.09 ? 0.0 : max(-18.0, min(18.0, wheelVelocity))
+                    let latest = dragTouchSamples.last ?? (pos: wheelPosition, time: now)
+                    let pauseBeforeLiftSec = now - latest.time
+                    var releaseVel: Double = 0.0
 
-                    if abs(releaseVel) > 1.2 || abs(extraThrowSlots) > 0.65 {
-                        wheelVelocity = releaseVel != 0 ? releaseVel : extraThrowSlots * 4.5
-                        wheelTargetSlot = (wheelPosition + max(-8.0, min(8.0, wheelVelocity * 0.25))).rounded()
-                    } else {
-                        wheelVelocity = 0.0
-                        wheelTargetSlot = wheelPosition.rounded()
+                    if pauseBeforeLiftSec < 0.085 && dragTouchSamples.count >= 2 {
+                        var anchor = dragTouchSamples[0]
+                        for idx in stride(from: dragTouchSamples.count - 2, through: 0, by: -1) {
+                            anchor = dragTouchSamples[idx]
+                            if (latest.time - anchor.time) >= 0.032 {
+                                break
+                            }
+                        }
+                        let windowSec = latest.time - anchor.time
+                        if windowSec >= 0.006 {
+                            releaseVel = (latest.pos - anchor.pos) / windowSec
+                        }
                     }
+
+                    // Also blend SwiftUI's predictedEndTranslation for ultra-fast short flicks
+                    if pauseBeforeLiftSec < 0.085 {
+                        let predictedEndPos = startPos - Double(val.predictedEndTranslation.width) / pickerPxPerSlot
+                        let systemThrowVel = (predictedEndPos - wheelPosition) * pickerDecelLambda
+                        if abs(systemThrowVel) > abs(releaseVel) {
+                            releaseVel = releaseVel * 0.35 + systemThrowVel * 0.65
+                        }
+                    }
+
+                    // Multi-flick momentum stacking (just like spinning the iPhone Alarm minute wheel repeatedly!)
+                    let gestureDuration = now - dragStartTime
+                    if gestureDuration < 0.26 && abs(releaseVel) > 2.2 && (releaseVel * inheritedWheelVelocity > 0) {
+                        releaseVel += inheritedWheelVelocity * 0.68
+                    }
+                    releaseVel = max(-pickerMaxVelocity, min(pickerMaxVelocity, releaseVel))
+                    dragTouchSamples.removeAll()
+
+                    let targetSlot: Double
+                    if abs(releaseVel) > 1.15 {
+                        let projected = wheelPosition + releaseVel / pickerDecelLambda
+                        var roundedTarget = projected.rounded()
+                        if roundedTarget == wheelPosition.rounded() {
+                            roundedTarget += releaseVel > 0 ? 1.0 : -1.0
+                        }
+                        targetSlot = roundedTarget
+                    } else {
+                        targetSlot = wheelPosition.rounded()
+                    }
+
+                    wheelTargetSlot = targetSlot
+                    wheelVelocity = (targetSlot - wheelPosition) * pickerDecelLambda
                 }
         )
     }

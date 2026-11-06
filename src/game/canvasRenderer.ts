@@ -141,62 +141,39 @@ export function computeSpineSliceDeformation(
     }
 
     case 'ANGUILLIFORM': {
-      // Eels & sea-serpents: full-body multi-wave S-slither along the body
-      const envelope = 0.14 + 0.86 * Math.pow(clampedU, 1.15);
-      const waveNumber = 4.35;
+      // Eels & sea-serpents: sleek shark-like steady head with smooth posterior S-glide
+      const envelope = 0.02 * clampedU + 0.98 * Math.pow(clampedU, 1.95);
+      const waveNumber = 2.55;
       const theta = phase - clampedU * waveNumber;
       const dy =
-        Math.sin(theta) * drawH * 0.145 * intensity * turnAmpBoost * envelope +
-        turnArcDy * 0.85;
+        Math.sin(theta) * drawH * 0.086 * intensity * envelope +
+        turnArcDy * 0.38;
       return { dy, scaleY: bankRollScaleY };
     }
 
     case 'MEDUSOID_JET': {
-      // Squids, Jellyfish & Kraken: C1-continuous bell/mantle pulse + trailing tentacle whip
-      const jetPulse = Math.sin(phase) + 0.32 * Math.sin(phase * 2);
-      if (clampedU < 0.45) {
-        const bellFactor = Math.pow(1 - clampedU / 0.45, 1.5);
-        return {
-          dy: Math.cos(phase) * drawH * 0.028 * bellFactor + headTurnLead * 0.6,
-          scaleY: 1 - jetPulse * 0.085 * bellFactor * intensity,
-        };
-      }
-      const tentacleU = (clampedU - 0.45) / 0.55;
-      const theta = phase - tentacleU * 3.2;
+      // Squids, Jellyfish & Kraken: steady mantle/bell with gentle trailing tentacle sweep
+      const envelope = 0.015 * clampedU + 0.985 * Math.pow(clampedU, 2.15);
+      const waveNumber = 2.05;
+      const theta = phase - clampedU * waveNumber;
       const dy =
-        Math.sin(theta) *
-          drawH *
-          0.14 *
-          intensity *
-          turnAmpBoost *
-          Math.pow(tentacleU, 1.5) +
-        tailTurnTrail * 0.75;
+        Math.sin(theta) * drawH * 0.072 * intensity * envelope +
+        turnArcDy * 0.32;
       return {
         dy,
-        scaleY: 1 + Math.sin(theta) * 0.04 * Math.pow(tentacleU, 1.5),
+        scaleY: 1 + Math.sin(theta) * 0.022 * envelope,
       };
     }
 
     case 'PUFFER_BUOYANT': {
-      // Pufferfish, Lionfish, Seahorse: C1-continuous buoyant breathing body + caudal fin flutter
-      const bobY = Math.sin(phase * 0.9) * drawH * 0.026;
-      const finU = clampedU > 0.62 ? (clampedU - 0.62) / 0.38 : 0;
-      const smoothFin = finU > 0 ? Math.pow(finU, 1.6) : 0;
-      const breath =
-        1 +
-        Math.sin(phase * 1.6 - clampedU * 1.1) *
-          0.038 *
-          intensity *
-          (1 - smoothFin);
+      // Pufferfish, Lionfish, Seahorse: steady round body with gentle rear caudal fin flutter
+      const envelope = 0.012 * clampedU + 0.988 * Math.pow(clampedU, 2.35);
+      const waveNumber = 2.1;
+      const theta = phase - clampedU * waveNumber;
       const flutterDy =
-        Math.sin(phase * 2.1 - finU * 2.2) *
-          drawH *
-          0.1 *
-          intensity *
-          turnAmpBoost *
-          smoothFin +
-        turnArcDy * 0.45;
-      return { dy: bobY + flutterDy, scaleY: breath };
+        Math.sin(theta) * drawH * 0.058 * intensity * envelope +
+        turnArcDy * 0.28;
+      return { dy: flutterDy, scaleY: 1.0 };
     }
 
     case 'RIGID_PROPULSION': {
@@ -205,7 +182,7 @@ export function computeSpineSliceDeformation(
         clampedU > 0.78
           ? Math.sin(phase * 3.2) *
             drawH *
-            0.022 *
+            0.018 *
             Math.pow((clampedU - 0.78) / 0.22, 1.5)
           : 0;
       return { dy: rearVib, scaleY: 1.0 };
@@ -213,17 +190,17 @@ export function computeSpineSliceDeformation(
 
     case 'CARANGIFORM':
     default: {
-      // Standard pelagic & reef fish: steady anterior body, smooth posterior S-wave propulsion
-      const envelope = 0.02 + 0.98 * Math.pow(clampedU, 1.95);
-      const waveNumber = 2.35;
+      // Standard pelagic & reef fish: shark-like steady anterior torso + sleek posterior tail sweep
+      const envelope = 0.015 * clampedU + 0.985 * Math.pow(clampedU, 2.25);
+      const waveNumber = 2.15;
       const theta = phase - clampedU * waveNumber;
       const dy =
-        Math.sin(theta) * drawH * 0.12 * intensity * turnAmpBoost * envelope +
-        turnArcDy * 0.8;
+        Math.sin(theta) * drawH * 0.076 * intensity * envelope +
+        turnArcDy * 0.35;
       const tailFlare =
         clampedU > 0.68
           ? 1 +
-            Math.pow((clampedU - 0.68) / 0.32, 1.5) * 0.05 * Math.cos(theta * 2)
+            Math.pow((clampedU - 0.68) / 0.32, 1.5) * 0.032 * Math.cos(theta * 2)
           : 1.0;
       return { dy, scaleY: tailFlare * bankRollScaleY };
     }
@@ -638,8 +615,8 @@ export function drawPreyEntity(
       ctx.scale(-1, 1);
     }
     const pitch = Math.max(
-      -0.52,
-      Math.min(0.52, Math.atan2(vy, Math.abs(vx) + 18) * 0.65)
+      -0.24,
+      Math.min(0.24, Math.atan2(vy, Math.abs(vx) + 28) * 0.42)
     );
     ctx.rotate(pitch);
   }
@@ -647,18 +624,18 @@ export function drawPreyEntity(
   // Species-specific whole-body secondary motion coupled with spinal slice undulation
   const speedMag = Math.hypot(vx, vy);
   const speedRatio = Math.max(
-    0.65,
-    Math.min(1.65, speedMag / Math.max(25, config.baseSpeed))
+    0.72,
+    Math.min(1.22, speedMag / Math.max(25, config.baseSpeed))
   );
   const preyTurnBend =
     gait === 'RIGID_PROPULSION'
       ? 0
-      : Math.max(-0.55, Math.min(0.55, (vy / Math.max(35, speedMag)) * 0.52));
-  const swimPhase = phase * 3.1;
+      : Math.max(-0.35, Math.min(0.35, (vy / Math.max(45, speedMag)) * 0.32));
+  const swimPhase = phase * 2.55;
   const swimRock =
     gait === 'RIGID_PROPULSION'
-      ? Math.sin(swimPhase * 0.55) * 0.045
-      : Math.sin(swimPhase) * 0.032;
+      ? Math.sin(swimPhase * 0.55) * 0.022
+      : Math.sin(swimPhase) * 0.012;
   ctx.rotate(swimRock);
 
   const tintVariant: SpriteTintVariant =

@@ -586,8 +586,8 @@ public final class OceanGameScene: SKScene {
             self.mutation = mutation
             self.inflateRatio = 0.0
             self.cruiseDepthCenter = max(config.minDepth + 35.0, min(config.maxDepth - 35.0, y))
-            self.cruiseAmpY = Double.random(in: 36.0...92.0)
-            self.cruiseFreq = Double.random(in: 0.72...1.35)
+            self.cruiseAmpY = Double.random(in: 12.0...26.0)
+            self.cruiseFreq = Double.random(in: 0.36...0.68)
         }
     }
 
@@ -682,6 +682,8 @@ public final class OceanGameScene: SKScene {
     }
 
     private let bubbleContainer = SKNode()
+    private var parallaxTilePool: [SKSpriteNode] = []
+    private var activeParallaxTileCount: Int = 0
     private var ambientBubbles: [AmbientOceanBubble] = []
     private var trailBubbleAccumulator: Double = 0.0
     private var activePreys: [ActivePrey] = []
@@ -704,6 +706,20 @@ public final class OceanGameScene: SKScene {
         addChild(bubbleContainer)
         addChild(worldContainer)
         addChild(fxContainer)
+
+        if parallaxTilePool.isEmpty {
+            for _ in 0..<32 {
+                let tileNode = SKSpriteNode()
+                tileNode.anchorPoint = CGPoint(x: 0, y: 0)
+                tileNode.isHidden = true
+                parallaxContainer.addChild(tileNode)
+                parallaxTilePool.append(tileNode)
+            }
+        } else {
+            for tileNode in parallaxTilePool where tileNode.parent == nil {
+                parallaxContainer.addChild(tileNode)
+            }
+        }
 
         sharkNode.zPosition = 20
         worldContainer.addChild(sharkNode)
@@ -1041,33 +1057,31 @@ public final class OceanGameScene: SKScene {
             node.warpGeometry = nil
             return
         }
-        let cols = 7
+        let cols = 8
         var src: [SIMD2<Float>] = []
         var dst: [SIMD2<Float>] = []
         src.reserveCapacity((cols + 1) * 2)
         dst.reserveCapacity((cols + 1) * 2)
 
+        // Shark-like sleek anterior-locked envelope: head & chest (u -> 1.0) stay steady, posterior tail (u -> 0.0) sweeps smoothly
         for row in 0...1 {
             let v = Float(row)
             for col in 0...cols {
                 let u = Float(col) / Float(cols)
                 src.append(SIMD2<Float>(u, v))
-                // Prey sprite assets face RIGHT (u = 1.0 is snout/head, u = 0.0 is tail/tentacles — identical to shark!)
                 let tailProgress = Double(1.0 - u)
+                let sharkLikeEnv = 0.015 * tailProgress + 0.985 * pow(tailProgress, 2.25)
                 let dy: Double
                 switch gait {
                 case .CARANGIFORM:
-                    let env = 0.02 * tailProgress + 0.98 * pow(tailProgress, 2.05)
-                    dy = sin(prey.phase * 1.45 - tailProgress * 2.1 * .pi) * 0.095 * env
+                    dy = sin(prey.phase - tailProgress * 2.15 * .pi) * 0.068 * sharkLikeEnv
                 case .ANGUILLIFORM:
-                    let env = 0.14 + 0.86 * pow(tailProgress, 1.15)
-                    dy = sin(prey.phase * 1.65 - tailProgress * 3.1 * .pi) * 0.125 * env
+                    let eelEnv = 0.02 * tailProgress + 0.98 * pow(tailProgress, 1.95)
+                    dy = sin(prey.phase * 1.12 - tailProgress * 2.35 * .pi) * 0.082 * eelEnv
                 case .MEDUSOID_JET:
-                    let env = pow(tailProgress, 1.55)
-                    dy = sin(prey.phase * 1.2 - tailProgress * 1.7 * .pi) * 0.105 * env
+                    dy = sin(prey.phase * 0.92 - tailProgress * 1.85 * .pi) * 0.056 * sharkLikeEnv
                 case .PUFFER_BUOYANT:
-                    let env = pow(tailProgress, 2.2)
-                    dy = sin(prey.phase * 1.85 - tailProgress * 1.9 * .pi) * 0.065 * env
+                    dy = sin(prey.phase * 1.15 - tailProgress * 1.95 * .pi) * 0.046 * sharkLikeEnv
                 case .RIGID_PROPULSION:
                     dy = 0
                 }
@@ -1172,7 +1186,7 @@ public final class OceanGameScene: SKScene {
         waterBgNode.size = CGSize(width: viewW, height: viewH)
         waterBgNode.position = CGPoint(x: viewW * 0.5, y: viewH * 0.5)
 
-        parallaxContainer.removeAllChildren()
+        activeParallaxTileCount = 0
 
         let assetMap: [String: (water: String, far: String, mid: String, near: String)] = [
             "bg_shallow": ("bg_shallow_0_water_0e65cb68", "bg_shallow_1_far_8898229a", "bg_shallow_2_mid_b4e0d30a", "bg_shallow_3_near_96e92ee1"),
@@ -1180,7 +1194,7 @@ public final class OceanGameScene: SKScene {
             "bg_abyss": ("bg_abyss_0_1bbf506a", "bg_abyss_1_75e4a628", "bg_abyss_2_6ce66695", "bg_abyss_3_a4986280")
         ]
 
-        // 1. Layer 0 Water Backdrops blended smoothly across depth zones (zero horizontal cutoff line!)
+        // 1. Layer 0 Water Backdrops blended smoothly across depth zones (zero horizontal or vertical seam lines!)
         if depthRefY < 680.0,
            let names0 = assetMap["bg_shallow"],
            let water0 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names0.water, isWaterCanopy: true) {
@@ -1196,6 +1210,7 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: canopyH,
                 bottomYFromBottom: canopyBottomY,
                 parallaxXFactor: 0.012,
+                phaseOffset: 0.50,
                 viewW: viewW,
                 alpha: wAlpha0,
                 zPos: 1.0
@@ -1211,13 +1226,13 @@ public final class OceanGameScene: SKScene {
             } else if depthRefY > 1060.0 {
                 wAlpha1 = (1.0 - (depthRefY - 1060.0) / 260.0) * 0.88
             }
-            // Full-viewport water column backdrop (covers -12 to viewH+12 so it NEVER creates a horizontal cutoff line!)
             addTiledStrip(
                 texture: water1,
                 baseTargetH: viewH + 24.0,
                 scaledTargetH: viewH + 24.0,
                 bottomYFromBottom: -12.0,
                 parallaxXFactor: 0.025,
+                phaseOffset: 0.50,
                 viewW: viewW,
                 alpha: max(0.0, min(0.88, wAlpha1)),
                 zPos: 1.1
@@ -1234,6 +1249,7 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: viewH + 24.0,
                 bottomYFromBottom: -12.0,
                 parallaxXFactor: 0.025,
+                phaseOffset: 0.50,
                 viewW: viewW,
                 alpha: max(0.0, min(0.92, wAlpha2)),
                 zPos: 1.2
@@ -1290,6 +1306,13 @@ public final class OceanGameScene: SKScene {
                 zBase: 4.0
             )
         }
+
+        // Hide any unused pooled tile nodes without removing them from the scene graph
+        if activeParallaxTileCount < parallaxTilePool.count {
+            for i in activeParallaxTileCount..<parallaxTilePool.count {
+                parallaxTilePool[i].isHidden = true
+            }
+        }
     }
 
     private func renderBiomeTerrainPlanes(
@@ -1319,6 +1342,7 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: farH,
                 bottomYFromBottom: farBottomY,
                 parallaxXFactor: 0.025,
+                phaseOffset: 0.37,
                 viewW: viewW,
                 alpha: alpha * 0.94,
                 zPos: zBase + 0.1
@@ -1334,6 +1358,7 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: midH,
                 bottomYFromBottom: midBottomY,
                 parallaxXFactor: 0.18,
+                phaseOffset: 0.63,
                 viewW: viewW,
                 alpha: alpha,
                 zPos: zBase + 0.2
@@ -1349,11 +1374,27 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: nearH,
                 bottomYFromBottom: nearBottomY,
                 parallaxXFactor: 0.38,
+                phaseOffset: 0.21,
                 viewW: viewW,
                 alpha: alpha,
                 zPos: zBase + 0.3
             )
         }
+    }
+
+    private func acquirePooledParallaxTile() -> SKSpriteNode {
+        if activeParallaxTileCount < parallaxTilePool.count {
+            let node = parallaxTilePool[activeParallaxTileCount]
+            activeParallaxTileCount += 1
+            node.isHidden = false
+            return node
+        }
+        let node = SKSpriteNode()
+        node.anchorPoint = CGPoint(x: 0, y: 0)
+        parallaxContainer.addChild(node)
+        parallaxTilePool.append(node)
+        activeParallaxTileCount += 1
+        return node
     }
 
     private func addTiledStrip(
@@ -1362,29 +1403,35 @@ public final class OceanGameScene: SKScene {
         scaledTargetH: Double,
         bottomYFromBottom: Double,
         parallaxXFactor: Double,
+        phaseOffset: Double = 0.50,
         viewW: Double,
         alpha: Double,
         zPos: CGFloat
     ) {
         let texSize = texture.size()
-        guard texSize.height > 0 else { return }
+        guard texSize.height > 0 && alpha > 0.004 else { return }
         let aspect = Double(texSize.width / texSize.height)
         let baseTileW = max(256.0, baseTargetH * aspect)
         let tileW = ceil(max(148.0, scaledTargetH * aspect))
+        let displayScale = Double(max(1.0, view?.contentScaleFactor ?? UIScreen.main.scale))
 
-        let rawPhase = (cameraX * parallaxXFactor) / baseTileW
+        let rawPhase = (cameraX * parallaxXFactor) / baseTileW + phaseOffset
         let normPhase = (rawPhase.truncatingRemainder(dividingBy: 1.0) + 1.0).truncatingRemainder(dividingBy: 1.0)
         let centerAnchorX = viewW * 0.5 - normPhase * tileW
-        var startX = floor(((centerAnchorX.truncatingRemainder(dividingBy: tileW) + tileW).truncatingRemainder(dividingBy: tileW)) - tileW)
+        var startX = ((centerAnchorX.truncatingRemainder(dividingBy: tileW) + tileW).truncatingRemainder(dividingBy: tileW)) - tileW
+        let alignedY = (bottomYFromBottom * displayScale).rounded(.down) / displayScale
+        let alignedH = ceil(scaledTargetH * displayScale) / displayScale
 
         while startX < viewW {
-            let node = SKSpriteNode(texture: texture)
-            node.anchorPoint = CGPoint(x: 0, y: 0)
-            node.size = CGSize(width: tileW + 2.0, height: ceil(scaledTargetH))
-            node.position = CGPoint(x: startX, y: floor(bottomYFromBottom))
+            let x0 = (startX * displayScale).rounded() / displayScale
+            let x1 = ((startX + tileW) * displayScale).rounded() / displayScale
+            let node = acquirePooledParallaxTile()
+            node.texture = texture
+            // Exact physical pixel boundary abutment (x0 -> x1) with ZERO double-alpha overlap!
+            node.size = CGSize(width: max(1.0, x1 - x0), height: alignedH)
+            node.position = CGPoint(x: x0, y: alignedY)
             node.alpha = CGFloat(alpha)
             node.zPosition = zPos
-            parallaxContainer.addChild(node)
             startX += tileW
         }
     }
@@ -1674,8 +1721,8 @@ public final class OceanGameScene: SKScene {
         while idx >= 0 {
             let p = activePreys[idx]
             let gait = classifyPreySwimGait(p.config)
-            let speedNorm = max(0.65, min(2.4, hypot(p.vx, p.vy) / max(18.0, p.config.baseSpeed)))
-            p.phase += dt * 5.4 * speedNorm
+            let speedNorm = max(0.72, min(1.35, hypot(p.vx, p.vy) / max(18.0, p.config.baseSpeed)))
+            p.phase += dt * 4.6 * speedNorm
             p.stateTimer += dt
 
             let dx = p.x - sharkX
@@ -1702,56 +1749,56 @@ public final class OceanGameScene: SKScene {
                 mutationVariant: p.mutation
             )
 
-            // Biomechanical Non-Linear Trajectory AI (1:1 parity with src/App.tsx)
+            // Biomechanical Smooth Horizontal Cruising Trajectory AI (1:1 parity with src/App.tsx)
             let dirSign: Double = p.vx >= 0 ? 1.0 : -1.0
             switch p.config.behavior {
             case .SCHOOL_FLEE:
                 if dist < 250 && encounterPreview == .DEVOUR && dist > 1.0 {
-                    let fleeAng = atan2(dy, dx) + sin(p.phase * 1.9) * 0.42
-                    let fleeSpd = p.config.baseSpeed * 1.62
-                    p.vx += (cos(fleeAng) * fleeSpd - p.vx) * min(1.0, dt * 5.0)
-                    p.vy += (sin(fleeAng) * fleeSpd - p.vy) * min(1.0, dt * 5.0)
+                    let fleeAng = atan2(dy, dx) + sin(p.phase * 1.35) * 0.18
+                    let fleeSpd = p.config.baseSpeed * 1.42
+                    p.vx += (cos(fleeAng) * fleeSpd - p.vx) * min(1.0, dt * 4.5)
+                    p.vy += (sin(fleeAng) * fleeSpd - p.vy) * min(1.0, dt * 4.5)
                 } else {
-                    let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq + p.phase * 0.25) * p.cruiseAmpY
-                    let desiredVy = (targetY - p.y) * 1.55 + cos(p.phase * 0.85) * p.config.baseSpeed * 0.42
-                    let desiredVx = dirSign * p.config.baseSpeed * (0.86 + 0.26 * sin(p.stateTimer * 1.4))
-                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.2)
-                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.2)
+                    let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq) * p.cruiseAmpY
+                    let desiredVy = (targetY - p.y) * 0.92 + cos(p.phase * 0.65) * p.config.baseSpeed * 0.14
+                    let desiredVx = dirSign * p.config.baseSpeed * (0.92 + 0.12 * sin(p.stateTimer * 0.95))
+                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
                 }
             case .PUFFER_INFLATE:
                 let targetInflate = dist < 195 ? 1.0 : 0.0
                 p.inflateRatio += (targetInflate - p.inflateRatio) * min(1.0, dt * 4.5)
-                let targetY = p.cruiseDepthCenter + sin(p.stateTimer * 0.95) * (p.cruiseAmpY * 0.72)
-                let desiredVy = (targetY - p.y) * 1.25 + sin(p.phase * 0.75) * 28.0
+                let targetY = p.cruiseDepthCenter + sin(p.stateTimer * 0.65) * (p.cruiseAmpY * 0.65)
+                let desiredVy = (targetY - p.y) * 0.85 + sin(p.phase * 0.6) * 12.0
                 let desiredVx = dirSign * p.config.baseSpeed * (1.0 - p.inflateRatio * 0.35)
                 p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
                 p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
             case .EEL_CHARGER:
                 if dist < 310 && encounterPreview != .DEVOUR && dist > 1.0 {
-                    let atkAng = atan2(-dy, -dx) + sin(p.phase * 2.1) * 0.28
-                    let atkSpd = p.config.baseSpeed * 1.48
-                    p.vx += (cos(atkAng) * atkSpd - p.vx) * min(1.0, dt * 4.2)
-                    p.vy += (sin(atkAng) * atkSpd - p.vy) * min(1.0, dt * 4.2)
+                    let atkAng = atan2(-dy, -dx) + sin(p.phase * 1.4) * 0.14
+                    let atkSpd = p.config.baseSpeed * 1.42
+                    p.vx += (cos(atkAng) * atkSpd - p.vx) * min(1.0, dt * 4.0)
+                    p.vy += (sin(atkAng) * atkSpd - p.vy) * min(1.0, dt * 4.0)
                 } else {
-                    let desiredVy = cos(p.phase * 1.15) * p.config.baseSpeed * 0.62
+                    let desiredVy = cos(p.phase * 0.75) * p.config.baseSpeed * 0.18
                     let desiredVx = dirSign * p.config.baseSpeed
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
-                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.5)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
                 }
             case .MINE_HAZARD:
                 p.vx = sin(p.stateTimer * 0.8 + p.phase * 0.2) * 8.0
-                p.vy = cos(p.stateTimer * 1.1 + p.phase * 0.3) * 12.0
+                p.vy = cos(p.stateTimer * 1.1 + p.phase * 0.3) * 10.0
             default:
                 if gait == .MEDUSOID_JET {
-                    let jetPulse = 0.45 + 0.85 * pow(max(0.0, sin(p.phase * 0.65)), 2.0)
+                    let jetPulse = 0.72 + 0.38 * pow(max(0.0, sin(p.phase * 0.65)), 2.0)
                     let desiredVx = dirSign * p.config.baseSpeed * jetPulse
-                    let desiredVy = -abs(sin(p.phase * 0.65)) * p.config.baseSpeed * 0.48 + cos(p.stateTimer * 0.9) * 26.0
-                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 4.0)
-                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 4.0)
+                    let desiredVy = cos(p.stateTimer * 0.75) * 14.0
+                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.5)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.5)
                 } else {
                     let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq) * p.cruiseAmpY
-                    let desiredVy = (targetY - p.y) * 1.35 + sin(p.phase * 0.72) * p.config.baseSpeed * 0.38
-                    let desiredVx = dirSign * p.config.baseSpeed * (0.88 + 0.22 * cos(p.stateTimer * 1.1))
+                    let desiredVy = (targetY - p.y) * 0.88 + sin(p.phase * 0.6) * p.config.baseSpeed * 0.14
+                    let desiredVx = dirSign * p.config.baseSpeed * (0.92 + 0.12 * cos(p.stateTimer * 0.85))
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 2.8)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 2.8)
                 }
@@ -1959,19 +2006,12 @@ public final class OceanGameScene: SKScene {
             p.node.size = CGSize(width: drawW, height: drawH)
             p.node.position = CGPoint(x: screenX, y: screenY)
 
-            // Smooth horizontal flip (prey sprites face RIGHT in sheet: +1 when vx >= 0, -1 when vx < 0) + hydrodynamic pitch
+            // Smooth horizontal flip (prey sprites face RIGHT in sheet: +1 when vx >= 0, -1 when vx < 0) + calm shark-like horizontal pitch
             let facingSign: Double = p.vx >= 0 ? 1.0 : -1.0
-            let pitchAngle = max(-0.48, min(0.48, atan2(-p.vy, max(12.0, abs(p.vx)))))
-            if gait == .MEDUSOID_JET {
-                let pulseStretch = 1.0 + 0.12 * sin(p.phase * 1.3)
-                p.node.xScale = CGFloat(facingSign * (1.0 / pulseStretch))
-                p.node.yScale = CGFloat(pulseStretch)
-                p.node.zRotation = CGFloat(sin(p.phase * 0.65) * 0.14)
-            } else {
-                p.node.xScale = CGFloat(facingSign)
-                p.node.yScale = 1.0
-                p.node.zRotation = CGFloat(pitchAngle * facingSign)
-            }
+            let pitchAngle = max(-0.22, min(0.22, atan2(-p.vy, max(24.0, abs(p.vx))) * 0.42))
+            p.node.xScale = CGFloat(facingSign)
+            p.node.yScale = 1.0
+            p.node.zRotation = CGFloat(pitchAngle * facingSign)
 
             // Gold Frenzy & Golden Mutant 24K Gold Shimmer Tint (1:1 parity with Web drawPreyEntity)
             if vm.frenzyActive || p.mutation == .GOLDEN_SWARM {

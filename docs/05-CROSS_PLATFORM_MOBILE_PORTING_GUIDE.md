@@ -60,33 +60,30 @@
 
 ---
 
-### 3.2 专题二：猎物生物力学游动动画与非线性轨迹规范
-移植到任何平台时，猎物绝不能只写刚体平移：
-1. **注意精灵图朝向差异（关键坑点！）**：
-   - 玩家鲨鱼图集（`sharks_ec921c3b.png`）默认**鱼头朝右**（纹理坐标 $u = 0$ 为尾鳍，$u = 1$ 为鱼吻，故鲨鱼摆尾幅度包络随 `tailProgress = 1.0 - u` 递增）。
-   - 猎物鱼类图集（`fish_24bdaa5a.png` / `fish2_fc857cfa.png`）默认**鱼头朝左**（纹理坐标 $u = 0$ 为鱼吻，$u = 1$ 为尾鳍，故猎物摆尾幅度包络随 `tailProgress = u` 递增，且向右游 `vx >= 0` 时设置 `xScale = -1`）。
-2. **非线性巡航与反应式轨迹**：
-   - 每只猎物出生时分配独立的巡航基准深度 `cruiseDepthCenter`、纵向振幅 `cruiseAmpY ∈ [36, 92]` 与频率 `cruiseFreq ∈ [0.72, 1.35]`。
-   - 常态巡航时通过弹簧恢复力 `(targetY - y) * 1.4` 叠加高频尾鳍偏航分量，走出自然的 S 形波浪/8 字形轨迹；水母/乌贼（`MEDUSOID_JET`）采用 $\sin^2$ 脉冲喷射与伞盖呼吸缩放；可吞噬鱼群（`SCHOOL_FLEE`）在鲨鱼靠近 `< 250m` 时触发带正弦摆动的折线加速逃逸。
+### 3.2 专题二：猎物生物力学游动动画与类鲨鱼平稳摆尾规范
+移植到任何平台时，猎物游动动画必须与玩家鲨鱼一样保持“头部与前躯稳定、尾鳍柔和推进”的自然流体感，严禁全身夸张扭动：
+1. **注意精灵图朝向统一（关键坑点！）**：
+   - 玩家鲨鱼图集（`sharks_ec921c3b.png`）与猎物鱼类图集（`fish_24bdaa5a.png` / `fish2_fc857cfa.png`）在原图中均**默认鱼头朝右**（纹理坐标 $u = 1$ 为鱼吻/头部，$u = 0$ 为尾鳍，故摆尾幅度包络统一随 `tailProgress = 1.0 - u` 递增，且向右游 `vx >= 0` 时 `xScale = +1`、向左游 `vx < 0` 时 `xScale = -1`）。
+2. **类鲨鱼前躯锁定脊柱包络与平缓巡航**：
+   - 猎物脊柱变形统一采用与鲨鱼一致的前躯稳定包络 `sharkLikeEnv = 0.015 * tailProgress + 0.985 * pow(tailProgress, 2.25)`，确保鱼头、鱼眼与胸腹前 45% 区域平稳不晃动，仅尾柄与尾鳍按 `0.046 ~ 0.082` 幅度柔和摆动。
+   - 每只猎物出生时分配平缓的巡航纵向振幅 `cruiseAmpY ∈ [12, 26]` 与频率 `cruiseFreq ∈ [0.36, 0.68]`，俯仰角限制在 `±0.22 rad` 以内，游动姿态舒展平稳。
 
 ---
 
-### 3.3 专题三：48 阶进化图谱「丝滑转轮」物理手感实现规范
-进化界面的 48 阶鲨鱼弧形选择器在任何平台上都必须实现 **60/120Hz 连续跟手旋转 + 动量惯性 + 弹簧吸附**：
-1. **状态分离**：
-   - `wheelPosition: Double`（连续浮点位置，控制弧形转轮上所有可见鲨鱼的实时几何变换）。
-   - `inspectedIndex: Int`（当前对准弧顶中央的鲨鱼整数索引 `((Int(round(wheelPosition)) % 48) + 48) % 48`，实时刷新上方巨幕预览与右侧属性面板）。
-2. **连续弧面插值公式**：
-   - 取 `baseInt = floor(wheelPosition)`，小数偏移 `frac = wheelPosition - baseInt`。
-   - 遍历相对槽位 `k ∈ [-4, -3, -2, -1, 0, 1, 2, 3, 4]`，实际相对偏移 `relOffset = Double(k) - frac`。
-   - 弧面角度 `angleDeg = relOffset * 20.5°`，水平位置 `xPct = 0.50 + sin(angleRad) * 0.44`，垂直位置 `yPct = 0.34 + (1 - cos(angleRad)) * 0.88`，连续缩放 `scale = max(0.46, 1.15 - |relOffset| * 0.19)`，径向微倾角 `rotation = angleDeg * 0.42°`。
-3. **惯性预测与弹簧回弹**：
-   - 手指滑动时：`wheelPosition = dragStartPos - translationX / 56.0`，每当 `round(wheelPosition)` 变化时触发一次轻触觉刻度反馈（iOS `UISelectionFeedbackGenerator().selectionChanged()` / Android `HapticFeedbackConstants.CLOCK_TICK`）。
-   - 手指松开时：读取手势预测终点位移 `predictedEndTranslationX`（或松手瞬时速度 $v_x$），计算惯性目标格 `round(clamp(predictedPos, wheelPos - 6, wheelPos + 6))`，使用临界阻尼弹簧动画（`stiffness: 170, damping: 22`）平滑落位。
+### 3.3 专题三：48 阶进化图谱「iPhone 闹钟级（`UIPickerView`）丝滑转轮」物理手感规范
+进化界面的 48 阶鲨鱼弧形选择器在 Web 与 iOS 双端严格复刻 **iPhone 原生闹钟时间滚轮（`UIPickerView` / `UIScrollView.DecelerationRate`）** 的物理阻尼与棘轮刻度手感：
+1. **iPhone 闹钟滚轮核心物理参数**：
+   - **指数衰减率**：采用 UIKit 滚筒标准参数 $d = 0.9978/\text{ms}$（对应连续衰减率 $\lambda = 2.20\text{ s}^{-1}$，速度每 `315ms` 衰减一半）。
+   - **槽位齿距与慢速磁吸驻留**：每移动 `46~48px` 跨过 1 个鲨鱼槽位；慢速拖动时叠加微弱正弦棘轮齿感 `0.055 * sin(2π * rawPos)`，模拟手指拨动真实机械滚筒的过齿质感。
+   - **滑动窗口速度采样与连拨动量叠加**：采用 `32ms ~ 95ms` 环形触控采样窗口消除松手瞬间手指微颤导致的丢速；在转轮滑行未停稳时同向再次快拨（`260ms` 内），自动叠加 `0.68 * inheritedVelocity`（最高可达 `38 slots/s`），反向触碰则瞬间刹停抓稳。
+2. **两阶段“指数滑行 + 末端磁吸落锁”动力学**：
+   - **第一阶段（指数滑行 `|rem| > 0.26`）**：松手瞬间精确预测整数目标槽位 $x_{\text{target}} = \text{round}(x_0 + v_0 / \lambda)$，滑行中按解析速度场 $v(x) = (x_{\text{target}} - x)\cdot \lambda \cdot (1 + 0.075\cos(2\pi x))$ 推进，呈现出由快到慢的经典 `哒-哒-哒-哒…哒…哒` 棘轮减速曲线。
+   - **第二阶段（磁吸卡槽落锁 `|rem| <= 0.26`）**：当距离目标槽位小于 `0.26` 格时，无缝切入过阻尼磁吸弹簧（`stiffness = 115, damping = 22.5`），稳稳咬合进整数刻度中心，绝无生硬急刹或反向回弹。
+   - **声学与触感棘轮滴答**：每次跨过整数刻度格 `round(wheelPosition)` 时，Web 端触发 `soundFX.playWheelDetentTick(speedRatio)`（14ms 阻尼棘轮声）与 `navigator.vibrate(3)`，iOS 端触发 `UISelectionFeedbackGenerator().selectionChanged()`。
 
 ---
 
-## 4. 新平台打包上线前 12 项必检清单 (Pre-Release QA Checklist)
+## 4. 新平台打包上线前 13 项必检清单 (Pre-Release QA Checklist)
 
 未来打包至 **iOS / Android / HarmonyOS / 小游戏** 真机提审前，必须逐项打钩确认：
 
@@ -94,11 +91,11 @@
 - [ ] **2. 多语言零漏翻与零 `{var}` 裸露**：切换中文/英文，检查首页、局内连击（触发 2 连击以上）、狩猎热度（Lv.1~3）、3 步新手引导、冲刺键底部文字、暂停窗、复活窗、结算窗、进化图谱，确认无任何 `hud_*`、`onboard_*` 或 `{count}`、`{mult}` 裸露。
 - [ ] **3. 文本单行防折行**：在最窄手机横屏（如 `667×375`）下，左上角血条处于满血、濒危（`<28%`）、狂暴（`FRENZY`）三种状态时，文字是否均保持单行且无上下断行？
 - [ ] **4. 中心视野零遮挡**：将鲨鱼游至海平面最顶端（`depth = 4m`）并同时触发连击、黄金狂暴与新手引导，确认所有 HUD 胶囊均未遮挡正在游动的鲨鱼本体。
-- [ ] **5. 背景零分界线**：在阳光浅海、暮光带、深渊带上下左右游动，确认海面波光层底部无白色横线、右侧无白边、水平循环拼接处无垂直亮线/暗线、远中近礁石底部无悬空透明缝。
-- [ ] **6. 猎物步态与轨迹**：观察小丑鱼、水母、电鳗、河豚、潜艇 5 类生物，确认鱼尾方向正确（鱼吻在前、尾鳍摆动在后）、游动轨迹呈自然波浪/脉冲曲线而非呆板直线。
+- [ ] **5. 背景零分界线与下潜零卡顿**：在阳光浅海、暮光带、深渊带上下左右游动，确认海面波光层底部无白色横线、水平循环拼接处采用物理像素精确对齐（`x0 -> x1` **严禁对半透明背景块使用 `+2.0pt` 宽度重叠**，防止双倍 Alpha 叠加形成屏幕中央竖向黑线），且 12 张背景纹理已在启动阶段预加载预热（`SKTexture.preload`）+ 节点池化复用，首次下潜跨深度带 0 卡顿。
+- [ ] **6. 猎物步态与轨迹**：观察小丑鱼、水母、电鳗、河豚、潜艇 5 类生物，确认鱼尾方向正确（鱼吻在前、尾鳍摆动在后）、摆尾幅度与鲨鱼一样前稳后柔、不夸张扭动。
 - [ ] **7. 视觉体型 === 可吞噬性**：确认屏幕上所有比玩家鲨鱼小的鱼均可直接一口吞噬，所有比玩家鲨鱼大的鱼均不可常态直吞。
 - [ ] **8. 吞噬五位一体特效**：确认靠近小鱼时有吸口牵引，吞噬瞬间有鲨鱼前扑张嘴动画、绿色/金色粘液气泡爆散、3D 翻转金币与基因结晶磁吸飞入、以及双语浮动加分飘字。
-- [ ] **9. 进化转轮丝滑度**：打开进化图谱，慢速拖动与快速甩动底部弧形鲨鱼列表，确认转轮连续丝滑跟手、带机械刻度震动反馈与惯性弹簧吸附。
+- [ ] **9. 进化转轮 iPhone 闹钟级丝滑度**：打开进化图谱，慢速拖动与快速连续甩动底部弧形鲨鱼列表，确认具备 iPhone 闹钟滚轮级的长惯性滑行、连拨动量叠加与棘轮刻度震动反馈。
 - [ ] **10. 双手多点触控**：左手大拇指按住摇杆持续画圈游动的同时，右手连续点击强化、突破、狂暴与按住冲刺，确认 100% 即时响应且绝不打断左手摇杆。
 - [ ] **11. 跨语言数据模型字段与枚举值 100% 契约对齐**：代码生成器（如 `scripts/build-ios-native.ts`）中 `GameModels.swift` 定义的 `ComputedSharkStats` 属性名（如 `magnetRadius`、`jawSuctionMultiplier`）及 `PreyBehavior` 枚举分支（如 `.MINE_HAZARD`）与渲染层 `OceanGameScene.swift` 引用处必须 100% 严格一致，严禁手写臆造未定义的成员名（如 `magnetRadiusBonus` 或 `.MINE_STATIC`）。
 - [ ] **12. 自动化测试与构建**：`npx tsx --test src/game/rules.test.ts`、`npm run lint`、`npm run build`（及对应平台构建脚本如 `npm run build:ios`）全部零错误通过。
@@ -110,6 +107,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-06 | **iPhone 闹钟级进化转轮手感 + iOS 屏幕中央竖向黑线与首次下潜卡顿修复 + 猎物游动动画收敛对齐鲨鱼**：① Web 与 iOS 进化转盘升级为 iPhone 闹钟（`UIPickerView`）滚筒物理模型（$\lambda = 2.20\text{ s}^{-1}$ 指数减速率、`32~95ms` 滑窗测速、同向连拨动量叠加、慢拖棘轮齿感与两阶段指数滑行+磁吸落锁）；② 修复 iOS `addTiledStrip` 因 `tileW + 2.0` 宽度重叠导致半透明水幕与地形在屏幕中央（`cameraX = 0` 时 `centerAnchorX = viewW * 0.5`）产生双倍 Alpha 叠加竖向黑线的问题，改为物理像素网格精确对齐（`x0 -> x1` 零重叠）与层间相位错峰；③ 在 `SpriteAtlasManager.preloadAllIfNeeded()` 启动阶段预加载并 `SKTexture.preload` 预热全部 12 张背景纹理，并在 `OceanGameScene` 引入 `parallaxTilePool` 节点复用池替代每帧 `removeAllChildren()`，彻底消除首次下潜加载新背景时的卡顿；④ 调优全平台猎物脊柱波动包络与巡航俯仰角，使猎物游动像鲨鱼一样前躯平稳、尾鳍自然摆动 | `src/components/SharkEvolutionAtlasModal.tsx`, `src/game/audio.ts`, `src/game/canvasRenderer.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `docs/02-DESIGN_SPEC.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-06 | **松开摇杆原地悬停 + 进化圆盘丝滑拖拽惯性 + iOS 鲨鱼与猎物视觉比例放大对齐 Web**：① Web 与 iOS 双端在未拨动摇杆且未冲刺时（`mag <= 0.08 && !isBoosting`）鲨鱼保持原地呼吸悬停（`sharkVx = 0, sharkVy = 0`），不再维持原方向惯性游走；② 修复 iOS `EvolutionAtlasSheetView` 中圆盘节点 `Button` 拦截拖拽手势的问题（改用 `.onTapGesture` + 舞台级 `.simultaneousGesture(DragGesture)` + 60Hz `wheelPhysicsTimer` 惯性衰减与弹簧吸附），并在 Web `SharkEvolutionAtlasModal.tsx` 同步实装 60FPS 连续浮点惯性转轮；③ 修复 iOS `sliceAndKeyNormalizedCell` 未裁切鲨鱼/猎物透明白边及 `OceanGameScene.swift` 缺失 `sqrt(aspect)` 等面积宽高比公式导致鱼体偏小的问题，同时将 `sharkBaseDrawSize` 设为 `110.4`（`96 * 1.15`）使 iOS 鲨鱼与猎物同屏比例与 Web 端 1:1 对齐 | `src/App.tsx`, `src/components/SharkEvolutionAtlasModal.tsx`, `scripts/build-ios-native.ts`, `docs/02-DESIGN_SPEC.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-06 | **iOS 原生端 5 项体验与视效对齐 Web 端**：① 全平台鲨鱼与 33 种猎物基础游动速度下调 50%（`baseSharkSpeed = 140`，按住冲刺速度 `280` 等于原常态速度）；② 修复 iOS 猎物鱼头尾朝向与脊柱波动方向反转问题（原图集全部鱼类面朝右侧 `u = 1.0` 为鱼头、`u = 0.0` 为鱼尾，修正 `tailProgress = 1.0 - u` 且 `facingSign = vx >= 0 ? 1 : -1`）；③ 1:1 复刻 Web `parallaxBackground.ts` 跨深度带连续 Alpha 混合过渡（`420m~680m` 浅海↔暮光、`1040m~1340m` 暮光↔深渊），移除暮光/深渊水幕 `surfaceLift` 半屏抬升导致的屏幕中部水平断层线，并修复 HUD 深度显示系数；④ 补齐 iOS 海水泡泡系统（42 颗随深度自适应形态的环境上浮气泡/发光孢子/深渊余烬 + 鲨鱼游动/冲刺尾流气泡）；⑤ 补齐 iOS 黄金狂暴（Gold Frenzy）24K 流光金鲨鱼本体染色、全屏猎物鎏金转化与金色尾流粒子特效 | `src/game/config.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-06 | 修复 Xcode 编译时 `OceanGameScene.swift` 中 `ComputedSharkStats.magnetRadius`（原误写为 `magnetRadiusBonus`）与 `PreyBehavior.MINE_HAZARD`（原误写为 `.MINE_STATIC`）的字段/枚举名不匹配问题，并补充跨语言模型字段契约对齐检查项 | `scripts/build-ios-native.ts`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |

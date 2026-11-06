@@ -952,6 +952,27 @@ public final class SpriteAtlasManager {
         if let settingSheet = loadBundledImage(named: "setting_83a7a273") {
             sliceUiSettingSheet(settingSheet)
         }
+
+        // 6. Pre-process & GPU-warm all 12 Multi-Biome Ocean Parallax Layers up front (zero stutter when diving to Twilight/Abyss!)
+        let oceanLayers: [(name: String, isWater: Bool)] = [
+            ("bg_shallow_0_water_0e65cb68", true),
+            ("bg_shallow_1_far_8898229a", false),
+            ("bg_shallow_2_mid_b4e0d30a", false),
+            ("bg_shallow_3_near_96e92ee1", false),
+            ("bg_twilight_0_17bcb84c", true),
+            ("bg_twilight_1_04f5d35f", false),
+            ("bg_twilight_2_fd5a1b33", false),
+            ("bg_twilight_3_6e0dd7c1", false),
+            ("bg_abyss_0_1bbf506a", true),
+            ("bg_abyss_1_75e4a628", false),
+            ("bg_abyss_2_6ce66695", false),
+            ("bg_abyss_3_a4986280", false)
+        ]
+        for layer in oceanLayers {
+            _ = oceanParallaxTexture(named: layer.name, isWaterCanopy: layer.isWater)
+        }
+        let allGpuTextures = Array(sharkTextures.values) + Array(preyTextures.values) + Array(oceanLayerTextures.values)
+        SKTexture.preload(allGpuTextures) {}
     }
 
     public func sharkTexture(for spriteKey: String) -> SKTexture? {
@@ -1908,10 +1929,10 @@ public final class SpriteAtlasManager {
         let srcH = cgImg.height
         let isShallowCanopy = assetName.contains("shallow_0_water") || (Double(srcW) / Double(max(1, srcH)) > 3.0)
 
-        let cropLeft = isShallowCanopy ? Int((Double(srcW) * 0.012).rounded()) : 0
-        let cropRight = isShallowCanopy ? Int((Double(srcW) * 0.968).rounded()) : srcW
-        let cropTop = isShallowCanopy ? Int((Double(srcH) * 0.032).rounded()) : 0
-        let cropBot = isShallowCanopy ? Int((Double(srcH) * 0.902).rounded()) : srcH
+        let cropLeft = Int((Double(srcW) * (isShallowCanopy ? 0.012 : 0.010)).rounded())
+        let cropRight = Int((Double(srcW) * (isShallowCanopy ? 0.968 : 0.990)).rounded())
+        let cropTop = Int((Double(srcH) * (isShallowCanopy ? 0.032 : 0.008)).rounded())
+        let cropBot = Int((Double(srcH) * (isShallowCanopy ? 0.902 : 0.992)).rounded())
         let cropW = max(64, cropRight - cropLeft)
         let cropH = max(32, cropBot - cropTop)
 
@@ -2849,8 +2870,8 @@ public final class OceanGameScene: SKScene {
             self.mutation = mutation
             self.inflateRatio = 0.0
             self.cruiseDepthCenter = max(config.minDepth + 35.0, min(config.maxDepth - 35.0, y))
-            self.cruiseAmpY = Double.random(in: 36.0...92.0)
-            self.cruiseFreq = Double.random(in: 0.72...1.35)
+            self.cruiseAmpY = Double.random(in: 12.0...26.0)
+            self.cruiseFreq = Double.random(in: 0.36...0.68)
         }
     }
 
@@ -2945,6 +2966,8 @@ public final class OceanGameScene: SKScene {
     }
 
     private let bubbleContainer = SKNode()
+    private var parallaxTilePool: [SKSpriteNode] = []
+    private var activeParallaxTileCount: Int = 0
     private var ambientBubbles: [AmbientOceanBubble] = []
     private var trailBubbleAccumulator: Double = 0.0
     private var activePreys: [ActivePrey] = []
@@ -2967,6 +2990,20 @@ public final class OceanGameScene: SKScene {
         addChild(bubbleContainer)
         addChild(worldContainer)
         addChild(fxContainer)
+
+        if parallaxTilePool.isEmpty {
+            for _ in 0..<32 {
+                let tileNode = SKSpriteNode()
+                tileNode.anchorPoint = CGPoint(x: 0, y: 0)
+                tileNode.isHidden = true
+                parallaxContainer.addChild(tileNode)
+                parallaxTilePool.append(tileNode)
+            }
+        } else {
+            for tileNode in parallaxTilePool where tileNode.parent == nil {
+                parallaxContainer.addChild(tileNode)
+            }
+        }
 
         sharkNode.zPosition = 20
         worldContainer.addChild(sharkNode)
@@ -3304,33 +3341,31 @@ public final class OceanGameScene: SKScene {
             node.warpGeometry = nil
             return
         }
-        let cols = 7
+        let cols = 8
         var src: [SIMD2<Float>] = []
         var dst: [SIMD2<Float>] = []
         src.reserveCapacity((cols + 1) * 2)
         dst.reserveCapacity((cols + 1) * 2)
 
+        // Shark-like sleek anterior-locked envelope: head & chest (u -> 1.0) stay steady, posterior tail (u -> 0.0) sweeps smoothly
         for row in 0...1 {
             let v = Float(row)
             for col in 0...cols {
                 let u = Float(col) / Float(cols)
                 src.append(SIMD2<Float>(u, v))
-                // Prey sprite assets face RIGHT (u = 1.0 is snout/head, u = 0.0 is tail/tentacles — identical to shark!)
                 let tailProgress = Double(1.0 - u)
+                let sharkLikeEnv = 0.015 * tailProgress + 0.985 * pow(tailProgress, 2.25)
                 let dy: Double
                 switch gait {
                 case .CARANGIFORM:
-                    let env = 0.02 * tailProgress + 0.98 * pow(tailProgress, 2.05)
-                    dy = sin(prey.phase * 1.45 - tailProgress * 2.1 * .pi) * 0.095 * env
+                    dy = sin(prey.phase - tailProgress * 2.15 * .pi) * 0.068 * sharkLikeEnv
                 case .ANGUILLIFORM:
-                    let env = 0.14 + 0.86 * pow(tailProgress, 1.15)
-                    dy = sin(prey.phase * 1.65 - tailProgress * 3.1 * .pi) * 0.125 * env
+                    let eelEnv = 0.02 * tailProgress + 0.98 * pow(tailProgress, 1.95)
+                    dy = sin(prey.phase * 1.12 - tailProgress * 2.35 * .pi) * 0.082 * eelEnv
                 case .MEDUSOID_JET:
-                    let env = pow(tailProgress, 1.55)
-                    dy = sin(prey.phase * 1.2 - tailProgress * 1.7 * .pi) * 0.105 * env
+                    dy = sin(prey.phase * 0.92 - tailProgress * 1.85 * .pi) * 0.056 * sharkLikeEnv
                 case .PUFFER_BUOYANT:
-                    let env = pow(tailProgress, 2.2)
-                    dy = sin(prey.phase * 1.85 - tailProgress * 1.9 * .pi) * 0.065 * env
+                    dy = sin(prey.phase * 1.15 - tailProgress * 1.95 * .pi) * 0.046 * sharkLikeEnv
                 case .RIGID_PROPULSION:
                     dy = 0
                 }
@@ -3435,7 +3470,7 @@ public final class OceanGameScene: SKScene {
         waterBgNode.size = CGSize(width: viewW, height: viewH)
         waterBgNode.position = CGPoint(x: viewW * 0.5, y: viewH * 0.5)
 
-        parallaxContainer.removeAllChildren()
+        activeParallaxTileCount = 0
 
         let assetMap: [String: (water: String, far: String, mid: String, near: String)] = [
             "bg_shallow": ("bg_shallow_0_water_0e65cb68", "bg_shallow_1_far_8898229a", "bg_shallow_2_mid_b4e0d30a", "bg_shallow_3_near_96e92ee1"),
@@ -3443,7 +3478,7 @@ public final class OceanGameScene: SKScene {
             "bg_abyss": ("bg_abyss_0_1bbf506a", "bg_abyss_1_75e4a628", "bg_abyss_2_6ce66695", "bg_abyss_3_a4986280")
         ]
 
-        // 1. Layer 0 Water Backdrops blended smoothly across depth zones (zero horizontal cutoff line!)
+        // 1. Layer 0 Water Backdrops blended smoothly across depth zones (zero horizontal or vertical seam lines!)
         if depthRefY < 680.0,
            let names0 = assetMap["bg_shallow"],
            let water0 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names0.water, isWaterCanopy: true) {
@@ -3459,6 +3494,7 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: canopyH,
                 bottomYFromBottom: canopyBottomY,
                 parallaxXFactor: 0.012,
+                phaseOffset: 0.50,
                 viewW: viewW,
                 alpha: wAlpha0,
                 zPos: 1.0
@@ -3474,13 +3510,13 @@ public final class OceanGameScene: SKScene {
             } else if depthRefY > 1060.0 {
                 wAlpha1 = (1.0 - (depthRefY - 1060.0) / 260.0) * 0.88
             }
-            // Full-viewport water column backdrop (covers -12 to viewH+12 so it NEVER creates a horizontal cutoff line!)
             addTiledStrip(
                 texture: water1,
                 baseTargetH: viewH + 24.0,
                 scaledTargetH: viewH + 24.0,
                 bottomYFromBottom: -12.0,
                 parallaxXFactor: 0.025,
+                phaseOffset: 0.50,
                 viewW: viewW,
                 alpha: max(0.0, min(0.88, wAlpha1)),
                 zPos: 1.1
@@ -3497,6 +3533,7 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: viewH + 24.0,
                 bottomYFromBottom: -12.0,
                 parallaxXFactor: 0.025,
+                phaseOffset: 0.50,
                 viewW: viewW,
                 alpha: max(0.0, min(0.92, wAlpha2)),
                 zPos: 1.2
@@ -3553,6 +3590,13 @@ public final class OceanGameScene: SKScene {
                 zBase: 4.0
             )
         }
+
+        // Hide any unused pooled tile nodes without removing them from the scene graph
+        if activeParallaxTileCount < parallaxTilePool.count {
+            for i in activeParallaxTileCount..<parallaxTilePool.count {
+                parallaxTilePool[i].isHidden = true
+            }
+        }
     }
 
     private func renderBiomeTerrainPlanes(
@@ -3582,6 +3626,7 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: farH,
                 bottomYFromBottom: farBottomY,
                 parallaxXFactor: 0.025,
+                phaseOffset: 0.37,
                 viewW: viewW,
                 alpha: alpha * 0.94,
                 zPos: zBase + 0.1
@@ -3597,6 +3642,7 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: midH,
                 bottomYFromBottom: midBottomY,
                 parallaxXFactor: 0.18,
+                phaseOffset: 0.63,
                 viewW: viewW,
                 alpha: alpha,
                 zPos: zBase + 0.2
@@ -3612,11 +3658,27 @@ public final class OceanGameScene: SKScene {
                 scaledTargetH: nearH,
                 bottomYFromBottom: nearBottomY,
                 parallaxXFactor: 0.38,
+                phaseOffset: 0.21,
                 viewW: viewW,
                 alpha: alpha,
                 zPos: zBase + 0.3
             )
         }
+    }
+
+    private func acquirePooledParallaxTile() -> SKSpriteNode {
+        if activeParallaxTileCount < parallaxTilePool.count {
+            let node = parallaxTilePool[activeParallaxTileCount]
+            activeParallaxTileCount += 1
+            node.isHidden = false
+            return node
+        }
+        let node = SKSpriteNode()
+        node.anchorPoint = CGPoint(x: 0, y: 0)
+        parallaxContainer.addChild(node)
+        parallaxTilePool.append(node)
+        activeParallaxTileCount += 1
+        return node
     }
 
     private func addTiledStrip(
@@ -3625,29 +3687,35 @@ public final class OceanGameScene: SKScene {
         scaledTargetH: Double,
         bottomYFromBottom: Double,
         parallaxXFactor: Double,
+        phaseOffset: Double = 0.50,
         viewW: Double,
         alpha: Double,
         zPos: CGFloat
     ) {
         let texSize = texture.size()
-        guard texSize.height > 0 else { return }
+        guard texSize.height > 0 && alpha > 0.004 else { return }
         let aspect = Double(texSize.width / texSize.height)
         let baseTileW = max(256.0, baseTargetH * aspect)
         let tileW = ceil(max(148.0, scaledTargetH * aspect))
+        let displayScale = Double(max(1.0, view?.contentScaleFactor ?? UIScreen.main.scale))
 
-        let rawPhase = (cameraX * parallaxXFactor) / baseTileW
+        let rawPhase = (cameraX * parallaxXFactor) / baseTileW + phaseOffset
         let normPhase = (rawPhase.truncatingRemainder(dividingBy: 1.0) + 1.0).truncatingRemainder(dividingBy: 1.0)
         let centerAnchorX = viewW * 0.5 - normPhase * tileW
-        var startX = floor(((centerAnchorX.truncatingRemainder(dividingBy: tileW) + tileW).truncatingRemainder(dividingBy: tileW)) - tileW)
+        var startX = ((centerAnchorX.truncatingRemainder(dividingBy: tileW) + tileW).truncatingRemainder(dividingBy: tileW)) - tileW
+        let alignedY = (bottomYFromBottom * displayScale).rounded(.down) / displayScale
+        let alignedH = ceil(scaledTargetH * displayScale) / displayScale
 
         while startX < viewW {
-            let node = SKSpriteNode(texture: texture)
-            node.anchorPoint = CGPoint(x: 0, y: 0)
-            node.size = CGSize(width: tileW + 2.0, height: ceil(scaledTargetH))
-            node.position = CGPoint(x: startX, y: floor(bottomYFromBottom))
+            let x0 = (startX * displayScale).rounded() / displayScale
+            let x1 = ((startX + tileW) * displayScale).rounded() / displayScale
+            let node = acquirePooledParallaxTile()
+            node.texture = texture
+            // Exact physical pixel boundary abutment (x0 -> x1) with ZERO double-alpha overlap!
+            node.size = CGSize(width: max(1.0, x1 - x0), height: alignedH)
+            node.position = CGPoint(x: x0, y: alignedY)
             node.alpha = CGFloat(alpha)
             node.zPosition = zPos
-            parallaxContainer.addChild(node)
             startX += tileW
         }
     }
@@ -3937,8 +4005,8 @@ public final class OceanGameScene: SKScene {
         while idx >= 0 {
             let p = activePreys[idx]
             let gait = classifyPreySwimGait(p.config)
-            let speedNorm = max(0.65, min(2.4, hypot(p.vx, p.vy) / max(18.0, p.config.baseSpeed)))
-            p.phase += dt * 5.4 * speedNorm
+            let speedNorm = max(0.72, min(1.35, hypot(p.vx, p.vy) / max(18.0, p.config.baseSpeed)))
+            p.phase += dt * 4.6 * speedNorm
             p.stateTimer += dt
 
             let dx = p.x - sharkX
@@ -3965,56 +4033,56 @@ public final class OceanGameScene: SKScene {
                 mutationVariant: p.mutation
             )
 
-            // Biomechanical Non-Linear Trajectory AI (1:1 parity with src/App.tsx)
+            // Biomechanical Smooth Horizontal Cruising Trajectory AI (1:1 parity with src/App.tsx)
             let dirSign: Double = p.vx >= 0 ? 1.0 : -1.0
             switch p.config.behavior {
             case .SCHOOL_FLEE:
                 if dist < 250 && encounterPreview == .DEVOUR && dist > 1.0 {
-                    let fleeAng = atan2(dy, dx) + sin(p.phase * 1.9) * 0.42
-                    let fleeSpd = p.config.baseSpeed * 1.62
-                    p.vx += (cos(fleeAng) * fleeSpd - p.vx) * min(1.0, dt * 5.0)
-                    p.vy += (sin(fleeAng) * fleeSpd - p.vy) * min(1.0, dt * 5.0)
+                    let fleeAng = atan2(dy, dx) + sin(p.phase * 1.35) * 0.18
+                    let fleeSpd = p.config.baseSpeed * 1.42
+                    p.vx += (cos(fleeAng) * fleeSpd - p.vx) * min(1.0, dt * 4.5)
+                    p.vy += (sin(fleeAng) * fleeSpd - p.vy) * min(1.0, dt * 4.5)
                 } else {
-                    let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq + p.phase * 0.25) * p.cruiseAmpY
-                    let desiredVy = (targetY - p.y) * 1.55 + cos(p.phase * 0.85) * p.config.baseSpeed * 0.42
-                    let desiredVx = dirSign * p.config.baseSpeed * (0.86 + 0.26 * sin(p.stateTimer * 1.4))
-                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.2)
-                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.2)
+                    let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq) * p.cruiseAmpY
+                    let desiredVy = (targetY - p.y) * 0.92 + cos(p.phase * 0.65) * p.config.baseSpeed * 0.14
+                    let desiredVx = dirSign * p.config.baseSpeed * (0.92 + 0.12 * sin(p.stateTimer * 0.95))
+                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
                 }
             case .PUFFER_INFLATE:
                 let targetInflate = dist < 195 ? 1.0 : 0.0
                 p.inflateRatio += (targetInflate - p.inflateRatio) * min(1.0, dt * 4.5)
-                let targetY = p.cruiseDepthCenter + sin(p.stateTimer * 0.95) * (p.cruiseAmpY * 0.72)
-                let desiredVy = (targetY - p.y) * 1.25 + sin(p.phase * 0.75) * 28.0
+                let targetY = p.cruiseDepthCenter + sin(p.stateTimer * 0.65) * (p.cruiseAmpY * 0.65)
+                let desiredVy = (targetY - p.y) * 0.85 + sin(p.phase * 0.6) * 12.0
                 let desiredVx = dirSign * p.config.baseSpeed * (1.0 - p.inflateRatio * 0.35)
                 p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
                 p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
             case .EEL_CHARGER:
                 if dist < 310 && encounterPreview != .DEVOUR && dist > 1.0 {
-                    let atkAng = atan2(-dy, -dx) + sin(p.phase * 2.1) * 0.28
-                    let atkSpd = p.config.baseSpeed * 1.48
-                    p.vx += (cos(atkAng) * atkSpd - p.vx) * min(1.0, dt * 4.2)
-                    p.vy += (sin(atkAng) * atkSpd - p.vy) * min(1.0, dt * 4.2)
+                    let atkAng = atan2(-dy, -dx) + sin(p.phase * 1.4) * 0.14
+                    let atkSpd = p.config.baseSpeed * 1.42
+                    p.vx += (cos(atkAng) * atkSpd - p.vx) * min(1.0, dt * 4.0)
+                    p.vy += (sin(atkAng) * atkSpd - p.vy) * min(1.0, dt * 4.0)
                 } else {
-                    let desiredVy = cos(p.phase * 1.15) * p.config.baseSpeed * 0.62
+                    let desiredVy = cos(p.phase * 0.75) * p.config.baseSpeed * 0.18
                     let desiredVx = dirSign * p.config.baseSpeed
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
-                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.5)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
                 }
             case .MINE_HAZARD:
                 p.vx = sin(p.stateTimer * 0.8 + p.phase * 0.2) * 8.0
-                p.vy = cos(p.stateTimer * 1.1 + p.phase * 0.3) * 12.0
+                p.vy = cos(p.stateTimer * 1.1 + p.phase * 0.3) * 10.0
             default:
                 if gait == .MEDUSOID_JET {
-                    let jetPulse = 0.45 + 0.85 * pow(max(0.0, sin(p.phase * 0.65)), 2.0)
+                    let jetPulse = 0.72 + 0.38 * pow(max(0.0, sin(p.phase * 0.65)), 2.0)
                     let desiredVx = dirSign * p.config.baseSpeed * jetPulse
-                    let desiredVy = -abs(sin(p.phase * 0.65)) * p.config.baseSpeed * 0.48 + cos(p.stateTimer * 0.9) * 26.0
-                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 4.0)
-                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 4.0)
+                    let desiredVy = cos(p.stateTimer * 0.75) * 14.0
+                    p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.5)
+                    p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.5)
                 } else {
                     let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq) * p.cruiseAmpY
-                    let desiredVy = (targetY - p.y) * 1.35 + sin(p.phase * 0.72) * p.config.baseSpeed * 0.38
-                    let desiredVx = dirSign * p.config.baseSpeed * (0.88 + 0.22 * cos(p.stateTimer * 1.1))
+                    let desiredVy = (targetY - p.y) * 0.88 + sin(p.phase * 0.6) * p.config.baseSpeed * 0.14
+                    let desiredVx = dirSign * p.config.baseSpeed * (0.92 + 0.12 * cos(p.stateTimer * 0.85))
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 2.8)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 2.8)
                 }
@@ -4222,19 +4290,12 @@ public final class OceanGameScene: SKScene {
             p.node.size = CGSize(width: drawW, height: drawH)
             p.node.position = CGPoint(x: screenX, y: screenY)
 
-            // Smooth horizontal flip (prey sprites face RIGHT in sheet: +1 when vx >= 0, -1 when vx < 0) + hydrodynamic pitch
+            // Smooth horizontal flip (prey sprites face RIGHT in sheet: +1 when vx >= 0, -1 when vx < 0) + calm shark-like horizontal pitch
             let facingSign: Double = p.vx >= 0 ? 1.0 : -1.0
-            let pitchAngle = max(-0.48, min(0.48, atan2(-p.vy, max(12.0, abs(p.vx)))))
-            if gait == .MEDUSOID_JET {
-                let pulseStretch = 1.0 + 0.12 * sin(p.phase * 1.3)
-                p.node.xScale = CGFloat(facingSign * (1.0 / pulseStretch))
-                p.node.yScale = CGFloat(pulseStretch)
-                p.node.zRotation = CGFloat(sin(p.phase * 0.65) * 0.14)
-            } else {
-                p.node.xScale = CGFloat(facingSign)
-                p.node.yScale = 1.0
-                p.node.zRotation = CGFloat(pitchAngle * facingSign)
-            }
+            let pitchAngle = max(-0.22, min(0.22, atan2(-p.vy, max(24.0, abs(p.vx))) * 0.42))
+            p.node.xScale = CGFloat(facingSign)
+            p.node.yScale = 1.0
+            p.node.zRotation = CGFloat(pitchAngle * facingSign)
 
             // Gold Frenzy & Golden Mutant 24K Gold Shimmer Tint (1:1 parity with Web drawPreyEntity)
             if vm.frenzyActive || p.mutation == .GOLDEN_SWARM {
@@ -5836,10 +5897,16 @@ public struct EvolutionAtlasSheetView: View {
     @State private var wheelTargetSlot: Double? = nil
     @State private var isDraggingWheel: Bool = false
     @State private var dragBaseWheelPos: Double? = nil
-    @State private var lastDragTranslationX: Double = 0.0
-    @State private var lastDragTimestamp: Date = Date()
+    @State private var dragStartTime: TimeInterval = 0.0
+    @State private var inheritedWheelVelocity: Double = 0.0
+    @State private var dragTouchSamples: [(pos: Double, time: TimeInterval)] = []
     @State private var lastTickIndex: Int = 0
 
+    // iPhone Alarm Clock (UIPickerView) Drum Physics Constants:
+    // UIKit UIScrollView.DecelerationRate.normal = 0.998/ms (~2.00 s^-1); UIPickerView drum = 0.9978/ms (lambda = 2.20 s^-1)
+    private let pickerDecelLambda: Double = 2.20
+    private let pickerPxPerSlot: Double = 46.0
+    private let pickerMaxVelocity: Double = 38.0
     private let wheelSlotOffsets: [Int] = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
     private let wheelPhysicsTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
@@ -5849,60 +5916,60 @@ public struct EvolutionAtlasSheetView: View {
         return GameConfigGenerated.sharkForms[norm]
     }
 
-    private func snapWheel(to targetPosition: Double, initialVelocity: Double = 0.0) {
+    private func fireDetentFeedbackIfCrossed(at position: Double) {
+        let total = GameConfigGenerated.sharkForms.count
+        let roundedSlot = Int(position.rounded())
+        let curIdx = ((roundedSlot % total) + total) % total
+        if curIdx != inspectedIndex {
+            inspectedIndex = curIdx
+        }
+        if roundedSlot != lastTickIndex {
+            lastTickIndex = roundedSlot
+            UISelectionFeedbackGenerator().selectionChanged()
+            vm.playUiTick()
+        }
+    }
+
+    private func snapWheel(to targetPosition: Double) {
         let snapped = targetPosition.rounded()
         wheelTargetSlot = snapped
-        if abs(initialVelocity) > 0.01 {
-            wheelVelocity = initialVelocity
-        }
+        wheelVelocity = (snapped - wheelPosition) * pickerDecelLambda * 1.35
     }
 
     private func stepWheelPhysics() {
         guard !isDraggingWheel else { return }
-        let dt = 1.0 / 60.0
-        let total = GameConfigGenerated.sharkForms.count
+        guard let target = wheelTargetSlot else { return }
 
-        if let target = wheelTargetSlot {
-            let disp = target - wheelPosition
-            let stiffness = 145.0
-            let damping = 21.0
-            let accel = disp * stiffness - wheelVelocity * damping
+        let dt = 1.0 / 60.0
+        let rem = target - wheelPosition
+        let absRem = abs(rem)
+
+        if absRem > 0.26 {
+            // Phase 1: Authentic iPhone Alarm (UIPickerView) Exponential Drum Glide (d = 0.9978/ms, lambda = 2.20 s^-1)
+            // with subtle mechanical detent ratchet modulation across each slot boundary
+            let baseExpVel = rem * pickerDecelLambda
+            let ratchetMod = 1.0 + 0.075 * cos(2.0 * .pi * wheelPosition)
+            let desiredVel = baseExpVel * ratchetMod
+            wheelVelocity += (desiredVel - wheelVelocity) * min(1.0, dt * 24.0)
+            wheelPosition += wheelVelocity * dt
+        } else {
+            // Phase 2: Final Magnetic Detent Notch Lock-In (overdamped, zero overshoot)
+            let detentStiffness = 115.0
+            let detentDamping = 22.5
+            let accel = rem * detentStiffness - wheelVelocity * detentDamping
             wheelVelocity += accel * dt
             wheelPosition += wheelVelocity * dt
 
-            let curIdx = ((Int(wheelPosition.rounded()) % total) + total) % total
-            if curIdx != inspectedIndex {
-                inspectedIndex = curIdx
-            }
-            if curIdx != lastTickIndex {
-                lastTickIndex = curIdx
-                UISelectionFeedbackGenerator().selectionChanged()
-                vm.playUiTick()
-            }
-
-            if abs(disp) < 0.003 && abs(wheelVelocity) < 0.02 {
+            if abs(target - wheelPosition) < 0.002 && abs(wheelVelocity) < 0.015 {
                 wheelPosition = target
                 wheelVelocity = 0.0
                 wheelTargetSlot = nil
-            }
-        } else if abs(wheelVelocity) > 0.01 {
-            wheelPosition += wheelVelocity * dt
-            wheelVelocity *= exp(-4.2 * dt)
-
-            let curIdx = ((Int(wheelPosition.rounded()) % total) + total) % total
-            if curIdx != inspectedIndex {
-                inspectedIndex = curIdx
-            }
-            if curIdx != lastTickIndex {
-                lastTickIndex = curIdx
-                UISelectionFeedbackGenerator().selectionChanged()
-                vm.playUiTick()
-            }
-
-            if abs(wheelVelocity) < 2.2 {
-                wheelTargetSlot = (wheelPosition + wheelVelocity * 0.14).rounded()
+                fireDetentFeedbackIfCrossed(at: target)
+                return
             }
         }
+
+        fireDetentFeedbackIfCrossed(at: wheelPosition)
     }
 
     public var body: some View {
@@ -6139,7 +6206,8 @@ public struct EvolutionAtlasSheetView: View {
             // Center Giant Shark Spotlight with Left / Right Step Arrows
             HStack {
                 Button {
-                    snapWheel(to: wheelPosition.rounded() - 1.0)
+                    let base = wheelTargetSlot ?? wheelPosition.rounded()
+                    snapWheel(to: base - 1.0)
                 } label: {
                     Text("◀")
                         .font(.system(size: 16, weight: .black))
@@ -6170,7 +6238,8 @@ public struct EvolutionAtlasSheetView: View {
                 Spacer()
 
                 Button {
-                    snapWheel(to: wheelPosition.rounded() + 1.0)
+                    let base = wheelTargetSlot ?? wheelPosition.rounded()
+                    snapWheel(to: base + 1.0)
                 } label: {
                     Text("▶")
                         .font(.system(size: 16, weight: .black))
@@ -6184,7 +6253,7 @@ public struct EvolutionAtlasSheetView: View {
 
             Spacer(minLength: 2)
 
-            // Bottom Silky-Smooth Continuous Rotary Wheel (Fractional offsets + Drag Inertia + Spring Snapping)
+            // Bottom Silky-Smooth Continuous Rotary Wheel (iPhone Alarm UIPickerView Drum Physics)
             GeometryReader { dialGeo in
                 let dialW = dialGeo.size.width
                 let dialH = dialGeo.size.height
@@ -6269,60 +6338,95 @@ public struct EvolutionAtlasSheetView: View {
         }
         .contentShape(Rectangle())
         .simultaneousGesture(
-            DragGesture(minimumDistance: 4)
+            DragGesture(minimumDistance: 3)
                 .onChanged { val in
-                    let total = GameConfigGenerated.sharkForms.count
-                    let now = Date()
+                    let now = Date().timeIntervalSinceReferenceDate
                     let tx = Double(val.translation.width)
-                    let pxPerSlot = 52.0
 
                     if !isDraggingWheel || dragBaseWheelPos == nil {
                         isDraggingWheel = true
+                        inheritedWheelVelocity = abs(wheelVelocity) > 2.0 ? wheelVelocity : 0.0
                         wheelTargetSlot = nil
-                        dragBaseWheelPos = wheelPosition
-                        lastDragTranslationX = tx
-                        lastDragTimestamp = now
                         wheelVelocity = 0.0
-                    } else {
-                        let dt = max(0.004, now.timeIntervalSince(lastDragTimestamp))
-                        let stepDx = tx - lastDragTranslationX
-                        let instVel = (-stepDx / pxPerSlot) / dt
-                        wheelVelocity = wheelVelocity * 0.55 + instVel * 0.45
-                        lastDragTranslationX = tx
-                        lastDragTimestamp = now
+                        dragBaseWheelPos = wheelPosition
+                        dragStartTime = now
+                        dragTouchSamples = [(pos: wheelPosition, time: now)]
                     }
 
                     let startPos = dragBaseWheelPos ?? wheelPosition
-                    let newPos = startPos - tx / pxPerSlot
-                    wheelPosition = newPos
-                    let curIdx = ((Int(newPos.rounded()) % total) + total) % total
-                    if curIdx != inspectedIndex {
-                        inspectedIndex = curIdx
+                    let rawPos = startPos - tx / pickerPxPerSlot
+                    dragTouchSamples.append((pos: rawPos, time: now))
+                    while dragTouchSamples.count > 10, let first = dragTouchSamples.first, (now - first.time) > 0.12 {
+                        dragTouchSamples.removeFirst()
                     }
-                    if curIdx != lastTickIndex {
-                        lastTickIndex = curIdx
-                        UISelectionFeedbackGenerator().selectionChanged()
-                        vm.playUiTick()
-                    }
+
+                    let firstSample = dragTouchSamples.first ?? (pos: rawPos, time: now)
+                    let dtSec = max(0.008, now - firstSample.time)
+                    let dragVel = (rawPos - firstSample.pos) / dtSec
+
+                    // Subtle slow-drag magnetic detent dwell across each integer slot (like iPhone Alarm drum)
+                    let detentStrength = max(0.0, 1.0 - abs(dragVel) / 3.2) * 0.055
+                    let displayPos = rawPos - detentStrength * sin(2.0 * .pi * rawPos)
+
+                    wheelPosition = displayPos
+                    wheelVelocity = dragVel
+                    fireDetentFeedbackIfCrossed(at: displayPos)
                 }
                 .onEnded { val in
-                    let pxPerSlot = 52.0
+                    let now = Date().timeIntervalSinceReferenceDate
                     let startPos = dragBaseWheelPos ?? wheelPosition
                     isDraggingWheel = false
                     dragBaseWheelPos = nil
 
-                    let predictedEndPos = startPos - Double(val.predictedEndTranslation.width) / pxPerSlot
-                    let extraThrowSlots = max(-8.5, min(8.5, predictedEndPos - wheelPosition))
-                    let idleSec = Date().timeIntervalSince(lastDragTimestamp)
-                    let releaseVel = idleSec > 0.09 ? 0.0 : max(-18.0, min(18.0, wheelVelocity))
+                    let latest = dragTouchSamples.last ?? (pos: wheelPosition, time: now)
+                    let pauseBeforeLiftSec = now - latest.time
+                    var releaseVel: Double = 0.0
 
-                    if abs(releaseVel) > 1.2 || abs(extraThrowSlots) > 0.65 {
-                        wheelVelocity = releaseVel != 0 ? releaseVel : extraThrowSlots * 4.5
-                        wheelTargetSlot = (wheelPosition + max(-8.0, min(8.0, wheelVelocity * 0.25))).rounded()
-                    } else {
-                        wheelVelocity = 0.0
-                        wheelTargetSlot = wheelPosition.rounded()
+                    if pauseBeforeLiftSec < 0.085 && dragTouchSamples.count >= 2 {
+                        var anchor = dragTouchSamples[0]
+                        for idx in stride(from: dragTouchSamples.count - 2, through: 0, by: -1) {
+                            anchor = dragTouchSamples[idx]
+                            if (latest.time - anchor.time) >= 0.032 {
+                                break
+                            }
+                        }
+                        let windowSec = latest.time - anchor.time
+                        if windowSec >= 0.006 {
+                            releaseVel = (latest.pos - anchor.pos) / windowSec
+                        }
                     }
+
+                    // Also blend SwiftUI's predictedEndTranslation for ultra-fast short flicks
+                    if pauseBeforeLiftSec < 0.085 {
+                        let predictedEndPos = startPos - Double(val.predictedEndTranslation.width) / pickerPxPerSlot
+                        let systemThrowVel = (predictedEndPos - wheelPosition) * pickerDecelLambda
+                        if abs(systemThrowVel) > abs(releaseVel) {
+                            releaseVel = releaseVel * 0.35 + systemThrowVel * 0.65
+                        }
+                    }
+
+                    // Multi-flick momentum stacking (just like spinning the iPhone Alarm minute wheel repeatedly!)
+                    let gestureDuration = now - dragStartTime
+                    if gestureDuration < 0.26 && abs(releaseVel) > 2.2 && (releaseVel * inheritedWheelVelocity > 0) {
+                        releaseVel += inheritedWheelVelocity * 0.68
+                    }
+                    releaseVel = max(-pickerMaxVelocity, min(pickerMaxVelocity, releaseVel))
+                    dragTouchSamples.removeAll()
+
+                    let targetSlot: Double
+                    if abs(releaseVel) > 1.15 {
+                        let projected = wheelPosition + releaseVel / pickerDecelLambda
+                        var roundedTarget = projected.rounded()
+                        if roundedTarget == wheelPosition.rounded() {
+                            roundedTarget += releaseVel > 0 ? 1.0 : -1.0
+                        }
+                        targetSlot = roundedTarget
+                    } else {
+                        targetSlot = wheelPosition.rounded()
+                    }
+
+                    wheelTargetSlot = targetSlot
+                    wheelVelocity = (targetSlot - wheelPosition) * pickerDecelLambda
                 }
         )
     }

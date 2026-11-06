@@ -2208,12 +2208,12 @@ export default function App() {
                 prey.vx = Math.cos(fleeAngle) * prey.config.baseSpeed * fleeMult;
                 prey.vy = Math.sin(fleeAngle) * prey.config.baseSpeed * fleeMult;
               } else {
-                // Natural S-curve schooling trajectory when undisturbed
+                // Natural gentle horizontal schooling trajectory when undisturbed
                 const cruiseSpeed =
-                  prey.config.baseSpeed * (0.88 + 0.18 * Math.sin(prey.phase * 0.9 + uidSeed));
+                  prey.config.baseSpeed * (0.92 + 0.1 * Math.sin(prey.phase * 0.7 + uidSeed));
                 const curvePitch =
-                  Math.sin(prey.phase * 1.15 + uidSeed) * 0.34 +
-                  Math.cos(prey.phase * 0.52 + uidSeed) * 0.16;
+                  Math.sin(prey.phase * 0.75 + uidSeed) * 0.12 +
+                  Math.cos(prey.phase * 0.42 + uidSeed) * 0.06;
                 prey.vx = dirSign * Math.cos(curvePitch) * cruiseSpeed;
                 prey.vy = Math.sin(curvePitch) * cruiseSpeed;
               }
@@ -2224,21 +2224,21 @@ export default function App() {
               if (prey.isInflated && !inJawSuctionZone) {
                 const fleeAngle =
                   Math.atan2(prey.y - shark.y, prey.x - shark.x) +
-                  Math.sin(prey.phase * 1.8) * 0.22;
+                  Math.sin(prey.phase * 1.4) * 0.14;
                 prey.vx = Math.cos(fleeAngle) * prey.config.baseSpeed * 1.15;
                 prey.vy = Math.sin(fleeAngle) * prey.config.baseSpeed * 1.15;
               } else {
-                // Buoyant figure-8 bobbing trajectory
-                prey.vx = dirSign * prey.config.baseSpeed * (0.85 + 0.15 * Math.cos(prey.phase * 0.8));
+                // Gentle buoyant cruising trajectory
+                prey.vx = dirSign * prey.config.baseSpeed * (0.9 + 0.1 * Math.cos(prey.phase * 0.65));
                 prey.vy =
-                  Math.sin(prey.phase * 1.35 + uidSeed) * 26 +
-                  Math.cos(prey.phase * 0.65) * 12;
+                  Math.sin(prey.phase * 0.85 + uidSeed) * 14 +
+                  Math.cos(prey.phase * 0.5) * 6;
               }
               break;
             }
             case 'SUB_PATROL': {
-              prey.vx = dirSign * prey.config.baseSpeed * (0.92 + 0.08 * Math.sin(prey.phase * 0.5));
-              prey.vy = Math.cos(prey.phase * 0.8 + uidSeed) * 38;
+              prey.vx = dirSign * prey.config.baseSpeed * (0.94 + 0.06 * Math.sin(prey.phase * 0.5));
+              prey.vy = Math.cos(prey.phase * 0.65 + uidSeed) * 18;
               break;
             }
             case 'EEL_CHARGER': {
@@ -2246,7 +2246,7 @@ export default function App() {
               if (shark.y <= 520 || prey.y <= 520) {
                 prey.telegraphTimer = 0;
                 prey.vx = dirSign * prey.config.baseSpeed * 0.9;
-                prey.vy = Math.sin(prey.phase * 1.45 + uidSeed) * 32;
+                prey.vy = Math.sin(prey.phase * 0.95 + uidSeed) * 16;
                 break;
               }
               if (distToShark < 290 && prey.telegraphTimer <= 0) {
@@ -2260,14 +2260,14 @@ export default function App() {
                   prey.vy = Math.sin(atkAngle) * prey.config.baseSpeed * 1.85;
                 }
               } else {
-                // Serpentine S-slither trajectory while patrolling
-                prey.vy = Math.sin(prey.phase * 1.65 + uidSeed) * 36;
+                // Smooth horizontal glide while patrolling
+                prey.vy = Math.sin(prey.phase * 1.05 + uidSeed) * 18;
               }
               break;
             }
             case 'MINE_HAZARD': {
-              prey.vx = Math.sin(prey.phase * 0.6 + uidSeed) * 12;
-              prey.vy = Math.cos(prey.phase * 0.9 + uidSeed) * 12;
+              prey.vx = Math.sin(prey.phase * 0.6 + uidSeed) * 10;
+              prey.vy = Math.cos(prey.phase * 0.9 + uidSeed) * 10;
               if (distToShark < 150) {
                 prey.telegraphTimer = 0.4;
               } else {
@@ -2294,9 +2294,9 @@ export default function App() {
                 prey.vx = Math.cos(dirAngle) * prey.config.baseSpeed * mult;
                 prey.vy = Math.sin(dirAngle) * prey.config.baseSpeed * mult;
               } else {
-                // Deep sweeping S-glide when patrolling
-                prey.vx = dirSign * prey.config.baseSpeed * (0.9 + 0.1 * Math.cos(prey.phase * 0.6));
-                prey.vy = Math.sin(prey.phase * 0.95 + uidSeed) * 28;
+                // Smooth horizontal glide when patrolling
+                prey.vx = dirSign * prey.config.baseSpeed * (0.92 + 0.08 * Math.cos(prey.phase * 0.55));
+                prey.vy = Math.sin(prey.phase * 0.75 + uidSeed) * 16;
               }
               break;
             }
