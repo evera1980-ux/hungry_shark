@@ -49,10 +49,72 @@ public struct ComputedSharkStats: Sendable {
     public let parallaxScales: ParallaxLayerGrowthScales
 }
 
+public struct UnlockCheckResult: Sendable {
+    public let isUnlocked: Bool
+    public let canUnlockNow: Bool
+    public let parentForm: SharkFormConfig?
+    public let parentUnlocked: Bool
+    public let parentUpgradeLevel: Int
+    public let reqParentUpgradeLevel: Int
+    public let parentLevelMet: Bool
+    public let currentBestInRunLevel: Int
+    public let reqMaxInRunLevel: Int
+    public let inRunLevelMet: Bool
+    public let currentMaxDepth: Double
+    public let reqMaxDepth: Double
+    public let depthMet: Bool
+    public let coinsMet: Bool
+    public let genesMet: Bool
+}
+
+public struct MasteryRewardTierConfig: Sendable {
+    public let tier: Int
+    public let labelZh: String
+    public let labelEn: String
+    public let targetScore: Int
+    public let rewardCoins: Int
+    public let rewardGenes: Int
+}
+
+public struct SharkMasteryConfig: Sendable {
+    public let sharkId: String
+    public let tiers: [MasteryRewardTierConfig]
+}
+
+public struct MasterySettlementResult: Sendable {
+    public let sharkId: String
+    public let previousBestScore: Int
+    public let newBestScore: Int
+    public let isNewRecord: Bool
+    public let previousMasteryTier: Int
+    public let newMasteryTier: Int
+    public let newlyClaimedTiers: [MasteryRewardTierConfig]
+    public let totalBonusCoins: Int
+    public let totalBonusGenes: Int
+}
+
+public struct GlobalAtlasBonuses: Sendable {
+    public let unlockedCount: Int
+    public let totalMasteryCrowns: Int
+    public let hpMultiplier: Double
+    public let speedBonus: Double
+    public let rewardMultiplier: Double
+    public let scoreMultiplierBonus: Double
+}
+
+public struct HuntingHeatBuff: Sendable {
+    public let heatLevel: Int
+    public let speedMultiplier: Double
+    public let scoreMultiplier: Double
+    public let labelKey: String
+}
+
 public struct SharkMetaSaveData: Codable, Sendable {
     public var selectedSharkId: String
     public var unlockedSharkIds: [String]
     public var sharkUpgradeLevels: [String: Int]
+    public var sharkBestScores: [String: Int]
+    public var sharkMasteryTiers: [String: Int]
     public var bankedCoins: Int
     public var bankedGenes: Int
     public var bestInRunLevel: Int
@@ -61,11 +123,57 @@ public struct SharkMetaSaveData: Codable, Sendable {
     public var language: String
     public var soundEnabled: Bool
 
+    public init(
+        selectedSharkId: String,
+        unlockedSharkIds: [String],
+        sharkUpgradeLevels: [String: Int],
+        sharkBestScores: [String: Int] = [:],
+        sharkMasteryTiers: [String: Int] = [:],
+        bankedCoins: Int,
+        bankedGenes: Int,
+        bestInRunLevel: Int,
+        maxDepthReached: Double,
+        totalRuns: Int,
+        language: String,
+        soundEnabled: Bool
+    ) {
+        self.selectedSharkId = selectedSharkId
+        self.unlockedSharkIds = unlockedSharkIds
+        self.sharkUpgradeLevels = sharkUpgradeLevels
+        self.sharkBestScores = sharkBestScores
+        self.sharkMasteryTiers = sharkMasteryTiers
+        self.bankedCoins = bankedCoins
+        self.bankedGenes = bankedGenes
+        self.bestInRunLevel = bestInRunLevel
+        self.maxDepthReached = maxDepthReached
+        self.totalRuns = totalRuns
+        self.language = language
+        self.soundEnabled = soundEnabled
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.selectedSharkId = (try? c.decode(String.self, forKey: .selectedSharkId)) ?? "shark_00_clown_fry"
+        self.unlockedSharkIds = (try? c.decode([String].self, forKey: .unlockedSharkIds)) ?? ["shark_00_clown_fry"]
+        self.sharkUpgradeLevels = (try? c.decode([String: Int].self, forKey: .sharkUpgradeLevels)) ?? ["shark_00_clown_fry": 1]
+        self.sharkBestScores = (try? c.decode([String: Int].self, forKey: .sharkBestScores)) ?? [:]
+        self.sharkMasteryTiers = (try? c.decode([String: Int].self, forKey: .sharkMasteryTiers)) ?? [:]
+        self.bankedCoins = (try? c.decode(Int.self, forKey: .bankedCoins)) ?? 120
+        self.bankedGenes = (try? c.decode(Int.self, forKey: .bankedGenes)) ?? 15
+        self.bestInRunLevel = (try? c.decode(Int.self, forKey: .bestInRunLevel)) ?? 1
+        self.maxDepthReached = (try? c.decode(Double.self, forKey: .maxDepthReached)) ?? 180
+        self.totalRuns = (try? c.decode(Int.self, forKey: .totalRuns)) ?? 0
+        self.language = (try? c.decode(String.self, forKey: .language)) ?? "zh"
+        self.soundEnabled = (try? c.decode(Bool.self, forKey: .soundEnabled)) ?? true
+    }
+
     public static func createDefault() -> SharkMetaSaveData {
         SharkMetaSaveData(
             selectedSharkId: "shark_00_clown_fry",
             unlockedSharkIds: ["shark_00_clown_fry"],
             sharkUpgradeLevels: ["shark_00_clown_fry": 1],
+            sharkBestScores: [:],
+            sharkMasteryTiers: [:],
             bankedCoins: 120,
             bankedGenes: 15,
             bestInRunLevel: 1,
@@ -121,6 +229,161 @@ public enum GameRules {
             return Int((refGenes * 0.65 + 14.0).rounded())
         }
         return 0
+    }
+
+    /// Evaluates whether a shark form can be unlocked right now
+    public static func evaluateSharkUnlock(form: SharkFormConfig, save: SharkMetaSaveData) -> UnlockCheckResult {
+        let isUnlocked = save.unlockedSharkIds.contains(form.id)
+        let parentForm = form.index > 0 ? GameConfigGenerated.sharkForms[form.index - 1] : nil
+        let parentUnlocked = parentForm == nil ? true : save.unlockedSharkIds.contains(parentForm!.id)
+        let parentUpgradeLevel = parentForm == nil ? 10 : (save.sharkUpgradeLevels[parentForm!.id] ?? 1)
+        let parentLevelMet = parentForm == nil ? true : (parentUpgradeLevel >= form.reqParentUpgradeLevel)
+
+        let inRunLevelMet = save.bestInRunLevel >= form.reqMaxInRunLevel
+        let depthMet = save.maxDepthReached >= form.reqMaxDepth
+        let coinsMet = save.bankedCoins >= form.unlockCoins
+        let genesMet = save.bankedGenes >= form.unlockGenes
+
+        let canUnlockNow = !isUnlocked && parentUnlocked && parentLevelMet && inRunLevelMet && depthMet && coinsMet && genesMet
+
+        return UnlockCheckResult(
+            isUnlocked: isUnlocked,
+            canUnlockNow: canUnlockNow,
+            parentForm: parentForm,
+            parentUnlocked: parentUnlocked,
+            parentUpgradeLevel: parentUpgradeLevel,
+            reqParentUpgradeLevel: form.reqParentUpgradeLevel,
+            parentLevelMet: parentLevelMet,
+            currentBestInRunLevel: save.bestInRunLevel,
+            reqMaxInRunLevel: form.reqMaxInRunLevel,
+            inRunLevelMet: inRunLevelMet,
+            currentMaxDepth: save.maxDepthReached,
+            reqMaxDepth: form.reqMaxDepth,
+            depthMet: depthMet,
+            coinsMet: coinsMet,
+            genesMet: genesMet
+        )
+    }
+
+    /// Returns the immediate next locked shark form in the 48-shark chain (or nil if all 48 are unlocked)
+    public static func getNextEvolutionTarget(save: SharkMetaSaveData) -> (form: SharkFormConfig, check: UnlockCheckResult)? {
+        for form in GameConfigGenerated.sharkForms {
+            if !save.unlockedSharkIds.contains(form.id) {
+                return (form, evaluateSharkUnlock(form: form, save: save))
+            }
+        }
+        return nil
+    }
+
+    /// Computes 3-tier score mastery milestones & one-time bounty rewards for any of the 48 sharks
+    public static func getSharkMasteryConfig(form: SharkFormConfig) -> SharkMasteryConfig {
+        let idx = Double(form.index)
+        let row = Double(form.row)
+        let baseScore = Double(round((1800.0 + idx * 1450.0 + pow(idx, 1.65) * 420.0) / 100.0) * 100.0)
+        let baseCoin = Int((45.0 + idx * 24.0 + row * 65.0).rounded())
+        let baseGene = Int((4.0 + floor(idx * 0.85) + row * 3.0).rounded())
+
+        return SharkMasteryConfig(
+            sharkId: form.id,
+            tiers: [
+                MasteryRewardTierConfig(
+                    tier: 1,
+                    labelZh: "铜冠猎手",
+                    labelEn: "BRONZE CROWN",
+                    targetScore: Int(baseScore),
+                    rewardCoins: baseCoin,
+                    rewardGenes: baseGene
+                ),
+                MasteryRewardTierConfig(
+                    tier: 2,
+                    labelZh: "银冠霸主",
+                    labelEn: "SILVER CROWN",
+                    targetScore: Int(round((baseScore * 2.4) / 100.0) * 100.0),
+                    rewardCoins: Int((Double(baseCoin) * 2.2).rounded()),
+                    rewardGenes: Int((Double(baseGene) * 2.0).rounded())
+                ),
+                MasteryRewardTierConfig(
+                    tier: 3,
+                    labelZh: "金冠深渊王",
+                    labelEn: "GOLD CROWN",
+                    targetScore: Int(round((baseScore * 4.8) / 100.0) * 100.0),
+                    rewardCoins: Int((Double(baseCoin) * 4.5).rounded()),
+                    rewardGenes: Int((Double(baseGene) * 4.0).rounded())
+                )
+            ]
+        )
+    }
+
+    /// Evaluates a completed run's score against the active shark's mastery milestones
+    public static func settleSharkScoreMastery(
+        sharkId: String,
+        runScore: Int,
+        save: SharkMetaSaveData
+    ) -> MasterySettlementResult {
+        let form = GameConfigGenerated.sharkForms.first(where: { $0.id == sharkId }) ?? GameConfigGenerated.sharkForms[0]
+        let config = getSharkMasteryConfig(form: form)
+        let prevBest = save.sharkBestScores[sharkId] ?? 0
+        let prevTier = save.sharkMasteryTiers[sharkId] ?? 0
+        let cleanScore = max(0, runScore)
+        let newBest = max(prevBest, cleanScore)
+        let isNewRecord = cleanScore > prevBest && cleanScore > 0
+
+        var newTier = prevTier
+        var newlyClaimedTiers: [MasteryRewardTierConfig] = []
+        var totalBonusCoins = 0
+        var totalBonusGenes = 0
+
+        for tConfig in config.tiers {
+            if newBest >= tConfig.targetScore && tConfig.tier > prevTier {
+                newTier = max(newTier, tConfig.tier)
+                newlyClaimedTiers.append(tConfig)
+                totalBonusCoins += tConfig.rewardCoins
+                totalBonusGenes += tConfig.rewardGenes
+            }
+        }
+
+        return MasterySettlementResult(
+            sharkId: sharkId,
+            previousBestScore: prevBest,
+            newBestScore: newBest,
+            isNewRecord: isNewRecord,
+            previousMasteryTier: prevTier,
+            newMasteryTier: newTier,
+            newlyClaimedTiers: newlyClaimedTiers,
+            totalBonusCoins: totalBonusCoins,
+            totalBonusGenes: totalBonusGenes
+        )
+    }
+
+    /// Computes global collection & mastery crown bonuses across all 48 sharks
+    public static func getGlobalAtlasBonuses(save: SharkMetaSaveData) -> GlobalAtlasBonuses {
+        let unlockedCount = max(1, save.unlockedSharkIds.count)
+        let extraUnlocked = Double(max(0, unlockedCount - 1))
+        let totalMasteryCrowns = save.sharkMasteryTiers.values.reduce(0) { $0 + max(0, min(3, $1)) }
+        let crowns = Double(totalMasteryCrowns)
+
+        return GlobalAtlasBonuses(
+            unlockedCount: unlockedCount,
+            totalMasteryCrowns: totalMasteryCrowns,
+            hpMultiplier: 1.0 + extraUnlocked * 0.02 + crowns * 0.005,
+            speedBonus: extraUnlocked * 0.008 + crowns * 0.002,
+            rewardMultiplier: 1.0 + extraUnlocked * 0.025 + crowns * 0.008,
+            scoreMultiplierBonus: crowns * 0.015
+        )
+    }
+
+    /// Computes Hunting Heat streak buff from combo count
+    public static func computeHuntingHeatBuff(comboCount: Int) -> HuntingHeatBuff {
+        if comboCount >= 18 {
+            return HuntingHeatBuff(heatLevel: 3, speedMultiplier: 1.24, scoreMultiplier: 1.6, labelKey: "hud_heat_lv3")
+        }
+        if comboCount >= 10 {
+            return HuntingHeatBuff(heatLevel: 2, speedMultiplier: 1.15, scoreMultiplier: 1.3, labelKey: "hud_heat_lv2")
+        }
+        if comboCount >= 4 {
+            return HuntingHeatBuff(heatLevel: 1, speedMultiplier: 1.08, scoreMultiplier: 1.15, labelKey: "hud_heat_lv1")
+        }
+        return HuntingHeatBuff(heatLevel: 0, speedMultiplier: 1.0, scoreMultiplier: 1.0, labelKey: "hud_heat_lv0")
     }
 
     /// Optical Far / Mid / Near background shrinking ratios coupled to shark growth (`relativePreyScale`: 1.00 -> 0.40)

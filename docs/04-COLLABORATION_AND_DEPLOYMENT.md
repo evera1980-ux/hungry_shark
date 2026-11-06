@@ -89,17 +89,21 @@
 本项目提供 **100% 纯原生 iOS 工程（Swift 5.9 + SpriteKit Metal 硬件加速 2D 引擎 + SwiftUI 原生 HUD，零 `WKWebView`/Capacitor/Cordova 套壳）**。
 
 ### 5.1 单一数据源自动同步架构 (`scripts/build-ios-native.ts`)
-每当修改了 `src/game/sharkEvolutionConfig.ts`、`src/game/config.ts`、`src/game/rules.ts` 或 `public/assets/aistudio/*.png` 素材后，只需在项目根目录执行：
+每当修改了 `src/game/sharkEvolutionConfig.ts`、`src/game/config.ts`、`src/game/rules.ts`、`src/game/i18n.ts` 或 `public/assets/aistudio/*.png` 素材后，只需在项目根目录执行：
 ```bash
 npm run build:ios
 ```
 该脚本会自动完成以下工作：
-1. 将 48 阶鲨鱼完整属性矩阵、33 种海洋猎物配置、3 大深度生态区及精灵图归一化裁切坐标编译生成至 `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift`。
+1. 将 48 阶鲨鱼完整属性矩阵、四重血统元数据 (`LINEAGE_META`)、33 种海洋猎物配置、中英双语词典 (`I18N.zh` / `I18N.en`) 及所有 UI 精灵图归一化裁切坐标编译生成至 `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift`。
 2. 同步生成纯原生核心模块：
-   - `Core/GameRules.swift`：100% 对齐 `src/game/rules.ts` 的经验曲线、48 阶躯体成长、猎物严格体型契约 `getPreyRelativeVisualScale`、远中近景光学视差缩小 `getParallaxLayerGrowthScales`、碰撞破甲判定 `resolvePreyEncounter` 及 `UserDefaults` 跨局存档。
-   - `Rendering/SpriteAtlasManager.swift`：基于 `CoreGraphics` (`CGContext`) 的离屏四边 BFS 泛洪去白底 + 边缘 `Color-to-Alpha` 半透明抗锯齿解混，将 4K 鲨鱼大图与鱼类/UI 图集切分为原生 `SKTexture` 与 `UIImage`。
-   - `Rendering/OceanGameScene.swift`：基于 Apple Metal 驱动的 `SKScene`（支持 iPhone ProMotion 120Hz），包含 10 列 `SKWarpGeometryGrid` 脊椎 S 型摆动与转向流体 C 型弯曲、2.5D 侧身甩尾翻转、5 层海底视差背景随鲨鱼体型联动缩小、85% 原生深度带刷怪器及 `UIImpactFeedbackGenerator` 物理震动反馈。
-   - `UI/ContentView.swift`：纯 SwiftUI 原生无边框 HUD（左上鲨鱼实时裁剪头像与双进度条、顶中深度/生态胶囊、左下零状态阻塞原生多指声呐摇杆、右下 90° 扇形技能轮盘与 48 阶进化图谱弹窗）。
+   - `Core/GameRules.swift`：100% 对齐 `src/game/rules.ts` 与 `src/game/sharkEvolutionConfig.ts` 的经验曲线、48 阶躯体成长、三重解锁条件校验 `evaluateSharkUnlock`、单鲨三阶皇冠积分专精 `settleSharkScoreMastery`、全局图谱收集加成 `getGlobalAtlasBonuses`、猎物严格体型契约 `getPreyRelativeVisualScale`、远中近景光学视差缩小 `getParallaxLayerGrowthScales`、碰撞破甲判定 `resolvePreyEncounter` 及 `UserDefaults` 跨局存档。
+   - `Rendering/SpriteAtlasManager.swift`：基于 `CoreGraphics` (`CGContext`) 的离屏像素级处理器，完整复刻 Web 端 `spriteSheetManager.ts` 的五大图集切分管线：
+     - `sharks_ec921c3b.png`（4K 48 阶鲨鱼）与 `fish_24bdaa5a.png` / `fish2_fc857cfa.png`（32 种猎物）：四边 BFS 去白底 + 边缘 `Color-to-Alpha` 解混。
+     - `icons_f5128c12.png`（6×4 局内图标、声呐摇杆底座 `UI_JOYSTICK_BASE` + 中心镂空种子、摇杆核心 `UI_JOYSTICK_KNOB`、冲刺/狂暴/突破/强化/进化圆形技能章）：自动紧致包围盒归一化为 `128×128` 高清图标。
+     - `buttons_16e3a0cf.png`（左上角金属斜切头像状态栏 `UI_PLATE_AVATAR_BAR` + 中心圆窗镂空种子与动态孔位度量 `avatarBarHollowMetrics`，以及首页底部绿/蓝/金三色横幅按钮 `UI_BAR_BTN_GREEN` / `UI_BAR_BTN_BLUE` / `UI_BAR_BTN_GOLD`）。
+     - `setting_83a7a273.png`（暂停/结算科幻金属弹窗外框 `SETTING_MODAL_FRAME` + 净版顶章 `SETTING_MODAL_FRAME_CLEAN`、三宫格水平拉宽至 `6.05:1` 的鲨鱼摘要横幅卡 `SETTING_SHARK_CARD`、以及提取左侧发光图标并水平扫描线修补底纹的八角形按钮 `SETTING_BTN_*`）。
+   - `Rendering/OceanGameScene.swift`：基于 Apple Metal 驱动的 `SKScene`（支持 iPhone ProMotion 120Hz），包含中英双语实时切换 (`vm.toggleLanguage()`)、3 步交互式新手引导 (`EAT_SMALL_FISH` / `HOLD_BOOST` / `HANDS_ON_UPGRADE`)、悬赏猎物追踪、黄金变异充能、3 秒模拟激励视频广告 (`SimRewardedAdState`)、10 列 `SKWarpGeometryGrid` 脊椎摆动、5 层海底视差背景随鲨鱼体型联动缩小与触觉音效反馈。
+   - `UI/ContentView.swift`：100% 复刻原版 UI 素材的纯 SwiftUI 视图层（包含 `UiAvatarDataBarView`、`UiBannerButtonView`、`UiSettingModalFrameView`、`UiSettingSharkCardView`、`UiSettingButtonView`、原版素材声呐摇杆、90° MOBA 技能轮盘、暂停/复活/战利品结算弹窗，以及带 **7 槽位半圆弧形罗盘拨盘 (`ARC_OFFSETS = [-3..3]`)** 与去框化指令台的 48 阶进化图谱全屏弹窗 `EvolutionAtlasSheetView`）。
 3. 将 `public/assets/aistudio/` 下的全部 22 张高清 PNG 资源同步拷贝至 `ios-native/HungrySharkEvolution/Resources/Assets/`。
 4. 生成可直接双击打开的 `ios-native/HungrySharkEvolution.xcodeproj/project.pbxproj`、`ios-native/project.yml`（支持 XcodeGen）与 `ios-native/Package.swift`。
 
@@ -118,4 +122,6 @@ npm run build:ios
 | :--- | :--- | :--- |
 | 2026-10-26 | 创建多人协同开发、单测说明与 Vercel 部署参数手册 | `package.json`, `.npmrc`, `src/game/rules.test.ts` |
 | 2026-11-05 | 新增 `npm run build:ios` 纯原生 iOS (Swift + SpriteKit Metal + SwiftUI，零 WebView) 工程生成器与 Xcode 编译文档 | `scripts/build-ios-native.ts`, `package.json`, `ios-native/` |
+| 2026-11-05 | 100% 复刻 iOS 原生工程 UI 图集切分 (`buttons_16e3a0cf` / `icons_f5128c12` / `setting_83a7a273`)、中英双语 `I18N`、声呐摇杆与 90° 技能轮盘、暂停/复活/结算弹窗及 7 槽位弧形罗盘 48 阶进化图谱 | `scripts/build-ios-native.ts`, `ios-native/` |
+
 

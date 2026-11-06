@@ -1,7 +1,30 @@
 import SpriteKit
 import SwiftUI
 import UIKit
+import AudioToolbox
 import simd
+
+public enum OnboardingStep: String, Sendable {
+    case EAT_SMALL_FISH
+    case HOLD_BOOST
+    case HANDS_ON_UPGRADE
+    case CELEBRATE
+    case DONE
+}
+
+public enum SimRewardedAdKind: String, Sendable {
+    case REVIVE
+    case DOUBLE_SETTLEMENT
+    case SUPPLY_DROP
+    case TRIAL_SHARK
+}
+
+public struct SimRewardedAdState: Sendable {
+    public var kind: SimRewardedAdKind
+    public var title: String
+    public var rewardDesc: String
+    public var secondsLeft: Int
+}
 
 @MainActor
 public final class GameViewModel: ObservableObject {
@@ -13,24 +36,56 @@ public final class GameViewModel: ObservableObject {
     @Published public var xpRequired: Int = 140
     @Published public var hp: Double = 100
     @Published public var maxHp: Double = 100
+    @Published public var ghostHpPct: Double = 100
     @Published public var energy: Double = 100
     @Published public var maxEnergy: Double = 100
     @Published public var biteTier: Int = 1
     @Published public var depthMeters: Int = 22
     @Published public var comboCount: Int = 0
+    @Published public var comboTimer: Double = 0
     @Published public var frenzyActive: Bool = false
     @Published public var frenzyTimer: Double = 0
     @Published public var showEvolutionAtlas: Bool = false
     @Published public var goldOverdriveUseCount: Int = 0
     @Published public var geneSurgeUseCount: Int = 0
 
+    // Target Bounty & Golden Mutant Charge
+    @Published public var targetBountyPreyId: String = "clownfish"
+    @Published public var targetBountyCaptured: Int = 0
+    @Published public var goldenMutantCharge: Int = 0
+    public let goldenMutantNeed: Int = 5
+
+    // 3-Step Interactive Onboarding Tutorial
+    @Published public var onboardingStep: OnboardingStep = .EAT_SMALL_FISH
+    @Published public var onboardingEatCount: Int = 0
+    @Published public var onboardingBoostSeconds: Double = 0
+    @Published public var onboardingHandsOnUpgraded: Bool = false
+    @Published public var onboardingCelebrationTimer: Double = 0
+
+    // GameOver Revive & Settlement
+    @Published public var reviveOffered: Bool = false
+    @Published public var runSurvivalSec: Int = 0
+    @Published public var runCoinsEarned: Int = 0
+    @Published public var runGenesEarned: Int = 0
+    @Published public var runPeakCombo: Int = 0
+    @Published public var runMaxDepth: Int = 22
+    @Published public var settlementDoubled: Bool = false
+    @Published public var lastMasterySettlement: MasterySettlementResult? = nil
+    @Published public var trialSharkIdForRun: String? = nil
+
+    // 3s Simulated Rewarded Video Ad
+    @Published public var simAd: SimRewardedAdState? = nil
+    private var simAdTimer: Timer? = nil
+
     // Non-Published real-time input state (Zero SwiftUI re-render during 60/120Hz joystick drag!)
     public var joyDx: CGFloat = 0
     public var joyDy: CGFloat = 0
     public var joyActive: Bool = false
     public var isBoostingHeld: Bool = false
+    public var lastRenderedSpriteKey: String = ""
 
     private let saveKey = "hungry_shark_48_meta_save_v2"
+    private let onboardingDoneKey = "hungry_shark_onboarding_v2_done"
 
     public init() {
         if let data = UserDefaults.standard.data(forKey: saveKey),
@@ -39,7 +94,11 @@ public final class GameViewModel: ObservableObject {
         } else {
             self.save = SharkMetaSaveData.createDefault()
         }
+        if UserDefaults.standard.bool(forKey: onboardingDoneKey) {
+            self.onboardingStep = .DONE
+        }
         recomputeCurrentSharkStats()
+        pickNewBountyPrey()
     }
 
     public func persistSave() {
@@ -48,24 +107,92 @@ public final class GameViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Bilingual I18N (zh / en)
+    public var lang: String {
+        save.language == "en" ? "en" : "zh"
+    }
+
+    public func t(_ key: String, _ params: [String: String] = [:]) -> String {
+        let dict = lang == "en" ? GameConfigGenerated.i18nEn : GameConfigGenerated.i18nZh
+        var text = dict[key] ?? GameConfigGenerated.i18nEn[key] ?? key
+        for (k, v) in params {
+            text = text.replacingOccurrences(of: "{\(k)}", with: v)
+        }
+        return text
+    }
+
+    public func toggleLanguage() {
+        save.language = (save.language == "zh") ? "en" : "zh"
+        persistSave()
+        playUiTick()
+    }
+
+    public func toggleMute() {
+        save.soundEnabled.toggle()
+        persistSave()
+        playUiTick()
+    }
+
+    public func playUiTick() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        if save.soundEnabled {
+            AudioServicesPlaySystemSound(1104)
+        }
+    }
+
+    public func playSuccessSound() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        if save.soundEnabled {
+            AudioServicesPlaySystemSound(1025)
+        }
+    }
+
+    // MARK: - Active Shark & Computed Stats
+    public var activeSharkId: String {
+        trialSharkIdForRun ?? save.selectedSharkId
+    }
+
     public var activeSharkForm: SharkFormConfig {
-        GameConfigGenerated.sharkForms.first(where: { $0.id == save.selectedSharkId })
+        GameConfigGenerated.sharkForms.first(where: { $0.id == activeSharkId })
             ?? GameConfigGenerated.sharkForms[0]
     }
 
     public var activeUpgradeLevel: Int {
-        save.sharkUpgradeLevels[save.selectedSharkId] ?? 1
+        if trialSharkIdForRun != nil {
+            return max(5, save.sharkUpgradeLevels[activeSharkId] ?? 5)
+        }
+        return save.sharkUpgradeLevels[activeSharkId] ?? 1
     }
 
     public var currentStats: ComputedSharkStats {
         GameRules.computeEvolvedSharkStats(
             inRunLevel: inRunLevel,
-            sharkFormId: save.selectedSharkId,
+            sharkFormId: activeSharkId,
             upgradeLevel: activeUpgradeLevel,
             frenzyActive: frenzyActive,
             globalDifficultyMultiplier: 1.0,
             unlockedCount: save.unlockedSharkIds.count
         )
+    }
+
+    public var huntingHeatBuff: HuntingHeatBuff {
+        GameRules.computeHuntingHeatBuff(comboCount: comboCount)
+    }
+
+    public var targetBountyPrey: PreyTierConfig {
+        GameConfigGenerated.preyTiers.first(where: { $0.id == targetBountyPreyId })
+            ?? GameConfigGenerated.preyTiers[0]
+    }
+
+    public func pickNewBountyPrey() {
+        let maxBite = max(1, currentStats.normalBiteTier)
+        let candidates = GameConfigGenerated.preyTiers.filter { !$0.isHazard && !$0.isBoss && $0.tier <= maxBite }
+        if let picked = candidates.randomElement() {
+            targetBountyPreyId = picked.id
+        } else {
+            targetBountyPreyId = "clownfish"
+        }
+        targetBountyCaptured = 0
     }
 
     public func recomputeCurrentSharkStats() {
@@ -78,29 +205,106 @@ public final class GameViewModel: ObservableObject {
         if energy > maxEnergy { energy = maxEnergy }
     }
 
-    public func startNewRun(trialSharkId: String? = nil) {
-        if let trialId = trialSharkId {
-            save.selectedSharkId = trialId
+    // MARK: - Run Lifecycle
+    public var nextShowcaseSharkForm: SharkFormConfig {
+        if let nextTarget = GameRules.getNextEvolutionTarget(save: save) {
+            return nextTarget.form
         }
+        return GameConfigGenerated.sharkForms.last ?? GameConfigGenerated.sharkForms[0]
+    }
+
+    public func startNewRun(trialSharkId: String? = nil) {
+        trialSharkIdForRun = trialSharkId
         inRunLevel = trialSharkId != nil ? 5 : 1
         xp = 0
         score = 0
         comboCount = 0
+        comboTimer = 0
         frenzyActive = false
         frenzyTimer = 0
         goldOverdriveUseCount = 0
         geneSurgeUseCount = 0
+        runSurvivalSec = 0
+        runCoinsEarned = 0
+        runGenesEarned = 0
+        runPeakCombo = 0
+        runMaxDepth = 22
+        reviveOffered = false
+        settlementDoubled = false
+        lastMasterySettlement = nil
+
         let st = currentStats
         maxHp = st.maxHp
         hp = st.maxHp
+        ghostHpPct = 100
         maxEnergy = st.maxEnergy
         energy = st.maxEnergy
         biteTier = st.biteTier
         xpRequired = GameRules.getXpRequiredForLevel(inRunLevel)
+        pickNewBountyPrey()
+
+        save.totalRuns += 1
+        persistSave()
         gameState = "playing"
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        playUiTick()
     }
 
+    public func pauseGame() {
+        guard gameState == "playing" else { return }
+        gameState = "paused"
+        playUiTick()
+    }
+
+    public func resumeGame() {
+        guard gameState == "paused" else { return }
+        gameState = "playing"
+        playUiTick()
+    }
+
+    public func returnToTitle() {
+        trialSharkIdForRun = nil
+        gameState = "title"
+        recomputeCurrentSharkStats()
+        playUiTick()
+    }
+
+    public func triggerGameOver() {
+        guard gameState != "gameover" else { return }
+        gameState = "gameover"
+        if !reviveOffered {
+            reviveOffered = true
+        } else {
+            finalizeRunSettlement()
+        }
+        persistSave()
+    }
+
+    public func declineRevive() {
+        reviveOffered = false
+        finalizeRunSettlement()
+        playUiTick()
+    }
+
+    public func finalizeRunSettlement() {
+        let activeId = activeSharkId
+        let settlement = GameRules.settleSharkScoreMastery(
+            sharkId: activeId,
+            runScore: score,
+            save: save
+        )
+        save.sharkBestScores[activeId] = settlement.newBestScore
+        save.sharkMasteryTiers[activeId] = settlement.newMasteryTier
+        if settlement.totalBonusCoins > 0 {
+            save.bankedCoins += settlement.totalBonusCoins
+        }
+        if settlement.totalBonusGenes > 0 {
+            save.bankedGenes += settlement.totalBonusGenes
+        }
+        lastMasterySettlement = settlement
+        persistSave()
+    }
+
+    // MARK: - In-Run Skills & Upgrades
     public func triggerGoldFrenzy() {
         let form = activeSharkForm
         let cost = GameRules.getGoldOverdriveCost(useCount: goldOverdriveUseCount, generationRow: form.row)
@@ -110,10 +314,11 @@ public final class GameViewModel: ObservableObject {
         frenzyActive = true
         frenzyTimer = GameConfigGenerated.frenzyDuration + currentStats.frenzyDurationBonus
         hp = maxHp
+        ghostHpPct = 100
         energy = maxEnergy
         recomputeCurrentSharkStats()
         persistSave()
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        playSuccessSound()
     }
 
     public func triggerGeneSurge() {
@@ -127,23 +332,71 @@ public final class GameViewModel: ObservableObject {
         hp = min(maxHp, hp + 35)
         energy = maxEnergy
         persistSave()
-        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        playSuccessSound()
     }
 
     public func upgradeActiveSharkBody() {
-        let form = activeSharkForm
-        let curLv = activeUpgradeLevel
-        guard curLv < 10 else { return }
+        _ = upgradeSharkForm(activeSharkForm)
+        if onboardingStep == .HANDS_ON_UPGRADE {
+            onboardingHandsOnUpgraded = true
+            onboardingStep = .CELEBRATE
+            onboardingCelebrationTimer = 3.2
+            UserDefaults.standard.set(true, forKey: onboardingDoneKey)
+        }
+    }
+
+    @discardableResult
+    public func upgradeSharkForm(_ form: SharkFormConfig) -> Bool {
+        let curLv = save.sharkUpgradeLevels[form.id] ?? 1
+        guard curLv < 10 else { return false }
         let coinCost = GameRules.getSharkUpgradeCoinCost(form: form, currentLevel: curLv)
         let geneCost = GameRules.getSharkUpgradeGeneCost(form: form, currentLevel: curLv)
-        guard save.bankedCoins >= coinCost && save.bankedGenes >= geneCost else { return }
+        guard save.bankedCoins >= coinCost && save.bankedGenes >= geneCost else { return false }
         save.bankedCoins -= coinCost
         save.bankedGenes -= geneCost
         save.sharkUpgradeLevels[form.id] = curLv + 1
         recomputeCurrentSharkStats()
         hp = min(maxHp, hp + maxHp * 0.25)
         persistSave()
-        UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
+        playSuccessSound()
+        return true
+    }
+
+    @discardableResult
+    public func unlockSharkForm(_ form: SharkFormConfig) -> Bool {
+        let check = GameRules.evaluateSharkUnlock(form: form, save: save)
+        guard check.canUnlockNow else { return false }
+        save.bankedCoins -= form.unlockCoins
+        save.bankedGenes -= form.unlockGenes
+        if !save.unlockedSharkIds.contains(form.id) {
+            save.unlockedSharkIds.append(form.id)
+        }
+        if save.sharkUpgradeLevels[form.id] == nil {
+            save.sharkUpgradeLevels[form.id] = 1
+        }
+        save.selectedSharkId = form.id
+        trialSharkIdForRun = nil
+        recomputeCurrentSharkStats()
+        hp = maxHp
+        energy = maxEnergy
+        persistSave()
+        playSuccessSound()
+        return true
+    }
+
+    public func selectSharkForm(_ form: SharkFormConfig) {
+        guard save.unlockedSharkIds.contains(form.id) else { return }
+        save.selectedSharkId = form.id
+        trialSharkIdForRun = nil
+        recomputeCurrentSharkStats()
+        persistSave()
+        playUiTick()
+    }
+
+    public func evolveToNextReadySharkInRun() {
+        guard let nextTarget = GameRules.getNextEvolutionTarget(save: save),
+              nextTarget.check.canUnlockNow else { return }
+        _ = unlockSharkForm(nextTarget.form)
     }
 
     public func addXp(_ amount: Int) {
@@ -157,8 +410,102 @@ public final class GameViewModel: ObservableObject {
             recomputeCurrentSharkStats()
             hp = min(maxHp, hp + maxHp * 0.38)
             energy = min(maxEnergy, energy + maxEnergy * 0.50)
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            playSuccessSound()
         }
+    }
+
+    // MARK: - Onboarding Controls
+    public func restartOnboardingTutorial() {
+        UserDefaults.standard.set(false, forKey: onboardingDoneKey)
+        onboardingStep = .EAT_SMALL_FISH
+        onboardingEatCount = 0
+        onboardingBoostSeconds = 0
+        onboardingHandsOnUpgraded = false
+        onboardingCelebrationTimer = 0
+        if gameState == "paused" {
+            gameState = "playing"
+        }
+        playUiTick()
+    }
+
+    public func skipOnboardingTutorial() {
+        UserDefaults.standard.set(true, forKey: onboardingDoneKey)
+        onboardingStep = .DONE
+        playUiTick()
+    }
+
+    // MARK: - 3s Simulated Rewarded Video Ad
+    public func openSimulatedRewardedAd(kind: SimRewardedAdKind) {
+        simAdTimer?.invalidate()
+        let title: String
+        let desc: String
+        switch kind {
+        case .REVIVE:
+            title = lang == "zh" ? "深海紧急救援信号" : "ABYSS EMERGENCY REVIVE"
+            desc = lang == "zh" ? "满血满能量复活 + 3秒无敌护盾 + 狂暴冲刺" : "Full HP & Energy Revive + 3s Shield + Frenzy"
+        case .DOUBLE_SETTLEMENT:
+            title = lang == "zh" ? "深海狩猎战利品翻倍" : "DOUBLE HUNTING BOUNTY"
+            desc = lang == "zh" ? "本局获得的金币与基因奖励立即 ×2 倍入库" : "Instantly 2x all Coins & Genes earned this run"
+        case .SUPPLY_DROP:
+            title = lang == "zh" ? "深海空投补给箱" : "ABYSS SUPPLY AIRDROP"
+            desc = lang == "zh" ? "立即获得 +300 金币 & +25 远古基因" : "Instantly claim +300 Coins & +25 Genes"
+        case .TRIAL_SHARK:
+            let showcase = nextShowcaseSharkForm
+            let sName = lang == "zh" ? showcase.nameZh : showcase.nameEn
+            title = lang == "zh" ? "高阶巨兽本局免费试驾" : "APEX BEHEMOTH FREE TRIAL"
+            desc = lang == "zh" ? "直接驾驶【\(sName)】(Lv.5) 潜入深海狩猎！" : "Deploy [\(sName)] (Lv.5) for this run!"
+        }
+        simAd = SimRewardedAdState(kind: kind, title: title, rewardDesc: desc, secondsLeft: 3)
+        simAdTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self = self, var current = self.simAd else { return }
+                if current.secondsLeft > 0 {
+                    current.secondsLeft -= 1
+                    self.simAd = current
+                } else {
+                    self.simAdTimer?.invalidate()
+                }
+            }
+        }
+        playUiTick()
+    }
+
+    public func cancelSimulatedAd() {
+        simAdTimer?.invalidate()
+        simAd = nil
+        playUiTick()
+    }
+
+    public func claimSimulatedAdReward() {
+        guard let ad = simAd, ad.secondsLeft <= 0 else { return }
+        simAdTimer?.invalidate()
+        simAd = nil
+
+        switch ad.kind {
+        case .REVIVE:
+            reviveOffered = false
+            hp = maxHp
+            ghostHpPct = 100
+            energy = maxEnergy
+            frenzyActive = true
+            frenzyTimer = 4.5
+            gameState = "playing"
+        case .DOUBLE_SETTLEMENT:
+            if !settlementDoubled {
+                settlementDoubled = true
+                save.bankedCoins += max(30, runCoinsEarned)
+                save.bankedGenes += max(5, runGenesEarned)
+                persistSave()
+            }
+        case .SUPPLY_DROP:
+            save.bankedCoins += 300
+            save.bankedGenes += 25
+            persistSave()
+        case .TRIAL_SHARK:
+            let showcase = nextShowcaseSharkForm
+            startNewRun(trialSharkId: showcase.id)
+        }
+        playSuccessSound()
     }
 }
 
@@ -182,6 +529,7 @@ public final class OceanGameScene: SKScene {
     private var cameraY: Double = 220
     private var smoothedRelativePreyScale: Double = 1.0
     private var lastUpdateTime: TimeInterval = 0
+    private var survivalAccumulator: Double = 0
 
     private let waterBgNode = SKSpriteNode()
     private let parallaxContainer = SKNode()
@@ -235,8 +583,10 @@ public final class OceanGameScene: SKScene {
 
     public func refreshSharkTexture() {
         guard let vm = viewModel else { return }
-        if let tex = SpriteAtlasManager.shared.sharkTexture(for: vm.activeSharkForm.spriteKey) {
+        let spKey = vm.activeSharkForm.spriteKey
+        if let tex = SpriteAtlasManager.shared.sharkTexture(for: spKey) {
             sharkNode.texture = tex
+            vm.lastRenderedSpriteKey = spKey
         }
     }
 
@@ -249,8 +599,16 @@ public final class OceanGameScene: SKScene {
         let viewH = Double(max(240, size.height))
         let stats = vm.currentStats
 
-        if vm.sharkNodeNeedsRefresh(currentTexture: sharkNode.texture) {
+        if sharkNode.texture == nil || vm.lastRenderedSpriteKey != vm.activeSharkForm.spriteKey {
             refreshSharkTexture()
+        }
+
+        // Smooth ghost HP bar decay
+        let curHpPct = max(0, min(100, (vm.hp / max(1, vm.maxHp)) * 100.0))
+        if vm.ghostHpPct > curHpPct {
+            vm.ghostHpPct = max(curHpPct, vm.ghostHpPct - dt * 28.0)
+        } else {
+            vm.ghostHpPct = curHpPct
         }
 
         // 1. Update Shark Physics (Title screen patrol vs In-game hunting)
@@ -258,7 +616,13 @@ public final class OceanGameScene: SKScene {
             let patrolDir: Double = cos(currentTime * 0.95) >= 0 ? 1.0 : -1.0
             let inputY = sin(currentTime * 2.2) * 0.12 + max(-0.18, min(0.18, (240.0 - sharkY) * 0.008))
             stepSharkKinematics(inputX: patrolDir, inputY: inputY, isBoosting: false, stats: stats, dt: dt)
-        } else if vm.gameState == "playing" {
+        } else if vm.gameState == "playing" && vm.simAd == nil {
+            survivalAccumulator += dt
+            if survivalAccumulator >= 1.0 {
+                survivalAccumulator -= 1.0
+                vm.runSurvivalSec += 1
+            }
+
             let ix = Double(vm.joyDx)
             let iy = Double(vm.joyDy)
             let mag = hypot(ix, iy)
@@ -269,8 +633,33 @@ public final class OceanGameScene: SKScene {
 
             if canBoost {
                 vm.energy = max(0, vm.energy - stats.boostDrainPerSec * dt)
+                if vm.onboardingStep == .HOLD_BOOST {
+                    vm.onboardingBoostSeconds = min(1.2, vm.onboardingBoostSeconds + dt)
+                    if vm.onboardingBoostSeconds >= 1.2 {
+                        let firstCost = GameRules.getSharkUpgradeCoinCost(form: vm.activeSharkForm, currentLevel: vm.activeUpgradeLevel)
+                        if vm.save.bankedCoins < firstCost {
+                            vm.save.bankedCoins = firstCost
+                        }
+                        vm.onboardingStep = .HANDS_ON_UPGRADE
+                        vm.playSuccessSound()
+                    }
+                }
             } else {
                 vm.energy = min(vm.maxEnergy, vm.energy + GameConfigGenerated.baseBoostRegenPerSec * dt)
+            }
+
+            if vm.onboardingStep == .CELEBRATE {
+                vm.onboardingCelebrationTimer -= dt
+                if vm.onboardingCelebrationTimer <= 0 {
+                    vm.onboardingStep = .DONE
+                }
+            }
+
+            if vm.comboCount > 0 {
+                vm.comboTimer -= dt
+                if vm.comboTimer <= 0 {
+                    vm.comboCount = 0
+                }
             }
 
             if vm.frenzyActive {
@@ -283,8 +672,7 @@ public final class OceanGameScene: SKScene {
                 vm.hp -= stats.hpDrainPerSec * dt
                 if vm.hp <= 0 {
                     vm.hp = 0
-                    vm.gameState = "gameover"
-                    vm.persistSave()
+                    vm.triggerGameOver()
                 }
             }
 
@@ -292,6 +680,9 @@ public final class OceanGameScene: SKScene {
             let curDepth = Int((max(0, sharkY) * 0.1).rounded())
             if curDepth != vm.depthMeters {
                 vm.depthMeters = curDepth
+                if curDepth > vm.runMaxDepth {
+                    vm.runMaxDepth = curDepth
+                }
                 if Double(curDepth) > vm.save.maxDepthReached {
                     vm.save.maxDepthReached = Double(curDepth)
                 }
@@ -346,7 +737,8 @@ public final class OceanGameScene: SKScene {
         }
         facingScaleX += (facingDir - facingScaleX) * min(1.0, dt * 11.0)
 
-        let speed = isBoosting ? stats.boostSpeed : stats.moveSpeed
+        let heatMult = viewModel?.huntingHeatBuff.speedMultiplier ?? 1.0
+        let speed = (isBoosting ? stats.boostSpeed : stats.moveSpeed) * heatMult
         sharkVx = cos(sharkAngle) * speed
         sharkVy = sin(sharkAngle) * speed
         sharkX += sharkVx * dt
@@ -371,7 +763,6 @@ public final class OceanGameScene: SKScene {
         sharkNode.size = CGSize(width: drawW, height: drawH)
         sharkNode.position = CGPoint(x: screenX, y: screenY)
 
-        // 2.5D perspective scale & continuous pitch
         let absFacing = max(0.15, abs(facingScaleX))
         let perspectiveScaleX = (0.42 + 0.58 * pow(absFacing, 0.8)) * (facingScaleX >= 0 ? 1.0 : -1.0)
         let horizonPitch = atan2(-sin(sharkAngle), abs(cos(sharkAngle)))
@@ -380,7 +771,6 @@ public final class OceanGameScene: SKScene {
         sharkNode.zRotation = CGFloat(horizonPitch * (facingScaleX >= 0 ? 1.0 : -1.0))
         sharkNode.alpha = invulnTimer > 0 && Int(invulnTimer * 20) % 2 == 0 ? 0.45 : 1.0
 
-        // Apply GPU 12-column SKWarpGeometryGrid spine wave
         applySpineWaveWarp(to: sharkNode, phase: swimPhase, turnBend: turnRate)
     }
 
@@ -396,7 +786,6 @@ public final class OceanGameScene: SKScene {
             for col in 0...cols {
                 let u = Float(col) / Float(cols)
                 src.append(SIMD2<Float>(u, v))
-                // Head at u=1 (right-facing sprite), tail at u=0
                 let tailProgress = Double(1.0 - u)
                 let env = 0.015 * tailProgress + 0.985 * pow(tailProgress, 2.25)
                 let waveDy = sin(phase - tailProgress * 2.15 * .pi) * 0.09 * env
@@ -441,7 +830,6 @@ public final class OceanGameScene: SKScene {
         let baseMidH = max(78.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.22 : zonePrefix == "bg_twilight" ? 0.37 : 0.54))
         let baseFarH = max(82.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.232 : 0.42))
 
-        // Layer 0: Top Water Canopy (shrinks by waterScale: 1.00 -> 0.91x)
         if let waterTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.water, isWaterCanopy: true) {
             let baseCanopyH = zonePrefix == "bg_shallow" ? panoRefH * 0.36 : viewH
             let canopyH = baseCanopyH * bgScales.waterScale
@@ -457,7 +845,6 @@ public final class OceanGameScene: SKScene {
             )
         }
 
-        // Layer 1: Far Seamounts / Ruins (shrinks least: 1.00 -> 0.868x)
         if let farTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.far) {
             let farH = baseFarH * bgScales.farScale
             let farBottomY = (baseNearH * 0.38 - (-20.0 + 2.5 * u)) * bgScales.nearScale
@@ -473,7 +860,6 @@ public final class OceanGameScene: SKScene {
             )
         }
 
-        // Layer 2: Mid Reef / Ribcage / Smokers (shrinks moderately: 1.00 -> 0.730x)
         if let midTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.mid) {
             let midH = baseMidH * bgScales.midScale
             let midBottomY = (baseNearH * 0.20 - (-10.0 + 14.0 * u)) * bgScales.nearScale
@@ -489,7 +875,6 @@ public final class OceanGameScene: SKScene {
             )
         }
 
-        // Layer 3: Near Seabed (shrinks most: 1.00 -> 0.580x)
         if let nearTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.near) {
             let nearH = baseNearH * bgScales.nearScale
             let nearBottomY = -28.0 * u * bgScales.nearScale
@@ -522,7 +907,6 @@ public final class OceanGameScene: SKScene {
         let baseTileW = max(256.0, baseTargetH * aspect)
         let tileW = max(148.0, scaledTargetH * aspect)
 
-        // Screen-center anchored normalized phase (0px horizontal jump during level-up shrinking)
         let rawPhase = (cameraX * parallaxXFactor) / baseTileW
         let normPhase = (rawPhase.truncatingRemainder(dividingBy: 1.0) + 1.0).truncatingRemainder(dividingBy: 1.0)
         let centerAnchorX = viewW * 0.5 - normPhase * tileW
@@ -548,7 +932,6 @@ public final class OceanGameScene: SKScene {
 
     private func spawnOnePrey(nearShark: Bool) {
         let targetDepth = max(60.0, sharkY + Double.random(in: -260...260))
-        // 85% native habitat rule + zero active chargers in shallow zone (<= 520m)
         let candidates = GameConfigGenerated.preyTiers.filter { p in
             if targetDepth <= 520 && (p.behavior == .EEL_CHARGER || p.isHazard || p.isBoss) {
                 return false
@@ -611,7 +994,7 @@ public final class OceanGameScene: SKScene {
             )
             let hitRadius = p.config.radius * visualScale + 26.0 * stats.scale
 
-            if vm.gameState == "playing" && dist < hitRadius {
+            if vm.gameState == "playing" && vm.simAd == nil && dist < hitRadius {
                 let outcome = GameRules.resolvePreyEncounter(
                     prey: p.config,
                     sharkStats: stats,
@@ -621,14 +1004,58 @@ public final class OceanGameScene: SKScene {
                 )
                 if outcome == .DEVOUR {
                     let mult = p.mutation == .GOLDEN_SWARM ? 3 : 1
-                    vm.score += p.config.scoreValue * mult
-                    vm.save.bankedCoins += max(1, Int((Double(p.config.coinValue * mult) * stats.coinYieldMultiplier).rounded()))
-                    if p.config.geneValue > 0 && Double.random(in: 0...1) < 0.35 {
-                        vm.save.bankedGenes += max(1, Int((Double(p.config.geneValue) * stats.geneYieldMultiplier).rounded()))
+                    let heatScoreMult = vm.huntingHeatBuff.scoreMultiplier
+                    vm.score += Int((Double(p.config.scoreValue * mult) * heatScoreMult).rounded())
+                    let coinGain = max(1, Int((Double(p.config.coinValue * mult) * stats.coinYieldMultiplier).rounded()))
+                    vm.save.bankedCoins += coinGain
+                    vm.runCoinsEarned += coinGain
+
+                    if p.config.geneValue > 0 && (p.mutation == .GOLDEN_SWARM || Double.random(in: 0...1) < 0.35) {
+                        let geneGain = max(1, Int((Double(p.config.geneValue) * stats.geneYieldMultiplier).rounded()))
+                        vm.save.bankedGenes += geneGain
+                        vm.runGenesEarned += geneGain
                     }
+
+                    // Target Bounty check
+                    if p.config.id == vm.targetBountyPreyId {
+                        vm.targetBountyCaptured += 1
+                        if vm.targetBountyCaptured >= 3 {
+                            vm.save.bankedCoins += 45
+                            vm.save.bankedGenes += 3
+                            vm.runCoinsEarned += 45
+                            vm.runGenesEarned += 3
+                            vm.pickNewBountyPrey()
+                            vm.playSuccessSound()
+                        }
+                    }
+
+                    // Golden mutant charge check
+                    if p.mutation == .GOLDEN_SWARM {
+                        vm.goldenMutantCharge += 1
+                        if vm.goldenMutantCharge >= vm.goldenMutantNeed {
+                            vm.goldenMutantCharge = 0
+                            vm.frenzyActive = true
+                            vm.frenzyTimer = GameConfigGenerated.frenzyDuration + stats.frenzyDurationBonus
+                            vm.recomputeCurrentSharkStats()
+                        }
+                    }
+
+                    // Onboarding Step 1 check
+                    if vm.onboardingStep == .EAT_SMALL_FISH {
+                        vm.onboardingEatCount += 1
+                        if vm.onboardingEatCount >= 3 {
+                            vm.onboardingStep = .HOLD_BOOST
+                            vm.playSuccessSound()
+                        }
+                    }
+
                     vm.hp = min(vm.maxHp, vm.hp + p.config.hpRestore * stats.devourHealMultiplier)
                     vm.addXp(p.config.xpValue * mult)
                     vm.comboCount += 1
+                    vm.comboTimer = 4.2
+                    if vm.comboCount > vm.runPeakCombo {
+                        vm.runPeakCombo = vm.comboCount
+                    }
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     p.node.removeFromParent()
                     activePreys.remove(at: idx)
@@ -640,7 +1067,9 @@ public final class OceanGameScene: SKScene {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     if p.armorHp <= 0 {
                         vm.score += p.config.scoreValue * 2
-                        vm.save.bankedGenes += p.config.geneValue * 2
+                        let gGain = p.config.geneValue * 2
+                        vm.save.bankedGenes += gGain
+                        vm.runGenesEarned += gGain
                         vm.addXp(Int(Double(p.config.xpValue) * 1.5))
                         p.node.removeFromParent()
                         activePreys.remove(at: idx)
@@ -671,11 +1100,5 @@ public final class OceanGameScene: SKScene {
             p.node.xScale = p.vx >= 0 ? -1.0 : 1.0
             idx -= 1
         }
-    }
-}
-
-private extension GameViewModel {
-    func sharkNodeNeedsRefresh(currentTexture: SKTexture?) -> Bool {
-        currentTexture == nil
     }
 }
