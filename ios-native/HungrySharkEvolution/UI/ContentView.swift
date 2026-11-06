@@ -1574,10 +1574,16 @@ public struct EvolutionAtlasSheetView: View {
     @ObservedObject var vm: GameViewModel
     @State private var inspectedIndex: Int = 0
     @State private var wheelPosition: Double = 0.0
+    @State private var wheelVelocity: Double = 0.0 // slots per second
+    @State private var wheelTargetSlot: Double? = nil
+    @State private var isDraggingWheel: Bool = false
     @State private var dragBaseWheelPos: Double? = nil
+    @State private var lastDragTranslationX: Double = 0.0
+    @State private var lastDragTimestamp: Date = Date()
     @State private var lastTickIndex: Int = 0
 
     private let wheelSlotOffsets: [Int] = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
+    private let wheelPhysicsTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
     private var inspectedForm: SharkFormConfig {
         let total = GameConfigGenerated.sharkForms.count
@@ -1585,17 +1591,59 @@ public struct EvolutionAtlasSheetView: View {
         return GameConfigGenerated.sharkForms[norm]
     }
 
-    private func snapWheel(to targetPosition: Double) {
-        let total = GameConfigGenerated.sharkForms.count
+    private func snapWheel(to targetPosition: Double, initialVelocity: Double = 0.0) {
         let snapped = targetPosition.rounded()
-        let normIdx = ((Int(snapped) % total) + total) % total
-        withAnimation(.interpolatingSpring(stiffness: 170, damping: 22)) {
-            wheelPosition = snapped
-            inspectedIndex = normIdx
+        wheelTargetSlot = snapped
+        if abs(initialVelocity) > 0.01 {
+            wheelVelocity = initialVelocity
         }
-        if lastTickIndex != normIdx {
-            lastTickIndex = normIdx
-            vm.playUiTick()
+    }
+
+    private func stepWheelPhysics() {
+        guard !isDraggingWheel else { return }
+        let dt = 1.0 / 60.0
+        let total = GameConfigGenerated.sharkForms.count
+
+        if let target = wheelTargetSlot {
+            let disp = target - wheelPosition
+            let stiffness = 145.0
+            let damping = 21.0
+            let accel = disp * stiffness - wheelVelocity * damping
+            wheelVelocity += accel * dt
+            wheelPosition += wheelVelocity * dt
+
+            let curIdx = ((Int(wheelPosition.rounded()) % total) + total) % total
+            if curIdx != inspectedIndex {
+                inspectedIndex = curIdx
+            }
+            if curIdx != lastTickIndex {
+                lastTickIndex = curIdx
+                UISelectionFeedbackGenerator().selectionChanged()
+                vm.playUiTick()
+            }
+
+            if abs(disp) < 0.003 && abs(wheelVelocity) < 0.02 {
+                wheelPosition = target
+                wheelVelocity = 0.0
+                wheelTargetSlot = nil
+            }
+        } else if abs(wheelVelocity) > 0.01 {
+            wheelPosition += wheelVelocity * dt
+            wheelVelocity *= exp(-4.2 * dt)
+
+            let curIdx = ((Int(wheelPosition.rounded()) % total) + total) % total
+            if curIdx != inspectedIndex {
+                inspectedIndex = curIdx
+            }
+            if curIdx != lastTickIndex {
+                lastTickIndex = curIdx
+                UISelectionFeedbackGenerator().selectionChanged()
+                vm.playUiTick()
+            }
+
+            if abs(wheelVelocity) < 2.2 {
+                wheelTargetSlot = (wheelPosition + wheelVelocity * 0.14).rounded()
+            }
         }
     }
 
@@ -1680,7 +1728,12 @@ public struct EvolutionAtlasSheetView: View {
         .onAppear {
             inspectedIndex = vm.activeSharkForm.index
             wheelPosition = Double(vm.activeSharkForm.index)
+            wheelVelocity = 0.0
+            wheelTargetSlot = nil
             lastTickIndex = vm.activeSharkForm.index
+        }
+        .onReceive(wheelPhysicsTimer) { _ in
+            stepWheelPhysics()
         }
     }
 
@@ -1915,73 +1968,105 @@ public struct EvolutionAtlasSheetView: View {
                             let opacity = max(0.18, 1.0 - max(0.0, absOff - 2.3) * 0.65)
                             let isCenter = absOff < 0.45
 
-                            Button {
-                                snapWheel(to: Double(rawIdx))
-                            } label: {
-                                VStack(spacing: 2) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(
-                                                isCenter
-                                                    ? Color(red: 8/255, green: 36/255, blue: 72/255).opacity(0.96)
-                                                    : Color(red: 2/255, green: 10/255, blue: 28/255).opacity(0.86)
+                            VStack(spacing: 2) {
+                                ZStack {
+                                    Circle()
+                                        .fill(
+                                            isCenter
+                                                ? Color(red: 8/255, green: 36/255, blue: 72/255).opacity(0.96)
+                                                : Color(red: 2/255, green: 10/255, blue: 28/255).opacity(0.86)
+                                        )
+                                        .frame(width: 54, height: 54)
+                                        .overlay(
+                                            Circle().stroke(
+                                                isCenter ? Color.cyan : (itemUnlocked ? Color.cyan.opacity(0.42) : Color.white.opacity(0.15)),
+                                                lineWidth: isCenter ? 2.4 : 1.0
                                             )
-                                            .frame(width: 54, height: 54)
-                                            .overlay(
-                                                Circle().stroke(
-                                                    isCenter ? Color.cyan : (itemUnlocked ? Color.cyan.opacity(0.42) : Color.white.opacity(0.15)),
-                                                    lineWidth: isCenter ? 2.4 : 1.0
-                                                )
-                                            )
-                                            .shadow(color: isCenter ? Color.cyan.opacity(0.55) : .clear, radius: 8)
-                                        SharkPreviewView(form: itemForm, width: 46, height: 28, locked: !itemUnlocked)
-                                    }
-                                    Text(vm.lang == "zh" ? itemForm.nameZh : itemForm.nameEn)
-                                        .font(.system(size: 8.5, weight: .black))
-                                        .foregroundColor(isCenter ? .white : .gray)
-                                        .lineLimit(1)
+                                        )
+                                        .shadow(color: isCenter ? Color.cyan.opacity(0.55) : .clear, radius: 8)
+                                    SharkPreviewView(form: itemForm, width: 46, height: 28, locked: !itemUnlocked)
                                 }
-                                .scaleEffect(scale)
-                                .rotationEffect(.degrees(angleDeg * 0.42))
-                                .opacity(opacity)
+                                Text(vm.lang == "zh" ? itemForm.nameZh : itemForm.nameEn)
+                                    .font(.system(size: 8.5, weight: .black))
+                                    .foregroundColor(isCenter ? .white : .gray)
+                                    .lineLimit(1)
                             }
-                            .buttonStyle(.plain)
+                            .scaleEffect(scale)
+                            .rotationEffect(.degrees(angleDeg * 0.42))
+                            .opacity(opacity)
+                            .contentShape(Circle())
+                            .onTapGesture {
+                                isDraggingWheel = false
+                                dragBaseWheelPos = nil
+                                snapWheel(to: Double(rawIdx))
+                            }
                             .position(x: dialW * CGFloat(xPct), y: dialH * CGFloat(yPct))
                             .zIndex(10.0 - absOff)
                         }
                     }
                 }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 2)
-                        .onChanged { val in
-                            if dragBaseWheelPos == nil {
-                                dragBaseWheelPos = wheelPosition
-                            }
-                            let startPos = dragBaseWheelPos ?? wheelPosition
-                            let newPos = startPos - Double(val.translation.width) / 56.0
-                            wheelPosition = newPos
-                            let curIdx = ((Int(newPos.rounded()) % total) + total) % total
-                            if curIdx != inspectedIndex {
-                                inspectedIndex = curIdx
-                            }
-                            if curIdx != lastTickIndex {
-                                lastTickIndex = curIdx
-                                UISelectionFeedbackGenerator().selectionChanged()
-                            }
-                        }
-                        .onEnded { val in
-                            let startPos = dragBaseWheelPos ?? wheelPosition
-                            dragBaseWheelPos = nil
-                            let predictedPos = startPos - Double(val.predictedEndTranslation.width) / 56.0
-                            let clampedTarget = max(wheelPosition - 6.0, min(wheelPosition + 6.0, predictedPos))
-                            snapWheel(to: clampedTarget)
-                        }
-                )
             }
             .frame(height: 114)
             .padding(.bottom, 6)
         }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { val in
+                    let total = GameConfigGenerated.sharkForms.count
+                    let now = Date()
+                    let tx = Double(val.translation.width)
+                    let pxPerSlot = 52.0
+
+                    if !isDraggingWheel || dragBaseWheelPos == nil {
+                        isDraggingWheel = true
+                        wheelTargetSlot = nil
+                        dragBaseWheelPos = wheelPosition
+                        lastDragTranslationX = tx
+                        lastDragTimestamp = now
+                        wheelVelocity = 0.0
+                    } else {
+                        let dt = max(0.004, now.timeIntervalSince(lastDragTimestamp))
+                        let stepDx = tx - lastDragTranslationX
+                        let instVel = (-stepDx / pxPerSlot) / dt
+                        wheelVelocity = wheelVelocity * 0.55 + instVel * 0.45
+                        lastDragTranslationX = tx
+                        lastDragTimestamp = now
+                    }
+
+                    let startPos = dragBaseWheelPos ?? wheelPosition
+                    let newPos = startPos - tx / pxPerSlot
+                    wheelPosition = newPos
+                    let curIdx = ((Int(newPos.rounded()) % total) + total) % total
+                    if curIdx != inspectedIndex {
+                        inspectedIndex = curIdx
+                    }
+                    if curIdx != lastTickIndex {
+                        lastTickIndex = curIdx
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        vm.playUiTick()
+                    }
+                }
+                .onEnded { val in
+                    let pxPerSlot = 52.0
+                    let startPos = dragBaseWheelPos ?? wheelPosition
+                    isDraggingWheel = false
+                    dragBaseWheelPos = nil
+
+                    let predictedEndPos = startPos - Double(val.predictedEndTranslation.width) / pxPerSlot
+                    let extraThrowSlots = max(-8.5, min(8.5, predictedEndPos - wheelPosition))
+                    let idleSec = Date().timeIntervalSince(lastDragTimestamp)
+                    let releaseVel = idleSec > 0.09 ? 0.0 : max(-18.0, min(18.0, wheelVelocity))
+
+                    if abs(releaseVel) > 1.2 || abs(extraThrowSlots) > 0.65 {
+                        wheelVelocity = releaseVel != 0 ? releaseVel : extraThrowSlots * 4.5
+                        wheelTargetSlot = (wheelPosition + max(-8.0, min(8.0, wheelVelocity * 0.25))).rounded()
+                    } else {
+                        wheelVelocity = 0.0
+                        wheelTargetSlot = wheelPosition.rounded()
+                    }
+                }
+        )
     }
 
     // MARK: - Right/Bottom: De-Boxed Command Deck (Trait + 4-Col Stat Strip + 3-Col Mastery Crowns + Gate/Reinforce + Actions)

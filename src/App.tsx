@@ -2021,15 +2021,20 @@ export default function App() {
           );
         }
 
-        // Smoothly decelerate to a gentle underwater glide (18% speed) when player releases controls
+        // Keep shark stationary in place when joystick / directional controls are not active
         const targetSpeed = isBoosting
           ? shark.stats.boostSpeed
           : inputMag > 0.08
           ? shark.stats.moveSpeed * Math.min(1, Math.max(0.55, inputMag))
-          : shark.stats.moveSpeed * 0.18;
+          : 0;
 
-        shark.vx += (Math.cos(shark.angle) * targetSpeed - shark.vx) * Math.min(1, simDt * 7);
-        shark.vy += (Math.sin(shark.angle) * targetSpeed - shark.vy) * Math.min(1, simDt * 7);
+        if (targetSpeed === 0) {
+          shark.vx = 0;
+          shark.vy = 0;
+        } else {
+          shark.vx += (Math.cos(shark.angle) * targetSpeed - shark.vx) * Math.min(1, simDt * 7);
+          shark.vy += (Math.sin(shark.angle) * targetSpeed - shark.vy) * Math.min(1, simDt * 7);
+        }
 
         shark.x += shark.vx * simDt;
         shark.y += shark.vy * simDt;

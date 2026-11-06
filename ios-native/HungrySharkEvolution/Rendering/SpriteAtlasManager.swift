@@ -883,43 +883,67 @@ public final class SpriteAtlasManager {
             if cy + 1 < h { enqueue(cx, cy + 1) }
         }
 
-        // Boundary Color-to-Alpha unmixing on 2px halo around removed white background
+        // Boundary Color-to-Alpha unmixing on 2px halo around removed white background + tight bounding-box measurement
+        var minX = w
+        var minY = h
+        var maxX = 0
+        var maxY = 0
+
         if h > 2 && w > 2 {
-            for y in 1..<(h - 1) {
+            for y in 0..<h {
                 let rowOff = y * w
-                for x in 1..<(w - 1) {
+                for x in 0..<w {
                     let i = rowOff + x
                     if visited[i] != 0 { continue }
-                    if visited[i - 1] != 0 || visited[i + 1] != 0 || visited[i - w] != 0 || visited[i + w] != 0 {
-                        let p = i * 4
-                        let r = Double(rgba[p])
-                        let g = Double(rgba[p + 1])
-                        let b = Double(rgba[p + 2])
-                        let minC = min(r, min(g, b))
-                        if minC > 55.0 {
-                            let cleanAlpha = max(0.0, min(1.0, (250.0 - minC) / 195.0))
-                            if cleanAlpha <= 0.04 {
-                                rgba[p] = 0
-                                rgba[p + 1] = 0
-                                rgba[p + 2] = 0
-                                rgba[p + 3] = 0
-                            } else {
-                                let unmixDiv = max(0.08, (255.0 - minC) / 255.0)
-                                let nr = max(0.0, min(255.0, (r - minC) / unmixDiv)) * cleanAlpha
-                                let ng = max(0.0, min(255.0, (g - minC) / unmixDiv)) * cleanAlpha
-                                let nb = max(0.0, min(255.0, (b - minC) / unmixDiv)) * cleanAlpha
-                                rgba[p] = UInt8(nr.rounded())
-                                rgba[p + 1] = UInt8(ng.rounded())
-                                rgba[p + 2] = UInt8(nb.rounded())
-                                rgba[p + 3] = UInt8((Double(rgba[p + 3]) * cleanAlpha).rounded())
+                    let p = i * 4
+                    if x > 0 && x + 1 < w && y > 0 && y + 1 < h {
+                        if visited[i - 1] != 0 || visited[i + 1] != 0 || visited[i - w] != 0 || visited[i + w] != 0 {
+                            let r = Double(rgba[p])
+                            let g = Double(rgba[p + 1])
+                            let b = Double(rgba[p + 2])
+                            let minC = min(r, min(g, b))
+                            if minC > 55.0 {
+                                let cleanAlpha = max(0.0, min(1.0, (250.0 - minC) / 195.0))
+                                if cleanAlpha <= 0.04 {
+                                    rgba[p] = 0
+                                    rgba[p + 1] = 0
+                                    rgba[p + 2] = 0
+                                    rgba[p + 3] = 0
+                                } else {
+                                    let unmixDiv = max(0.08, (255.0 - minC) / 255.0)
+                                    let nr = max(0.0, min(255.0, (r - minC) / unmixDiv)) * cleanAlpha
+                                    let ng = max(0.0, min(255.0, (g - minC) / unmixDiv)) * cleanAlpha
+                                    let nb = max(0.0, min(255.0, (b - minC) / unmixDiv)) * cleanAlpha
+                                    rgba[p] = UInt8(nr.rounded())
+                                    rgba[p + 1] = UInt8(ng.rounded())
+                                    rgba[p + 2] = UInt8(nb.rounded())
+                                    rgba[p + 3] = UInt8((Double(rgba[p + 3]) * cleanAlpha).rounded())
+                                }
                             }
                         }
+                    }
+                    if rgba[p + 3] > 20 {
+                        if x < minX { minX = x }
+                        if x > maxX { maxX = x }
+                        if y < minY { minY = y }
+                        if y > maxY { maxY = y }
                     }
                 }
             }
         }
 
         guard let outCG = ctx.makeImage() else { return nil }
+        // Tight-crop non-transparent bounding box for all shark & prey sprites (1:1 parity with Web spriteSheetManager.ts)
+        if !topSkyOnly && maxX >= minX && maxY >= minY {
+            let pad = 2
+            let cx = max(0, minX - pad)
+            let cy = max(0, minY - pad)
+            let cw = min(w - cx, (maxX - minX + 1) + pad * 2)
+            let ch = min(h - cy, (maxY - minY + 1) + pad * 2)
+            if cw > 4 && ch > 4, let tightCG = outCG.cropping(to: CGRect(x: cx, y: cy, width: cw, height: ch)) {
+                return UIImage(cgImage: tightCG)
+            }
+        }
         return UIImage(cgImage: outCG)
     }
 

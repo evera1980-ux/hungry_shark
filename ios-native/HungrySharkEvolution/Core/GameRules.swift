@@ -186,9 +186,9 @@ public struct SharkMetaSaveData: Codable, Sendable {
 }
 
 public enum GameRules {
-    public static let sharkBaseDrawSize: Double = 96.0
+    public static let sharkBaseDrawSize: Double = 110.4 // 96.0 * 1.15 mobile viewport presence parity with Web
     public static let preyRadiusToDrawSize: Double = 2.25
-    public static let sharkEquivalentRadius: Double = 96.0 / 2.25 // 42.6667
+    public static let sharkEquivalentRadius: Double = 110.4 / 2.25 // 49.0667 (preserves 1:1 sharkParityScale ratio)
     public static let defaultPreySizeMultiplier: Double = 0.80
 
     /// XP required to advance from `level` to `level + 1` (matches src/game/rules.ts)

@@ -758,7 +758,7 @@ public final class OceanGameScene: SKScene {
         if vm.gameState == "title" {
             let patrolDir: Double = cos(currentTime * 0.95) >= 0 ? 1.0 : -1.0
             let inputY = sin(currentTime * 2.2) * 0.12 + max(-0.18, min(0.18, (210.0 - sharkY) * 0.008))
-            stepSharkKinematics(inputX: patrolDir, inputY: inputY, isBoosting: false, stats: stats, dt: dt)
+            stepSharkKinematics(inputX: patrolDir, inputY: inputY, inputMagnitude: 1.0, isBoosting: false, stats: stats, dt: dt)
         } else if vm.gameState == "playing" && vm.simAd == nil {
             survivalAccumulator += dt
             if survivalAccumulator >= 1.0 {
@@ -769,10 +769,10 @@ public final class OceanGameScene: SKScene {
             let ix = Double(vm.joyDx)
             let iy = Double(vm.joyDy)
             let mag = hypot(ix, iy)
-            let normX = mag > 0.08 ? ix / mag : facingDir * 0.35
+            let normX = mag > 0.08 ? ix / mag : 0.0
             let normY = mag > 0.08 ? iy / mag : 0.0
             let canBoost = vm.isBoostingHeld && vm.energy > 2.0
-            stepSharkKinematics(inputX: normX, inputY: normY, isBoosting: canBoost, stats: stats, dt: dt)
+            stepSharkKinematics(inputX: normX, inputY: normY, inputMagnitude: mag, isBoosting: canBoost, stats: stats, dt: dt)
 
             if canBoost {
                 vm.energy = max(0, vm.energy - stats.boostDrainPerSec * dt)
@@ -861,34 +861,49 @@ public final class OceanGameScene: SKScene {
         renderPlayerShark(viewW: viewW, viewH: viewH, stats: stats)
     }
 
-    private func stepSharkKinematics(inputX: Double, inputY: Double, isBoosting: Bool, stats: ComputedSharkStats, dt: Double) {
-        sharkTargetAngle = atan2(inputY, inputX)
-        var diff = sharkTargetAngle - sharkAngle
-        while diff > .pi { diff -= .pi * 2 }
-        while diff < -.pi { diff += .pi * 2 }
-
-        // Hydrodynamic Horizontal Whip-Turn: pivot horizontally without pitching 90 degrees vertically
-        if abs(diff) > 1.85 && cos(sharkAngle) * cos(sharkTargetAngle) < -0.15 {
-            facingDir = cos(sharkTargetAngle) >= 0 ? 1.0 : -1.0
-            sharkAngle = atan2(sin(sharkAngle), -cos(sharkAngle))
-            diff = sharkTargetAngle - sharkAngle
+    private func stepSharkKinematics(inputX: Double, inputY: Double, inputMagnitude: Double, isBoosting: Bool, stats: ComputedSharkStats, dt: Double) {
+        let hasDirectionInput = inputMagnitude > 0.08
+        if hasDirectionInput {
+            sharkTargetAngle = atan2(inputY, inputX)
+            var diff = sharkTargetAngle - sharkAngle
             while diff > .pi { diff -= .pi * 2 }
             while diff < -.pi { diff += .pi * 2 }
-            turnRate = (diff >= 0 ? 1.0 : -1.0) * 0.92
+
+            // Hydrodynamic Horizontal Whip-Turn: pivot horizontally without pitching 90 degrees vertically
+            if abs(diff) > 1.85 && cos(sharkAngle) * cos(sharkTargetAngle) < -0.15 {
+                facingDir = cos(sharkTargetAngle) >= 0 ? 1.0 : -1.0
+                sharkAngle = atan2(sin(sharkAngle), -cos(sharkAngle))
+                diff = sharkTargetAngle - sharkAngle
+                while diff > .pi { diff -= .pi * 2 }
+                while diff < -.pi { diff += .pi * 2 }
+                turnRate = (diff >= 0 ? 1.0 : -1.0) * 0.92
+            }
+
+            let turnSpeed = 6.2
+            let angleStep = diff * min(1.0, dt * turnSpeed)
+            sharkAngle += angleStep
+            turnRate = turnRate * 0.84 + (angleStep / max(0.001, dt)) * 0.045
+
+            if abs(cos(sharkAngle)) > 0.18 {
+                facingDir = cos(sharkAngle) >= 0 ? 1.0 : -1.0
+            }
+        } else {
+            turnRate *= max(0.0, 1.0 - dt * 10.0)
         }
 
-        let turnSpeed = 6.2
-        let angleStep = diff * min(1.0, dt * turnSpeed)
-        sharkAngle += angleStep
-        turnRate = turnRate * 0.84 + (angleStep / max(0.001, dt)) * 0.045
-
-        if abs(cos(sharkAngle)) > 0.18 {
-            facingDir = cos(sharkAngle) >= 0 ? 1.0 : -1.0
-        }
         facingScaleX += (facingDir - facingScaleX) * min(1.0, dt * 11.0)
 
+        // When joystick is not moved and not boosting, keep shark stationary in place (zero drift in previous direction!)
+        if !hasDirectionInput && !isBoosting {
+            sharkVx = 0.0
+            sharkVy = 0.0
+            swimPhase += dt * 3.2
+            return
+        }
+
         let heatMult = viewModel?.huntingHeatBuff.speedMultiplier ?? 1.0
-        let speed = (isBoosting ? stats.boostSpeed : stats.moveSpeed) * heatMult
+        let joySpeedFactor = isBoosting ? 1.0 : min(1.0, max(0.55, inputMagnitude))
+        let speed = (isBoosting ? stats.boostSpeed : stats.moveSpeed * joySpeedFactor) * heatMult
         sharkVx = cos(sharkAngle) * speed
         sharkVy = sin(sharkAngle) * speed
         sharkX += sharkVx * dt
@@ -944,14 +959,18 @@ public final class OceanGameScene: SKScene {
         let screenX = viewW * 0.5 + (sharkX + cos(sharkAngle) * lungeWorld - cameraX) * zoom
         let screenY = viewH * 0.5 - (sharkY + sin(sharkAngle) * lungeWorld - cameraY) * zoom
 
-        let drawW = GameRules.sharkBaseDrawSize * stats.scale * zoom
+        // 1:1 Constant-Area Aspect Normalization (drawW = baseSize * sqrt(aspect), drawH = baseSize / sqrt(aspect)) matching Web canvasRenderer.ts
+        let baseSize = GameRules.sharkBaseDrawSize * stats.scale * zoom
         let texAspect: Double
         if let tex = sharkNode.texture, tex.size().height > 0 {
             texAspect = Double(tex.size().width / tex.size().height)
         } else {
             texAspect = 1.65
         }
-        let drawH = drawW / max(1.1, min(2.2, texAspect))
+        let clampedAspect = max(0.42, min(2.65, texAspect))
+        let sqrtAspect = sqrt(clampedAspect)
+        let drawW = baseSize * sqrtAspect
+        let drawH = baseSize / sqrtAspect
 
         sharkNode.size = CGSize(width: drawW, height: drawH)
         sharkNode.position = CGPoint(x: screenX, y: screenY)
@@ -1926,14 +1945,17 @@ public final class OceanGameScene: SKScene {
             let screenX = viewW * 0.5 + (p.x - cameraX) * zoom
             let screenY = viewH * 0.5 - (p.y - cameraY) * zoom
             let inflateScale = 1.0 + p.inflateRatio * 0.38
-            let drawW = p.config.radius * GameRules.preyRadiusToDrawSize * visualScale * inflateScale * zoom
+            let baseSize = p.config.radius * GameRules.preyRadiusToDrawSize * visualScale * inflateScale * zoom
             let texAspect: Double
             if let tex = p.node.texture, tex.size().height > 0 {
                 texAspect = Double(tex.size().width / tex.size().height)
             } else {
                 texAspect = 1.45
             }
-            let drawH = drawW / max(0.85, min(2.2, texAspect))
+            let clampedAspect = max(0.42, min(2.65, texAspect))
+            let sqrtAspect = sqrt(clampedAspect)
+            let drawW = baseSize * sqrtAspect
+            let drawH = (baseSize / sqrtAspect) * (p.inflateRatio > 0.05 ? 1.16 : 1.0)
             p.node.size = CGSize(width: drawW, height: drawH)
             p.node.position = CGPoint(x: screenX, y: screenY)
 

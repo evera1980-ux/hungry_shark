@@ -473,9 +473,9 @@ public struct SharkMetaSaveData: Codable, Sendable {
 }
 
 public enum GameRules {
-    public static let sharkBaseDrawSize: Double = 96.0
+    public static let sharkBaseDrawSize: Double = 110.4 // 96.0 * 1.15 mobile viewport presence parity with Web
     public static let preyRadiusToDrawSize: Double = 2.25
-    public static let sharkEquivalentRadius: Double = 96.0 / 2.25 // 42.6667
+    public static let sharkEquivalentRadius: Double = 110.4 / 2.25 // 49.0667 (preserves 1:1 sharkParityScale ratio)
     public static let defaultPreySizeMultiplier: Double = 0.80
 
     /// XP required to advance from \`level\` to \`level + 1\` (matches src/game/rules.ts)
@@ -1754,43 +1754,67 @@ public final class SpriteAtlasManager {
             if cy + 1 < h { enqueue(cx, cy + 1) }
         }
 
-        // Boundary Color-to-Alpha unmixing on 2px halo around removed white background
+        // Boundary Color-to-Alpha unmixing on 2px halo around removed white background + tight bounding-box measurement
+        var minX = w
+        var minY = h
+        var maxX = 0
+        var maxY = 0
+
         if h > 2 && w > 2 {
-            for y in 1..<(h - 1) {
+            for y in 0..<h {
                 let rowOff = y * w
-                for x in 1..<(w - 1) {
+                for x in 0..<w {
                     let i = rowOff + x
                     if visited[i] != 0 { continue }
-                    if visited[i - 1] != 0 || visited[i + 1] != 0 || visited[i - w] != 0 || visited[i + w] != 0 {
-                        let p = i * 4
-                        let r = Double(rgba[p])
-                        let g = Double(rgba[p + 1])
-                        let b = Double(rgba[p + 2])
-                        let minC = min(r, min(g, b))
-                        if minC > 55.0 {
-                            let cleanAlpha = max(0.0, min(1.0, (250.0 - minC) / 195.0))
-                            if cleanAlpha <= 0.04 {
-                                rgba[p] = 0
-                                rgba[p + 1] = 0
-                                rgba[p + 2] = 0
-                                rgba[p + 3] = 0
-                            } else {
-                                let unmixDiv = max(0.08, (255.0 - minC) / 255.0)
-                                let nr = max(0.0, min(255.0, (r - minC) / unmixDiv)) * cleanAlpha
-                                let ng = max(0.0, min(255.0, (g - minC) / unmixDiv)) * cleanAlpha
-                                let nb = max(0.0, min(255.0, (b - minC) / unmixDiv)) * cleanAlpha
-                                rgba[p] = UInt8(nr.rounded())
-                                rgba[p + 1] = UInt8(ng.rounded())
-                                rgba[p + 2] = UInt8(nb.rounded())
-                                rgba[p + 3] = UInt8((Double(rgba[p + 3]) * cleanAlpha).rounded())
+                    let p = i * 4
+                    if x > 0 && x + 1 < w && y > 0 && y + 1 < h {
+                        if visited[i - 1] != 0 || visited[i + 1] != 0 || visited[i - w] != 0 || visited[i + w] != 0 {
+                            let r = Double(rgba[p])
+                            let g = Double(rgba[p + 1])
+                            let b = Double(rgba[p + 2])
+                            let minC = min(r, min(g, b))
+                            if minC > 55.0 {
+                                let cleanAlpha = max(0.0, min(1.0, (250.0 - minC) / 195.0))
+                                if cleanAlpha <= 0.04 {
+                                    rgba[p] = 0
+                                    rgba[p + 1] = 0
+                                    rgba[p + 2] = 0
+                                    rgba[p + 3] = 0
+                                } else {
+                                    let unmixDiv = max(0.08, (255.0 - minC) / 255.0)
+                                    let nr = max(0.0, min(255.0, (r - minC) / unmixDiv)) * cleanAlpha
+                                    let ng = max(0.0, min(255.0, (g - minC) / unmixDiv)) * cleanAlpha
+                                    let nb = max(0.0, min(255.0, (b - minC) / unmixDiv)) * cleanAlpha
+                                    rgba[p] = UInt8(nr.rounded())
+                                    rgba[p + 1] = UInt8(ng.rounded())
+                                    rgba[p + 2] = UInt8(nb.rounded())
+                                    rgba[p + 3] = UInt8((Double(rgba[p + 3]) * cleanAlpha).rounded())
+                                }
                             }
                         }
+                    }
+                    if rgba[p + 3] > 20 {
+                        if x < minX { minX = x }
+                        if x > maxX { maxX = x }
+                        if y < minY { minY = y }
+                        if y > maxY { maxY = y }
                     }
                 }
             }
         }
 
         guard let outCG = ctx.makeImage() else { return nil }
+        // Tight-crop non-transparent bounding box for all shark & prey sprites (1:1 parity with Web spriteSheetManager.ts)
+        if !topSkyOnly && maxX >= minX && maxY >= minY {
+            let pad = 2
+            let cx = max(0, minX - pad)
+            let cy = max(0, minY - pad)
+            let cw = min(w - cx, (maxX - minX + 1) + pad * 2)
+            let ch = min(h - cy, (maxY - minY + 1) + pad * 2)
+            if cw > 4 && ch > 4, let tightCG = outCG.cropping(to: CGRect(x: cx, y: cy, width: cw, height: ch)) {
+                return UIImage(cgImage: tightCG)
+            }
+        }
         return UIImage(cgImage: outCG)
     }
 
@@ -2997,7 +3021,7 @@ public final class OceanGameScene: SKScene {
         if vm.gameState == "title" {
             let patrolDir: Double = cos(currentTime * 0.95) >= 0 ? 1.0 : -1.0
             let inputY = sin(currentTime * 2.2) * 0.12 + max(-0.18, min(0.18, (210.0 - sharkY) * 0.008))
-            stepSharkKinematics(inputX: patrolDir, inputY: inputY, isBoosting: false, stats: stats, dt: dt)
+            stepSharkKinematics(inputX: patrolDir, inputY: inputY, inputMagnitude: 1.0, isBoosting: false, stats: stats, dt: dt)
         } else if vm.gameState == "playing" && vm.simAd == nil {
             survivalAccumulator += dt
             if survivalAccumulator >= 1.0 {
@@ -3008,10 +3032,10 @@ public final class OceanGameScene: SKScene {
             let ix = Double(vm.joyDx)
             let iy = Double(vm.joyDy)
             let mag = hypot(ix, iy)
-            let normX = mag > 0.08 ? ix / mag : facingDir * 0.35
+            let normX = mag > 0.08 ? ix / mag : 0.0
             let normY = mag > 0.08 ? iy / mag : 0.0
             let canBoost = vm.isBoostingHeld && vm.energy > 2.0
-            stepSharkKinematics(inputX: normX, inputY: normY, isBoosting: canBoost, stats: stats, dt: dt)
+            stepSharkKinematics(inputX: normX, inputY: normY, inputMagnitude: mag, isBoosting: canBoost, stats: stats, dt: dt)
 
             if canBoost {
                 vm.energy = max(0, vm.energy - stats.boostDrainPerSec * dt)
@@ -3100,34 +3124,49 @@ public final class OceanGameScene: SKScene {
         renderPlayerShark(viewW: viewW, viewH: viewH, stats: stats)
     }
 
-    private func stepSharkKinematics(inputX: Double, inputY: Double, isBoosting: Bool, stats: ComputedSharkStats, dt: Double) {
-        sharkTargetAngle = atan2(inputY, inputX)
-        var diff = sharkTargetAngle - sharkAngle
-        while diff > .pi { diff -= .pi * 2 }
-        while diff < -.pi { diff += .pi * 2 }
-
-        // Hydrodynamic Horizontal Whip-Turn: pivot horizontally without pitching 90 degrees vertically
-        if abs(diff) > 1.85 && cos(sharkAngle) * cos(sharkTargetAngle) < -0.15 {
-            facingDir = cos(sharkTargetAngle) >= 0 ? 1.0 : -1.0
-            sharkAngle = atan2(sin(sharkAngle), -cos(sharkAngle))
-            diff = sharkTargetAngle - sharkAngle
+    private func stepSharkKinematics(inputX: Double, inputY: Double, inputMagnitude: Double, isBoosting: Bool, stats: ComputedSharkStats, dt: Double) {
+        let hasDirectionInput = inputMagnitude > 0.08
+        if hasDirectionInput {
+            sharkTargetAngle = atan2(inputY, inputX)
+            var diff = sharkTargetAngle - sharkAngle
             while diff > .pi { diff -= .pi * 2 }
             while diff < -.pi { diff += .pi * 2 }
-            turnRate = (diff >= 0 ? 1.0 : -1.0) * 0.92
+
+            // Hydrodynamic Horizontal Whip-Turn: pivot horizontally without pitching 90 degrees vertically
+            if abs(diff) > 1.85 && cos(sharkAngle) * cos(sharkTargetAngle) < -0.15 {
+                facingDir = cos(sharkTargetAngle) >= 0 ? 1.0 : -1.0
+                sharkAngle = atan2(sin(sharkAngle), -cos(sharkAngle))
+                diff = sharkTargetAngle - sharkAngle
+                while diff > .pi { diff -= .pi * 2 }
+                while diff < -.pi { diff += .pi * 2 }
+                turnRate = (diff >= 0 ? 1.0 : -1.0) * 0.92
+            }
+
+            let turnSpeed = 6.2
+            let angleStep = diff * min(1.0, dt * turnSpeed)
+            sharkAngle += angleStep
+            turnRate = turnRate * 0.84 + (angleStep / max(0.001, dt)) * 0.045
+
+            if abs(cos(sharkAngle)) > 0.18 {
+                facingDir = cos(sharkAngle) >= 0 ? 1.0 : -1.0
+            }
+        } else {
+            turnRate *= max(0.0, 1.0 - dt * 10.0)
         }
 
-        let turnSpeed = 6.2
-        let angleStep = diff * min(1.0, dt * turnSpeed)
-        sharkAngle += angleStep
-        turnRate = turnRate * 0.84 + (angleStep / max(0.001, dt)) * 0.045
-
-        if abs(cos(sharkAngle)) > 0.18 {
-            facingDir = cos(sharkAngle) >= 0 ? 1.0 : -1.0
-        }
         facingScaleX += (facingDir - facingScaleX) * min(1.0, dt * 11.0)
 
+        // When joystick is not moved and not boosting, keep shark stationary in place (zero drift in previous direction!)
+        if !hasDirectionInput && !isBoosting {
+            sharkVx = 0.0
+            sharkVy = 0.0
+            swimPhase += dt * 3.2
+            return
+        }
+
         let heatMult = viewModel?.huntingHeatBuff.speedMultiplier ?? 1.0
-        let speed = (isBoosting ? stats.boostSpeed : stats.moveSpeed) * heatMult
+        let joySpeedFactor = isBoosting ? 1.0 : min(1.0, max(0.55, inputMagnitude))
+        let speed = (isBoosting ? stats.boostSpeed : stats.moveSpeed * joySpeedFactor) * heatMult
         sharkVx = cos(sharkAngle) * speed
         sharkVy = sin(sharkAngle) * speed
         sharkX += sharkVx * dt
@@ -3183,14 +3222,18 @@ public final class OceanGameScene: SKScene {
         let screenX = viewW * 0.5 + (sharkX + cos(sharkAngle) * lungeWorld - cameraX) * zoom
         let screenY = viewH * 0.5 - (sharkY + sin(sharkAngle) * lungeWorld - cameraY) * zoom
 
-        let drawW = GameRules.sharkBaseDrawSize * stats.scale * zoom
+        // 1:1 Constant-Area Aspect Normalization (drawW = baseSize * sqrt(aspect), drawH = baseSize / sqrt(aspect)) matching Web canvasRenderer.ts
+        let baseSize = GameRules.sharkBaseDrawSize * stats.scale * zoom
         let texAspect: Double
         if let tex = sharkNode.texture, tex.size().height > 0 {
             texAspect = Double(tex.size().width / tex.size().height)
         } else {
             texAspect = 1.65
         }
-        let drawH = drawW / max(1.1, min(2.2, texAspect))
+        let clampedAspect = max(0.42, min(2.65, texAspect))
+        let sqrtAspect = sqrt(clampedAspect)
+        let drawW = baseSize * sqrtAspect
+        let drawH = baseSize / sqrtAspect
 
         sharkNode.size = CGSize(width: drawW, height: drawH)
         sharkNode.position = CGPoint(x: screenX, y: screenY)
@@ -4165,14 +4208,17 @@ public final class OceanGameScene: SKScene {
             let screenX = viewW * 0.5 + (p.x - cameraX) * zoom
             let screenY = viewH * 0.5 - (p.y - cameraY) * zoom
             let inflateScale = 1.0 + p.inflateRatio * 0.38
-            let drawW = p.config.radius * GameRules.preyRadiusToDrawSize * visualScale * inflateScale * zoom
+            let baseSize = p.config.radius * GameRules.preyRadiusToDrawSize * visualScale * inflateScale * zoom
             let texAspect: Double
             if let tex = p.node.texture, tex.size().height > 0 {
                 texAspect = Double(tex.size().width / tex.size().height)
             } else {
                 texAspect = 1.45
             }
-            let drawH = drawW / max(0.85, min(2.2, texAspect))
+            let clampedAspect = max(0.42, min(2.65, texAspect))
+            let sqrtAspect = sqrt(clampedAspect)
+            let drawW = baseSize * sqrtAspect
+            let drawH = (baseSize / sqrtAspect) * (p.inflateRatio > 0.05 ? 1.16 : 1.0)
             p.node.size = CGSize(width: drawW, height: drawH)
             p.node.position = CGPoint(x: screenX, y: screenY)
 
@@ -5786,10 +5832,16 @@ public struct EvolutionAtlasSheetView: View {
     @ObservedObject var vm: GameViewModel
     @State private var inspectedIndex: Int = 0
     @State private var wheelPosition: Double = 0.0
+    @State private var wheelVelocity: Double = 0.0 // slots per second
+    @State private var wheelTargetSlot: Double? = nil
+    @State private var isDraggingWheel: Bool = false
     @State private var dragBaseWheelPos: Double? = nil
+    @State private var lastDragTranslationX: Double = 0.0
+    @State private var lastDragTimestamp: Date = Date()
     @State private var lastTickIndex: Int = 0
 
     private let wheelSlotOffsets: [Int] = [-4, -3, -2, -1, 0, 1, 2, 3, 4]
+    private let wheelPhysicsTimer = Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()
 
     private var inspectedForm: SharkFormConfig {
         let total = GameConfigGenerated.sharkForms.count
@@ -5797,17 +5849,59 @@ public struct EvolutionAtlasSheetView: View {
         return GameConfigGenerated.sharkForms[norm]
     }
 
-    private func snapWheel(to targetPosition: Double) {
-        let total = GameConfigGenerated.sharkForms.count
+    private func snapWheel(to targetPosition: Double, initialVelocity: Double = 0.0) {
         let snapped = targetPosition.rounded()
-        let normIdx = ((Int(snapped) % total) + total) % total
-        withAnimation(.interpolatingSpring(stiffness: 170, damping: 22)) {
-            wheelPosition = snapped
-            inspectedIndex = normIdx
+        wheelTargetSlot = snapped
+        if abs(initialVelocity) > 0.01 {
+            wheelVelocity = initialVelocity
         }
-        if lastTickIndex != normIdx {
-            lastTickIndex = normIdx
-            vm.playUiTick()
+    }
+
+    private func stepWheelPhysics() {
+        guard !isDraggingWheel else { return }
+        let dt = 1.0 / 60.0
+        let total = GameConfigGenerated.sharkForms.count
+
+        if let target = wheelTargetSlot {
+            let disp = target - wheelPosition
+            let stiffness = 145.0
+            let damping = 21.0
+            let accel = disp * stiffness - wheelVelocity * damping
+            wheelVelocity += accel * dt
+            wheelPosition += wheelVelocity * dt
+
+            let curIdx = ((Int(wheelPosition.rounded()) % total) + total) % total
+            if curIdx != inspectedIndex {
+                inspectedIndex = curIdx
+            }
+            if curIdx != lastTickIndex {
+                lastTickIndex = curIdx
+                UISelectionFeedbackGenerator().selectionChanged()
+                vm.playUiTick()
+            }
+
+            if abs(disp) < 0.003 && abs(wheelVelocity) < 0.02 {
+                wheelPosition = target
+                wheelVelocity = 0.0
+                wheelTargetSlot = nil
+            }
+        } else if abs(wheelVelocity) > 0.01 {
+            wheelPosition += wheelVelocity * dt
+            wheelVelocity *= exp(-4.2 * dt)
+
+            let curIdx = ((Int(wheelPosition.rounded()) % total) + total) % total
+            if curIdx != inspectedIndex {
+                inspectedIndex = curIdx
+            }
+            if curIdx != lastTickIndex {
+                lastTickIndex = curIdx
+                UISelectionFeedbackGenerator().selectionChanged()
+                vm.playUiTick()
+            }
+
+            if abs(wheelVelocity) < 2.2 {
+                wheelTargetSlot = (wheelPosition + wheelVelocity * 0.14).rounded()
+            }
         }
     }
 
@@ -5892,7 +5986,12 @@ public struct EvolutionAtlasSheetView: View {
         .onAppear {
             inspectedIndex = vm.activeSharkForm.index
             wheelPosition = Double(vm.activeSharkForm.index)
+            wheelVelocity = 0.0
+            wheelTargetSlot = nil
             lastTickIndex = vm.activeSharkForm.index
+        }
+        .onReceive(wheelPhysicsTimer) { _ in
+            stepWheelPhysics()
         }
     }
 
@@ -6127,73 +6226,105 @@ public struct EvolutionAtlasSheetView: View {
                             let opacity = max(0.18, 1.0 - max(0.0, absOff - 2.3) * 0.65)
                             let isCenter = absOff < 0.45
 
-                            Button {
-                                snapWheel(to: Double(rawIdx))
-                            } label: {
-                                VStack(spacing: 2) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(
-                                                isCenter
-                                                    ? Color(red: 8/255, green: 36/255, blue: 72/255).opacity(0.96)
-                                                    : Color(red: 2/255, green: 10/255, blue: 28/255).opacity(0.86)
+                            VStack(spacing: 2) {
+                                ZStack {
+                                    Circle()
+                                        .fill(
+                                            isCenter
+                                                ? Color(red: 8/255, green: 36/255, blue: 72/255).opacity(0.96)
+                                                : Color(red: 2/255, green: 10/255, blue: 28/255).opacity(0.86)
+                                        )
+                                        .frame(width: 54, height: 54)
+                                        .overlay(
+                                            Circle().stroke(
+                                                isCenter ? Color.cyan : (itemUnlocked ? Color.cyan.opacity(0.42) : Color.white.opacity(0.15)),
+                                                lineWidth: isCenter ? 2.4 : 1.0
                                             )
-                                            .frame(width: 54, height: 54)
-                                            .overlay(
-                                                Circle().stroke(
-                                                    isCenter ? Color.cyan : (itemUnlocked ? Color.cyan.opacity(0.42) : Color.white.opacity(0.15)),
-                                                    lineWidth: isCenter ? 2.4 : 1.0
-                                                )
-                                            )
-                                            .shadow(color: isCenter ? Color.cyan.opacity(0.55) : .clear, radius: 8)
-                                        SharkPreviewView(form: itemForm, width: 46, height: 28, locked: !itemUnlocked)
-                                    }
-                                    Text(vm.lang == "zh" ? itemForm.nameZh : itemForm.nameEn)
-                                        .font(.system(size: 8.5, weight: .black))
-                                        .foregroundColor(isCenter ? .white : .gray)
-                                        .lineLimit(1)
+                                        )
+                                        .shadow(color: isCenter ? Color.cyan.opacity(0.55) : .clear, radius: 8)
+                                    SharkPreviewView(form: itemForm, width: 46, height: 28, locked: !itemUnlocked)
                                 }
-                                .scaleEffect(scale)
-                                .rotationEffect(.degrees(angleDeg * 0.42))
-                                .opacity(opacity)
+                                Text(vm.lang == "zh" ? itemForm.nameZh : itemForm.nameEn)
+                                    .font(.system(size: 8.5, weight: .black))
+                                    .foregroundColor(isCenter ? .white : .gray)
+                                    .lineLimit(1)
                             }
-                            .buttonStyle(.plain)
+                            .scaleEffect(scale)
+                            .rotationEffect(.degrees(angleDeg * 0.42))
+                            .opacity(opacity)
+                            .contentShape(Circle())
+                            .onTapGesture {
+                                isDraggingWheel = false
+                                dragBaseWheelPos = nil
+                                snapWheel(to: Double(rawIdx))
+                            }
                             .position(x: dialW * CGFloat(xPct), y: dialH * CGFloat(yPct))
                             .zIndex(10.0 - absOff)
                         }
                     }
                 }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 2)
-                        .onChanged { val in
-                            if dragBaseWheelPos == nil {
-                                dragBaseWheelPos = wheelPosition
-                            }
-                            let startPos = dragBaseWheelPos ?? wheelPosition
-                            let newPos = startPos - Double(val.translation.width) / 56.0
-                            wheelPosition = newPos
-                            let curIdx = ((Int(newPos.rounded()) % total) + total) % total
-                            if curIdx != inspectedIndex {
-                                inspectedIndex = curIdx
-                            }
-                            if curIdx != lastTickIndex {
-                                lastTickIndex = curIdx
-                                UISelectionFeedbackGenerator().selectionChanged()
-                            }
-                        }
-                        .onEnded { val in
-                            let startPos = dragBaseWheelPos ?? wheelPosition
-                            dragBaseWheelPos = nil
-                            let predictedPos = startPos - Double(val.predictedEndTranslation.width) / 56.0
-                            let clampedTarget = max(wheelPosition - 6.0, min(wheelPosition + 6.0, predictedPos))
-                            snapWheel(to: clampedTarget)
-                        }
-                )
             }
             .frame(height: 114)
             .padding(.bottom, 6)
         }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { val in
+                    let total = GameConfigGenerated.sharkForms.count
+                    let now = Date()
+                    let tx = Double(val.translation.width)
+                    let pxPerSlot = 52.0
+
+                    if !isDraggingWheel || dragBaseWheelPos == nil {
+                        isDraggingWheel = true
+                        wheelTargetSlot = nil
+                        dragBaseWheelPos = wheelPosition
+                        lastDragTranslationX = tx
+                        lastDragTimestamp = now
+                        wheelVelocity = 0.0
+                    } else {
+                        let dt = max(0.004, now.timeIntervalSince(lastDragTimestamp))
+                        let stepDx = tx - lastDragTranslationX
+                        let instVel = (-stepDx / pxPerSlot) / dt
+                        wheelVelocity = wheelVelocity * 0.55 + instVel * 0.45
+                        lastDragTranslationX = tx
+                        lastDragTimestamp = now
+                    }
+
+                    let startPos = dragBaseWheelPos ?? wheelPosition
+                    let newPos = startPos - tx / pxPerSlot
+                    wheelPosition = newPos
+                    let curIdx = ((Int(newPos.rounded()) % total) + total) % total
+                    if curIdx != inspectedIndex {
+                        inspectedIndex = curIdx
+                    }
+                    if curIdx != lastTickIndex {
+                        lastTickIndex = curIdx
+                        UISelectionFeedbackGenerator().selectionChanged()
+                        vm.playUiTick()
+                    }
+                }
+                .onEnded { val in
+                    let pxPerSlot = 52.0
+                    let startPos = dragBaseWheelPos ?? wheelPosition
+                    isDraggingWheel = false
+                    dragBaseWheelPos = nil
+
+                    let predictedEndPos = startPos - Double(val.predictedEndTranslation.width) / pxPerSlot
+                    let extraThrowSlots = max(-8.5, min(8.5, predictedEndPos - wheelPosition))
+                    let idleSec = Date().timeIntervalSince(lastDragTimestamp)
+                    let releaseVel = idleSec > 0.09 ? 0.0 : max(-18.0, min(18.0, wheelVelocity))
+
+                    if abs(releaseVel) > 1.2 || abs(extraThrowSlots) > 0.65 {
+                        wheelVelocity = releaseVel != 0 ? releaseVel : extraThrowSlots * 4.5
+                        wheelTargetSlot = (wheelPosition + max(-8.0, min(8.0, wheelVelocity * 0.25))).rounded()
+                    } else {
+                        wheelVelocity = 0.0
+                        wheelTargetSlot = wheelPosition.rounded()
+                    }
+                }
+        )
     }
 
     // MARK: - Right/Bottom: De-Boxed Command Deck (Trait + 4-Col Stat Strip + 3-Col Mastery Crowns + Gate/Reinforce + Actions)

@@ -29,10 +29,18 @@ interface SharkEvolutionAtlasModalProps {
 }
 
 const TOTAL_SHARKS = SHARK_EVOLUTION_FORMS.length; // 48
-const ARC_OFFSETS = [-3, -2, -1, 0, 1, 2, 3] as const;
+const ARC_OFFSETS = [-4, -3, -2, -1, 0, 1, 2, 3, 4] as const;
 
 function wrapIndex(idx: number): number {
   return ((idx % TOTAL_SHARKS) + TOTAL_SHARKS) % TOTAL_SHARKS;
+}
+
+/** Shortest signed distance on the 48-shark ring from current wrapped index to target index */
+function shortestRingDelta(fromIdx: number, toIdx: number): number {
+  let d = wrapIndex(toIdx) - wrapIndex(fromIdx);
+  if (d > TOTAL_SHARKS / 2) d -= TOTAL_SHARKS;
+  if (d < -TOTAL_SHARKS / 2) d += TOTAL_SHARKS;
+  return d;
 }
 
 export const SharkEvolutionAtlasModal: React.FC<
@@ -70,8 +78,8 @@ export const SharkEvolutionAtlasModal: React.FC<
     liveRunMaxDepth,
   ]);
 
-  // Smart initial focus: prioritize ready-to-evolve shark if available, otherwise active shark
-  const [activeIndex, setActiveIndex] = useState<number>(() => {
+  // Continuous floating-point wheel position (supports infinite rotation + momentum inertia)
+  const initialIndex = useMemo(() => {
     if (readyToEvolveSharks.length > 0) {
       return readyToEvolveSharks[0].index;
     }
@@ -79,31 +87,126 @@ export const SharkEvolutionAtlasModal: React.FC<
       metaSave.selectedSharkId || 'shark_00_clown_fry'
     );
     return activeForm.index;
-  });
+  }, []);
 
-  // Live pointer drag state for smooth touch/mouse carousel wheel swiping
-  const [dragOffsetPx, setDragOffsetPx] = useState<number>(0);
+  const [wheelPos, setWheelPos] = useState<number>(initialIndex);
+  const wheelPosRef = useRef<number>(initialIndex);
+  const wheelVelRef = useRef<number>(0); // slots per second
+  const targetSlotRef = useRef<number | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef<number>(0);
+
+  const activeIndex = wrapIndex(Math.round(wheelPos));
+
   const dragStateRef = useRef<{
     isDragging: boolean;
     pointerId: number | null;
     startX: number;
+    startWheelPos: number;
     lastX: number;
-    startTime: number;
+    lastTime: number;
+    velocitySlotsPerSec: number;
     hasMoved: boolean;
   }>({
     isDragging: false,
     pointerId: null,
     startX: 0,
+    startWheelPos: initialIndex,
     lastX: 0,
-    startTime: 0,
+    lastTime: 0,
+    velocitySlotsPerSec: 0,
     hasMoved: false,
   });
   const lastWheelTimeRef = useRef<number>(0);
 
-  const stepCarousel = useCallback((delta: number) => {
-    setDragOffsetPx(0);
-    setActiveIndex((prev) => wrapIndex(prev + delta));
+  const stopPhysicsLoop = useCallback(() => {
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    }
   }, []);
+
+  // 60FPS physical momentum coasting + critically-damped spring snap loop
+  const startPhysicsLoop = useCallback(() => {
+    if (rafIdRef.current !== null) return;
+    lastFrameTimeRef.current = performance.now();
+
+    const stepPhysics = (now: number) => {
+      const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameTimeRef.current) / 1000));
+      lastFrameTimeRef.current = now;
+
+      if (dragStateRef.current.isDragging) {
+        rafIdRef.current = null;
+        return;
+      }
+
+      let pos = wheelPosRef.current;
+      let vel = wheelVelRef.current;
+      const target = targetSlotRef.current;
+
+      if (target !== null) {
+        // Critically-damped spring attraction + momentum toward target integer slot
+        const disp = target - pos;
+        const stiffness = 145;
+        const damping = 21;
+        const accel = disp * stiffness - vel * damping;
+        vel += accel * dt;
+        pos += vel * dt;
+
+        if (Math.abs(disp) < 0.003 && Math.abs(vel) < 0.02) {
+          pos = target;
+          vel = 0;
+          targetSlotRef.current = null;
+          wheelPosRef.current = pos;
+          wheelVelRef.current = 0;
+          setWheelPos(pos);
+          rafIdRef.current = null;
+          return;
+        }
+      } else {
+        // Free momentum coasting with exponential hydrodynamic friction, then engage spring snap
+        pos += vel * dt;
+        vel *= Math.exp(-4.2 * dt);
+        if (Math.abs(vel) < 2.2) {
+          targetSlotRef.current = Math.round(pos + vel * 0.14);
+        }
+      }
+
+      wheelPosRef.current = pos;
+      wheelVelRef.current = vel;
+      setWheelPos(pos);
+      rafIdRef.current = requestAnimationFrame(stepPhysics);
+    };
+
+    rafIdRef.current = requestAnimationFrame(stepPhysics);
+  }, []);
+
+  useEffect(() => {
+    return () => stopPhysicsLoop();
+  }, [stopPhysicsLoop]);
+
+  const animateToSlot = useCallback(
+    (targetSlot: number, initialBoostVel: number = 0) => {
+      const snappedTarget = Math.round(targetSlot);
+      targetSlotRef.current = snappedTarget;
+      if (initialBoostVel !== 0) {
+        wheelVelRef.current = initialBoostVel;
+      }
+      startPhysicsLoop();
+    },
+    [startPhysicsLoop]
+  );
+
+  const stepCarousel = useCallback(
+    (delta: number) => {
+      const baseTarget =
+        targetSlotRef.current !== null
+          ? targetSlotRef.current
+          : Math.round(wheelPosRef.current);
+      animateToSlot(baseTarget + delta);
+    },
+    [animateToSlot]
+  );
 
   // Keyboard Left/Right Arrow navigation for non-touch desktop convenience
   useEffect(() => {
@@ -125,17 +228,22 @@ export const SharkEvolutionAtlasModal: React.FC<
 
   const handleStagePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest('button')) return;
+    stopPhysicsLoop();
+    targetSlotRef.current = null;
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch {
       // Ignore synthetic pointer capture errors
     }
+    const now = performance.now();
     dragStateRef.current = {
       isDragging: true,
       pointerId: e.pointerId,
       startX: e.clientX,
+      startWheelPos: wheelPosRef.current,
       lastX: e.clientX,
-      startTime: performance.now(),
+      lastTime: now,
+      velocitySlotsPerSec: 0,
       hasMoved: false,
     };
   };
@@ -145,12 +253,26 @@ export const SharkEvolutionAtlasModal: React.FC<
     if (!st.isDragging || (st.pointerId !== null && e.pointerId !== st.pointerId)) {
       return;
     }
-    const dx = e.clientX - st.startX;
+    const now = performance.now();
+    const dt = Math.max(0.004, (now - st.lastTime) / 1000);
+    const stepDx = e.clientX - st.lastX;
+    const totalDx = e.clientX - st.startX;
     st.lastX = e.clientX;
-    if (Math.abs(dx) > 6) {
+    st.lastTime = now;
+
+    if (Math.abs(totalDx) > 5) {
       st.hasMoved = true;
     }
-    setDragOffsetPx(Math.max(-220, Math.min(220, dx)));
+
+    // 56px horizontal drag = 1 full shark slot along the rotary arc dial
+    const pxPerSlot = 56;
+    const instVelSlots = (-stepDx / pxPerSlot) / dt;
+    st.velocitySlotsPerSec = st.velocitySlotsPerSec * 0.55 + instVelSlots * 0.45;
+
+    const nextPos = st.startWheelPos - totalDx / pxPerSlot;
+    wheelPosRef.current = nextPos;
+    wheelVelRef.current = st.velocitySlotsPerSec;
+    setWheelPos(nextPos);
   };
 
   const finishStagePointerDrag = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -158,40 +280,55 @@ export const SharkEvolutionAtlasModal: React.FC<
     if (!st.isDragging || (st.pointerId !== null && e.pointerId !== st.pointerId)) {
       return;
     }
-    const dx = e.clientX - st.startX;
-    const elapsed = Math.max(16, performance.now() - st.startTime);
-    const velocity = dx / elapsed; // px per ms
-
+    const now = performance.now();
+    const idleTime = (now - st.lastTime) / 1000;
     st.isDragging = false;
     st.pointerId = null;
-    setDragOffsetPx(0);
 
-    if (Math.abs(dx) > 36 || Math.abs(velocity) > 0.35) {
-      const steps =
-        Math.abs(velocity) > 0.95 && Math.abs(dx) > 90
-          ? 2
-          : 1;
-      stepCarousel(dx < 0 ? steps : -steps);
+    // Decay velocity if finger paused before lifting
+    const releaseVel =
+      idleTime > 0.09
+        ? 0
+        : Math.max(-18, Math.min(18, st.velocitySlotsPerSec));
+    wheelVelRef.current = releaseVel;
+
+    if (Math.abs(releaseVel) > 1.2) {
+      // Momentum coasting across multiple sharks, then spring-settle onto predicted integer slot
+      const predictedSlot = Math.round(
+        wheelPosRef.current + Math.max(-8, Math.min(8, releaseVel * 0.26))
+      );
+      targetSlotRef.current = predictedSlot;
+    } else {
+      targetSlotRef.current = Math.round(wheelPosRef.current);
     }
+    startPhysicsLoop();
   };
 
   const handleStageWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     const now = performance.now();
-    if (now - lastWheelTimeRef.current < 130) return;
+    if (now - lastWheelTimeRef.current < 90) return;
     const dominantDelta =
       Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    if (Math.abs(dominantDelta) > 12) {
+    if (Math.abs(dominantDelta) > 8) {
       lastWheelTimeRef.current = now;
       stepCarousel(dominantDelta > 0 ? 1 : -1);
     }
   };
 
+  const handleJumpToIndex = useCallback(
+    (targetIdx: number) => {
+      const curRounded = Math.round(wheelPosRef.current);
+      const delta = shortestRingDelta(curRounded, targetIdx);
+      animateToSlot(curRounded + delta);
+    },
+    [animateToSlot]
+  );
+
   const handleJumpToActive = () => {
     const activeForm = getSharkFormById(
       metaSave.selectedSharkId || 'shark_00_clown_fry'
     );
-    setDragOffsetPx(0);
-    setActiveIndex(activeForm.index);
+    handleJumpToIndex(activeForm.index);
   };
 
   const handleJumpToReady = () => {
@@ -200,8 +337,7 @@ export const SharkEvolutionAtlasModal: React.FC<
     const curIdx = readyToEvolveSharks.findIndex((s) => s.id === curForm.id);
     const nextReady =
       readyToEvolveSharks[(curIdx + 1) % readyToEvolveSharks.length];
-    setDragOffsetPx(0);
-    setActiveIndex(nextReady.index);
+    handleJumpToIndex(nextReady.index);
   };
 
   const inspectedForm = SHARK_EVOLUTION_FORMS[activeIndex];
@@ -292,7 +428,8 @@ export const SharkEvolutionAtlasModal: React.FC<
     };
   }, []);
 
-  const normalizedDrag = dragOffsetPx / 105; // smooth angular drag offset in slot units
+  const baseWheelInt = Math.floor(wheelPos);
+  const wheelFrac = wheelPos - baseWheelInt;
   const isCompactStage = stageSize.w < 460 || stageSize.h < 310;
 
   return (
@@ -566,44 +703,50 @@ export const SharkEvolutionAtlasModal: React.FC<
                     />
                   </svg>
 
-                  {/* 7 Neighboring Sharks Floating Organically Along the Arc (Well-Spaced, Zero Overlap) */}
+                  {/* Continuous Rotary Sharks Floating Organically Along the Arc (Draggable + Momentum Inertia) */}
                   <div className="relative w-full h-full flex items-center justify-center">
-                    {ARC_OFFSETS.map((relOffset) => {
-                      const sharkIdx = wrapIndex(activeIndex + relOffset);
+                    {ARC_OFFSETS.map((k) => {
+                      const rawSlot = baseWheelInt + k;
+                      const sharkIdx = wrapIndex(rawSlot);
                       const shark = SHARK_EVOLUTION_FORMS[sharkIdx];
-                      const isArcCenter = relOffset === 0;
+                      const slotPos = k - wheelFrac;
+                      const absSlot = Math.abs(slotPos);
+                      if (absSlot > 3.65) return null;
+
+                      const isArcCenter = absSlot < 0.45;
                       const unlocked = metaSave.unlockedSharkIds.includes(
                         shark.id
                       );
                       const isActive = metaSave.selectedSharkId === shark.id;
 
-                      const slotPos = relOffset + normalizedDrag;
                       const maxHalfSpan = Math.min(
                         186,
                         Math.round(stageSize.w * 0.44)
                       );
                       const xPx = (slotPos / 3.05) * maxHalfSpan;
                       const normalizedX = Math.min(
-                        1.2,
-                        Math.abs(slotPos) / 3.05
+                        1.25,
+                        absSlot / 3.05
                       );
                       const yPx = -4 + normalizedX * normalizedX * 18;
                       const rotDeg = slotPos * 6.5;
-                      const scale = isArcCenter
-                        ? 1.12
-                        : Math.max(0.64, 0.78 - Math.abs(slotPos) * 0.05);
+                      const scale = Math.max(
+                        0.6,
+                        1.12 - absSlot * 0.14
+                      );
+                      const edgeOpacity = Math.max(
+                        0.15,
+                        1 - Math.max(0, absSlot - 2.4) * 0.7
+                      );
 
                       return (
                         <div
-                          key={shark.id}
+                          key={`${shark.id}-${k}`}
                           data-testid={`atlas-card-${shark.id}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             if (dragStateRef.current.hasMoved) return;
-                            if (shark.index !== activeIndex) {
-                              setDragOffsetPx(0);
-                              setActiveIndex(shark.index);
-                            }
+                            animateToSlot(rawSlot);
                           }}
                           style={{
                             transform: `translate3d(${xPx.toFixed(
@@ -612,22 +755,22 @@ export const SharkEvolutionAtlasModal: React.FC<
                               1
                             )}px, 0) rotate(${rotDeg.toFixed(
                               1
-                            )}deg) scale(${scale.toFixed(2)})`,
+                            )}deg) scale(${scale.toFixed(3)})`,
+                            opacity: unlocked
+                              ? edgeOpacity
+                              : edgeOpacity * 0.65,
                             zIndex: isArcCenter
                               ? 35
-                              : Math.round(25 - Math.abs(slotPos) * 3),
-                            transition: dragStateRef.current.isDragging
-                              ? 'none'
-                              : 'transform 280ms cubic-bezier(0.22, 1, 0.36, 1)',
+                              : Math.round(25 - absSlot * 3),
                           }}
-                          className={`absolute w-10 h-10 sm:w-11 sm:h-11 rounded-full flex flex-col items-center justify-center gap-0.5 cursor-pointer select-none ${
+                          className={`absolute w-10 h-10 sm:w-11 sm:h-11 rounded-full flex flex-col items-center justify-center gap-0.5 cursor-grab active:cursor-grabbing select-none ${
                             isArcCenter
                               ? 'bg-sky-400/20 shadow-[0_0_18px_rgba(56,189,248,0.65)]'
                               : isActive
                               ? 'bg-emerald-400/15'
                               : unlocked
                               ? 'hover:bg-white/[0.06]'
-                              : 'opacity-60 hover:opacity-85'
+                              : 'hover:opacity-90'
                           }`}
                         >
                           {isArcCenter && (
@@ -798,8 +941,7 @@ export const SharkEvolutionAtlasModal: React.FC<
                       type="button"
                       onClick={() => {
                         if (unlockCheck.bestParentId) {
-                          setDragOffsetPx(0);
-                          setActiveIndex(unlockCheck.bestParentIndex);
+                          handleJumpToIndex(unlockCheck.bestParentIndex);
                         }
                       }}
                       title={
