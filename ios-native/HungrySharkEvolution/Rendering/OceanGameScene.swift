@@ -1298,7 +1298,7 @@ public final class OceanGameScene: SKScene {
         }
 
         // 2. Update & Render 3D Spinning Coin & Gene Pickups with Magnetic Pull
-        let magnetR = (vm.frenzyActive ? 390.0 : 220.0) + stats.magnetRadiusBonus
+        let magnetR = (vm.frenzyActive ? 390.0 : 120.0) + stats.magnetRadius
         var kIdx = activePickups.count - 1
         while kIdx >= 0 {
             let pk = activePickups[kIdx]
@@ -1455,7 +1455,7 @@ public final class OceanGameScene: SKScene {
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.5)
                 }
-            case .MINE_STATIC:
+            case .MINE_HAZARD:
                 p.vx = sin(p.stateTimer * 0.8 + p.phase * 0.2) * 8.0
                 p.vy = cos(p.stateTimer * 1.1 + p.phase * 0.3) * 12.0
             default:
@@ -1475,7 +1475,7 @@ public final class OceanGameScene: SKScene {
             }
 
             // Jaw Suction Pull: pull devourable prey straight into the shark's open jaws when close!
-            let suctionRadius = (88.0 + stats.magnetRadiusBonus * 0.35) * stats.scale
+            let suctionRadius = (58.0 + stats.magnetRadius * 0.35) * stats.jawSuctionMultiplier * stats.scale
             let mouthX = sharkX + cos(sharkAngle) * 28.0 * stats.scale
             let mouthY = sharkY + sin(sharkAngle) * 28.0 * stats.scale
             let mouthDist = hypot(mouthX - p.x, mouthY - p.y)

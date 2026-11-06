@@ -100,8 +100,9 @@
 - [ ] **8. 吞噬五位一体特效**：确认靠近小鱼时有吸口牵引，吞噬瞬间有鲨鱼前扑张嘴动画、绿色/金色粘液气泡爆散、3D 翻转金币与基因结晶磁吸飞入、以及双语浮动加分飘字。
 - [ ] **9. 进化转轮丝滑度**：打开进化图谱，慢速拖动与快速甩动底部弧形鲨鱼列表，确认转轮连续丝滑跟手、带机械刻度震动反馈与惯性弹簧吸附。
 - [ ] **10. 双手多点触控**：左手大拇指按住摇杆持续画圈游动的同时，右手连续点击强化、突破、狂暴与按住冲刺，确认 100% 即时响应且绝不打断左手摇杆。
-- [ ] **11. 自动化测试与构建**：`npx tsx --test src/game/rules.test.ts`、`npm run lint`、`npm run build`（及对应平台构建脚本如 `npm run build:ios`）全部零错误通过。
-- [ ] **12. 文档同步**：所有变更已同步更新至 `docs/01 ~ 05.md`。
+- [ ] **11. 跨语言数据模型字段与枚举值 100% 契约对齐**：代码生成器（如 `scripts/build-ios-native.ts`）中 `GameModels.swift` 定义的 `ComputedSharkStats` 属性名（如 `magnetRadius`、`jawSuctionMultiplier`）及 `PreyBehavior` 枚举分支（如 `.MINE_HAZARD`）与渲染层 `OceanGameScene.swift` 引用处必须 100% 严格一致，严禁手写臆造未定义的成员名（如 `magnetRadiusBonus` 或 `.MINE_STATIC`）。
+- [ ] **12. 自动化测试与构建**：`npx tsx --test src/game/rules.test.ts`、`npm run lint`、`npm run build`（及对应平台构建脚本如 `npm run build:ios`）全部零错误通过。
+- [ ] **13. 文档同步**：所有变更已同步更新至 `docs/01 ~ 05.md`。
 
 ---
 
@@ -109,4 +110,6 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-06 | 修复 Xcode 编译时 `OceanGameScene.swift` 中 `ComputedSharkStats.magnetRadius`（原误写为 `magnetRadiusBonus`）与 `PreyBehavior.MINE_HAZARD`（原误写为 `.MINE_STATIC`）的字段/枚举名不匹配问题，并补充跨语言模型字段契约对齐检查项 | `scripts/build-ios-native.ts`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-05 | 首次创建《移动端与跨平台原生移植避坑指南》，系统总结 iOS 真机调试中发现的 10 大跨平台问题（UI 图集去底与切片、多语言 `{count}/{mult}` 占位符、HUD 遮挡主角、背景水平/垂直分界线、猎物生物力学步态与曲线轨迹、进化图谱连续惯性转轮、吞噬五位一体特效等）及 12 项上线必检清单 | `scripts/build-ios-native.ts`, `src/game/i18n.ts`, `src/App.tsx`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
+
