@@ -12,6 +12,7 @@ import {
   UI_SETTING_BOUNDS,
 } from '../src/game/spriteSheetManager';
 import { I18N } from '../src/game/i18n';
+import { GOOGLE_ADS_CONFIG } from '../src/game/adManager';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -248,6 +249,11 @@ public enum GameConfigGenerated {
     public static let baseMagnetRadius: Double = ${GAME_CONFIG.world.baseMagnetRadius}
     public static let baseBiteTier: Int = ${GAME_CONFIG.world.baseBiteTier}
     public static let frenzyDuration: Double = ${GAME_CONFIG.world.frenzyDuration}
+
+    // Google AdMob & H5 Games Ads Production Identifiers
+    public static let googleAdMobAppId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.admobAppId)}"
+    public static let googleAdMobRewardedAdUnitId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.admobRewardedAdUnitId)}"
+    public static let googleH5ClientId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.h5ClientId)}"
 
     public static let sharkForms: [SharkFormConfig] = [
 ${sharkEntries}
@@ -1033,7 +1039,6 @@ public final class SpriteAtlasManager {
     }
 
     private func loadBundledImage(named name: String) -> UIImage? {
-        if let img = UIImage(named: name) { return img }
         if let path = Bundle.main.path(forResource: name, ofType: "png"),
            let img = UIImage(contentsOfFile: path) {
             return img
@@ -1042,6 +1047,7 @@ public final class SpriteAtlasManager {
            let img = UIImage(contentsOfFile: path) {
             return img
         }
+        if let img = UIImage(named: name) { return img }
         return nil
     }
 
@@ -2316,6 +2322,90 @@ import SwiftUI
 import UIKit
 import AudioToolbox
 import simd
+#if canImport(GoogleMobileAds)
+import GoogleMobileAds
+#endif
+
+/// Production Google AdMob Rewarded Video Bridge (App ID: ${GOOGLE_ADS_CONFIG.admobAppId}, Unit ID: ${GOOGLE_ADS_CONFIG.admobRewardedAdUnitId}).
+/// Automatically activates real GADRewardedAd when GoogleMobileAds SPM package is linked in Xcode,
+/// and seamlessly falls back to the 3s in-app rewarded preview when offline or before SPM linking.
+@MainActor
+public final class GoogleAdMobManager: NSObject {
+    public static let shared = GoogleAdMobManager()
+    public let appId: String = GameConfigGenerated.googleAdMobAppId
+    public let rewardedAdUnitId: String = GameConfigGenerated.googleAdMobRewardedAdUnitId
+
+    #if canImport(GoogleMobileAds)
+    private var rewardedAd: GADRewardedAd?
+    private var isLoadingAd: Bool = false
+    private var sdkStarted: Bool = false
+    #endif
+
+    public func startSDKAndPreload() {
+        #if canImport(GoogleMobileAds)
+        if !sdkStarted {
+            sdkStarted = true
+            GADMobileAds.sharedInstance().start { [weak self] _ in
+                Task { @MainActor in
+                    self?.preloadRewardedAd()
+                }
+            }
+        } else {
+            preloadRewardedAd()
+        }
+        #endif
+    }
+
+    public func preloadRewardedAd() {
+        #if canImport(GoogleMobileAds)
+        guard !isLoadingAd, rewardedAd == nil else { return }
+        isLoadingAd = true
+        let request = GADRequest()
+        GADRewardedAd.load(withAdUnitID: rewardedAdUnitId, request: request) { [weak self] ad, error in
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.isLoadingAd = false
+                if error == nil, let loadedAd = ad {
+                    self.rewardedAd = loadedAd
+                }
+            }
+        }
+        #endif
+    }
+
+    public func showRewardedAd(
+        onReward: @escaping () -> Void,
+        onFallback: @escaping () -> Void
+    ) {
+        #if canImport(GoogleMobileAds)
+        guard let ad = rewardedAd,
+              let rootVC = Self.topViewController() else {
+            preloadRewardedAd()
+            onFallback()
+            return
+        }
+        rewardedAd = nil
+        ad.present(fromRootViewController: rootVC) {
+            onReward()
+        }
+        preloadRewardedAd()
+        #else
+        onFallback()
+        #endif
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let window = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) ?? scenes.flatMap({ $0.windows }).first,
+              var top = window.rootViewController else {
+            return nil
+        }
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+        return top
+    }
+}
 
 public enum OnboardingStep: String, Sendable {
     case EAT_SMALL_FISH
@@ -2412,6 +2502,7 @@ public final class GameViewModel: ObservableObject {
         }
         recomputeCurrentSharkStats()
         pickNewBountyPrey()
+        GoogleAdMobManager.shared.startSDKAndPreload()
     }
 
     public func persistSave() {
@@ -2756,8 +2847,19 @@ public final class GameViewModel: ObservableObject {
         playUiTick()
     }
 
-    // MARK: - 3s Simulated Rewarded Video Ad
+    // MARK: - Google AdMob Rewarded Video + 3s Fallback Simulator
     public func openSimulatedRewardedAd(kind: SimRewardedAdKind) {
+        GoogleAdMobManager.shared.showRewardedAd(
+            onReward: { [weak self] in
+                self?.grantAdReward(for: kind)
+            },
+            onFallback: { [weak self] in
+                self?.presentFallbackSimulatedAd(kind: kind)
+            }
+        )
+    }
+
+    private func presentFallbackSimulatedAd(kind: SimRewardedAdKind) {
         simAdTimer?.invalidate()
         let title: String
         let desc: String
@@ -2802,8 +2904,11 @@ public final class GameViewModel: ObservableObject {
         guard let ad = simAd, ad.secondsLeft <= 0 else { return }
         simAdTimer?.invalidate()
         simAd = nil
+        grantAdReward(for: ad.kind)
+    }
 
-        switch ad.kind {
+    public func grantAdReward(for kind: SimRewardedAdKind) {
+        switch kind {
         case .REVIVE:
             reviveOffered = false
             hp = maxHp
@@ -6829,7 +6934,7 @@ function generateInfoPlist(): string {
     <key>CFBundleDevelopmentRegion</key>
     <string>zh_CN</string>
     <key>CFBundleDisplayName</key>
-    <string>深海狂鲨进化</string>
+    <string>deepsea:evolution</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -6875,6 +6980,19 @@ function generateInfoPlist(): string {
         <string>UIInterfaceOrientationLandscapeRight</string>
         <string>UIInterfaceOrientationPortrait</string>
         <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    </array>
+    <key>GADApplicationIdentifier</key>
+    <string>${GOOGLE_ADS_CONFIG.admobAppId}</string>
+    <key>GADIsAdManagerApp</key>
+    <true/>
+    <key>NSUserTrackingUsageDescription</key>
+    <string>允许追踪以提供个性化深海狩猎激励视频广告体验</string>
+    <key>SKAdNetworkItems</key>
+    <array>
+        <dict>
+            <key>SKAdNetworkIdentifier</key>
+            <string>cstr6suwn9.skadnetwork</string>
+        </dict>
     </array>
 </dict>
 </plist>

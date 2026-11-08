@@ -162,7 +162,6 @@ public final class SpriteAtlasManager {
     }
 
     private func loadBundledImage(named name: String) -> UIImage? {
-        if let img = UIImage(named: name) { return img }
         if let path = Bundle.main.path(forResource: name, ofType: "png"),
            let img = UIImage(contentsOfFile: path) {
             return img
@@ -171,6 +170,7 @@ public final class SpriteAtlasManager {
            let img = UIImage(contentsOfFile: path) {
             return img
         }
+        if let img = UIImage(named: name) { return img }
         return nil
     }
 

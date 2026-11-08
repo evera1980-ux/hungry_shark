@@ -3,6 +3,90 @@ import SwiftUI
 import UIKit
 import AudioToolbox
 import simd
+#if canImport(GoogleMobileAds)
+import GoogleMobileAds
+#endif
+
+/// Production Google AdMob Rewarded Video Bridge (App ID: ca-app-pub-9273669553362347~9016886171, Unit ID: ca-app-pub-9273669553362347/8698331137).
+/// Automatically activates real GADRewardedAd when GoogleMobileAds SPM package is linked in Xcode,
+/// and seamlessly falls back to the 3s in-app rewarded preview when offline or before SPM linking.
+@MainActor
+public final class GoogleAdMobManager: NSObject {
+    public static let shared = GoogleAdMobManager()
+    public let appId: String = GameConfigGenerated.googleAdMobAppId
+    public let rewardedAdUnitId: String = GameConfigGenerated.googleAdMobRewardedAdUnitId
+
+    #if canImport(GoogleMobileAds)
+    private var rewardedAd: GADRewardedAd?
+    private var isLoadingAd: Bool = false
+    private var sdkStarted: Bool = false
+    #endif
+
+    public func startSDKAndPreload() {
+        #if canImport(GoogleMobileAds)
+        if !sdkStarted {
+            sdkStarted = true
+            GADMobileAds.sharedInstance().start { [weak self] _ in
+                Task { @MainActor in
+                    self?.preloadRewardedAd()
+                }
+            }
+        } else {
+            preloadRewardedAd()
+        }
+        #endif
+    }
+
+    public func preloadRewardedAd() {
+        #if canImport(GoogleMobileAds)
+        guard !isLoadingAd, rewardedAd == nil else { return }
+        isLoadingAd = true
+        let request = GADRequest()
+        GADRewardedAd.load(withAdUnitID: rewardedAdUnitId, request: request) { [weak self] ad, error in
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.isLoadingAd = false
+                if error == nil, let loadedAd = ad {
+                    self.rewardedAd = loadedAd
+                }
+            }
+        }
+        #endif
+    }
+
+    public func showRewardedAd(
+        onReward: @escaping () -> Void,
+        onFallback: @escaping () -> Void
+    ) {
+        #if canImport(GoogleMobileAds)
+        guard let ad = rewardedAd,
+              let rootVC = Self.topViewController() else {
+            preloadRewardedAd()
+            onFallback()
+            return
+        }
+        rewardedAd = nil
+        ad.present(fromRootViewController: rootVC) {
+            onReward()
+        }
+        preloadRewardedAd()
+        #else
+        onFallback()
+        #endif
+    }
+
+    private static func topViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let window = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) ?? scenes.flatMap({ $0.windows }).first,
+              var top = window.rootViewController else {
+            return nil
+        }
+        while let presented = top.presentedViewController {
+            top = presented
+        }
+        return top
+    }
+}
 
 public enum OnboardingStep: String, Sendable {
     case EAT_SMALL_FISH
@@ -99,6 +183,7 @@ public final class GameViewModel: ObservableObject {
         }
         recomputeCurrentSharkStats()
         pickNewBountyPrey()
+        GoogleAdMobManager.shared.startSDKAndPreload()
     }
 
     public func persistSave() {
@@ -443,8 +528,19 @@ public final class GameViewModel: ObservableObject {
         playUiTick()
     }
 
-    // MARK: - 3s Simulated Rewarded Video Ad
+    // MARK: - Google AdMob Rewarded Video + 3s Fallback Simulator
     public func openSimulatedRewardedAd(kind: SimRewardedAdKind) {
+        GoogleAdMobManager.shared.showRewardedAd(
+            onReward: { [weak self] in
+                self?.grantAdReward(for: kind)
+            },
+            onFallback: { [weak self] in
+                self?.presentFallbackSimulatedAd(kind: kind)
+            }
+        )
+    }
+
+    private func presentFallbackSimulatedAd(kind: SimRewardedAdKind) {
         simAdTimer?.invalidate()
         let title: String
         let desc: String
@@ -489,8 +585,11 @@ public final class GameViewModel: ObservableObject {
         guard let ad = simAd, ad.secondsLeft <= 0 else { return }
         simAdTimer?.invalidate()
         simAd = nil
+        grantAdReward(for: ad.kind)
+    }
 
-        switch ad.kind {
+    public func grantAdReward(for kind: SimRewardedAdKind) {
+        switch kind {
         case .REVIVE:
             reviveOffered = false
             hp = maxHp

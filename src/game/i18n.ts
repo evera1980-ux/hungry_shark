@@ -2,7 +2,7 @@ export type Lang = 'zh' | 'en';
 
 export const I18N: Record<Lang, Record<string, string>> = {
   zh: {
-    game_title: '饥饿鲨：无限进化',
+    game_title: 'deepsea:evolution',
     game_subtitle: '深海基因掠食者 · 模块化骨骼进化',
     btn_start: '开始捕食',
     btn_trial_mecha: '看广告开局试用：满级赛博机械鲨',
@@ -154,9 +154,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     ad_sim_ready: '奖励已就绪！点击下方按钮立即发放奖励',
     ad_sim_claim_btn: '关闭广告并领取奖励',
     ad_sim_cancel_btn: '放弃奖励',
+    ad_env_admob: 'Google AdMob 原生激励视频',
+    ad_env_h5_ads: 'Google H5 Games Ads',
     ad_env_wx: '微信小游戏广告组件',
     ad_env_tt: '抖音小游戏广告组件',
-    ad_env_web: 'H5 跨端模拟激励广告',
+    ad_env_web: 'Google H5 / AdMob 激励广告',
 
     // Floating Combat Texts
     float_devour: '一口吞噬!',
@@ -215,7 +217,7 @@ export const I18N: Record<Lang, Record<string, string>> = {
     btn_play_again: '再次捕食'
   },
   en: {
-    game_title: 'Hungry Shark: Infinite Evolution',
+    game_title: 'deepsea:evolution',
     game_subtitle: 'Deep-Sea Apex Predator · Modular Skeletal Evolution',
     btn_start: 'Start Hunting',
     btn_trial_mecha: 'Trial Max Mecha Shark (Watch Ad)',
@@ -367,9 +369,11 @@ export const I18N: Record<Lang, Record<string, string>> = {
     ad_sim_ready: 'Reward Unlocked! Click below to claim immediately',
     ad_sim_claim_btn: 'Close Ad & Claim Reward',
     ad_sim_cancel_btn: 'Skip Reward',
+    ad_env_admob: 'Google AdMob Native Rewarded Ad',
+    ad_env_h5_ads: 'Google H5 Games Ads',
     ad_env_wx: 'WeChat Mini-Game Ad SDK',
     ad_env_tt: 'Douyin Mini-Game Ad SDK',
-    ad_env_web: 'HTML5 Simulated Rewarded Ad',
+    ad_env_web: 'Google H5 / AdMob Rewarded Ad',
 
     // Floating Combat Texts
     float_devour: 'DEVOURED!',
