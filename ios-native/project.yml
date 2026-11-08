@@ -4,6 +4,10 @@ options:
   deploymentTarget:
     iOS: "16.0"
   xcodeVersion: "15.0"
+packages:
+  GoogleMobileAds:
+    url: https://github.com/googleads/swift-package-manager-google-mobile-ads.git
+    from: 11.2.0
 targets:
   HungrySharkEvolution:
     type: application
@@ -16,6 +20,9 @@ targets:
       - path: HungrySharkEvolution/Resources/Assets
         type: folder
         buildPhase: resources
+    dependencies:
+      - package: GoogleMobileAds
+        product: GoogleMobileAds
     info:
       path: HungrySharkEvolution/Info.plist
     settings:
@@ -25,4 +32,5 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 5.9
         TARGETED_DEVICE_FAMILY: "1,2"
+        OTHER_LDFLAGS: "-ObjC"
         INFOPLIST_FILE: HungrySharkEvolution/Info.plist

@@ -51,6 +51,7 @@ import {
 } from './game/canvasRenderer';
 import { SharkEvolutionAtlasModal } from './components/SharkEvolutionAtlasModal';
 import { SharkFormCanvasPreview } from './components/SharkFormCanvasPreview';
+import { GoogleRewardedVideoAdOverlay } from './components/GoogleRewardedVideoAdOverlay';
 import {
   getLineageUiIconKey,
   UiAtlasIcon,
@@ -5271,82 +5272,24 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ==================== 6. SIMULATED REWARDED VIDEO AD OVERLAY (3S COUNTDOWN, DE-BOXED) ==================== */}
+      {/* ==================== 6. GOOGLE IMA / H5 REWARDED VIDEO AD PLAYER ==================== */}
       <AnimatePresence>
         {simAd && simAd.active && (
-          <motion.div
-            key="sim-ad-backdrop"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            role="dialog"
-            aria-modal="true"
-            aria-label={t('ad_sim_title')}
-            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/92 pointer-events-auto"
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.86, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 16 }}
-              transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-              className="landscape-modal-card w-full max-w-md max-h-[94dvh] overflow-y-auto bg-gradient-to-b from-[#06132d] to-[#030917] rounded-3xl p-5 sm:p-6 text-center shadow-[0_24px_80px_rgba(0,0,0,0.85)]"
-            >
-              <div className="text-[11px] font-mono-num text-amber-300 tracking-wider mb-1">
-                {t('ad_sim_badge')} · {t(`ad_env_${adManager.detectPlatform()}`)}
-              </div>
-
-              <h3 className="font-display font-extrabold text-lg sm:text-xl text-white mb-1 flex items-center justify-center gap-2">
-                <UiAtlasIcon iconKey="UI_ICON_VIDEO_AD" size={22} />
-                <span>{t('ad_sim_title')}</span>
-              </h3>
-              <p className="text-xs text-slate-300 mb-4">{t('ad_sim_desc')}</p>
-
-              {/* Frameless Animated Ad Preview Stage */}
-              <div className="relative h-24 sm:h-32 w-full rounded-2xl bg-white/[0.04] flex flex-col items-center justify-center mb-4 overflow-hidden">
-                <div className="font-display font-extrabold text-3xl sm:text-4xl text-amber-400 font-mono-num mb-1">
-                  {simAd.secondsLeft > 0 ? `${simAd.secondsLeft}s` : '✓'}
-                </div>
-                <div className="text-xs text-sky-200 font-medium">
-                  {simAd.secondsLeft > 0
-                    ? t('ad_sim_countdown', { sec: simAd.secondsLeft })
-                    : t('ad_sim_ready')}
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  disabled={simAd.secondsLeft > 0}
-                  onClick={() => {
-                    const rewardFn = simAd.onReward;
-                    setSimAd(null);
-                    rewardFn();
-                  }}
-                  className={`game-btn-spring w-full py-3 rounded-2xl font-display font-extrabold text-sm flex items-center justify-center gap-2 ${
-                    simAd.secondsLeft > 0
-                      ? 'bg-white/[0.06] text-slate-500 cursor-not-allowed'
-                      : 'bg-emerald-400 text-slate-950 hover:bg-emerald-300 cursor-pointer'
-                  }`}
-                >
-                  <UiAtlasIcon iconKey="UI_BTN_SUPPLY_DROP" size={20} />
-                  <span>{t('ad_sim_claim_btn')}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const cancelFn = simAd.onCancel;
-                    setSimAd(null);
-                    if (cancelFn) cancelFn();
-                  }}
-                  className="game-btn-spring w-full py-1.5 text-xs text-slate-400 hover:text-white cursor-pointer"
-                >
-                  {t('ad_sim_cancel_btn')}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
+          <GoogleRewardedVideoAdOverlay
+            key="google-video-ad-overlay"
+            placement={simAd.placement}
+            lang={lang}
+            onReward={() => {
+              const rewardFn = simAd.onReward;
+              setSimAd(null);
+              rewardFn();
+            }}
+            onCancel={() => {
+              const cancelFn = simAd.onCancel;
+              setSimAd(null);
+              if (cancelFn) cancelFn();
+            }}
+          />
         )}
       </AnimatePresence>
     </main>

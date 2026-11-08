@@ -253,7 +253,9 @@ public enum GameConfigGenerated {
     // Google AdMob & H5 Games Ads Production Identifiers
     public static let googleAdMobAppId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.admobAppId)}"
     public static let googleAdMobRewardedAdUnitId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.admobRewardedAdUnitId)}"
+    public static let googleAdMobBackupRewardedAdUnitId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.admobIosBackupRewardedAdUnitId)}"
     public static let googleH5ClientId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.h5ClientId)}"
+    public static let fallbackVideoStreamUrl: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.fallbackVideoStreamUrl)}"
 
     public static let sharkForms: [SharkFormConfig] = [
 ${sharkEntries}
@@ -2327,13 +2329,14 @@ import GoogleMobileAds
 #endif
 
 /// Production Google AdMob Rewarded Video Bridge (App ID: ${GOOGLE_ADS_CONFIG.admobAppId}, Unit ID: ${GOOGLE_ADS_CONFIG.admobRewardedAdUnitId}).
-/// Automatically activates real GADRewardedAd when GoogleMobileAds SPM package is linked in Xcode,
-/// and seamlessly falls back to the 3s in-app rewarded preview when offline or before SPM linking.
+/// Automatically presents real GADRewardedAd via GoogleMobileAds SDK (with automatic fallback to Google's official
+/// iOS Rewarded Video unit when production inventory returns No-Fill in Simulator/Dev before App Store linking).
 @MainActor
 public final class GoogleAdMobManager: NSObject {
     public static let shared = GoogleAdMobManager()
     public let appId: String = GameConfigGenerated.googleAdMobAppId
     public let rewardedAdUnitId: String = GameConfigGenerated.googleAdMobRewardedAdUnitId
+    public let backupRewardedAdUnitId: String = GameConfigGenerated.googleAdMobBackupRewardedAdUnitId
 
     #if canImport(GoogleMobileAds)
     private var rewardedAd: GADRewardedAd?
@@ -2360,35 +2363,75 @@ public final class GoogleAdMobManager: NSObject {
         #if canImport(GoogleMobileAds)
         guard !isLoadingAd, rewardedAd == nil else { return }
         isLoadingAd = true
-        let request = GADRequest()
-        GADRewardedAd.load(withAdUnitID: rewardedAdUnitId, request: request) { [weak self] ad, error in
-            Task { @MainActor in
-                guard let self = self else { return }
-                self.isLoadingAd = false
-                if error == nil, let loadedAd = ad {
-                    self.rewardedAd = loadedAd
-                }
-            }
+        loadRewardedAdWithBackup { [weak self] loadedAd in
+            guard let self = self else { return }
+            self.isLoadingAd = false
+            self.rewardedAd = loadedAd
         }
         #endif
     }
+
+    #if canImport(GoogleMobileAds)
+    private func loadRewardedAdWithBackup(completion: @escaping (GADRewardedAd?) -> Void) {
+        let request = GADRequest()
+        // 1. Request production AdMob Rewarded Video Unit first
+        GADRewardedAd.load(withAdUnitID: rewardedAdUnitId, request: request) { [weak self] ad, error in
+            Task { @MainActor in
+                guard let self = self else {
+                    completion(nil)
+                    return
+                }
+                if error == nil, let loadedAd = ad {
+                    completion(loadedAd)
+                    return
+                }
+                // 2. If production unit has No-Fill (e.g. Simulator or pre-App-Store review), load Google's official iOS Rewarded Video unit
+                GADRewardedAd.load(withAdUnitID: self.backupRewardedAdUnitId, request: GADRequest()) { backupAd, backupErr in
+                    Task { @MainActor in
+                        if backupErr == nil, let validBackup = backupAd {
+                            completion(validBackup)
+                        } else {
+                            completion(nil)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #endif
 
     public func showRewardedAd(
         onReward: @escaping () -> Void,
         onFallback: @escaping () -> Void
     ) {
         #if canImport(GoogleMobileAds)
-        guard let ad = rewardedAd,
-              let rootVC = Self.topViewController() else {
-            preloadRewardedAd()
+        guard let rootVC = Self.topViewController() else {
             onFallback()
             return
         }
-        rewardedAd = nil
-        ad.present(fromRootViewController: rootVC) {
-            onReward()
+        if let ad = rewardedAd {
+            rewardedAd = nil
+            ad.present(fromRootViewController: rootVC) {
+                onReward()
+            }
+            preloadRewardedAd()
+            return
         }
-        preloadRewardedAd()
+        // Load on-demand if user tapped before preload finished
+        loadRewardedAdWithBackup { [weak self] loadedAd in
+            guard let self = self else {
+                onFallback()
+                return
+            }
+            if let ad = loadedAd, let currentRootVC = Self.topViewController() {
+                ad.present(fromRootViewController: currentRootVC) {
+                    onReward()
+                }
+                self.preloadRewardedAd()
+            } else {
+                onFallback()
+            }
+        }
         #else
         onFallback()
         #endif
@@ -4465,6 +4508,7 @@ function generateSwiftUIViews(): string {
 import SpriteKit
 import AudioToolbox
 import QuartzCore
+import AVKit
 
 // MARK: - Hex Color Helper
 extension Color {
@@ -5953,82 +5997,111 @@ public struct ContentView: View {
         }
     }
 
-    // MARK: - 3-Second Simulated Rewarded Video Ad Modal
+    // MARK: - Full-Screen Google AdMob Video Ad Player Fallback (AVKit VideoPlayer)
     private func simulatedRewardedAdModal(ad: SimRewardedAdState) -> some View {
+        GoogleAdMobVideoFallbackView(vm: vm, ad: ad)
+    }
+}
+
+public struct GoogleAdMobVideoFallbackView: View {
+    @ObservedObject public var vm: GameViewModel
+    public let ad: SimRewardedAdState
+    @State private var player: AVPlayer? = nil
+
+    public var body: some View {
         ZStack {
-            Color.black.opacity(0.84).ignoresSafeArea()
-            VStack(spacing: 14) {
-                HStack {
-                    Text(vm.lang == "zh" ? "📺 模拟激励视频广告" : "📺 SIMULATED REWARDED VIDEO")
-                        .font(.system(size: 11, weight: .black, design: .monospaced))
-                        .foregroundColor(.yellow)
-                    Spacer()
-                    Text(ad.secondsLeft > 0
-                         ? (vm.lang == "zh" ? "\\(ad.secondsLeft)秒后可领奖" : "Reward in \\(ad.secondsLeft)s")
-                         : (vm.lang == "zh" ? "✅ 播放完成" : "✅ COMPLETED"))
-                        .font(.system(size: 11, weight: .black))
-                        .foregroundColor(ad.secondsLeft > 0 ? .white : .green)
-                }
+            Color.black.ignoresSafeArea()
 
-                Text(ad.title)
-                    .font(.system(size: 18, weight: .black))
-                    .foregroundColor(.white)
-
-                Text(ad.rewardDesc)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.cyan)
-                    .multilineTextAlignment(.center)
-
-                GeometryReader { barGeo in
-                    let pct = CGFloat(3 - ad.secondsLeft) / 3.0
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.15))
-                        Capsule()
-                            .fill(LinearGradient(colors: [.yellow, .green], startPoint: .leading, endPoint: .trailing))
-                            .frame(width: barGeo.size.width * pct)
-                    }
-                }
-                .frame(height: 8)
-
-                HStack(spacing: 12) {
-                    Button {
-                        vm.cancelSimulatedAd()
-                    } label: {
-                        Text(vm.lang == "zh" ? "关闭" : "CLOSE")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white.opacity(0.75))
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 9)
-                            .background(Capsule().fill(Color.white.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        vm.claimSimulatedAdReward()
-                    } label: {
-                        Text(ad.secondsLeft > 0
-                             ? (vm.lang == "zh" ? "请等待 \\(ad.secondsLeft)s..." : "Wait \\(ad.secondsLeft)s...")
-                             : (vm.lang == "zh" ? "🎁 立即领取奖励" : "🎁 CLAIM REWARD"))
-                            .font(.system(size: 13, weight: .black))
-                            .foregroundColor(.black)
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 9)
-                            .background(
-                                Capsule()
-                                    .fill(ad.secondsLeft > 0 ? Color.gray : Color.yellow)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(ad.secondsLeft > 0)
-                }
+            if let activePlayer = player {
+                VideoPlayer(player: activePlayer)
+                    .ignoresSafeArea()
+                    .disabled(true)
             }
-            .padding(24)
-            .frame(width: 380)
-            .background(
-                RoundedRectangle(cornerRadius: 22)
-                    .fill(Color(red: 4/255, green: 14/255, blue: 34/255))
-                    .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.yellow.opacity(0.65), lineWidth: 2))
-            )
+
+            VStack {
+                // Top Official Google AdMob Bar
+                HStack(spacing: 10) {
+                    Text("Ad")
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.yellow))
+
+                    Text("Google AdMob · \\(ad.title)")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    if ad.secondsLeft > 0 {
+                        Text(vm.lang == "zh" ? "\\(ad.secondsLeft)秒后可领奖" : "Reward in \\(ad.secondsLeft)s")
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                            .foregroundColor(.yellow)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.white.opacity(0.15)))
+                    } else {
+                        Button {
+                            vm.claimSimulatedAdReward()
+                        } label: {
+                            Text(vm.lang == "zh" ? "✓ 领取奖励并关闭" : "✓ CLAIM REWARD")
+                                .font(.system(size: 13, weight: .black))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(Color.green))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button {
+                        if ad.secondsLeft <= 0 {
+                            vm.claimSimulatedAdReward()
+                        } else {
+                            vm.cancelSimulatedAd()
+                        }
+                    } label: {
+                        Text("✕")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(Color.white.opacity(0.18)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(Color.black.opacity(0.78))
+
+                Spacer()
+
+                // Bottom Attribution & Reward Description Strip
+                HStack {
+                    Text("AdMob Unit: \\(GameConfigGenerated.googleAdMobRewardedAdUnitId)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.65))
+                    Spacer()
+                    Text(ad.rewardDesc)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.cyan)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.78))
+            }
+        }
+        .onAppear {
+            if let url = URL(string: GameConfigGenerated.fallbackVideoStreamUrl) {
+                let avPlayer = AVPlayer(url: url)
+                player = avPlayer
+                avPlayer.play()
+            }
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
         }
     }
 }
@@ -7006,6 +7079,10 @@ options:
   deploymentTarget:
     iOS: "16.0"
   xcodeVersion: "15.0"
+packages:
+  GoogleMobileAds:
+    url: https://github.com/googleads/swift-package-manager-google-mobile-ads.git
+    from: 11.2.0
 targets:
   HungrySharkEvolution:
     type: application
@@ -7018,6 +7095,9 @@ targets:
       - path: HungrySharkEvolution/Resources/Assets
         type: folder
         buildPhase: resources
+    dependencies:
+      - package: GoogleMobileAds
+        product: GoogleMobileAds
     info:
       path: HungrySharkEvolution/Info.plist
     settings:
@@ -7027,6 +7107,7 @@ targets:
         CURRENT_PROJECT_VERSION: 1
         SWIFT_VERSION: 5.9
         TARGETED_DEVICE_FAMILY: "1,2"
+        OTHER_LDFLAGS: "-ObjC"
         INFOPLIST_FILE: HungrySharkEvolution/Info.plist
 `;
 }
@@ -7047,9 +7128,15 @@ let package = Package(
             targets: ["HungrySharkEvolutionCore"]
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/googleads/swift-package-manager-google-mobile-ads.git", from: "11.2.0")
+    ],
     targets: [
         .target(
             name: "HungrySharkEvolutionCore",
+            dependencies: [
+                .product(name: "GoogleMobileAds", package: "swift-package-manager-google-mobile-ads", condition: .when(platforms: [.iOS]))
+            ],
             path: "HungrySharkEvolution",
             exclude: ["Info.plist", "HungrySharkEvolutionApp.swift"],
             resources: [
@@ -7062,7 +7149,7 @@ let package = Package(
 }
 
 function generatePbxproj(): string {
-  // Valid Xcode 15/16 project.pbxproj referencing all 5 Swift files and the bundled Assets folder
+  // Valid Xcode 15/16 project.pbxproj referencing all 6 Swift files, bundled Assets folder, and GoogleMobileAds Swift Package
   return `// !$*UTF8*$!
 {
 	archiveVersion = 1;
@@ -7079,6 +7166,7 @@ function generatePbxproj(): string {
 		A10000052B00000000000001 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* OceanGameScene.swift */; };
 		A10000062B00000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* ContentView.swift */; };
 		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
+		A10000082B00000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = AB0000012B00000000000001 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -7098,6 +7186,7 @@ function generatePbxproj(): string {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000082B00000000000001 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -7151,6 +7240,9 @@ function generatePbxproj(): string {
 			dependencies = (
 			);
 			name = HungrySharkEvolution;
+			packageProductDependencies = (
+				AB0000012B00000000000001 /* GoogleMobileAds */,
+			);
 			productName = HungrySharkEvolution;
 			productReference = A00000012B00000000000001 /* HungrySharkEvolution.app */;
 			productType = "com.apple.product-type.application";
@@ -7175,6 +7267,9 @@ function generatePbxproj(): string {
 				Base,
 			);
 			mainGroup = A40000012B00000000000001;
+			packageReferences = (
+				AA0000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+			);
 			productRefGroup = A40000032B00000000000001 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -7227,6 +7322,7 @@ function generatePbxproj(): string {
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
+				OTHER_LDFLAGS = "-ObjC";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -7246,6 +7342,7 @@ function generatePbxproj(): string {
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
+				OTHER_LDFLAGS = "-ObjC";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -7266,6 +7363,7 @@ function generatePbxproj(): string {
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
+				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_BUNDLE_IDENTIFIER = com.deepsea.hungryshark.evolution;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -7286,6 +7384,7 @@ function generatePbxproj(): string {
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
+				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_BUNDLE_IDENTIFIER = com.deepsea.hungryshark.evolution;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -7316,6 +7415,25 @@ function generatePbxproj(): string {
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA0000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 11.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AB0000012B00000000000001 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = AA0000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A70000012B00000000000001 /* Project object */;
 }

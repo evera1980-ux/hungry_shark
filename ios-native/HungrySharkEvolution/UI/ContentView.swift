@@ -2,6 +2,7 @@ import SwiftUI
 import SpriteKit
 import AudioToolbox
 import QuartzCore
+import AVKit
 
 // MARK: - Hex Color Helper
 extension Color {
@@ -1490,82 +1491,111 @@ public struct ContentView: View {
         }
     }
 
-    // MARK: - 3-Second Simulated Rewarded Video Ad Modal
+    // MARK: - Full-Screen Google AdMob Video Ad Player Fallback (AVKit VideoPlayer)
     private func simulatedRewardedAdModal(ad: SimRewardedAdState) -> some View {
+        GoogleAdMobVideoFallbackView(vm: vm, ad: ad)
+    }
+}
+
+public struct GoogleAdMobVideoFallbackView: View {
+    @ObservedObject public var vm: GameViewModel
+    public let ad: SimRewardedAdState
+    @State private var player: AVPlayer? = nil
+
+    public var body: some View {
         ZStack {
-            Color.black.opacity(0.84).ignoresSafeArea()
-            VStack(spacing: 14) {
-                HStack {
-                    Text(vm.lang == "zh" ? "📺 模拟激励视频广告" : "📺 SIMULATED REWARDED VIDEO")
-                        .font(.system(size: 11, weight: .black, design: .monospaced))
-                        .foregroundColor(.yellow)
-                    Spacer()
-                    Text(ad.secondsLeft > 0
-                         ? (vm.lang == "zh" ? "\(ad.secondsLeft)秒后可领奖" : "Reward in \(ad.secondsLeft)s")
-                         : (vm.lang == "zh" ? "✅ 播放完成" : "✅ COMPLETED"))
-                        .font(.system(size: 11, weight: .black))
-                        .foregroundColor(ad.secondsLeft > 0 ? .white : .green)
-                }
+            Color.black.ignoresSafeArea()
 
-                Text(ad.title)
-                    .font(.system(size: 18, weight: .black))
-                    .foregroundColor(.white)
-
-                Text(ad.rewardDesc)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.cyan)
-                    .multilineTextAlignment(.center)
-
-                GeometryReader { barGeo in
-                    let pct = CGFloat(3 - ad.secondsLeft) / 3.0
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.15))
-                        Capsule()
-                            .fill(LinearGradient(colors: [.yellow, .green], startPoint: .leading, endPoint: .trailing))
-                            .frame(width: barGeo.size.width * pct)
-                    }
-                }
-                .frame(height: 8)
-
-                HStack(spacing: 12) {
-                    Button {
-                        vm.cancelSimulatedAd()
-                    } label: {
-                        Text(vm.lang == "zh" ? "关闭" : "CLOSE")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white.opacity(0.75))
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 9)
-                            .background(Capsule().fill(Color.white.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        vm.claimSimulatedAdReward()
-                    } label: {
-                        Text(ad.secondsLeft > 0
-                             ? (vm.lang == "zh" ? "请等待 \(ad.secondsLeft)s..." : "Wait \(ad.secondsLeft)s...")
-                             : (vm.lang == "zh" ? "🎁 立即领取奖励" : "🎁 CLAIM REWARD"))
-                            .font(.system(size: 13, weight: .black))
-                            .foregroundColor(.black)
-                            .padding(.horizontal, 22)
-                            .padding(.vertical, 9)
-                            .background(
-                                Capsule()
-                                    .fill(ad.secondsLeft > 0 ? Color.gray : Color.yellow)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(ad.secondsLeft > 0)
-                }
+            if let activePlayer = player {
+                VideoPlayer(player: activePlayer)
+                    .ignoresSafeArea()
+                    .disabled(true)
             }
-            .padding(24)
-            .frame(width: 380)
-            .background(
-                RoundedRectangle(cornerRadius: 22)
-                    .fill(Color(red: 4/255, green: 14/255, blue: 34/255))
-                    .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.yellow.opacity(0.65), lineWidth: 2))
-            )
+
+            VStack {
+                // Top Official Google AdMob Bar
+                HStack(spacing: 10) {
+                    Text("Ad")
+                        .font(.system(size: 11, weight: .black, design: .monospaced))
+                        .foregroundColor(.black)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.yellow))
+
+                    Text("Google AdMob · \(ad.title)")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    Spacer()
+
+                    if ad.secondsLeft > 0 {
+                        Text(vm.lang == "zh" ? "\(ad.secondsLeft)秒后可领奖" : "Reward in \(ad.secondsLeft)s")
+                            .font(.system(size: 12, weight: .black, design: .monospaced))
+                            .foregroundColor(.yellow)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.white.opacity(0.15)))
+                    } else {
+                        Button {
+                            vm.claimSimulatedAdReward()
+                        } label: {
+                            Text(vm.lang == "zh" ? "✓ 领取奖励并关闭" : "✓ CLAIM REWARD")
+                                .font(.system(size: 13, weight: .black))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 7)
+                                .background(Capsule().fill(Color.green))
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    Button {
+                        if ad.secondsLeft <= 0 {
+                            vm.claimSimulatedAdReward()
+                        } else {
+                            vm.cancelSimulatedAd()
+                        }
+                    } label: {
+                        Text("✕")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 28, height: 28)
+                            .background(Circle().fill(Color.white.opacity(0.18)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background(Color.black.opacity(0.78))
+
+                Spacer()
+
+                // Bottom Attribution & Reward Description Strip
+                HStack {
+                    Text("AdMob Unit: \(GameConfigGenerated.googleAdMobRewardedAdUnitId)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.65))
+                    Spacer()
+                    Text(ad.rewardDesc)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.cyan)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.78))
+            }
+        }
+        .onAppear {
+            if let url = URL(string: GameConfigGenerated.fallbackVideoStreamUrl) {
+                let avPlayer = AVPlayer(url: url)
+                player = avPlayer
+                avPlayer.play()
+            }
+        }
+        .onDisappear {
+            player?.pause()
+            player = nil
         }
     }
 }

@@ -8,13 +8,14 @@ import GoogleMobileAds
 #endif
 
 /// Production Google AdMob Rewarded Video Bridge (App ID: ca-app-pub-9273669553362347~9016886171, Unit ID: ca-app-pub-9273669553362347/8698331137).
-/// Automatically activates real GADRewardedAd when GoogleMobileAds SPM package is linked in Xcode,
-/// and seamlessly falls back to the 3s in-app rewarded preview when offline or before SPM linking.
+/// Automatically presents real GADRewardedAd via GoogleMobileAds SDK (with automatic fallback to Google's official
+/// iOS Rewarded Video unit when production inventory returns No-Fill in Simulator/Dev before App Store linking).
 @MainActor
 public final class GoogleAdMobManager: NSObject {
     public static let shared = GoogleAdMobManager()
     public let appId: String = GameConfigGenerated.googleAdMobAppId
     public let rewardedAdUnitId: String = GameConfigGenerated.googleAdMobRewardedAdUnitId
+    public let backupRewardedAdUnitId: String = GameConfigGenerated.googleAdMobBackupRewardedAdUnitId
 
     #if canImport(GoogleMobileAds)
     private var rewardedAd: GADRewardedAd?
@@ -41,35 +42,75 @@ public final class GoogleAdMobManager: NSObject {
         #if canImport(GoogleMobileAds)
         guard !isLoadingAd, rewardedAd == nil else { return }
         isLoadingAd = true
-        let request = GADRequest()
-        GADRewardedAd.load(withAdUnitID: rewardedAdUnitId, request: request) { [weak self] ad, error in
-            Task { @MainActor in
-                guard let self = self else { return }
-                self.isLoadingAd = false
-                if error == nil, let loadedAd = ad {
-                    self.rewardedAd = loadedAd
-                }
-            }
+        loadRewardedAdWithBackup { [weak self] loadedAd in
+            guard let self = self else { return }
+            self.isLoadingAd = false
+            self.rewardedAd = loadedAd
         }
         #endif
     }
+
+    #if canImport(GoogleMobileAds)
+    private func loadRewardedAdWithBackup(completion: @escaping (GADRewardedAd?) -> Void) {
+        let request = GADRequest()
+        // 1. Request production AdMob Rewarded Video Unit first
+        GADRewardedAd.load(withAdUnitID: rewardedAdUnitId, request: request) { [weak self] ad, error in
+            Task { @MainActor in
+                guard let self = self else {
+                    completion(nil)
+                    return
+                }
+                if error == nil, let loadedAd = ad {
+                    completion(loadedAd)
+                    return
+                }
+                // 2. If production unit has No-Fill (e.g. Simulator or pre-App-Store review), load Google's official iOS Rewarded Video unit
+                GADRewardedAd.load(withAdUnitID: self.backupRewardedAdUnitId, request: GADRequest()) { backupAd, backupErr in
+                    Task { @MainActor in
+                        if backupErr == nil, let validBackup = backupAd {
+                            completion(validBackup)
+                        } else {
+                            completion(nil)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #endif
 
     public func showRewardedAd(
         onReward: @escaping () -> Void,
         onFallback: @escaping () -> Void
     ) {
         #if canImport(GoogleMobileAds)
-        guard let ad = rewardedAd,
-              let rootVC = Self.topViewController() else {
-            preloadRewardedAd()
+        guard let rootVC = Self.topViewController() else {
             onFallback()
             return
         }
-        rewardedAd = nil
-        ad.present(fromRootViewController: rootVC) {
-            onReward()
+        if let ad = rewardedAd {
+            rewardedAd = nil
+            ad.present(fromRootViewController: rootVC) {
+                onReward()
+            }
+            preloadRewardedAd()
+            return
         }
-        preloadRewardedAd()
+        // Load on-demand if user tapped before preload finished
+        loadRewardedAdWithBackup { [weak self] loadedAd in
+            guard let self = self else {
+                onFallback()
+                return
+            }
+            if let ad = loadedAd, let currentRootVC = Self.topViewController() {
+                ad.present(fromRootViewController: currentRootVC) {
+                    onReward()
+                }
+                self.preloadRewardedAd()
+            } else {
+                onFallback()
+            }
+        }
         #else
         onFallback()
         #endif

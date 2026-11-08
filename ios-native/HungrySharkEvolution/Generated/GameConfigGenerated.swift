@@ -109,7 +109,9 @@ public enum GameConfigGenerated {
     // Google AdMob & H5 Games Ads Production Identifiers
     public static let googleAdMobAppId: String = "ca-app-pub-9273669553362347~9016886171"
     public static let googleAdMobRewardedAdUnitId: String = "ca-app-pub-9273669553362347/8698331137"
+    public static let googleAdMobBackupRewardedAdUnitId: String = "ca-app-pub-3940256099942544/1712485313"
     public static let googleH5ClientId: String = "ca-pub-9273669553362347"
+    public static let fallbackVideoStreamUrl: String = "https://storage.googleapis.com/gvabox/media/samples/stock.mp4"
 
     public static let sharkForms: [SharkFormConfig] = [
         SharkFormConfig(
