@@ -579,7 +579,9 @@ public struct ContentView: View {
     }()
     @State private var knobOffset: CGSize = .zero
 
-    public init() {}
+    public init() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
+    }
 
     public var body: some View {
         GeometryReader { geo in
