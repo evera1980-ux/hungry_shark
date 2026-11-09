@@ -1729,7 +1729,7 @@ export default function App() {
         const inputX = patrolDir;
         const inputY =
           Math.sin(now * 0.0022) * 0.12 +
-          Math.max(-0.18, Math.min(0.18, (240 - shark.y) * 0.008));
+          Math.max(-0.18, Math.min(0.18, (285 - shark.y) * 0.008));
 
         shark.targetAngle = Math.atan2(inputY, inputX);
         let diff = shark.targetAngle - shark.angle;
@@ -1786,16 +1786,19 @@ export default function App() {
           (Math.sin(shark.angle) * patrolSpeed - shark.vy) * Math.min(1, dt * 7);
 
         shark.x = infiniteWorldManager.wrapEntityX(shark.x + shark.vx * dt);
-        shark.y = Math.max(140, Math.min(340, shark.y + shark.vy * dt));
+        shark.y = Math.max(190, Math.min(375, shark.y + shark.vy * dt));
 
         const speedNorm =
           Math.hypot(shark.vx, shark.vy) /
           Math.max(180, shark.stats.moveSpeed || 280);
         shark.swimPhase += dt * (4.8 + speedNorm * 6.8);
 
-        sim.camera.x = shark.x;
-        sim.camera.y = shark.y;
         sim.camera.zoom = 1.15;
+        // Shift camera upward relative to shark.y so the hero shark swims at ~60.5% viewport height,
+        // centered in the open ocean band between the wide 3.57:1 top title banner and bottom action buttons.
+        const titleSharkDownOffsetWorld = (viewH * 0.105) / sim.camera.zoom;
+        sim.camera.x = shark.x;
+        sim.camera.y = shark.y - titleSharkDownOffsetWorld;
 
         // Ambient prey swim on title screen
         if (sim.preyList.length === 0) {
@@ -3536,56 +3539,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* ==================== TOP-RIGHT UTILITY BAR (ON TITLE SCREEN) ==================== */}
-      <AnimatePresence>
-        {gameState === 'title' && (
-          <motion.div
-            key="title-top-right-bar"
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-            className="fixed top-2.5 right-2.5 sm:top-3.5 sm:right-3.5 md:top-4 md:right-4 z-30 flex items-center gap-1 sm:gap-2 pointer-events-auto"
-          >
-            <button
-              type="button"
-              onClick={toggleLanguage}
-              aria-label={t('btn_lang_toggle')}
-              className="game-btn-spring px-2 py-1 sm:px-3.5 sm:py-1.5 md:px-4 md:py-2 rounded-full font-display font-bold text-[10px] sm:text-xs tracking-wide text-sky-100 bg-slate-950/65 hover:bg-slate-900/90 shadow-md whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              {t('btn_lang_toggle')}
-            </button>
-
-            <button
-              type="button"
-              tabIndex={-1}
-              onClick={toggleMute}
-              aria-label={isMuted ? t('btn_unmute') : t('btn_mute')}
-              className="game-btn-spring px-2 py-1 sm:px-3.5 sm:py-1.5 md:px-4 md:py-2 rounded-full font-display font-semibold text-[10px] sm:text-xs text-slate-200 bg-slate-950/65 hover:bg-slate-900/90 shadow-md flex items-center gap-1 sm:gap-1.5 whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <UiAtlasIcon
-                iconKey="UI_ICON_SOUND"
-                size={14}
-                className={isMuted ? 'opacity-40 grayscale' : ''}
-              />
-              <span>{isMuted ? t('btn_unmute') : t('btn_mute')}</span>
-            </button>
-
-            <button
-              type="button"
-              data-testid="toggle-debug-panel-title-btn"
-              onClick={() => setShowDebugPanel((prev) => !prev)}
-              className={`hidden game-btn-spring px-3.5 py-1.5 md:px-4 md:py-2 rounded-full font-display font-bold text-xs shadow-md whitespace-nowrap shrink-0 cursor-pointer ${
-                showDebugPanel
-                  ? 'bg-cyan-400 text-slate-950'
-                  : 'bg-slate-950/65 text-cyan-200 hover:bg-slate-900/90'
-              }`}
-            >
-              🛠 {lang === 'zh' ? '调参' : 'Debug'}
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Top-right language & sound buttons removed from Title Screen per design spec (available in in-game pause modal) */}
 
       {/* ==================== LIVE REAL-TIME DEBUG REGULATOR PANEL ==================== */}
       <AnimatePresence>
@@ -3749,110 +3703,24 @@ export default function App() {
                 'radial-gradient(circle at 50% 35%, rgba(2, 132, 199, 0.12) 0%, rgba(2, 6, 23, 0.78) 100%)',
             }}
           >
-            {/* Top Section: Top-Left Avatar Module + Upper Title Header */}
-            <div className="w-full flex flex-col items-center">
-              {/* Top-Left Corner: Deployed Shark Avatar, Name & Data Module (Reduced 30% in size) */}
-              <motion.div
-                initial={{ opacity: 0, x: -20, y: -12 }}
-                animate={{ opacity: 1, x: 0, y: 0 }}
-                exit={{ opacity: 0, x: -20, y: -12 }}
-                transition={{ type: 'spring', stiffness: 340, damping: 28 }}
-                className="w-full flex items-start justify-start pointer-events-auto"
-              >
-                <UiAvatarDataBar
-                  dataTestId="title-avatar-data-bar"
-                  onClick={() => setShowAtlasModal(true)}
-                  title={
-                    lang === 'zh'
-                      ? '点击打开48阶进化图谱'
-                      : 'Click to open 48-Form Evolution Atlas'
-                  }
-                  className="w-[203px] sm:w-[245px] md:w-[273px] transition-transform hover:scale-[1.02]"
-                  avatarContent={
-                    <SharkFormCanvasPreview
-                      sharkId={titleSharkForm.id}
-                      width={38}
-                      height={27}
-                      animate={true}
-                    />
-                  }
-                  ringOverlay={
-                    <div className="relative w-full h-full pointer-events-none">
-                      <div className="absolute -bottom-0.5 -left-0.5 flex items-center justify-center w-4.5 h-4.5 sm:w-5 sm:h-5">
-                        <UiAtlasIcon
-                          iconKey="UI_BADGE_TIER"
-                          size={18}
-                          className="absolute inset-0"
-                        />
-                        <span className="relative z-10 font-mono-num font-black text-[7px] sm:text-[8px] text-amber-200 hud-stroke leading-none">
-                          T{titleSharkForm.baseBiteTier}
-                        </span>
-                      </div>
-                    </div>
-                  }
-                >
-                  <div className="flex flex-col justify-between h-full text-left py-0.5 min-w-0 overflow-hidden">
-                    <div className="flex items-center justify-between gap-1 text-[7px] sm:text-[8px] md:text-[9px] font-mono-num text-sky-300 font-bold leading-none min-w-0">
-                      <span className="flex items-center gap-0.5 min-w-0 truncate">
-                        <UiAtlasIcon
-                          iconKey={getLineageUiIconKey(titleSharkForm.lineage)}
-                          size={9}
-                        />
-                        <span className="truncate">
-                          G{titleSharkForm.generation} ·{' '}
-                          {lang === 'zh'
-                            ? LINEAGE_META[titleSharkForm.lineage].nameZh
-                            : LINEAGE_META[titleSharkForm.lineage].nameEn}
-                        </span>
-                      </span>
-                      <span className="text-amber-300 shrink-0">
-                        Lv.{titleSharkUpg}/10
-                      </span>
-                    </div>
-
-                    <div className="font-display font-extrabold text-[10px] sm:text-xs md:text-[13px] text-white hud-stroke truncate leading-tight">
-                      {lang === 'zh'
-                        ? titleSharkForm.nameZh
-                        : titleSharkForm.nameEn}
-                    </div>
-
-                    <div className="flex items-center gap-2 text-[8.5px] sm:text-[9.5px] md:text-[10px] font-mono-num font-bold leading-none">
-                      <span className="text-amber-300 flex items-center gap-0.5">
-                        <UiAtlasIcon iconKey="UI_ICON_COIN" size={10} />
-                        {metaSave.bankedCoins}
-                      </span>
-                      <span className="text-emerald-300 flex items-center gap-0.5">
-                        <UiAtlasIcon iconKey="UI_ICON_GENE" size={10} />
-                        {metaSave.bankedGenes}
-                      </span>
-                    </div>
-                  </div>
-                </UiAvatarDataBar>
-              </motion.div>
-
-              {/* Upper Title Header (Moved upward above the central shark animation stage) */}
+            {/* Top Section: Maximized Wide Horizontal Title Banner (3.57:1 aspect ratio, 100% unobstructed top zone) */}
+            <div className="w-full flex flex-col items-center pt-2 sm:pt-2.5 md:pt-3.5">
               <motion.div
                 initial={{ opacity: 0, scale: 0.92, y: -12 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.94, y: -14 }}
                 transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-                className="landscape-title-wrap max-w-2xl mx-auto flex flex-col items-center text-center pointer-events-auto mt-4 sm:mt-5"
+                className="landscape-title-wrap w-full max-w-6xl mx-auto flex flex-col items-center text-center pointer-events-auto"
               >
-                <h1
-                  className="font-display font-extrabold text-white tracking-tight hud-stroke mb-1 sm:mb-1.5"
-                  style={{
-                    fontSize: 'clamp(1.65rem, 3.6vw, 3.2rem)',
-                    textWrap: 'balance',
-                  }}
-                >
-                  {t('game_title')}
+                <h1 className="flex items-center justify-center">
+                  <img
+                    src="/assets/aistudio/title3_cae0290c.png"
+                    alt={t('game_title')}
+                    draggable={false}
+                    className="w-[360px] sm:w-[580px] md:w-[740px] lg:w-[860px] max-w-[94vw] sm:max-w-[88vw] max-h-[30vh] sm:max-h-[36vh] h-auto object-contain select-none drop-shadow-[0_10px_26px_rgba(0,0,0,0.9)]"
+                  />
+                  <span className="sr-only">{t('game_title')}</span>
                 </h1>
-
-                <p className="text-sky-200/90 text-xs sm:text-sm md:text-base font-medium max-w-md px-2">
-                  {lang === 'zh'
-                    ? '48阶鲨鱼本体进化 · 跨局基因与金币养成 · 无缝深海吞噬'
-                    : '48-Form Shark Body Evolution · Persistent Coins & Genes · Seamless Hunting'}
-                </p>
               </motion.div>
             </div>
 

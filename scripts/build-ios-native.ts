@@ -1024,6 +1024,10 @@ public final class SpriteAtlasManager {
         return uiSettingIconImages[key]
     }
 
+    public func titleLogoImage() -> UIImage? {
+        return loadBundledImage(named: "title3_cae0290c") ?? loadBundledImage(named: "title2_dbfd9f83") ?? loadBundledImage(named: "title_11de9fff")
+    }
+
     public func oceanParallaxTexture(named assetName: String, isWaterCanopy: Bool = false) -> SKTexture? {
         if let cached = oceanLayerTextures[assetName] {
             return cached
@@ -3409,10 +3413,11 @@ public final class OceanGameScene: SKScene {
             }
         }
 
-        // 2. Sea-Surface Locked Camera Tracking (keeps shark centered below top HUD bars!)
+        // 2. Sea-Surface Locked Camera Tracking (keeps shark centered below top HUD bars, and shifted lower on Title Screen!)
         let minSurfaceCameraY = 40.0
         let targetCamX = sharkX + cos(sharkAngle) * 58.0
-        let targetCamY = max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0)
+        let titleDownOffset = vm.gameState == "title" ? (viewH * 0.105) / max(0.5, stats.cameraZoom) : 0.0
+        let targetCamY = max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0 - titleDownOffset)
         cameraX += (targetCamX - cameraX) * min(1.0, dt * 6.5)
         cameraY += (targetCamY - cameraY) * min(1.0, dt * 6.5)
 
@@ -5196,25 +5201,23 @@ public struct ContentView: View {
                         scene.refreshSharkTexture()
                     }
 
-                // 2. Top HUD Bar (Row 1: Frameless Avatar Bar + Telemetry Pill + Pause Button; Row 2: Compact Combo / Frenzy Pills)
-                VStack(spacing: 3) {
-                    HStack(alignment: .top, spacing: 8) {
-                        UiAvatarDataBarView(vm: vm, height: isCompactH ? 56 : 64)
-                        Spacer(minLength: 4)
-                        if vm.gameState == "playing" {
+                // 2. Top HUD Bar (Only visible during active gameplay so Title Screen top is 100% clear for the maximized Title Logo)
+                if vm.gameState == "playing" {
+                    VStack(spacing: 3) {
+                        HStack(alignment: .top, spacing: 8) {
+                            UiAvatarDataBarView(vm: vm, height: isCompactH ? 56 : 64)
+                            Spacer(minLength: 4)
                             telemetryPill(isCompact: isCompactH)
                             Spacer(minLength: 4)
                             pauseMedallionButton
                         }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 6)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 6)
 
-                    if vm.gameState == "playing" {
                         hudRow2Overlays
                             .allowsHitTesting(false)
+                        Spacer()
                     }
-                    Spacer()
                 }
 
                 // 3. Title Screen Hero & Bottom 3 Sliced Banner Buttons (UI_BAR_BTN_GREEN / BLUE / GOLD)
@@ -5305,30 +5308,32 @@ public struct ContentView: View {
         let btnH = max(50.0, btnW / 3.6)
 
         return VStack {
-            // Upper Title Banner
-            VStack(spacing: 4) {
-                Text(vm.t("game_title"))
-                    .font(.system(size: min(34, max(22, geo.size.width * 0.042)), weight: .black))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [.white, Color(red: 165/255, green: 243/255, blue: 252/255), Color.cyan],
-                            startPoint: .top,
-                            endPoint: .bottom
+            // Upper Title Banner (Wide 3.57:1 horizontal banner title3_cae0290c.png, maximized across top zone)
+            VStack(spacing: 0) {
+                if let titleImg = SpriteAtlasManager.shared.titleLogoImage() {
+                    Image(uiImage: titleImg)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(
+                            width: min(720, max(340, geo.size.width * 0.82)),
+                            height: min(210, max(98, geo.size.height * 0.34))
                         )
-                    )
-                    .shadow(color: .black.opacity(0.85), radius: 8, x: 0, y: 3)
-                Text(vm.t("title_sub_short"))
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(Color(red: 224/255, green: 242/255, blue: 254/255).opacity(0.92))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(Color(red: 2/255, green: 12/255, blue: 32/255).opacity(0.55))
-                            .overlay(Capsule().stroke(Color.cyan.opacity(0.35), lineWidth: 1))
-                    )
+                        .shadow(color: .black.opacity(0.9), radius: 16, x: 0, y: 6)
+                } else {
+                    Text(vm.t("game_title"))
+                        .font(.system(size: min(40, max(26, geo.size.width * 0.05)), weight: .black))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [.white, Color(red: 165/255, green: 243/255, blue: 252/255), Color.cyan],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .shadow(color: .black.opacity(0.85), radius: 8, x: 0, y: 3)
+                }
             }
-            .padding(.top, max(54, geo.size.height * 0.14))
+            .padding(.top, max(8, geo.size.height * 0.02))
 
             Spacer()
 
