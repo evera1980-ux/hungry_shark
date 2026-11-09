@@ -8,24 +8,24 @@
 
 /* Begin PBXBuildFile section */
 		A10000012B00000000000001 /* HungrySharkEvolutionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012B00000000000001 /* HungrySharkEvolutionApp.swift */; };
-		A10000022B00000000000001 /* GameConfigGenerated.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000022B00000000000001 /* GameConfigGenerated.swift */; };
-		A10000032B00000000000001 /* GameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000032B00000000000001 /* GameRules.swift */; };
-		A10000042B00000000000001 /* SpriteAtlasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000042B00000000000001 /* SpriteAtlasManager.swift */; };
-		A10000052B00000000000001 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* OceanGameScene.swift */; };
-		A10000062B00000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* ContentView.swift */; };
-		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
+		A10000022B00000000000001 /* Generated/GameConfigGenerated.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000022B00000000000001 /* Generated/GameConfigGenerated.swift */; };
+		A10000032B00000000000001 /* Core/GameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000032B00000000000001 /* Core/GameRules.swift */; };
+		A10000042B00000000000001 /* Rendering/SpriteAtlasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000042B00000000000001 /* Rendering/SpriteAtlasManager.swift */; };
+		A10000052B00000000000001 /* Rendering/OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* Rendering/OceanGameScene.swift */; };
+		A10000062B00000000000001 /* UI/ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* UI/ContentView.swift */; };
+		A10000072B00000000000001 /* Resources/Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Resources/Assets */; };
 		A10000082B00000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = A10000092B00000000000001 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A00000012B00000000000001 /* HungrySharkEvolution.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HungrySharkEvolution.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000012B00000000000001 /* HungrySharkEvolutionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HungrySharkEvolutionApp.swift; sourceTree = "<group>"; };
-		A20000022B00000000000001 /* GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/GameConfigGenerated.swift; sourceTree = "<group>"; };
-		A20000032B00000000000001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/GameRules.swift; sourceTree = "<group>"; };
-		A20000042B00000000000001 /* SpriteAtlasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/SpriteAtlasManager.swift; sourceTree = "<group>"; };
-		A20000052B00000000000001 /* OceanGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/OceanGameScene.swift; sourceTree = "<group>"; };
-		A20000062B00000000000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/ContentView.swift; sourceTree = "<group>"; };
-		A20000072B00000000000001 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Assets; sourceTree = "<group>"; };
+		A20000022B00000000000001 /* Generated/GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/GameConfigGenerated.swift; sourceTree = "<group>"; };
+		A20000032B00000000000001 /* Core/GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/GameRules.swift; sourceTree = "<group>"; };
+		A20000042B00000000000001 /* Rendering/SpriteAtlasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/SpriteAtlasManager.swift; sourceTree = "<group>"; };
+		A20000052B00000000000001 /* Rendering/OceanGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/OceanGameScene.swift; sourceTree = "<group>"; };
+		A20000062B00000000000001 /* UI/ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/ContentView.swift; sourceTree = "<group>"; };
+		A20000072B00000000000001 /* Resources/Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Assets; sourceTree = "<group>"; };
 		A20000082B00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -53,12 +53,12 @@
 			isa = PBXGroup;
 			children = (
 				A20000012B00000000000001 /* HungrySharkEvolutionApp.swift */,
-				A20000022B00000000000001 /* GameConfigGenerated.swift */,
-				A20000032B00000000000001 /* GameRules.swift */,
-				A20000042B00000000000001 /* SpriteAtlasManager.swift */,
-				A20000052B00000000000001 /* OceanGameScene.swift */,
-				A20000062B00000000000001 /* ContentView.swift */,
-				A20000072B00000000000001 /* Assets */,
+				A20000022B00000000000001 /* Generated/GameConfigGenerated.swift */,
+				A20000032B00000000000001 /* Core/GameRules.swift */,
+				A20000042B00000000000001 /* Rendering/SpriteAtlasManager.swift */,
+				A20000052B00000000000001 /* Rendering/OceanGameScene.swift */,
+				A20000062B00000000000001 /* UI/ContentView.swift */,
+				A20000072B00000000000001 /* Resources/Assets */,
 				A20000082B00000000000001 /* Info.plist */,
 			);
 			path = HungrySharkEvolution;
@@ -132,7 +132,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000072B00000000000001 /* Assets in Resources */,
+				A10000072B00000000000001 /* Resources/Assets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -144,11 +144,11 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000012B00000000000001 /* HungrySharkEvolutionApp.swift in Sources */,
-				A10000022B00000000000001 /* GameConfigGenerated.swift in Sources */,
-				A10000032B00000000000001 /* GameRules.swift in Sources */,
-				A10000042B00000000000001 /* SpriteAtlasManager.swift in Sources */,
-				A10000052B00000000000001 /* OceanGameScene.swift in Sources */,
-				A10000062B00000000000001 /* ContentView.swift in Sources */,
+				A10000022B00000000000001 /* Generated/GameConfigGenerated.swift in Sources */,
+				A10000032B00000000000001 /* Core/GameRules.swift in Sources */,
+				A10000042B00000000000001 /* Rendering/SpriteAtlasManager.swift in Sources */,
+				A10000052B00000000000001 /* Rendering/OceanGameScene.swift in Sources */,
+				A10000062B00000000000001 /* UI/ContentView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -204,6 +204,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
 				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -225,6 +226,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
 				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
