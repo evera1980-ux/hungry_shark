@@ -3,6 +3,7 @@ import SpriteKit
 import AudioToolbox
 import QuartzCore
 import AVKit
+import WebKit
 
 // MARK: - Hex Color Helper
 extension Color {
@@ -1491,29 +1492,202 @@ public struct ContentView: View {
         }
     }
 
-    // MARK: - Full-Screen Google AdMob Video Ad Player Fallback (AVKit VideoPlayer)
+    // MARK: - Full-Screen Google IMA / AdMob Video Ad Player
     private func simulatedRewardedAdModal(ad: SimRewardedAdState) -> some View {
         GoogleAdMobVideoFallbackView(vm: vm, ad: ad)
     }
 }
 
+public struct GoogleIMAWebViewRepresentable: UIViewRepresentable {
+    public let vastTagUrl: String
+    public let fallbackStreamUrl: String
+    public let admobUnitId: String
+    public let h5ClientId: String
+    public let onAdRewardCompleted: () -> Void
+
+    public final class Coordinator: NSObject, WKScriptMessageHandler {
+        public var onAdRewardCompleted: () -> Void
+        public init(onAdRewardCompleted: @escaping () -> Void) {
+            self.onAdRewardCompleted = onAdRewardCompleted
+        }
+        public func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            if message.name == "googleAdsBridge",
+               let body = message.body as? String,
+               body == "reward" {
+                DispatchQueue.main.async {
+                    self.onAdRewardCompleted()
+                }
+            }
+        }
+    }
+
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(onAdRewardCompleted: onAdRewardCompleted)
+    }
+
+    public func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        config.userContentController.add(context.coordinator, name: "googleAdsBridge")
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
+
+        let html = """
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+          <script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+            html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: -apple-system, sans-serif; }
+            #stage { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
+            #content-video { width: 100%; height: 100%; max-height: 82vh; object-fit: contain; background: #000; }
+            #ad-container { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; }
+          </style>
+        </head>
+        <body>
+          <div id="stage">
+            <video id="content-video" playsinline webkit-playsinline></video>
+            <div id="ad-container"></div>
+          </div>
+          <script>
+            (function() {
+              var videoEl = document.getElementById('content-video');
+              var adContainer = document.getElementById('ad-container');
+              var vastUrl = "\(vastTagUrl)";
+              var fallbackMp4 = "\(fallbackStreamUrl)";
+              var completed = false;
+
+              function notifyReward() {
+                if (completed) return;
+                completed = true;
+                try {
+                  window.webkit.messageHandlers.googleAdsBridge.postMessage("reward");
+                } catch (e) {}
+              }
+
+              function startFallbackStream() {
+                videoEl.src = fallbackMp4;
+                videoEl.muted = false;
+                videoEl.onended = notifyReward;
+                var p = videoEl.play();
+                if (p && p.catch) {
+                  p.catch(function() {
+                    videoEl.muted = true;
+                    videoEl.play().catch(function(){});
+                  });
+                }
+              }
+
+              var imaRetries = 0;
+              function bootIMA() {
+                if (!window.google || !window.google.ima) {
+                  if (imaRetries < 25) {
+                    imaRetries++;
+                    setTimeout(bootIMA, 100);
+                    return;
+                  }
+                  startFallbackStream();
+                  return;
+                }
+                try {
+                  var ima = window.google.ima;
+                  var adDisplayContainer = new ima.AdDisplayContainer(adContainer, videoEl);
+                  adDisplayContainer.initialize();
+                  var adsLoader = new ima.AdsLoader(adDisplayContainer);
+
+                  adsLoader.addEventListener(
+                    ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED,
+                    function(e) {
+                      try {
+                        var settings = new ima.AdsRenderingSettings();
+                        settings.enablePreloading = true;
+                        var adsManager = e.getAdsManager(videoEl, settings);
+                        adsManager.addEventListener(ima.AdErrorEvent.Type.AD_ERROR, function() {
+                          try { adsManager.destroy(); } catch (_) {}
+                          startFallbackStream();
+                        });
+                        adsManager.addEventListener(ima.AdEvent.Type.COMPLETE, notifyReward);
+                        adsManager.addEventListener(ima.AdEvent.Type.ALL_ADS_COMPLETED, notifyReward);
+                        adsManager.addEventListener(ima.AdEvent.Type.SKIPPED, notifyReward);
+                        adsManager.init(window.innerWidth || 640, window.innerHeight || 360, ima.ViewMode.NORMAL);
+                        adsManager.start();
+                      } catch (err) {
+                        startFallbackStream();
+                      }
+                    },
+                    false
+                  );
+
+                  adsLoader.addEventListener(
+                    ima.AdErrorEvent.Type.AD_ERROR,
+                    function() {
+                      startFallbackStream();
+                    },
+                    false
+                  );
+
+                  var req = new ima.AdsRequest();
+                  req.adTagUrl = vastUrl + "&correlator=" + Date.now() + "&description_url=" + encodeURIComponent("https://deepsea-evolution.app") + "&cust_params=" + encodeURIComponent("client=\(h5ClientId)&admob_unit=\(admobUnitId)");
+                  req.linearAdSlotWidth = window.innerWidth || 640;
+                  req.linearAdSlotHeight = window.innerHeight || 360;
+                  req.nonLinearAdSlotWidth = window.innerWidth || 640;
+                  req.nonLinearAdSlotHeight = Math.round((window.innerHeight || 360) / 3);
+                  adsLoader.requestAds(req);
+                } catch (e) {
+                  startFallbackStream();
+                }
+              }
+
+              if (document.readyState === "complete" || document.readyState === "interactive") {
+                setTimeout(bootIMA, 60);
+              } else {
+                window.addEventListener("DOMContentLoaded", function() { setTimeout(bootIMA, 60); });
+              }
+            })();
+          </script>
+        </body>
+        </html>
+        """
+        webView.loadHTMLString(html, baseURL: URL(string: "https://deepsea-evolution.app"))
+        return webView
+    }
+
+    public func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+
 public struct GoogleAdMobVideoFallbackView: View {
     @ObservedObject public var vm: GameViewModel
     public let ad: SimRewardedAdState
-    @State private var player: AVPlayer? = nil
 
     public var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let activePlayer = player {
-                VideoPlayer(player: activePlayer)
-                    .ignoresSafeArea()
-                    .disabled(true)
-            }
+            // Real Google IMA HTML5 Video Ad SDK Player (1:1 identical with Web GoogleRewardedVideoAdOverlay)
+            GoogleIMAWebViewRepresentable(
+                vastTagUrl: GameConfigGenerated.imaVastTagUrl,
+                fallbackStreamUrl: GameConfigGenerated.fallbackVideoStreamUrl,
+                admobUnitId: GameConfigGenerated.googleAdMobRewardedAdUnitId,
+                h5ClientId: GameConfigGenerated.googleH5ClientId,
+                onAdRewardCompleted: {
+                    vm.forceCompleteAndClaimAdReward()
+                }
+            )
+            .ignoresSafeArea()
 
             VStack {
-                // Top Official Google AdMob Bar
+                // Top Official Google AdMob / IMA Header Bar
                 HStack(spacing: 10) {
                     Text("Ad")
                         .font(.system(size: 11, weight: .black, design: .monospaced))
@@ -1540,7 +1714,7 @@ public struct GoogleAdMobVideoFallbackView: View {
                         Button {
                             vm.claimSimulatedAdReward()
                         } label: {
-                            Text(vm.lang == "zh" ? "✓ 领取奖励并关闭" : "✓ CLAIM REWARD")
+                            Text(vm.lang == "zh" ? "✓ 领取奖励并关闭" : "✓ CLAIM REWARD & CLOSE")
                                 .font(.system(size: 13, weight: .black))
                                 .foregroundColor(.black)
                                 .padding(.horizontal, 16)
@@ -1567,35 +1741,26 @@ public struct GoogleAdMobVideoFallbackView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)
-                .background(Color.black.opacity(0.78))
+                .background(Color.black.opacity(0.82))
 
                 Spacer()
 
                 // Bottom Attribution & Reward Description Strip
                 HStack {
-                    Text("AdMob Unit: \(GameConfigGenerated.googleAdMobRewardedAdUnitId)")
+                    Text("Google AdMob Unit: \(GameConfigGenerated.googleAdMobRewardedAdUnitId) · H5: \(GameConfigGenerated.googleH5ClientId)")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundColor(.white.opacity(0.65))
+                        .lineLimit(1)
                     Spacer()
                     Text(ad.rewardDesc)
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.cyan)
+                        .lineLimit(1)
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 8)
-                .background(Color.black.opacity(0.78))
+                .background(Color.black.opacity(0.82))
             }
-        }
-        .onAppear {
-            if let url = URL(string: GameConfigGenerated.fallbackVideoStreamUrl) {
-                let avPlayer = AVPlayer(url: url)
-                player = avPlayer
-                avPlayer.play()
-            }
-        }
-        .onDisappear {
-            player?.pause()
-            player = nil
         }
     }
 }

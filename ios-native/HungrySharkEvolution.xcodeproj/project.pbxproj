@@ -14,7 +14,6 @@
 		A10000052B00000000000001 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* OceanGameScene.swift */; };
 		A10000062B00000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* ContentView.swift */; };
 		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
-		A10000082B00000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = AB0000012B00000000000001 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,7 +33,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000082B00000000000001 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -88,9 +86,6 @@
 			dependencies = (
 			);
 			name = HungrySharkEvolution;
-			packageProductDependencies = (
-				AB0000012B00000000000001 /* GoogleMobileAds */,
-			);
 			productName = HungrySharkEvolution;
 			productReference = A00000012B00000000000001 /* HungrySharkEvolution.app */;
 			productType = "com.apple.product-type.application";
@@ -115,9 +110,6 @@
 				Base,
 			);
 			mainGroup = A40000012B00000000000001;
-			packageReferences = (
-				AA0000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
-			);
 			productRefGroup = A40000032B00000000000001 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -263,25 +255,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		AA0000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 11.2.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		AB0000012B00000000000001 /* GoogleMobileAds */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AA0000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
-			productName = GoogleMobileAds;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A70000012B00000000000001 /* Project object */;
 }

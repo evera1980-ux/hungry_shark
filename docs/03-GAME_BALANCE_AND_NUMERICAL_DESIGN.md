@@ -252,6 +252,7 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-09 | 为 `SharkFormConfig`（`src/game/sharkEvolutionConfig.ts`）新增 `sprite3xUrl`（`/assets/sharks_3x/shark_form_00@3x.png` .. `shark_form_47@3x.png`）与 `getShark3xImageUrl()` 辅助函数，使全部 48 阶鲨鱼配置具备独立 `@3x` 超分单图资源映射 | `src/game/sharkEvolutionConfig.ts`, `scripts/build-sharks-3x.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-06 | **全平台（Web + iOS 原生）游动速度下调 50%（冲刺速度对齐原常态移速）**：`GAME_CONFIG.world.baseSharkSpeed` 由 `280` 下调为 `140`（配合 `boostSpeedMultiplier: 2.0`，按住冲刺时 `boostSpeed = 280` 恰好等于原版常态速度，常态巡游速度 `140` 与全部 33 种猎物 `baseSpeed` 同步按 `0.5x` 等比下调），使深海巡游与冲刺爆发节奏更具层次感 | `src/game/config.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-05 | **新增第 3.5 节“鲨鱼成长驱动的远/中/近景光学分级缩小公式 (`getParallaxLayerGrowthScales`)”**：按景深距离权重（`近景 0.70 > 远景鱼群 0.55 > 中景 0.45 > 远景 0.22 > 海面水幕 0.15`）将 `relativePreyScale`（`1.00 -> 0.40`）映射为各背景视差层的动态缩放比（满阶时近景 `0.58x`、中景 `0.73x`、远景 `0.868x`），使鲨鱼长大时近处海床铁锚/珊瑚明显变小并自然显露更开阔的中远景深海奇观 | `src/game/rules.ts`, `src/game/parallaxBackground.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/02-DESIGN_SPEC.md` |
 | 2026-10-31 | **固化默认鱼群刷新数量 `20` 与猎物显示大小 `0.8`（保留调参功能、隐藏调参按钮）**：`ecosystemSpawner.ts` 默认 `maxActivePreys` 设为 `20`，`rules.ts` 默认 `debugPreySizeMultiplier` 设为 `0.8`，`App.tsx` 默认隐藏调参面板与调参按钮并保留全部实时调参代码 | `src/game/ecosystemSpawner.ts`, `src/game/rules.ts`, `src/App.tsx`, `src/game/rules.test.ts` |

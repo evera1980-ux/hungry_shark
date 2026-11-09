@@ -84,11 +84,7 @@ public final class GoogleAdMobManager: NSObject {
         onFallback: @escaping () -> Void
     ) {
         #if canImport(GoogleMobileAds)
-        guard let rootVC = Self.topViewController() else {
-            onFallback()
-            return
-        }
-        if let ad = rewardedAd {
+        if let ad = rewardedAd, let rootVC = Self.topViewController() {
             rewardedAd = nil
             ad.present(fromRootViewController: rootVC) {
                 onReward()
@@ -96,21 +92,8 @@ public final class GoogleAdMobManager: NSObject {
             preloadRewardedAd()
             return
         }
-        // Load on-demand if user tapped before preload finished
-        loadRewardedAdWithBackup { [weak self] loadedAd in
-            guard let self = self else {
-                onFallback()
-                return
-            }
-            if let ad = loadedAd, let currentRootVC = Self.topViewController() {
-                ad.present(fromRootViewController: currentRootVC) {
-                    onReward()
-                }
-                self.preloadRewardedAd()
-            } else {
-                onFallback()
-            }
-        }
+        preloadRewardedAd()
+        onFallback()
         #else
         onFallback()
         #endif
@@ -601,7 +584,7 @@ public final class GameViewModel: ObservableObject {
             title = lang == "zh" ? "高阶巨兽本局免费试驾" : "APEX BEHEMOTH FREE TRIAL"
             desc = lang == "zh" ? "直接驾驶【\(sName)】(Lv.5) 潜入深海狩猎！" : "Deploy [\(sName)] (Lv.5) for this run!"
         }
-        simAd = SimRewardedAdState(kind: kind, title: title, rewardDesc: desc, secondsLeft: 3)
+        simAd = SimRewardedAdState(kind: kind, title: title, rewardDesc: desc, secondsLeft: 5)
         simAdTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self, var current = self.simAd else { return }
@@ -624,6 +607,13 @@ public final class GameViewModel: ObservableObject {
 
     public func claimSimulatedAdReward() {
         guard let ad = simAd, ad.secondsLeft <= 0 else { return }
+        simAdTimer?.invalidate()
+        simAd = nil
+        grantAdReward(for: ad.kind)
+    }
+
+    public func forceCompleteAndClaimAdReward() {
+        guard let ad = simAd else { return }
         simAdTimer?.invalidate()
         simAd = nil
         grantAdReward(for: ad.kind)

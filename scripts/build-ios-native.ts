@@ -255,6 +255,7 @@ public enum GameConfigGenerated {
     public static let googleAdMobRewardedAdUnitId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.admobRewardedAdUnitId)}"
     public static let googleAdMobBackupRewardedAdUnitId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.admobIosBackupRewardedAdUnitId)}"
     public static let googleH5ClientId: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.h5ClientId)}"
+    public static let imaVastTagUrl: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.imaVastTagUrl)}"
     public static let fallbackVideoStreamUrl: String = "${escapeSwiftString(GOOGLE_ADS_CONFIG.fallbackVideoStreamUrl)}"
 
     public static let sharkForms: [SharkFormConfig] = [
@@ -922,10 +923,9 @@ public final class SpriteAtlasManager {
         guard !isPreloaded else { return }
         isPreloaded = true
 
-        // 1. Slice 48-Form 4K Shark Sprite Sheet (sharks_ec921c3b.png)
-        if let sharkSheet = loadBundledImage(named: "sharks_ec921c3b") {
-            sliceSharkSheet(sharkSheet)
-        }
+        // 1. Load 48 individual @3x Super-Resolved Shark PNGs (shark_form_00@3x.png .. shark_form_47@3x.png),
+        //    with automatic fallback to slicing sharks_ec921c3b.png if any @3x file is absent.
+        loadOrSliceSharks()
 
         // 2. Slice Prey Sprite Sheets (fish_24bdaa5a.png & fish2_fc857cfa.png)
         let primarySheet = loadBundledImage(named: "fish_24bdaa5a")
@@ -1049,12 +1049,41 @@ public final class SpriteAtlasManager {
            let img = UIImage(contentsOfFile: path) {
             return img
         }
+        if let path = Bundle.main.path(forResource: "\(name)@3x", ofType: "png"),
+           let img = UIImage(contentsOfFile: path) {
+            return img
+        }
+        if let path = Bundle.main.path(forResource: "\(name)@3x", ofType: "png", inDirectory: "Assets"),
+           let img = UIImage(contentsOfFile: path) {
+            return img
+        }
         if let img = UIImage(named: name) { return img }
         return nil
     }
 
-    private func sliceSharkSheet(_ sheetImage: UIImage) {
+    private func loadOrSliceSharks() {
+        var missingForms: [SharkFormConfig] = []
         for form in GameConfigGenerated.sharkForms {
+            let baseName = String(format: "shark_form_%02d", form.index)
+            if let rawImg = loadBundledImage(named: "\(baseName)@3x") ?? loadBundledImage(named: baseName),
+               let cg = rawImg.cgImage {
+                let img3x = UIImage(cgImage: cg, scale: 3.0, orientation: .up)
+                sharkUIImages[form.spriteKey] = img3x
+                let tex = SKTexture(image: img3x)
+                tex.filteringMode = .linear
+                sharkTextures[form.spriteKey] = tex
+            } else {
+                missingForms.append(form)
+            }
+        }
+        if !missingForms.isEmpty, let sharkSheet = loadBundledImage(named: "sharks_ec921c3b") {
+            sliceSharkSheet(sharkSheet, onlyForms: missingForms)
+        }
+    }
+
+    private func sliceSharkSheet(_ sheetImage: UIImage, onlyForms: [SharkFormConfig]? = nil) {
+        let targetForms = onlyForms ?? GameConfigGenerated.sharkForms
+        for form in targetForms {
             if let sliced = sliceAndKeyNormalizedCell(
                 from: sheetImage,
                 bounds: form.normalizedBounds,
@@ -2405,11 +2434,7 @@ public final class GoogleAdMobManager: NSObject {
         onFallback: @escaping () -> Void
     ) {
         #if canImport(GoogleMobileAds)
-        guard let rootVC = Self.topViewController() else {
-            onFallback()
-            return
-        }
-        if let ad = rewardedAd {
+        if let ad = rewardedAd, let rootVC = Self.topViewController() {
             rewardedAd = nil
             ad.present(fromRootViewController: rootVC) {
                 onReward()
@@ -2417,21 +2442,8 @@ public final class GoogleAdMobManager: NSObject {
             preloadRewardedAd()
             return
         }
-        // Load on-demand if user tapped before preload finished
-        loadRewardedAdWithBackup { [weak self] loadedAd in
-            guard let self = self else {
-                onFallback()
-                return
-            }
-            if let ad = loadedAd, let currentRootVC = Self.topViewController() {
-                ad.present(fromRootViewController: currentRootVC) {
-                    onReward()
-                }
-                self.preloadRewardedAd()
-            } else {
-                onFallback()
-            }
-        }
+        preloadRewardedAd()
+        onFallback()
         #else
         onFallback()
         #endif
@@ -2922,7 +2934,7 @@ public final class GameViewModel: ObservableObject {
             title = lang == "zh" ? "高阶巨兽本局免费试驾" : "APEX BEHEMOTH FREE TRIAL"
             desc = lang == "zh" ? "直接驾驶【\\(sName)】(Lv.5) 潜入深海狩猎！" : "Deploy [\\(sName)] (Lv.5) for this run!"
         }
-        simAd = SimRewardedAdState(kind: kind, title: title, rewardDesc: desc, secondsLeft: 3)
+        simAd = SimRewardedAdState(kind: kind, title: title, rewardDesc: desc, secondsLeft: 5)
         simAdTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self = self, var current = self.simAd else { return }
@@ -2945,6 +2957,13 @@ public final class GameViewModel: ObservableObject {
 
     public func claimSimulatedAdReward() {
         guard let ad = simAd, ad.secondsLeft <= 0 else { return }
+        simAdTimer?.invalidate()
+        simAd = nil
+        grantAdReward(for: ad.kind)
+    }
+
+    public func forceCompleteAndClaimAdReward() {
+        guard let ad = simAd else { return }
         simAdTimer?.invalidate()
         simAd = nil
         grantAdReward(for: ad.kind)
@@ -4509,6 +4528,7 @@ import SpriteKit
 import AudioToolbox
 import QuartzCore
 import AVKit
+import WebKit
 
 // MARK: - Hex Color Helper
 extension Color {
@@ -5997,29 +6017,202 @@ public struct ContentView: View {
         }
     }
 
-    // MARK: - Full-Screen Google AdMob Video Ad Player Fallback (AVKit VideoPlayer)
+    // MARK: - Full-Screen Google IMA / AdMob Video Ad Player
     private func simulatedRewardedAdModal(ad: SimRewardedAdState) -> some View {
         GoogleAdMobVideoFallbackView(vm: vm, ad: ad)
     }
 }
 
+public struct GoogleIMAWebViewRepresentable: UIViewRepresentable {
+    public let vastTagUrl: String
+    public let fallbackStreamUrl: String
+    public let admobUnitId: String
+    public let h5ClientId: String
+    public let onAdRewardCompleted: () -> Void
+
+    public final class Coordinator: NSObject, WKScriptMessageHandler {
+        public var onAdRewardCompleted: () -> Void
+        public init(onAdRewardCompleted: @escaping () -> Void) {
+            self.onAdRewardCompleted = onAdRewardCompleted
+        }
+        public func userContentController(
+            _ userContentController: WKUserContentController,
+            didReceive message: WKScriptMessage
+        ) {
+            if message.name == "googleAdsBridge",
+               let body = message.body as? String,
+               body == "reward" {
+                DispatchQueue.main.async {
+                    self.onAdRewardCompleted()
+                }
+            }
+        }
+    }
+
+    public func makeCoordinator() -> Coordinator {
+        Coordinator(onAdRewardCompleted: onAdRewardCompleted)
+    }
+
+    public func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        config.mediaTypesRequiringUserActionForPlayback = []
+        config.userContentController.add(context.coordinator, name: "googleAdsBridge")
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.isOpaque = false
+        webView.backgroundColor = .black
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
+
+        let html = """
+        <!doctype html>
+        <html>
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+          <script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
+          <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+            html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: -apple-system, sans-serif; }
+            #stage { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
+            #content-video { width: 100%; height: 100%; max-height: 82vh; object-fit: contain; background: #000; }
+            #ad-container { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; }
+          </style>
+        </head>
+        <body>
+          <div id="stage">
+            <video id="content-video" playsinline webkit-playsinline></video>
+            <div id="ad-container"></div>
+          </div>
+          <script>
+            (function() {
+              var videoEl = document.getElementById('content-video');
+              var adContainer = document.getElementById('ad-container');
+              var vastUrl = "\\(vastTagUrl)";
+              var fallbackMp4 = "\\(fallbackStreamUrl)";
+              var completed = false;
+
+              function notifyReward() {
+                if (completed) return;
+                completed = true;
+                try {
+                  window.webkit.messageHandlers.googleAdsBridge.postMessage("reward");
+                } catch (e) {}
+              }
+
+              function startFallbackStream() {
+                videoEl.src = fallbackMp4;
+                videoEl.muted = false;
+                videoEl.onended = notifyReward;
+                var p = videoEl.play();
+                if (p && p.catch) {
+                  p.catch(function() {
+                    videoEl.muted = true;
+                    videoEl.play().catch(function(){});
+                  });
+                }
+              }
+
+              var imaRetries = 0;
+              function bootIMA() {
+                if (!window.google || !window.google.ima) {
+                  if (imaRetries < 25) {
+                    imaRetries++;
+                    setTimeout(bootIMA, 100);
+                    return;
+                  }
+                  startFallbackStream();
+                  return;
+                }
+                try {
+                  var ima = window.google.ima;
+                  var adDisplayContainer = new ima.AdDisplayContainer(adContainer, videoEl);
+                  adDisplayContainer.initialize();
+                  var adsLoader = new ima.AdsLoader(adDisplayContainer);
+
+                  adsLoader.addEventListener(
+                    ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED,
+                    function(e) {
+                      try {
+                        var settings = new ima.AdsRenderingSettings();
+                        settings.enablePreloading = true;
+                        var adsManager = e.getAdsManager(videoEl, settings);
+                        adsManager.addEventListener(ima.AdErrorEvent.Type.AD_ERROR, function() {
+                          try { adsManager.destroy(); } catch (_) {}
+                          startFallbackStream();
+                        });
+                        adsManager.addEventListener(ima.AdEvent.Type.COMPLETE, notifyReward);
+                        adsManager.addEventListener(ima.AdEvent.Type.ALL_ADS_COMPLETED, notifyReward);
+                        adsManager.addEventListener(ima.AdEvent.Type.SKIPPED, notifyReward);
+                        adsManager.init(window.innerWidth || 640, window.innerHeight || 360, ima.ViewMode.NORMAL);
+                        adsManager.start();
+                      } catch (err) {
+                        startFallbackStream();
+                      }
+                    },
+                    false
+                  );
+
+                  adsLoader.addEventListener(
+                    ima.AdErrorEvent.Type.AD_ERROR,
+                    function() {
+                      startFallbackStream();
+                    },
+                    false
+                  );
+
+                  var req = new ima.AdsRequest();
+                  req.adTagUrl = vastUrl + "&correlator=" + Date.now() + "&description_url=" + encodeURIComponent("https://deepsea-evolution.app") + "&cust_params=" + encodeURIComponent("client=\\(h5ClientId)&admob_unit=\\(admobUnitId)");
+                  req.linearAdSlotWidth = window.innerWidth || 640;
+                  req.linearAdSlotHeight = window.innerHeight || 360;
+                  req.nonLinearAdSlotWidth = window.innerWidth || 640;
+                  req.nonLinearAdSlotHeight = Math.round((window.innerHeight || 360) / 3);
+                  adsLoader.requestAds(req);
+                } catch (e) {
+                  startFallbackStream();
+                }
+              }
+
+              if (document.readyState === "complete" || document.readyState === "interactive") {
+                setTimeout(bootIMA, 60);
+              } else {
+                window.addEventListener("DOMContentLoaded", function() { setTimeout(bootIMA, 60); });
+              }
+            })();
+          </script>
+        </body>
+        </html>
+        """
+        webView.loadHTMLString(html, baseURL: URL(string: "https://deepsea-evolution.app"))
+        return webView
+    }
+
+    public func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
+
 public struct GoogleAdMobVideoFallbackView: View {
     @ObservedObject public var vm: GameViewModel
     public let ad: SimRewardedAdState
-    @State private var player: AVPlayer? = nil
 
     public var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if let activePlayer = player {
-                VideoPlayer(player: activePlayer)
-                    .ignoresSafeArea()
-                    .disabled(true)
-            }
+            // Real Google IMA HTML5 Video Ad SDK Player (1:1 identical with Web GoogleRewardedVideoAdOverlay)
+            GoogleIMAWebViewRepresentable(
+                vastTagUrl: GameConfigGenerated.imaVastTagUrl,
+                fallbackStreamUrl: GameConfigGenerated.fallbackVideoStreamUrl,
+                admobUnitId: GameConfigGenerated.googleAdMobRewardedAdUnitId,
+                h5ClientId: GameConfigGenerated.googleH5ClientId,
+                onAdRewardCompleted: {
+                    vm.forceCompleteAndClaimAdReward()
+                }
+            )
+            .ignoresSafeArea()
 
             VStack {
-                // Top Official Google AdMob Bar
+                // Top Official Google AdMob / IMA Header Bar
                 HStack(spacing: 10) {
                     Text("Ad")
                         .font(.system(size: 11, weight: .black, design: .monospaced))
@@ -6046,7 +6239,7 @@ public struct GoogleAdMobVideoFallbackView: View {
                         Button {
                             vm.claimSimulatedAdReward()
                         } label: {
-                            Text(vm.lang == "zh" ? "✓ 领取奖励并关闭" : "✓ CLAIM REWARD")
+                            Text(vm.lang == "zh" ? "✓ 领取奖励并关闭" : "✓ CLAIM REWARD & CLOSE")
                                 .font(.system(size: 13, weight: .black))
                                 .foregroundColor(.black)
                                 .padding(.horizontal, 16)
@@ -6073,35 +6266,26 @@ public struct GoogleAdMobVideoFallbackView: View {
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)
-                .background(Color.black.opacity(0.78))
+                .background(Color.black.opacity(0.82))
 
                 Spacer()
 
                 // Bottom Attribution & Reward Description Strip
                 HStack {
-                    Text("AdMob Unit: \\(GameConfigGenerated.googleAdMobRewardedAdUnitId)")
+                    Text("Google AdMob Unit: \\(GameConfigGenerated.googleAdMobRewardedAdUnitId) · H5: \\(GameConfigGenerated.googleH5ClientId)")
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                         .foregroundColor(.white.opacity(0.65))
+                        .lineLimit(1)
                     Spacer()
                     Text(ad.rewardDesc)
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.cyan)
+                        .lineLimit(1)
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 8)
-                .background(Color.black.opacity(0.78))
+                .background(Color.black.opacity(0.82))
             }
-        }
-        .onAppear {
-            if let url = URL(string: GameConfigGenerated.fallbackVideoStreamUrl) {
-                let avPlayer = AVPlayer(url: url)
-                player = avPlayer
-                avPlayer.play()
-            }
-        }
-        .onDisappear {
-            player?.pause()
-            player = nil
         }
     }
 }
@@ -7149,7 +7333,7 @@ let package = Package(
 }
 
 function generatePbxproj(): string {
-  // Valid Xcode 15/16 project.pbxproj referencing all 6 Swift files, bundled Assets folder, and GoogleMobileAds Swift Package
+  // Valid Xcode 15/16 project.pbxproj referencing all 6 Swift files and the bundled Assets folder
   return `// !$*UTF8*$!
 {
 	archiveVersion = 1;
@@ -7166,7 +7350,6 @@ function generatePbxproj(): string {
 		A10000052B00000000000001 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* OceanGameScene.swift */; };
 		A10000062B00000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* ContentView.swift */; };
 		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
-		A10000082B00000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = AB0000012B00000000000001 /* GoogleMobileAds */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -7186,7 +7369,6 @@ function generatePbxproj(): string {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000082B00000000000001 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -7240,9 +7422,6 @@ function generatePbxproj(): string {
 			dependencies = (
 			);
 			name = HungrySharkEvolution;
-			packageProductDependencies = (
-				AB0000012B00000000000001 /* GoogleMobileAds */,
-			);
 			productName = HungrySharkEvolution;
 			productReference = A00000012B00000000000001 /* HungrySharkEvolution.app */;
 			productType = "com.apple.product-type.application";
@@ -7267,9 +7446,6 @@ function generatePbxproj(): string {
 				Base,
 			);
 			mainGroup = A40000012B00000000000001;
-			packageReferences = (
-				AA0000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
-			);
 			productRefGroup = A40000032B00000000000001 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -7415,25 +7591,6 @@ function generatePbxproj(): string {
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		AA0000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 11.2.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		AB0000012B00000000000001 /* GoogleMobileAds */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = AA0000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
-			productName = GoogleMobileAds;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A70000012B00000000000001 /* Project object */;
 }
@@ -7486,7 +7643,8 @@ function main() {
     'utf8'
   );
 
-  // 2. Copy all PNG assets from public/assets/aistudio into ios-native/HungrySharkEvolution/Resources/Assets
+  // 2. Copy all PNG assets from public/assets/aistudio AND 48 individual @3x shark PNGs from public/assets/sharks_3x
+  //    into ios-native/HungrySharkEvolution/Resources/Assets
   const srcAssetsDir = path.join(ROOT_DIR, 'public', 'assets', 'aistudio');
   let copiedCount = 0;
   if (fs.existsSync(srcAssetsDir)) {
@@ -7497,6 +7655,20 @@ function main() {
           path.join(assetsDst, file)
         );
         copiedCount++;
+      }
+    }
+  }
+  const srcSharks3xDir = path.join(ROOT_DIR, 'public', 'assets', 'sharks_3x');
+  let copiedSharks3xCount = 0;
+  if (fs.existsSync(srcSharks3xDir)) {
+    for (const file of fs.readdirSync(srcSharks3xDir)) {
+      if (file.endsWith('.png')) {
+        fs.copyFileSync(
+          path.join(srcSharks3xDir, file),
+          path.join(assetsDst, file)
+        );
+        copiedCount++;
+        copiedSharks3xCount++;
       }
     }
   }

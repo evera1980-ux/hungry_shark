@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
+    "build:sharks3x": "tsx scripts/build-sharks-3x.ts",
+    "redraw:sharks:nanobanana": "tsx scripts/build-sharks-3x.ts --nanobanana",
     "build:ios": "tsx scripts/build-ios-native.ts"
   },
   "dependencies": {

@@ -43,10 +43,9 @@ public final class SpriteAtlasManager {
         guard !isPreloaded else { return }
         isPreloaded = true
 
-        // 1. Slice 48-Form 4K Shark Sprite Sheet (sharks_ec921c3b.png)
-        if let sharkSheet = loadBundledImage(named: "sharks_ec921c3b") {
-            sliceSharkSheet(sharkSheet)
-        }
+        // 1. Load 48 individual @3x Super-Resolved Shark PNGs (shark_form_00@3x.png .. shark_form_47@3x.png),
+        //    with automatic fallback to slicing sharks_ec921c3b.png if any @3x file is absent.
+        loadOrSliceSharks()
 
         // 2. Slice Prey Sprite Sheets (fish_24bdaa5a.png & fish2_fc857cfa.png)
         let primarySheet = loadBundledImage(named: "fish_24bdaa5a")
@@ -170,12 +169,41 @@ public final class SpriteAtlasManager {
            let img = UIImage(contentsOfFile: path) {
             return img
         }
+        if let path = Bundle.main.path(forResource: "(name)@3x", ofType: "png"),
+           let img = UIImage(contentsOfFile: path) {
+            return img
+        }
+        if let path = Bundle.main.path(forResource: "(name)@3x", ofType: "png", inDirectory: "Assets"),
+           let img = UIImage(contentsOfFile: path) {
+            return img
+        }
         if let img = UIImage(named: name) { return img }
         return nil
     }
 
-    private func sliceSharkSheet(_ sheetImage: UIImage) {
+    private func loadOrSliceSharks() {
+        var missingForms: [SharkFormConfig] = []
         for form in GameConfigGenerated.sharkForms {
+            let baseName = String(format: "shark_form_%02d", form.index)
+            if let rawImg = loadBundledImage(named: "(baseName)@3x") ?? loadBundledImage(named: baseName),
+               let cg = rawImg.cgImage {
+                let img3x = UIImage(cgImage: cg, scale: 3.0, orientation: .up)
+                sharkUIImages[form.spriteKey] = img3x
+                let tex = SKTexture(image: img3x)
+                tex.filteringMode = .linear
+                sharkTextures[form.spriteKey] = tex
+            } else {
+                missingForms.append(form)
+            }
+        }
+        if !missingForms.isEmpty, let sharkSheet = loadBundledImage(named: "sharks_ec921c3b") {
+            sliceSharkSheet(sharkSheet, onlyForms: missingForms)
+        }
+    }
+
+    private func sliceSharkSheet(_ sheetImage: UIImage, onlyForms: [SharkFormConfig]? = nil) {
+        let targetForms = onlyForms ?? GameConfigGenerated.sharkForms
+        for form in targetForms {
             if let sliced = sliceAndKeyNormalizedCell(
                 from: sheetImage,
                 bounds: form.normalizedBounds,

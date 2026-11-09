@@ -1,4 +1,7 @@
-import type { SharkSpriteKey } from './sharkEvolutionConfig';
+import {
+  getShark3xImageUrl,
+  type SharkSpriteKey,
+} from './sharkEvolutionConfig';
 
 export type PrimarySpriteFrameKey =
   | 'BASE_SHARK'      // Row 0, Col 0 (0)
@@ -394,6 +397,8 @@ export class SpriteSheetManager {
   public loaded: boolean = false;
   public fish2Loaded: boolean = false;
   public sharksLoaded: boolean = false;
+  public sharks3xLoadedCount: number = 0;
+  private shark3xLoadedKeys: Set<SharkSpriteKey> = new Set();
   public uiIconsLoaded: boolean = false;
   public uiBannersLoaded: boolean = false;
   public uiSettingsLoaded: boolean = false;
@@ -487,15 +492,56 @@ export class SpriteSheetManager {
     });
 
     const loadSharks = new Promise<void>((resolve) => {
+      const orderedSharkKeys = Object.keys(SHARK_GRID_MAP) as SharkSpriteKey[];
+      let individualResolved = 0;
+      const totalSharks = orderedSharkKeys.length;
+
+      // 1. Load all 48 individual @3x super-resolved shark PNGs (/assets/sharks_3x/shark_form_XX@3x.png)
+      orderedSharkKeys.forEach((key, idx) => {
+        const img3x = new Image();
+        img3x.crossOrigin = 'anonymous';
+        img3x.onload = () => {
+          const w = img3x.naturalWidth || img3x.width;
+          const h = img3x.naturalHeight || img3x.height;
+          if (w > 0 && h > 0) {
+            const c = document.createElement('canvas');
+            c.width = w;
+            c.height = h;
+            const ctx = c.getContext('2d');
+            if (ctx) {
+              ctx.imageSmoothingEnabled = true;
+              ctx.imageSmoothingQuality = 'high';
+              ctx.drawImage(img3x, 0, 0, w, h);
+              this.frames[key] = c;
+              this.sharksGridFrames[idx] = c;
+              this.shark3xLoadedKeys.add(key);
+              this.sharks3xLoadedCount = this.shark3xLoadedKeys.size;
+              this.sharksLoaded = true;
+              this.notifyListeners();
+            }
+          }
+          individualResolved++;
+          if (individualResolved === totalSharks) {
+            resolve();
+          }
+        };
+        img3x.onerror = () => {
+          individualResolved++;
+          if (individualResolved === totalSharks) {
+            resolve();
+          }
+        };
+        img3x.src = getShark3xImageUrl(idx);
+      });
+
+      // 2. Also load the 8x6 master sheet as an immediate fallback for any frame while @3x PNGs stream in
       const imgSharks = new Image();
       imgSharks.crossOrigin = 'anonymous';
       imgSharks.onload = () => {
         this.processAndSliceSharksImage(imgSharks);
         this.sharksLoaded = true;
         this.notifyListeners();
-        resolve();
       };
-      imgSharks.onerror = () => resolve();
       imgSharks.src = sharksUrl;
     });
 
@@ -725,7 +771,6 @@ export class SpriteSheetManager {
     const fullImgData = rawCtx.getImageData(0, 0, fullW, fullH);
     const fullData = fullImgData.data;
 
-    this.sharksGridFrames = [];
     const orderedSharkKeys = Object.keys(SHARK_GRID_MAP) as SharkSpriteKey[];
     const pad = Math.max(4, Math.round((fullW / 1376) * 4));
 
@@ -737,6 +782,7 @@ export class SpriteSheetManager {
 
     for (let idx = 0; idx < orderedSharkKeys.length; idx++) {
       const key = orderedSharkKeys[idx];
+      if (this.shark3xLoadedKeys.has(key)) continue;
       const [nx0, ny0, nx1, ny1] = SHARK_CELL_BOUNDS[key];
       const sx = Math.floor(nx0 * fullW);
       const sy = Math.floor(ny0 * fullH);
@@ -981,8 +1027,11 @@ export class SpriteSheetManager {
         }
       }
 
-      this.frames[key] = frameCanvas;
-      this.sharksGridFrames.push(frameCanvas);
+      // Do not overwrite if the @3x individual shark PNG has already loaded for this key
+      if (!this.shark3xLoadedKeys.has(key)) {
+        this.frames[key] = frameCanvas;
+        this.sharksGridFrames[idx] = frameCanvas;
+      }
     }
   }
 
@@ -1934,6 +1983,10 @@ export class SpriteSheetManager {
       return this.frames[key] ?? this.frames.BASE_SHARK;
     }
     return this.frames[keyOrIndex] ?? this.frames.BASE_SHARK;
+  }
+
+  public getSharkForm3xUrl(keyOrIndex: SharkSpriteKey | number): string {
+    return getShark3xImageUrl(keyOrIndex);
   }
 
   public getOrganFrame(organId: string): HTMLCanvasElement | undefined {

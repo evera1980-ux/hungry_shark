@@ -61,6 +61,8 @@ export interface SharkFormConfig {
   generation: number; // 1..6
   id: string;
   spriteKey: SharkSpriteKey;
+  /** Individual @3x super-resolved PNG asset URL (/assets/sharks_3x/shark_form_XX@3x.png) */
+  sprite3xUrl: string;
   lineage: SharkLineageId;
   nameZh: string;
   nameEn: string;
@@ -883,6 +885,8 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
 
     const baseUpgradeCoinCost = [22, 68, 185, 440, 1020, 2200][row] + col * [4, 10, 25, 55, 125, 270][row];
 
+    const sprite3xUrl = `/assets/sharks_3x/shark_form_${String(index).padStart(2, '0')}@3x.png`;
+
     return {
       index,
       row,
@@ -890,6 +894,7 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
       generation,
       id: seed.id,
       spriteKey,
+      sprite3xUrl,
       lineage: seed.lineage,
       nameZh: seed.nameZh,
       nameEn: seed.nameEn,
@@ -918,6 +923,18 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
     };
   }
 );
+
+export function getShark3xImageUrl(
+  keyOrIndex: SharkSpriteKey | number
+): string {
+  if (typeof keyOrIndex === 'number') {
+    const clamped = Math.max(0, Math.min(47, Math.floor(keyOrIndex)));
+    return `/assets/sharks_3x/shark_form_${String(clamped).padStart(2, '0')}@3x.png`;
+  }
+  const match = keyOrIndex.match(/SHARK_FORM_(\d+)/);
+  const idx = match ? Math.max(0, Math.min(47, parseInt(match[1], 10))) : 0;
+  return `/assets/sharks_3x/shark_form_${String(idx).padStart(2, '0')}@3x.png`;
+}
 
 export function getSharkFormById(id: string): SharkFormConfig {
   return (
