@@ -857,54 +857,7 @@ export class SpriteSheetManager {
         if (cy + 1 < cellH) enqueue(cx, cy + 1);
       }
 
-      // 3. Also clear any enclosed pure studio-white pockets (e.g. inside portal rings, cable/tentacle loops)
-      // while preserving Clown Fry (#00) white stripes and all internal shaded teeth/eyes/highlights
-      if (idx !== 0) {
-        const pocketMinSpan = Math.max(4, Math.round((fullW / 1376) * 3));
-        for (let py = pocketMinSpan; py < cellH - pocketMinSpan; py += 2) {
-          const rowOff = py * cellW;
-          for (let px = pocketMinSpan; px < cellW - pocketMinSpan; px += 2) {
-            const i = rowOff + px;
-            if (visited[i]) continue;
-            const p = i * 4;
-            if (data[p] >= 252 && data[p + 1] >= 252 && data[p + 2] >= 252) {
-              // Verify it is a flat pure-white background pocket (all 4 cardinal neighbors at pocketMinSpan are also pure >=250 white)
-              const nUp = (py - pocketMinSpan) * cellW + px;
-              const nDn = (py + pocketMinSpan) * cellW + px;
-              const nLt = rowOff + (px - pocketMinSpan);
-              const nRt = rowOff + (px + pocketMinSpan);
-              if (
-                data[nUp * 4] >= 250 &&
-                data[nUp * 4 + 1] >= 250 &&
-                data[nUp * 4 + 2] >= 250 &&
-                data[nDn * 4] >= 250 &&
-                data[nDn * 4 + 1] >= 250 &&
-                data[nDn * 4 + 2] >= 250 &&
-                data[nLt * 4] >= 250 &&
-                data[nLt * 4 + 1] >= 250 &&
-                data[nLt * 4 + 2] >= 250 &&
-                data[nRt * 4] >= 250 &&
-                data[nRt * 4 + 1] >= 250 &&
-                data[nRt * 4 + 2] >= 250
-              ) {
-                qHead = 0;
-                qTail = 0;
-                enqueue(px, py);
-                while (qHead < qTail) {
-                  const curr = queue[qHead++];
-                  data[curr * 4 + 3] = 0;
-                  const cx = curr % cellW;
-                  const cy = (curr - cx) / cellW;
-                  if (cx > 0) enqueue(cx - 1, cy);
-                  if (cx + 1 < cellW) enqueue(cx + 1, cy);
-                  if (cy > 0) enqueue(cx, cy - 1);
-                  if (cy + 1 < cellH) enqueue(cx, cy + 1);
-                }
-              }
-            }
-          }
-        }
-      }
+      // 3. Preserve all enclosed interior white regions (shark countershaded bellies, eye sclera, teeth)
 
       // 4. Multi-pixel boundary Color-to-Alpha white unmixing (eliminates 100% of white anti-aliasing fringe on 4K outlines & glowing auras)
       let bHead = 0;

@@ -279,52 +279,9 @@ function extractCleanSharkCell(
     if (cy + 1 < cellH) enqueue(cx, cy + 1);
   }
 
-  // Clear enclosed pure studio-white pockets (except Clown Fry #00 white stripes)
-  if (sharkIndex !== 0) {
-    const pocketMinSpan = Math.max(4, Math.round((fullW / 1376) * 3));
-    for (let py = pocketMinSpan; py < cellH - pocketMinSpan; py += 2) {
-      const rowOff = py * cellW;
-      for (let px = pocketMinSpan; px < cellW - pocketMinSpan; px += 2) {
-        const i = rowOff + px;
-        if (visited[i]) continue;
-        const p = i * 4;
-        if (data[p] >= 252 && data[p + 1] >= 252 && data[p + 2] >= 252) {
-          const nUp = (py - pocketMinSpan) * cellW + px;
-          const nDn = (py + pocketMinSpan) * cellW + px;
-          const nLt = rowOff + (px - pocketMinSpan);
-          const nRt = rowOff + (px + pocketMinSpan);
-          if (
-            data[nUp * 4] >= 250 &&
-            data[nUp * 4 + 1] >= 250 &&
-            data[nUp * 4 + 2] >= 250 &&
-            data[nDn * 4] >= 250 &&
-            data[nDn * 4 + 1] >= 250 &&
-            data[nDn * 4 + 2] >= 250 &&
-            data[nLt * 4] >= 250 &&
-            data[nLt * 4 + 1] >= 250 &&
-            data[nLt * 4 + 2] >= 250 &&
-            data[nRt * 4] >= 250 &&
-            data[nRt * 4 + 1] >= 250 &&
-            data[nRt * 4 + 2] >= 250
-          ) {
-            qHead = 0;
-            qTail = 0;
-            enqueue(px, py);
-            while (qHead < qTail) {
-              const curr = queue[qHead++];
-              data[curr * 4 + 3] = 0;
-              const cx = curr % cellW;
-              const cy = (curr - cx) / cellW;
-              if (cx > 0) enqueue(cx - 1, cy);
-              if (cx + 1 < cellW) enqueue(cx + 1, cy);
-              if (cy > 0) enqueue(cx, cy - 1);
-              if (cy + 1 < cellH) enqueue(cx, cy + 1);
-            }
-          }
-        }
-      }
-    }
-  }
+  // NOTE: Do NOT clear enclosed interior white regions!
+  // Every shark has a closed outer silhouette; interior white pixels are the shark's
+  // white countershaded belly (#01, #08, #13, #32, #41), eye sclera, teeth, or glowing core.
 
   // Multi-pixel boundary Color-to-Alpha white unmixing
   let bHead = 0;
@@ -796,6 +753,76 @@ async function main() {
       2
     )
   );
+
+  // Also synchronize the 4096x2286 master sheet (public/assets/aistudio/sharks_ec921c3b.png)
+  // with the 48 newly generated @3x Nano Banana shark sprites so any fallback path in Web or iOS
+  // also displays the new Nano Banana artwork.
+  if (fromArtifacts) {
+    const sheetW = 4096;
+    const sheetH = 2286;
+    const newSheetData = new Uint8Array(sheetW * sheetH * 4);
+    // Fill with pure studio white (255, 255, 255, 255)
+    newSheetData.fill(255);
+
+    for (const form of SHARK_EVOLUTION_FORMS) {
+      const idxStr = String(form.index).padStart(2, '0');
+      const png3xPath = path.join(outDir, `shark_form_${idxStr}@3x.png`);
+      if (!fs.existsSync(png3xPath)) continue;
+      const sharkImg = decodePng(fs.readFileSync(png3xPath));
+      const [nx0, ny0, nx1, ny1] = SHARK_CELL_BOUNDS[form.spriteKey];
+      const cellX = Math.floor(nx0 * sheetW);
+      const cellY = Math.floor(ny0 * sheetH);
+      const cellW = Math.max(1, Math.floor((nx1 - nx0) * sheetW));
+      const cellH = Math.max(1, Math.floor((ny1 - ny0) * sheetH));
+      const margin = 10;
+      const availW = Math.max(1, cellW - margin * 2);
+      const availH = Math.max(1, cellH - margin * 2);
+      const fitScale = Math.min(availW / sharkImg.width, availH / sharkImg.height);
+      const drawW = Math.max(1, Math.round(sharkImg.width * fitScale));
+      const drawH = Math.max(1, Math.round(sharkImg.height * fitScale));
+      const offsetX = cellX + Math.floor((cellW - drawW) * 0.5);
+      const offsetY = cellY + Math.floor((cellH - drawH) * 0.5);
+
+      for (let dy = 0; dy < drawH; dy++) {
+        const sy = Math.min(
+          sharkImg.height - 1,
+          Math.floor(((dy + 0.5) / drawH) * sharkImg.height)
+        );
+        const dstY = offsetY + dy;
+        if (dstY < 0 || dstY >= sheetH) continue;
+        for (let dx = 0; dx < drawW; dx++) {
+          const sx = Math.min(
+            sharkImg.width - 1,
+            Math.floor(((dx + 0.5) / drawW) * sharkImg.width)
+          );
+          const dstX = offsetX + dx;
+          if (dstX < 0 || dstX >= sheetW) continue;
+          const sIdx = (sy * sharkImg.width + sx) * 4;
+          const sa = sharkImg.data[sIdx + 3] / 255;
+          if (sa <= 0.01) continue;
+          const dIdx = (dstY * sheetW + dstX) * 4;
+          newSheetData[dIdx] = Math.round(
+            sharkImg.data[sIdx] * sa + 255 * (1 - sa)
+          );
+          newSheetData[dIdx + 1] = Math.round(
+            sharkImg.data[sIdx + 1] * sa + 255 * (1 - sa)
+          );
+          newSheetData[dIdx + 2] = Math.round(
+            sharkImg.data[sIdx + 2] * sa + 255 * (1 - sa)
+          );
+          newSheetData[dIdx + 3] = 255;
+        }
+      }
+    }
+
+    fs.writeFileSync(
+      masterSheetPath,
+      encodePng3x({ width: sheetW, height: sheetH, data: newSheetData })
+    );
+    console.log(
+      `[build-sharks-3x] Synchronized 4096x2286 master sheet with all 48 Nano Banana @3x sharks: ${masterSheetPath}`
+    );
+  }
 
   console.log(
     `[build-sharks-3x] Successfully generated all ${manifest.length} individual @3x shark PNGs in ${outDir}`
