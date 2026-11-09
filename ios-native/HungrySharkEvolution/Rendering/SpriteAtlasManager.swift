@@ -143,6 +143,10 @@ public final class SpriteAtlasManager {
         return uiSettingIconImages[key]
     }
 
+    public func titleLogoImage() -> UIImage? {
+        return loadBundledImage(named: "title3_cae0290c") ?? loadBundledImage(named: "title2_dbfd9f83") ?? loadBundledImage(named: "title_11de9fff")
+    }
+
     public func oceanParallaxTexture(named assetName: String, isWaterCanopy: Bool = false) -> SKTexture? {
         if let cached = oceanLayerTextures[assetName] {
             return cached

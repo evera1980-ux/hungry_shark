@@ -988,10 +988,11 @@ public final class OceanGameScene: SKScene {
             }
         }
 
-        // 2. Sea-Surface Locked Camera Tracking (keeps shark centered below top HUD bars!)
+        // 2. Sea-Surface Locked Camera Tracking (keeps shark centered below top HUD bars, and shifted lower on Title Screen!)
         let minSurfaceCameraY = 40.0
         let targetCamX = sharkX + cos(sharkAngle) * 58.0
-        let targetCamY = max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0)
+        let titleDownOffset = vm.gameState == "title" ? (viewH * 0.105) / max(0.5, stats.cameraZoom) : 0.0
+        let targetCamY = max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0 - titleDownOffset)
         cameraX += (targetCamX - cameraX) * min(1.0, dt * 6.5)
         cameraY += (targetCamY - cameraY) * min(1.0, dt * 6.5)
 
