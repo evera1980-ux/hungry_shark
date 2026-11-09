@@ -572,6 +572,7 @@ public struct UiSettingModalFrameView<Content: View>: View {
 
 public struct ContentView: View {
     @StateObject private var vm = GameViewModel()
+    @ObservedObject private var adManager = GoogleAdMobManager.shared
     @State private var scene: OceanGameScene = {
         let s = OceanGameScene(size: CGSize(width: 844, height: 390))
         s.scaleMode = .resizeFill
@@ -663,10 +664,37 @@ public struct ContentView: View {
                         .zIndex(50)
                 }
 
-                // 8. 3-Second Simulated Rewarded Video Ad Overlay
-                if let ad = vm.simAd {
-                    simulatedRewardedAdModal(ad: ad)
-                        .zIndex(80)
+                // 7.5 Google Ad Connecting Loading HUD
+                if adManager.isConnectingAd {
+                    ZStack {
+                        Color.black.opacity(0.72).ignoresSafeArea()
+                        VStack(spacing: 14) {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .yellow))
+                                .scaleEffect(1.6)
+                            Text(vm.lang == "zh" ? "正在连接 Google 激励视频广告..." : "Connecting to Google Video Ad...")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.white)
+                            Text(vm.lang == "zh" ? "广告准备中，即将为您全屏播放" : "Preparing full-screen player...")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.white.opacity(0.7))
+                        }
+                        .padding(24)
+                        .background(
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(Color(red: 15/255, green: 23/255, blue: 42/255).opacity(0.96))
+                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.yellow.opacity(0.7), lineWidth: 1.5))
+                        )
+                    }
+                    .zIndex(75)
+                    .transition(.opacity)
+                }
+
+                // 8. Ad Unavailable Alert Modal (iOS Native: No 3s simulation fallback)
+                if let msg = vm.adUnavailableMessage {
+                    adUnavailableAlertModal(message: msg)
+                        .zIndex(85)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
                 }
             }
         }
@@ -761,7 +789,7 @@ public struct ContentView: View {
                         SharkPreviewView(form: showcase, width: btnH * 0.54, height: btnH * 0.38)
                     },
                     action: {
-                        vm.openSimulatedRewardedAd(kind: .TRIAL_SHARK)
+                        vm.showRewardedAd(kind: .TRIAL_SHARK)
                     }
                 )
             }
@@ -999,6 +1027,148 @@ public struct ContentView: View {
         )
     }
 
+public struct FixedEvolutionHudButton: View {
+    @ObservedObject var vm: GameViewModel
+    @State private var isPulsing: Bool = false
+
+    public var body: some View {
+        let nextTarget = GameRules.getNextEvolutionTarget(save: vm.save)
+        let evoReady = nextTarget?.check.canUnlockNow ?? false
+        let targetForm = nextTarget?.form
+
+        Button {
+            vm.playUiTick()
+            if evoReady {
+                vm.evolveToNextReadySharkInRun()
+            } else {
+                vm.showEvolutionAtlas = true
+            }
+        } label: {
+            ZStack {
+                // 1. 特效：满足条件时的跳动光圈与金色/翠绿放射辉光
+                if evoReady {
+                    Circle()
+                        .stroke(
+                            LinearGradient(
+                                colors: [.yellow, .green, .mint, .yellow],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 3.0
+                        )
+                        .frame(width: 58, height: 58)
+                        .scaleEffect(isPulsing ? 1.15 : 1.0)
+                        .opacity(isPulsing ? 1.0 : 0.45)
+                        .shadow(color: .green.opacity(0.85), radius: isPulsing ? 10 : 4)
+
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [Color.green.opacity(0.35), Color.clear],
+                                center: .center,
+                                startRadius: 4,
+                                endRadius: 30
+                            )
+                        )
+                        .frame(width: 60, height: 60)
+                        .scaleEffect(isPulsing ? 1.12 : 0.95)
+                }
+
+                // 2. 底盘圆形
+                Circle()
+                    .fill(
+                        evoReady
+                            ? RadialGradient(
+                                colors: [Color(red: 6/255, green: 78/255, blue: 59/255).opacity(0.95), Color(red: 2/255, green: 22/255, blue: 18/255).opacity(0.98)],
+                                center: .center,
+                                startRadius: 4,
+                                endRadius: 28
+                              )
+                            : RadialGradient(
+                                colors: [Color(red: 15/255, green: 23/255, blue: 42/255).opacity(0.92), Color(red: 4/255, green: 10/255, blue: 24/255).opacity(0.96)],
+                                center: .center,
+                                startRadius: 4,
+                                endRadius: 28
+                              )
+                    )
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        Circle()
+                            .stroke(
+                                evoReady ? Color.yellow : Color.cyan.opacity(0.4),
+                                lineWidth: evoReady ? 2.2 : 1.5
+                            )
+                    )
+                    .shadow(color: evoReady ? Color.yellow.opacity(0.65) : Color.black.opacity(0.5), radius: 6)
+
+                // 3. 中心图标：满足条件时换成最近一条可进化的鲨鱼！不满足时显示进化图鉴图标
+                if evoReady, let target = targetForm {
+                    if let img = SpriteAtlasManager.shared.sharkUIImage(for: target.spriteKey) {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 44, height: 28)
+                            .shadow(color: .green, radius: 4)
+                            .scaleEffect(isPulsing ? 1.08 : 0.96)
+                    } else {
+                        UiAtlasIconView(iconKey: "UI_BTN_MORPH_EVOLVE", size: 36)
+                    }
+                } else {
+                    UiAtlasIconView(iconKey: "UI_BTN_MORPH_EVOLVE", size: 34)
+                        .opacity(0.85)
+                }
+
+                // 4. 上下方文案
+                VStack(spacing: 0) {
+                    Text(evoReady ? (vm.lang == "zh" ? "⚡立即进化" : "EVOLVE") : (vm.lang == "zh" ? "进化图鉴" : "ATLAS"))
+                        .font(.system(size: 7.5, weight: .black))
+                        .foregroundColor(evoReady ? .yellow : .white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 0.8)
+                        .background(
+                            Capsule()
+                                .fill(Color.black.opacity(0.88))
+                                .overlay(Capsule().stroke(evoReady ? Color.yellow.opacity(0.8) : Color.cyan.opacity(0.3), lineWidth: 0.8))
+                        )
+
+                    Spacer()
+
+                    if evoReady, let target = targetForm {
+                        Text(vm.lang == "zh" ? target.nameZh : target.nameEn)
+                            .font(.system(size: 7.5, weight: .black))
+                            .foregroundColor(Color(red: 167/255, green: 243/255, blue: 208/255))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 0.6)
+                            .background(Capsule().fill(Color.black.opacity(0.9)))
+                    } else if let target = targetForm {
+                        Text("🪙\(target.unlockCoins)")
+                            .font(.system(size: 7.5, weight: .black, design: .monospaced))
+                            .foregroundColor(.gray)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 0.6)
+                            .background(Capsule().fill(Color.black.opacity(0.85)))
+                    } else {
+                        Text("MAX")
+                            .font(.system(size: 7.5, weight: .black, design: .monospaced))
+                            .foregroundColor(.gray)
+                    }
+                }
+                .frame(height: 58)
+            }
+            .frame(width: 58, height: 60)
+            .scaleEffect(evoReady && isPulsing ? 1.08 : 1.0)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true)) {
+                    isPulsing = true
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
     // MARK: - Bottom-Right 90° MOBA Skill Fan (using UI_BTN_* from icons_f5128c12.png)
     private var mobaSkillFan: some View {
         let form = vm.activeSharkForm
@@ -1014,20 +1184,12 @@ public struct ContentView: View {
         let energyPct = max(0.0, min(1.0, vm.energy / max(1.0, vm.maxEnergy)))
 
         return ZStack(alignment: .bottomTrailing) {
-            // Optional Outer-Top Slot: Evolve Now (when next shark is ready to unlock) or Emergency Supply Drop
-            if evoReady, let target = nextTarget {
-                skillFanSatelliteButton(
-                    iconKey: "UI_BTN_MORPH_EVOLVE",
-                    label: vm.lang == "zh" ? "破茧进化" : "EVOLVE",
-                    costText: vm.lang == "zh" ? target.form.nameZh : target.form.nameEn,
-                    ringColor: .green,
-                    enabled: true,
-                    pulse: true
-                ) {
-                    vm.evolveToNextReadySharkInRun()
-                }
-                .offset(x: -74, y: -116)
-            } else if !canGold && !canGene && !canUpgrade {
+            // 0. Fixed Evolution Button directly above Body Upgrade (x: -4, y: -164)
+            FixedEvolutionHudButton(vm: vm)
+                .offset(x: -4, y: -164)
+
+            // Optional Emergency Supply Drop when short on all resources
+            if !canGold && !canGene && !canUpgrade && !evoReady {
                 skillFanSatelliteButton(
                     iconKey: "UI_ICON_GIFT",
                     label: vm.lang == "zh" ? "免费空投" : "AIRDROP",
@@ -1036,9 +1198,9 @@ public struct ContentView: View {
                     enabled: true,
                     pulse: true
                 ) {
-                    vm.openSimulatedRewardedAd(kind: .SUPPLY_DROP)
+                    vm.showRewardedAd(kind: .SUPPLY_DROP)
                 }
-                .offset(x: -74, y: -116)
+                .offset(x: -116, y: -70)
             }
 
             // 1. 0° Left Slot: Gold Frenzy (UI_BTN_GOLD_FRENZY)
@@ -1394,7 +1556,7 @@ public struct ContentView: View {
                                 width: halfW,
                                 height: btnH * 1.12
                             ) {
-                                vm.openSimulatedRewardedAd(kind: .REVIVE)
+                                vm.showRewardedAd(kind: .REVIVE)
                             }
 
                             UiSettingButtonView(
@@ -1462,7 +1624,7 @@ public struct ContentView: View {
                                 height: btnH,
                                 disabled: vm.settlementDoubled
                             ) {
-                                vm.openSimulatedRewardedAd(kind: .DOUBLE_SETTLEMENT)
+                                vm.showRewardedAd(kind: .DOUBLE_SETTLEMENT)
                             }
 
                             UiSettingButtonView(
@@ -1492,279 +1654,69 @@ public struct ContentView: View {
         }
     }
 
-    // MARK: - Full-Screen Google IMA / AdMob Video Ad Player
-    private func simulatedRewardedAdModal(ad: SimRewardedAdState) -> some View {
-        GoogleAdMobVideoFallbackView(vm: vm, ad: ad)
-    }
-}
-
-public struct GoogleIMAWebViewRepresentable: UIViewRepresentable {
-    public let vastTagUrl: String
-    public let fallbackStreamUrl: String
-    public let admobUnitId: String
-    public let h5ClientId: String
-    public let onAdRewardCompleted: () -> Void
-
-    public final class Coordinator: NSObject, WKScriptMessageHandler {
-        public var onAdRewardCompleted: () -> Void
-        public init(onAdRewardCompleted: @escaping () -> Void) {
-            self.onAdRewardCompleted = onAdRewardCompleted
-        }
-        public func userContentController(
-            _ userContentController: WKUserContentController,
-            didReceive message: WKScriptMessage
-        ) {
-            if message.name == "googleAdsBridge",
-               let body = message.body as? String,
-               body == "reward" {
-                DispatchQueue.main.async {
-                    self.onAdRewardCompleted()
-                }
-            }
-        }
-    }
-
-    public func makeCoordinator() -> Coordinator {
-        Coordinator(onAdRewardCompleted: onAdRewardCompleted)
-    }
-
-    public func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.allowsInlineMediaPlayback = true
-        config.mediaTypesRequiringUserActionForPlayback = []
-        config.userContentController.add(context.coordinator, name: "googleAdsBridge")
-
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.isOpaque = false
-        webView.backgroundColor = .black
-        webView.scrollView.isScrollEnabled = false
-        webView.scrollView.bounces = false
-
-        let html = """
-        <!doctype html>
-        <html>
-        <head>
-          <meta charset="utf-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-          <script src="https://imasdk.googleapis.com/js/sdkloader/ima3.js"></script>
-          <style>
-            * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
-            html, body { width: 100%; height: 100%; background: #000; overflow: hidden; font-family: -apple-system, sans-serif; }
-            #stage { position: relative; width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; background: #000; }
-            #content-video { width: 100%; height: 100%; max-height: 82vh; object-fit: contain; background: #000; }
-            #ad-container { position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; }
-          </style>
-        </head>
-        <body>
-          <div id="stage">
-            <video id="content-video" playsinline webkit-playsinline></video>
-            <div id="ad-container"></div>
-          </div>
-          <script>
-            (function() {
-              var videoEl = document.getElementById('content-video');
-              var adContainer = document.getElementById('ad-container');
-              var vastUrl = "\(vastTagUrl)";
-              var fallbackMp4 = "\(fallbackStreamUrl)";
-              var completed = false;
-
-              function notifyReward() {
-                if (completed) return;
-                completed = true;
-                try {
-                  window.webkit.messageHandlers.googleAdsBridge.postMessage("reward");
-                } catch (e) {}
-              }
-
-              function startFallbackStream() {
-                videoEl.src = fallbackMp4;
-                videoEl.muted = false;
-                videoEl.onended = notifyReward;
-                var p = videoEl.play();
-                if (p && p.catch) {
-                  p.catch(function() {
-                    videoEl.muted = true;
-                    videoEl.play().catch(function(){});
-                  });
-                }
-              }
-
-              var imaRetries = 0;
-              function bootIMA() {
-                if (!window.google || !window.google.ima) {
-                  if (imaRetries < 25) {
-                    imaRetries++;
-                    setTimeout(bootIMA, 100);
-                    return;
-                  }
-                  startFallbackStream();
-                  return;
-                }
-                try {
-                  var ima = window.google.ima;
-                  var adDisplayContainer = new ima.AdDisplayContainer(adContainer, videoEl);
-                  adDisplayContainer.initialize();
-                  var adsLoader = new ima.AdsLoader(adDisplayContainer);
-
-                  adsLoader.addEventListener(
-                    ima.AdsManagerLoadedEvent.Type.ADS_MANAGER_LOADED,
-                    function(e) {
-                      try {
-                        var settings = new ima.AdsRenderingSettings();
-                        settings.enablePreloading = true;
-                        var adsManager = e.getAdsManager(videoEl, settings);
-                        adsManager.addEventListener(ima.AdErrorEvent.Type.AD_ERROR, function() {
-                          try { adsManager.destroy(); } catch (_) {}
-                          startFallbackStream();
-                        });
-                        adsManager.addEventListener(ima.AdEvent.Type.COMPLETE, notifyReward);
-                        adsManager.addEventListener(ima.AdEvent.Type.ALL_ADS_COMPLETED, notifyReward);
-                        adsManager.addEventListener(ima.AdEvent.Type.SKIPPED, notifyReward);
-                        adsManager.init(window.innerWidth || 640, window.innerHeight || 360, ima.ViewMode.NORMAL);
-                        adsManager.start();
-                      } catch (err) {
-                        startFallbackStream();
-                      }
-                    },
-                    false
-                  );
-
-                  adsLoader.addEventListener(
-                    ima.AdErrorEvent.Type.AD_ERROR,
-                    function() {
-                      startFallbackStream();
-                    },
-                    false
-                  );
-
-                  var req = new ima.AdsRequest();
-                  req.adTagUrl = vastUrl + "&correlator=" + Date.now() + "&description_url=" + encodeURIComponent("https://deepsea-evolution.app") + "&cust_params=" + encodeURIComponent("client=\(h5ClientId)&admob_unit=\(admobUnitId)");
-                  req.linearAdSlotWidth = window.innerWidth || 640;
-                  req.linearAdSlotHeight = window.innerHeight || 360;
-                  req.nonLinearAdSlotWidth = window.innerWidth || 640;
-                  req.nonLinearAdSlotHeight = Math.round((window.innerHeight || 360) / 3);
-                  adsLoader.requestAds(req);
-                } catch (e) {
-                  startFallbackStream();
-                }
-              }
-
-              if (document.readyState === "complete" || document.readyState === "interactive") {
-                setTimeout(bootIMA, 60);
-              } else {
-                window.addEventListener("DOMContentLoaded", function() { setTimeout(bootIMA, 60); });
-              }
-            })();
-          </script>
-        </body>
-        </html>
-        """
-        webView.loadHTMLString(html, baseURL: URL(string: "https://deepsea-evolution.app"))
-        return webView
-    }
-
-    public func updateUIView(_ uiView: WKWebView, context: Context) {}
-}
-
-public struct GoogleAdMobVideoFallbackView: View {
-    @ObservedObject public var vm: GameViewModel
-    public let ad: SimRewardedAdState
-
-    public var body: some View {
+    // MARK: - Ad Unavailable Alert Modal (Replaces 3s simulation on iOS)
+    private func adUnavailableAlertModal(message: String) -> some View {
         ZStack {
-            Color.black.ignoresSafeArea()
-
-            // Real Google IMA HTML5 Video Ad SDK Player (1:1 identical with Web GoogleRewardedVideoAdOverlay)
-            GoogleIMAWebViewRepresentable(
-                vastTagUrl: GameConfigGenerated.imaVastTagUrl,
-                fallbackStreamUrl: GameConfigGenerated.fallbackVideoStreamUrl,
-                admobUnitId: GameConfigGenerated.googleAdMobRewardedAdUnitId,
-                h5ClientId: GameConfigGenerated.googleH5ClientId,
-                onAdRewardCompleted: {
-                    vm.forceCompleteAndClaimAdReward()
+            Color.black.opacity(0.82)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    vm.dismissAdUnavailableAlert()
                 }
-            )
-            .ignoresSafeArea()
 
-            VStack {
-                // Top Official Google AdMob / IMA Header Bar
-                HStack(spacing: 10) {
-                    Text("Ad")
-                        .font(.system(size: 11, weight: .black, design: .monospaced))
-                        .foregroundColor(.black)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.yellow))
-
-                    Text("Google AdMob · \(ad.title)")
-                        .font(.system(size: 13, weight: .bold))
+            VStack(spacing: 16) {
+                // Header Icon & Title
+                VStack(spacing: 8) {
+                    Text("📺")
+                        .font(.system(size: 38))
+                    Text(vm.lang == "zh" ? "广告提示" : "Ad Notice")
+                        .font(.system(size: 20, weight: .black))
                         .foregroundColor(.white)
-                        .lineLimit(1)
-
-                    Spacer()
-
-                    if ad.secondsLeft > 0 {
-                        Text(vm.lang == "zh" ? "\(ad.secondsLeft)秒后可领奖" : "Reward in \(ad.secondsLeft)s")
-                            .font(.system(size: 12, weight: .black, design: .monospaced))
-                            .foregroundColor(.yellow)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Capsule().fill(Color.white.opacity(0.15)))
-                    } else {
-                        Button {
-                            vm.claimSimulatedAdReward()
-                        } label: {
-                            Text(vm.lang == "zh" ? "✓ 领取奖励并关闭" : "✓ CLAIM REWARD & CLOSE")
-                                .font(.system(size: 13, weight: .black))
-                                .foregroundColor(.black)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(Color.green))
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    Button {
-                        if ad.secondsLeft <= 0 {
-                            vm.claimSimulatedAdReward()
-                        } else {
-                            vm.cancelSimulatedAd()
-                        }
-                    } label: {
-                        Text("✕")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(width: 28, height: 28)
-                            .background(Circle().fill(Color.white.opacity(0.18)))
-                    }
-                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 10)
-                .background(Color.black.opacity(0.82))
 
-                Spacer()
+                // Description
+                Text(message)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(Color(red: 224/255, green: 242/255, blue: 254/255))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
 
-                // Bottom Attribution & Reward Description Strip
-                HStack {
-                    Text("Google AdMob Unit: \(GameConfigGenerated.googleAdMobRewardedAdUnitId) · H5: \(GameConfigGenerated.googleH5ClientId)")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.65))
-                        .lineLimit(1)
-                    Spacer()
-                    Text(ad.rewardDesc)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.cyan)
-                        .lineLimit(1)
+                // Close / Acknowledge Button
+                Button {
+                    vm.dismissAdUnavailableAlert()
+                } label: {
+                    Text(vm.lang == "zh" ? "知道了" : "Dismiss")
+                        .font(.system(size: 15, weight: .black))
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 44)
+                        .background(
+                            LinearGradient(
+                                colors: [Color.yellow, Color(red: 245/255, green: 158/255, blue: 11/255)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .cornerRadius(22)
+                        .shadow(color: Color.yellow.opacity(0.4), radius: 6, x: 0, y: 2)
                 }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 8)
-                .background(Color.black.opacity(0.82))
+                .buttonStyle(.plain)
+                .padding(.horizontal, 24)
+                .padding(.top, 4)
             }
+            .padding(24)
+            .frame(width: 320)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color(red: 15/255, green: 23/255, blue: 42/255).opacity(0.96))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.18), lineWidth: 1.5)
+                    )
+            )
+            .shadow(color: .black.opacity(0.6), radius: 24, x: 0, y: 10)
         }
     }
 }
-
 // MARK: - 3. 48-Shark Evolution Atlas Modal (Silky-Smooth Continuous Rotary Wheel + Command Deck)
 
 public struct EvolutionAtlasSheetView: View {
@@ -2607,7 +2559,7 @@ public struct EvolutionAtlasSheetView: View {
                     // Free Supply Drop Ad Button when short on Coins / Genes
                     if !check.coinsMet || !check.genesMet {
                         Button {
-                            vm.openSimulatedRewardedAd(kind: .SUPPLY_DROP)
+                            vm.showRewardedAd(kind: .SUPPLY_DROP)
                         } label: {
                             Text(vm.lang == "zh" ? "📺 免费补给 (+300🪙+25🧬)" : "📺 FREE DROP (+300🪙+25🧬)")
                                 .font(.system(size: 10.5, weight: .black))

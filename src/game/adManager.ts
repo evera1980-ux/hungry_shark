@@ -342,6 +342,7 @@ export class AdManager {
           type: 'reward',
           name: placement.toLowerCase(),
           beforeReward: (showAdFn) => {
+            console.log('[AdManager] 🎬 Google H5 Ad presenting now...');
             adStartedShowing = true;
             window.clearTimeout(watchdog);
             showAdFn();
@@ -349,12 +350,14 @@ export class AdManager {
           adViewed: () => {
             if (settled) return;
             settled = true;
+            console.log('[AdManager] 🎁 Google H5 Ad watched completely, reward granted!');
             window.clearTimeout(watchdog);
             onReward();
           },
           adDismissed: () => {
             if (settled) return;
             settled = true;
+            console.log('[AdManager] ❌ Google H5 Ad dismissed by user.');
             window.clearTimeout(watchdog);
             if (onCancel) onCancel();
           },
@@ -362,9 +365,10 @@ export class AdManager {
             if (settled) return;
             settled = true;
             window.clearTimeout(watchdog);
-            if (placementInfo.breakStatus === 'viewed') {
+            console.log(`[AdManager] ℹ️ Google H5 Ad break done. Status: ${placementInfo?.breakStatus}`);
+            if (placementInfo?.breakStatus === 'viewed') {
               onReward();
-            } else if (placementInfo.breakStatus === 'dismissed') {
+            } else if (placementInfo?.breakStatus === 'dismissed') {
               if (onCancel) onCancel();
             } else {
               // H5 adBreak returned notReady/noAdPreloaded -> Launch Google IMA HTML5 Video Ad Player
@@ -373,7 +377,8 @@ export class AdManager {
           },
         });
         return;
-      } catch {
+      } catch (err) {
+        console.error('[AdManager] ❌ Error triggering window.adBreak:', err);
         window.clearTimeout(watchdog);
       }
     }

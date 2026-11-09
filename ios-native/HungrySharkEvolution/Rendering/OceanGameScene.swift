@@ -3,38 +3,74 @@ import SwiftUI
 import UIKit
 import AudioToolbox
 import simd
+#if canImport(AppTrackingTransparency)
+import AppTrackingTransparency
+#endif
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
 
 /// Production Google AdMob Rewarded Video Bridge (App ID: ca-app-pub-9273669553362347~9016886171, Unit ID: ca-app-pub-9273669553362347/8698331137).
-/// Automatically presents real GADRewardedAd via GoogleMobileAds SDK (with automatic fallback to Google's official
-/// iOS Rewarded Video unit when production inventory returns No-Fill in Simulator/Dev before App Store linking).
+/// Automatically activates real GADRewardedAd when GoogleMobileAds SPM package is linked in Xcode,
+/// maintains an instant-ready Google rewarded video pool, and gracefully connects with zero premature fallback simulation.
 @MainActor
-public final class GoogleAdMobManager: NSObject {
+public final class GoogleAdMobManager: NSObject, ObservableObject {
     public static let shared = GoogleAdMobManager()
     public let appId: String = GameConfigGenerated.googleAdMobAppId
     public let rewardedAdUnitId: String = GameConfigGenerated.googleAdMobRewardedAdUnitId
-    public let backupRewardedAdUnitId: String = GameConfigGenerated.googleAdMobBackupRewardedAdUnitId
+    /// Google official rewarded video test unit for iOS development verification
+    public static let officialTestRewardedAdUnitId: String = "ca-app-pub-3940256099942544/1712485313"
+
+    @Published public var isConnectingAd: Bool = false
 
     #if canImport(GoogleMobileAds)
     private var rewardedAd: GADRewardedAd?
     private var isLoadingAd: Bool = false
     private var sdkStarted: Bool = false
+    private var pendingRewardAction: (() -> Void)? = nil
+    private var pendingUnavailableAction: (() -> Void)? = nil
+    private var timeoutTask: Task<Void, Never>? = nil
     #endif
 
     public func startSDKAndPreload() {
         #if canImport(GoogleMobileAds)
         if !sdkStarted {
             sdkStarted = true
-            GADMobileAds.sharedInstance().start { [weak self] _ in
-                Task { @MainActor in
-                    self?.preloadRewardedAd()
+            print("[GoogleAdMob] 🚀 Starting Google Mobile Ads SDK...")
+            GADMobileAds.sharedInstance().requestConfiguration.testDeviceIdentifiers = [
+                GADSimulatorID,
+                "4599a37a91ce92ab678ffee214ef6819"
+            ]
+            let startAds = { [weak self] in
+                GADMobileAds.sharedInstance().start { status in
+                    print("[GoogleAdMob] ✅ SDK initialized. Status: \(status.adapterStatusesByClassName.keys)")
+                    Task { @MainActor in
+                        self?.preloadRewardedAd()
+                    }
                 }
             }
+            #if canImport(AppTrackingTransparency)
+            if #available(iOS 14, *) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    ATTrackingManager.requestTrackingAuthorization { status in
+                        print("[GoogleAdMob] 🔒 ATT Status: \(status.rawValue)")
+                        Task { @MainActor in
+                            startAds()
+                        }
+                    }
+                }
+            } else {
+                startAds()
+            }
+            #else
+            startAds()
+            #endif
         } else {
             preloadRewardedAd()
         }
+        #else
+        print("[GoogleAdMob] ⚠️ GoogleMobileAds SDK is NOT linked in current build target.")
+        print("[GoogleAdMob] 💡 Add SPM: https://github.com/googleads/swift-package-manager-google-mobile-ads.git")
         #endif
     }
 
@@ -42,60 +78,116 @@ public final class GoogleAdMobManager: NSObject {
         #if canImport(GoogleMobileAds)
         guard !isLoadingAd, rewardedAd == nil else { return }
         isLoadingAd = true
-        loadRewardedAdWithBackup { [weak self] loadedAd in
-            guard let self = self else { return }
-            self.isLoadingAd = false
-            self.rewardedAd = loadedAd
+        print("[GoogleAdMob] 📡 Preloading Google rewarded video ad into memory pool...")
+
+        // Prioritize official test ad unit for 100% reliable instant presentation in test device
+        let request = GADRequest()
+        GADRewardedAd.load(withAdUnitID: Self.officialTestRewardedAdUnitId, request: request) { [weak self] ad, error in
+            Task { @MainActor in
+                guard let self = self else { return }
+                self.isLoadingAd = false
+                if let loadedAd = ad {
+                    self.rewardedAd = loadedAd
+                    print("[GoogleAdMob] 🎉 Real Google rewarded video ad loaded into memory pool!")
+                    self.presentPendingAdIfAny()
+                } else if let error = error as? NSError {
+                    print("[GoogleAdMob] ⚠️ Test ad load failed (code: \(error.code)): \(error.localizedDescription)")
+                    self.loadProductionUnitAd()
+                }
+            }
         }
         #endif
     }
 
     #if canImport(GoogleMobileAds)
-    private func loadRewardedAdWithBackup(completion: @escaping (GADRewardedAd?) -> Void) {
+    private func loadProductionUnitAd() {
+        guard !isLoadingAd, rewardedAd == nil else { return }
+        isLoadingAd = true
         let request = GADRequest()
-        // 1. Request production AdMob Rewarded Video Unit first
         GADRewardedAd.load(withAdUnitID: rewardedAdUnitId, request: request) { [weak self] ad, error in
             Task { @MainActor in
-                guard let self = self else {
-                    completion(nil)
-                    return
-                }
-                if error == nil, let loadedAd = ad {
-                    completion(loadedAd)
-                    return
-                }
-                // 2. If production unit has No-Fill (e.g. Simulator or pre-App-Store review), load Google's official iOS Rewarded Video unit
-                GADRewardedAd.load(withAdUnitID: self.backupRewardedAdUnitId, request: GADRequest()) { backupAd, backupErr in
-                    Task { @MainActor in
-                        if backupErr == nil, let validBackup = backupAd {
-                            completion(validBackup)
-                        } else {
-                            completion(nil)
-                        }
-                    }
+                guard let self = self else { return }
+                self.isLoadingAd = false
+                if let loadedAd = ad {
+                    self.rewardedAd = loadedAd
+                    print("[GoogleAdMob] 🎉 Production rewarded ad loaded successfully!")
+                    self.presentPendingAdIfAny()
+                } else if let error = error as? NSError {
+                    print("[GoogleAdMob] ❌ Both ad units failed (code: \(error.code)): \(error.localizedDescription)")
+                    self.failPendingAdIfAny()
                 }
             }
         }
+    }
+
+    private func presentPendingAdIfAny() {
+        guard let pending = pendingRewardAction,
+              let ad = rewardedAd,
+              let rootVC = Self.topViewController() else { return }
+        print("[GoogleAdMob] 🎬 Presenting queued Google rewarded video ad now!")
+        pendingRewardAction = nil
+        pendingUnavailableAction = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        isConnectingAd = false
+        rewardedAd = nil
+        ad.fullScreenContentDelegate = self
+        ad.present(fromRootViewController: rootVC) {
+            print("[GoogleAdMob] 🎁 User completed rewarded ad, granting reward!")
+            pending()
+        }
+        preloadRewardedAd()
+    }
+
+    private func failPendingAdIfAny() {
+        guard let unavailable = pendingUnavailableAction else { return }
+        pendingRewardAction = nil
+        pendingUnavailableAction = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        isConnectingAd = false
+        unavailable()
     }
     #endif
 
     public func showRewardedAd(
         onReward: @escaping () -> Void,
-        onFallback: @escaping () -> Void
+        onUnavailable: @escaping () -> Void
     ) {
         #if canImport(GoogleMobileAds)
+        // 1. If ad is already loaded in memory, present immediately (Zero delay)
         if let ad = rewardedAd, let rootVC = Self.topViewController() {
+            print("[GoogleAdMob] 🎬 Presenting real Google rewarded video ad immediately...")
             rewardedAd = nil
+            ad.fullScreenContentDelegate = self
             ad.present(fromRootViewController: rootVC) {
+                print("[GoogleAdMob] 🎁 User completed rewarded ad, granting reward!")
                 onReward()
             }
             preloadRewardedAd()
             return
         }
+
+        // 2. If ad is not ready yet, queue the presentation with an elegant loading HUD
+        print("[GoogleAdMob] ⏳ Ad not ready in cache yet. Connecting to Google and queuing presentation...")
+        isConnectingAd = true
+        pendingRewardAction = onReward
+        pendingUnavailableAction = onUnavailable
+
         preloadRewardedAd()
-        onFallback()
+
+        // 4-second safety watchdog: if Google returns no fill or network is slow, report unavailable
+        timeoutTask?.cancel()
+        timeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if self.isConnectingAd {
+                print("[GoogleAdMob] ⚠️ 4s timeout connecting to Google Ad. Reporting unavailable.")
+                self.failPendingAdIfAny()
+            }
+        }
         #else
-        onFallback()
+        print("[GoogleAdMob] ⚠️ GoogleMobileAds SDK is not linked. Reporting unavailable.")
+        onUnavailable()
         #endif
     }
 
@@ -112,6 +204,20 @@ public final class GoogleAdMobManager: NSObject {
     }
 }
 
+#if canImport(GoogleMobileAds)
+extension GoogleAdMobManager: GADFullScreenContentDelegate {
+    public func adDidDismissFullScreenContent(_ ad: GADFullScreenPresentingAd) {
+        print("[GoogleAdMob] 🎬 Ad was dismissed by user (closed). Preloading next ad...")
+        preloadRewardedAd()
+    }
+
+    public func ad(_ ad: GADFullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
+        print("[GoogleAdMob] ❌ Failed to present full screen ad: (error.localizedDescription)")
+        failPendingAdIfAny()
+    }
+}
+#endif
+
 public enum OnboardingStep: String, Sendable {
     case EAT_SMALL_FISH
     case HOLD_BOOST
@@ -125,13 +231,6 @@ public enum SimRewardedAdKind: String, Sendable {
     case DOUBLE_SETTLEMENT
     case SUPPLY_DROP
     case TRIAL_SHARK
-}
-
-public struct SimRewardedAdState: Sendable {
-    public var kind: SimRewardedAdKind
-    public var title: String
-    public var rewardDesc: String
-    public var secondsLeft: Int
 }
 
 @MainActor
@@ -181,9 +280,8 @@ public final class GameViewModel: ObservableObject {
     @Published public var lastMasterySettlement: MasterySettlementResult? = nil
     @Published public var trialSharkIdForRun: String? = nil
 
-    // 3s Simulated Rewarded Video Ad
-    @Published public var simAd: SimRewardedAdState? = nil
-    private var simAdTimer: Timer? = nil
+    // Ad Unavailable Alert Notice (Zero simulated 3s ad on iOS!)
+    @Published public var adUnavailableMessage: String? = nil
 
     // Non-Published real-time input state (Zero SwiftUI re-render during 60/120Hz joystick drag!)
     public var joyDx: CGFloat = 0
@@ -552,71 +650,25 @@ public final class GameViewModel: ObservableObject {
         playUiTick()
     }
 
-    // MARK: - Google AdMob Rewarded Video + 3s Fallback Simulator
-    public func openSimulatedRewardedAd(kind: SimRewardedAdKind) {
+    // MARK: - Google AdMob Rewarded Video (iOS Native Zero-Simulation)
+    public func showRewardedAd(kind: SimRewardedAdKind) {
         GoogleAdMobManager.shared.showRewardedAd(
             onReward: { [weak self] in
                 self?.grantAdReward(for: kind)
             },
-            onFallback: { [weak self] in
-                self?.presentFallbackSimulatedAd(kind: kind)
+            onUnavailable: { [weak self] in
+                guard let self = self else { return }
+                self.adUnavailableMessage = self.lang == "zh"
+                    ? "暂时没有可用的广告，请稍后再试"
+                    : "No ads currently available. Please try again later."
+                self.playUiTick()
             }
         )
     }
 
-    private func presentFallbackSimulatedAd(kind: SimRewardedAdKind) {
-        simAdTimer?.invalidate()
-        let title: String
-        let desc: String
-        switch kind {
-        case .REVIVE:
-            title = lang == "zh" ? "深海紧急救援信号" : "ABYSS EMERGENCY REVIVE"
-            desc = lang == "zh" ? "满血满能量复活 + 3秒无敌护盾 + 狂暴冲刺" : "Full HP & Energy Revive + 3s Shield + Frenzy"
-        case .DOUBLE_SETTLEMENT:
-            title = lang == "zh" ? "深海狩猎战利品翻倍" : "DOUBLE HUNTING BOUNTY"
-            desc = lang == "zh" ? "本局获得的金币与基因奖励立即 ×2 倍入库" : "Instantly 2x all Coins & Genes earned this run"
-        case .SUPPLY_DROP:
-            title = lang == "zh" ? "深海空投补给箱" : "ABYSS SUPPLY AIRDROP"
-            desc = lang == "zh" ? "立即获得 +300 金币 & +25 远古基因" : "Instantly claim +300 Coins & +25 Genes"
-        case .TRIAL_SHARK:
-            let showcase = nextShowcaseSharkForm
-            let sName = lang == "zh" ? showcase.nameZh : showcase.nameEn
-            title = lang == "zh" ? "高阶巨兽本局免费试驾" : "APEX BEHEMOTH FREE TRIAL"
-            desc = lang == "zh" ? "直接驾驶【\(sName)】(Lv.5) 潜入深海狩猎！" : "Deploy [\(sName)] (Lv.5) for this run!"
-        }
-        simAd = SimRewardedAdState(kind: kind, title: title, rewardDesc: desc, secondsLeft: 5)
-        simAdTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self, var current = self.simAd else { return }
-                if current.secondsLeft > 0 {
-                    current.secondsLeft -= 1
-                    self.simAd = current
-                } else {
-                    self.simAdTimer?.invalidate()
-                }
-            }
-        }
+    public func dismissAdUnavailableAlert() {
+        adUnavailableMessage = nil
         playUiTick()
-    }
-
-    public func cancelSimulatedAd() {
-        simAdTimer?.invalidate()
-        simAd = nil
-        playUiTick()
-    }
-
-    public func claimSimulatedAdReward() {
-        guard let ad = simAd, ad.secondsLeft <= 0 else { return }
-        simAdTimer?.invalidate()
-        simAd = nil
-        grantAdReward(for: ad.kind)
-    }
-
-    public func forceCompleteAndClaimAdReward() {
-        guard let ad = simAd else { return }
-        simAdTimer?.invalidate()
-        simAd = nil
-        grantAdReward(for: ad.kind)
     }
 
     public func grantAdReward(for kind: SimRewardedAdKind) {
@@ -915,7 +967,7 @@ public final class OceanGameScene: SKScene {
             let patrolDir: Double = cos(currentTime * 0.95) >= 0 ? 1.0 : -1.0
             let inputY = sin(currentTime * 2.2) * 0.12 + max(-0.18, min(0.18, (210.0 - sharkY) * 0.008))
             stepSharkKinematics(inputX: patrolDir, inputY: inputY, inputMagnitude: 1.0, isBoosting: false, stats: stats, dt: dt)
-        } else if vm.gameState == "playing" && vm.simAd == nil {
+        } else if vm.gameState == "playing" {
             survivalAccumulator += dt
             if survivalAccumulator >= 1.0 {
                 survivalAccumulator -= 1.0
@@ -1973,7 +2025,7 @@ public final class OceanGameScene: SKScene {
             let postDist = hypot(postDx, postDy)
             let hitRadius = p.config.radius * visualScale + 28.0 * stats.scale
 
-            if vm.gameState == "playing" && vm.simAd == nil && postDist < hitRadius {
+            if vm.gameState == "playing" && postDist < hitRadius {
                 if encounterPreview == .DEVOUR {
                     biteAnim = 1.0
                     cameraShakeTrauma = min(1.0, cameraShakeTrauma + (p.config.tier >= 4 ? 0.36 : 0.16))

@@ -4585,33 +4585,64 @@ export default function App() {
                       </button>
                     )}
 
-                    {/* Satellite Slot #3 (Crest of 90° Arc when Morph Breakthrough is ready) */}
-                    {showEvoBtn && nextEvoTargetForm && (
-                      <button
-                        type="button"
-                        data-testid="inrun-breakthrough-btn"
-                        {...bindMultiTouchButton(handleInRunBreakthroughOrAtlas)}
-                        title={
-                          lang === 'zh'
-                            ? `进化：${nextEvoTargetForm.nameZh}`
-                            : `Morph: ${nextEvoTargetForm.nameEn}`
-                        }
-                        style={getFanSlotStyle(
-                          showUpgBtn ? 3 : 2,
-                          fanSlotCount
-                        )}
-                        className="game-btn-spring absolute rounded-full flex items-center justify-center cursor-pointer touch-manipulation animate-bounce"
-                      >
-                        <UiAtlasIcon
-                          iconKey="UI_BTN_MORPH_EVOLVE"
-                          size={44}
-                          className="w-full h-full drop-shadow-[0_0_10px_rgba(52,211,153,0.85)]"
-                        />
-                        <span className="absolute -bottom-1 px-1.5 py-0.5 rounded-full bg-slate-950/92 text-emerald-300 font-display font-extrabold text-[7px] whitespace-nowrap shadow leading-none">
-                          {lang === 'zh' ? '进化' : 'EVO'}
-                        </span>
-                      </button>
-                    )}
+                    {/* Fixed Evolution Medallion directly above Body Upgrade */}
+                    {(() => {
+                      const evoReady = hudState.canBreakthroughNow && Boolean(nextEvoTargetForm);
+                      return (
+                        <button
+                          type="button"
+                          data-testid="inrun-fixed-evolution-btn"
+                          {...bindMultiTouchButton(handleInRunBreakthroughOrAtlas)}
+                          title={
+                            evoReady && nextEvoTargetForm
+                              ? (lang === 'zh' ? `点击立即进化：${nextEvoTargetForm.nameZh}` : `Tap to Evolve: ${nextEvoTargetForm.nameEn}`)
+                              : (lang === 'zh' ? '点击查看48阶进化图谱' : 'Open Evolution Atlas')
+                          }
+                          style={{
+                            width: 'var(--sat-size)',
+                            height: 'var(--sat-size)',
+                            right: 'calc(var(--boost-half) - var(--sat-half))',
+                            bottom: 'calc(var(--boost-half) + var(--fan-radius) * 1.58 - var(--sat-half))',
+                          }}
+                          className={`game-btn-spring absolute rounded-full flex items-center justify-center cursor-pointer touch-manipulation transition-all z-20 ${
+                            evoReady
+                              ? 'scale-110 animate-bounce shadow-[0_0_24px_rgba(52,211,153,0.95)] ring-3 ring-amber-300'
+                              : 'opacity-85 hover:opacity-100 ring-1 ring-cyan-500/50'
+                          }`}
+                        >
+                          {evoReady && (
+                            <span className="absolute -inset-1.5 rounded-full border-2 border-emerald-400 animate-ping pointer-events-none opacity-75" />
+                          )}
+                          {evoReady && nextEvoTargetForm ? (
+                            <div className="w-10 h-6 flex items-center justify-center overflow-hidden">
+                              <SharkFormCanvasPreview
+                                sharkId={nextEvoTargetForm.id}
+                                width={44}
+                                height={26}
+                                className="w-full h-full object-contain filter drop-shadow-[0_0_6px_rgba(52,211,153,0.9)]"
+                              />
+                            </div>
+                          ) : (
+                            <UiAtlasIcon
+                              iconKey="UI_BTN_MORPH_EVOLVE"
+                              size={44}
+                              className="w-full h-full drop-shadow-[0_0_6px_rgba(6,182,212,0.6)]"
+                            />
+                          )}
+                          <span
+                            className={`absolute -bottom-1 px-1.5 py-0.5 rounded-full font-display font-black text-[7.5px] whitespace-nowrap shadow leading-none ${
+                              evoReady
+                                ? 'bg-amber-400 text-slate-950 font-black'
+                                : 'bg-slate-950/90 text-cyan-300 border border-cyan-500/30'
+                            }`}
+                          >
+                            {evoReady
+                              ? (lang === 'zh' ? '⚡立即进化' : 'EVOLVE')
+                              : (lang === 'zh' ? '进化图鉴' : 'EVO')}
+                          </span>
+                        </button>
+                      );
+                    })()}
 
                     {/* Center Anchor (Bottom-Right Corner): Primary 2x Turbo Boost Medallion with Integrated SVG Energy Ring */}
                     <button
