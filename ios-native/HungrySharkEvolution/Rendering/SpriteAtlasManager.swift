@@ -161,23 +161,41 @@ public final class SpriteAtlasManager {
     }
 
     private func loadBundledImage(named name: String) -> UIImage? {
-        if let path = Bundle.main.path(forResource: name, ofType: "png"),
+        let cleanBase = name.hasSuffix(".png") ? String(name.dropLast(4)) : name
+        let roots: [URL] = [Bundle.main.resourceURL, Bundle.main.bundleURL].compactMap { $0 }
+        for root in roots {
+            let candidates = [
+                root.appendingPathComponent("Assets/(cleanBase).png"),
+                root.appendingPathComponent("Assets/(cleanBase)@3x.png"),
+                root.appendingPathComponent("Resources/Assets/(cleanBase).png"),
+                root.appendingPathComponent("Resources/Assets/(cleanBase)@3x.png"),
+                root.appendingPathComponent("(cleanBase).png"),
+                root.appendingPathComponent("(cleanBase)@3x.png")
+            ]
+            for url in candidates {
+                if FileManager.default.fileExists(atPath: url.path),
+                   let img = UIImage(contentsOfFile: url.path) {
+                    return img
+                }
+            }
+        }
+        if let path = Bundle.main.path(forResource: cleanBase, ofType: "png"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: name, ofType: "png", inDirectory: "Assets"),
+        if let path = Bundle.main.path(forResource: cleanBase, ofType: "png", inDirectory: "Assets"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: "(name)@3x", ofType: "png"),
+        if let path = Bundle.main.path(forResource: "(cleanBase)@3x", ofType: "png"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: "(name)@3x", ofType: "png", inDirectory: "Assets"),
+        if let path = Bundle.main.path(forResource: "(cleanBase)@3x", ofType: "png", inDirectory: "Assets"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let img = UIImage(named: name) { return img }
+        if let img = UIImage(named: cleanBase) { return img }
         return nil
     }
 
@@ -207,7 +225,7 @@ public final class SpriteAtlasManager {
             if let sliced = sliceAndKeyNormalizedCell(
                 from: sheetImage,
                 bounds: form.normalizedBounds,
-                preserveInteriorWhite: form.index == 0
+                preserveInteriorWhite: true
             ) {
                 sharkUIImages[form.spriteKey] = sliced
                 let tex = SKTexture(image: sliced)

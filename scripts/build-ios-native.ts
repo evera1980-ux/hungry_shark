@@ -1041,23 +1041,41 @@ public final class SpriteAtlasManager {
     }
 
     private func loadBundledImage(named name: String) -> UIImage? {
-        if let path = Bundle.main.path(forResource: name, ofType: "png"),
+        let cleanBase = name.hasSuffix(".png") ? String(name.dropLast(4)) : name
+        let roots: [URL] = [Bundle.main.resourceURL, Bundle.main.bundleURL].compactMap { $0 }
+        for root in roots {
+            let candidates = [
+                root.appendingPathComponent("Assets/\(cleanBase).png"),
+                root.appendingPathComponent("Assets/\(cleanBase)@3x.png"),
+                root.appendingPathComponent("Resources/Assets/\(cleanBase).png"),
+                root.appendingPathComponent("Resources/Assets/\(cleanBase)@3x.png"),
+                root.appendingPathComponent("\(cleanBase).png"),
+                root.appendingPathComponent("\(cleanBase)@3x.png")
+            ]
+            for url in candidates {
+                if FileManager.default.fileExists(atPath: url.path),
+                   let img = UIImage(contentsOfFile: url.path) {
+                    return img
+                }
+            }
+        }
+        if let path = Bundle.main.path(forResource: cleanBase, ofType: "png"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: name, ofType: "png", inDirectory: "Assets"),
+        if let path = Bundle.main.path(forResource: cleanBase, ofType: "png", inDirectory: "Assets"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: "\(name)@3x", ofType: "png"),
+        if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: "png"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: "\(name)@3x", ofType: "png", inDirectory: "Assets"),
+        if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: "png", inDirectory: "Assets"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let img = UIImage(named: name) { return img }
+        if let img = UIImage(named: cleanBase) { return img }
         return nil
     }
 
@@ -1087,7 +1105,7 @@ public final class SpriteAtlasManager {
             if let sliced = sliceAndKeyNormalizedCell(
                 from: sheetImage,
                 bounds: form.normalizedBounds,
-                preserveInteriorWhite: form.index == 0
+                preserveInteriorWhite: true
             ) {
                 sharkUIImages[form.spriteKey] = sliced
                 let tex = SKTexture(image: sliced)
@@ -7332,8 +7350,30 @@ let package = Package(
 `;
 }
 
-function generatePbxproj(): string {
-  // Valid Xcode 15/16 project.pbxproj referencing all 6 Swift files and the bundled Assets folder
+function generatePbxproj(assetFiles: string[] = []): string {
+  // Valid Xcode 15/16 project.pbxproj referencing all 6 Swift files, the bundled Assets folder,
+  // AND every individual PNG asset (including shark_form_00@3x.png .. shark_form_47@3x.png)
+  // so Xcode copies all 48 @3x shark PNGs on incremental builds without needing Clean Build Folder.
+  const sortedAssets = [...assetFiles].sort();
+  const assetBuildFiles = sortedAssets
+    .map((f, i) => {
+      const idxHex = String(i + 1).padStart(4, '0');
+      return `\t\tB100${idxHex}2B00000000000001 /* ${f} in Resources */ = {isa = PBXBuildFile; fileRef = B200${idxHex}2B00000000000001 /* ${f} */; };`;
+    })
+    .join('\n');
+  const assetFileRefs = sortedAssets
+    .map((f, i) => {
+      const idxHex = String(i + 1).padStart(4, '0');
+      return `\t\tB200${idxHex}2B00000000000001 /* ${f} */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "${f}"; path = "Resources/Assets/${f}"; sourceTree = "<group>"; };`;
+    })
+    .join('\n');
+  const assetResourceEntries = sortedAssets
+    .map((f, i) => {
+      const idxHex = String(i + 1).padStart(4, '0');
+      return `\t\t\t\tB100${idxHex}2B00000000000001 /* ${f} in Resources */,`;
+    })
+    .join('\n');
+
   return `// !$*UTF8*$!
 {
 	archiveVersion = 1;
@@ -7350,6 +7390,7 @@ function generatePbxproj(): string {
 		A10000052B00000000000001 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* OceanGameScene.swift */; };
 		A10000062B00000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* ContentView.swift */; };
 		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
+${assetBuildFiles}
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -7362,6 +7403,7 @@ function generatePbxproj(): string {
 		A20000062B00000000000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/ContentView.swift; sourceTree = "<group>"; };
 		A20000072B00000000000001 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Assets; sourceTree = "<group>"; };
 		A20000082B00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+${assetFileRefs}
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -7461,6 +7503,7 @@ function generatePbxproj(): string {
 			buildActionMask = 2147483647;
 			files = (
 				A10000072B00000000000001 /* Assets in Resources */,
+${assetResourceEntries}
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -7674,9 +7717,12 @@ function main() {
   }
 
   // 3. Write Xcode project files (project.pbxproj, project.yml, Package.swift)
+  const allBundledPngFiles = fs
+    .readdirSync(assetsDst)
+    .filter((f) => f.endsWith('.png'));
   fs.writeFileSync(
     path.join(IOS_ROOT, 'HungrySharkEvolution.xcodeproj', 'project.pbxproj'),
-    generatePbxproj(),
+    generatePbxproj(allBundledPngFiles),
     'utf8'
   );
   fs.writeFileSync(
