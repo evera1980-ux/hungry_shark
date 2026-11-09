@@ -3,87 +3,124 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A10000012B00000000000001 /* HungrySharkEvolutionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000012B00000000000001 /* HungrySharkEvolutionApp.swift */; };
-		A10000022B00000000000001 /* GameConfigGenerated.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000022B00000000000001 /* GameConfigGenerated.swift */; };
-		A10000032B00000000000001 /* GameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000032B00000000000001 /* GameRules.swift */; };
-		A10000042B00000000000001 /* SpriteAtlasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000042B00000000000001 /* SpriteAtlasManager.swift */; };
-		A10000052B00000000000001 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* OceanGameScene.swift */; };
-		A10000062B00000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* ContentView.swift */; };
-		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
-		A10000082B00000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = A10000092B00000000000001 /* GoogleMobileAds */; };
-
+		19B310C9805C4C2BCF0E24C2 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = C4985E4589C8C40D02C128F3 /* GoogleMobileAds */; };
+		3AF3C1BC59ABE3C6EFF3E9D9 /* GameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101F4A15326A47655B1C7F1A /* GameRules.swift */; };
+		5C9CD805F6DD528B440D645B /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = 69B3C0D7DB4F3DBF47B29DF6 /* Assets */; };
+		9FCA7C383322B025DF85B098 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DDC40AEEDFC7A0A44F40C33 /* OceanGameScene.swift */; };
+		B25AF8EC2FED9914C37427EC /* HungrySharkEvolutionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49817EAED6ADE3BE4FCFFA36 /* HungrySharkEvolutionApp.swift */; };
+		B50F2EF693A364C21A3B93E3 /* SpriteAtlasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 583132C9A07A0F6F7CBD89C7 /* SpriteAtlasManager.swift */; };
+		BA37B753E2AAAC19F9783F9F /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B9BAD62F7CEE8C738E16233 /* ContentView.swift */; };
+		D7A391540C9981C59E2A0311 /* GameConfigGenerated.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFFC184653342AD5FE917FC1 /* GameConfigGenerated.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A00000012B00000000000001 /* HungrySharkEvolution.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HungrySharkEvolution.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A20000012B00000000000001 /* HungrySharkEvolutionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HungrySharkEvolutionApp.swift; sourceTree = "<group>"; };
-		A20000022B00000000000001 /* GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/GameConfigGenerated.swift; sourceTree = "<group>"; };
-		A20000032B00000000000001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/GameRules.swift; sourceTree = "<group>"; };
-		A20000042B00000000000001 /* SpriteAtlasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/SpriteAtlasManager.swift; sourceTree = "<group>"; };
-		A20000052B00000000000001 /* OceanGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/OceanGameScene.swift; sourceTree = "<group>"; };
-		A20000062B00000000000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/ContentView.swift; sourceTree = "<group>"; };
-		A20000072B00000000000001 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Assets; sourceTree = "<group>"; };
-		A20000082B00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-
+		0DDC40AEEDFC7A0A44F40C33 /* OceanGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OceanGameScene.swift; sourceTree = "<group>"; };
+		101F4A15326A47655B1C7F1A /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameRules.swift; sourceTree = "<group>"; };
+		49817EAED6ADE3BE4FCFFA36 /* HungrySharkEvolutionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HungrySharkEvolutionApp.swift; sourceTree = "<group>"; };
+		583132C9A07A0F6F7CBD89C7 /* SpriteAtlasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpriteAtlasManager.swift; sourceTree = "<group>"; };
+		69B3C0D7DB4F3DBF47B29DF6 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets; path = HungrySharkEvolution/Resources/Assets; sourceTree = SOURCE_ROOT; };
+		8B9BAD62F7CEE8C738E16233 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		9B9BC5CF0B867969C10622B9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		9F85933870EF8272B95A7969 /* HungrySharkEvolution.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HungrySharkEvolution.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AFFC184653342AD5FE917FC1 /* GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameConfigGenerated.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A30000012B00000000000001 /* Frameworks */ = {
+		E130BE0FC1BF7F6FF2691E17 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000082B00000000000001 /* GoogleMobileAds in Frameworks */,
+				19B310C9805C4C2BCF0E24C2 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		A40000012B00000000000001 = {
+		506BEC99692AC0AF9CE59078 /* Rendering */ = {
 			isa = PBXGroup;
 			children = (
-				A40000022B00000000000001 /* HungrySharkEvolution */,
-				A40000032B00000000000001 /* Products */,
+				0DDC40AEEDFC7A0A44F40C33 /* OceanGameScene.swift */,
+				583132C9A07A0F6F7CBD89C7 /* SpriteAtlasManager.swift */,
+			);
+			path = Rendering;
+			sourceTree = "<group>";
+		};
+		86093D3DF8C32B4FC21572C0 /* UI */ = {
+			isa = PBXGroup;
+			children = (
+				8B9BAD62F7CEE8C738E16233 /* ContentView.swift */,
+			);
+			path = UI;
+			sourceTree = "<group>";
+		};
+		9A2BF84AF4646DA74A266777 = {
+			isa = PBXGroup;
+			children = (
+				69B3C0D7DB4F3DBF47B29DF6 /* Assets */,
+				A6797C395A8EA49F51441A52 /* HungrySharkEvolution */,
+				CE72BB06DA91C3072ECC1F59 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		A40000022B00000000000001 /* HungrySharkEvolution */ = {
+		A6797C395A8EA49F51441A52 /* HungrySharkEvolution */ = {
 			isa = PBXGroup;
 			children = (
-				A20000012B00000000000001 /* HungrySharkEvolutionApp.swift */,
-				A20000022B00000000000001 /* GameConfigGenerated.swift */,
-				A20000032B00000000000001 /* GameRules.swift */,
-				A20000042B00000000000001 /* SpriteAtlasManager.swift */,
-				A20000052B00000000000001 /* OceanGameScene.swift */,
-				A20000062B00000000000001 /* ContentView.swift */,
-				A20000072B00000000000001 /* Assets */,
-				A20000082B00000000000001 /* Info.plist */,
+				49817EAED6ADE3BE4FCFFA36 /* HungrySharkEvolutionApp.swift */,
+				9B9BC5CF0B867969C10622B9 /* Info.plist */,
+				BAECEA42929840FA703ED78D /* Core */,
+				ADB565A34C5AEC9B6F956814 /* Generated */,
+				506BEC99692AC0AF9CE59078 /* Rendering */,
+				86093D3DF8C32B4FC21572C0 /* UI */,
 			);
 			path = HungrySharkEvolution;
 			sourceTree = "<group>";
 		};
-		A40000032B00000000000001 /* Products */ = {
+		ADB565A34C5AEC9B6F956814 /* Generated */ = {
 			isa = PBXGroup;
 			children = (
-				A00000012B00000000000001 /* HungrySharkEvolution.app */,
+				AFFC184653342AD5FE917FC1 /* GameConfigGenerated.swift */,
+			);
+			path = Generated;
+			sourceTree = "<group>";
+		};
+		BAECEA42929840FA703ED78D /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				101F4A15326A47655B1C7F1A /* GameRules.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		CE72BB06DA91C3072ECC1F59 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				9F85933870EF8272B95A7969 /* HungrySharkEvolution.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		"TEMP_7DE1731B-99FB-4140-B267-E28B76F24A60" /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		A50000012B00000000000001 /* HungrySharkEvolution */ = {
+		4A9326CBCAAEF3D15DEB707F /* HungrySharkEvolution */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A80000022B00000000000001 /* Build configuration list for PBXNativeTarget "HungrySharkEvolution" */;
+			buildConfigurationList = 7C3C0F4D3D181B669717765D /* Build configuration list for PBXNativeTarget "HungrySharkEvolution" */;
 			buildPhases = (
-				A60000012B00000000000001 /* Sources */,
-				A30000012B00000000000001 /* Frameworks */,
-				A60000022B00000000000001 /* Resources */,
+				7F02FC3A5D8149C9F79DBB75 /* Sources */,
+				7A12867AB03D8B3E5C793B24 /* Resources */,
+				E130BE0FC1BF7F6FF2691E17 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -91,89 +128,189 @@
 			);
 			name = HungrySharkEvolution;
 			packageProductDependencies = (
-				A10000092B00000000000001 /* GoogleMobileAds */,
+				C4985E4589C8C40D02C128F3 /* GoogleMobileAds */,
 			);
 			productName = HungrySharkEvolution;
-			productReference = A00000012B00000000000001 /* HungrySharkEvolution.app */;
+			productReference = 9F85933870EF8272B95A7969 /* HungrySharkEvolution.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		A70000012B00000000000001 /* Project object */ = {
+		2D8308D92F7A412AA58220F4 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 1500;
+				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					4A9326CBCAAEF3D15DEB707F = {
+						DevelopmentTeam = 3N2FUK7M23;
+						ProvisioningStyle = Automatic;
+					};
+				};
 			};
-			buildConfigurationList = A80000012B00000000000001 /* Build configuration list for PBXProject "HungrySharkEvolution" */;
-			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = zh_CN;
+			buildConfigurationList = 9E0E920B0172CA77709E6E28 /* Build configuration list for PBXProject "HungrySharkEvolution" */;
+			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
-				zh_CN,
 				Base,
+				en,
 			);
-			mainGroup = A40000012B00000000000001;
+			mainGroup = 9A2BF84AF4646DA74A266777;
+			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A10000102B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+				2DA67D5DB2E67AFB9492821E /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 			);
-			productRefGroup = A40000032B00000000000001 /* Products */;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = CE72BB06DA91C3072ECC1F59 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				A50000012B00000000000001 /* HungrySharkEvolution */,
+				4A9326CBCAAEF3D15DEB707F /* HungrySharkEvolution */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		A60000022B00000000000001 /* Resources */ = {
+		7A12867AB03D8B3E5C793B24 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000072B00000000000001 /* Assets in Resources */,
-
+				5C9CD805F6DD528B440D645B /* Assets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A60000012B00000000000001 /* Sources */ = {
+		7F02FC3A5D8149C9F79DBB75 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A10000012B00000000000001 /* HungrySharkEvolutionApp.swift in Sources */,
-				A10000022B00000000000001 /* GameConfigGenerated.swift in Sources */,
-				A10000032B00000000000001 /* GameRules.swift in Sources */,
-				A10000042B00000000000001 /* SpriteAtlasManager.swift in Sources */,
-				A10000052B00000000000001 /* OceanGameScene.swift in Sources */,
-				A10000062B00000000000001 /* ContentView.swift in Sources */,
+				BA37B753E2AAAC19F9783F9F /* ContentView.swift in Sources */,
+				D7A391540C9981C59E2A0311 /* GameConfigGenerated.swift in Sources */,
+				3AF3C1BC59ABE3C6EFF3E9D9 /* GameRules.swift in Sources */,
+				B25AF8EC2FED9914C37427EC /* HungrySharkEvolutionApp.swift in Sources */,
+				9FCA7C383322B025DF85B098 /* OceanGameScene.swift in Sources */,
+				B50F2EF693A364C21A3B93E3 /* SpriteAtlasManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		A90000012B00000000000001 /* Debug */ = {
+		2099B25905FA92454E6876B7 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		2E79203D595F87291935D85C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
-				OTHER_LDFLAGS = "-ObjC";
+				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -181,32 +318,14 @@
 			};
 			name = Debug;
 		};
-		A90000022B00000000000001 /* Release */ = {
+		C67EA9626EDEE8F422980EA0 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_ENABLE_MODULES = YES;
-				CLANG_ENABLE_OBJC_ARC = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				ENABLE_NS_ASSERTIONS = NO;
-				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				MTL_ENABLE_DEBUG_INFO = NO;
-				OTHER_LDFLAGS = "-ObjC";
-				SDKROOT = iphoneos;
-				SWIFT_COMPILATION_MODE = wholemodule;
-				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
-				VALIDATE_PRODUCT = YES;
-			};
-			name = Release;
-		};
-		A90000032B00000000000001 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
 				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -216,75 +335,76 @@
 				MARKETING_VERSION = 1.0.0;
 				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_BUNDLE_IDENTIFIER = com.deepsea.hungryshark.evolution;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		FCB64B3D3A732EDCCD171CF5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
+				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				OTHER_LDFLAGS = "-ObjC";
+				PRODUCT_BUNDLE_IDENTIFIER = com.deepsea.hungryshark.evolution;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
-		A90000042B00000000000001 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 1.0.0;
-				OTHER_LDFLAGS = "-ObjC";
-				PRODUCT_BUNDLE_IDENTIFIER = com.deepsea.hungryshark.evolution;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A80000012B00000000000001 /* Build configuration list for PBXProject "HungrySharkEvolution" */ = {
+		7C3C0F4D3D181B669717765D /* Build configuration list for PBXNativeTarget "HungrySharkEvolution" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				A90000012B00000000000001 /* Debug */,
-				A90000022B00000000000001 /* Release */,
+				FCB64B3D3A732EDCCD171CF5 /* Debug */,
+				C67EA9626EDEE8F422980EA0 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
 		};
-		A80000022B00000000000001 /* Build configuration list for PBXNativeTarget "HungrySharkEvolution" */ = {
+		9E0E920B0172CA77709E6E28 /* Build configuration list for PBXProject "HungrySharkEvolution" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				A90000032B00000000000001 /* Debug */,
-				A90000042B00000000000001 /* Release */,
+				2E79203D595F87291935D85C /* Debug */,
+				2099B25905FA92454E6876B7 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
+			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		A10000102B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+		2DA67D5DB2E67AFB9492821E /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 11.0.0;
+				minimumVersion = 11.2.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		A10000092B00000000000001 /* GoogleMobileAds */ = {
+		C4985E4589C8C40D02C128F3 /* GoogleMobileAds */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = A10000102B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			package = 2DA67D5DB2E67AFB9492821E /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
 			productName = GoogleMobileAds;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = A70000012B00000000000001 /* Project object */;
+	rootObject = 2D8308D92F7A412AA58220F4 /* Project object */;
 }

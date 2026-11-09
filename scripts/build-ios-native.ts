@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import child_process from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { GAME_CONFIG } from '../src/game/config';
 import { SHARK_EVOLUTION_FORMS, LINEAGE_META } from '../src/game/sharkEvolutionConfig';
@@ -7380,6 +7381,8 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         OTHER_LDFLAGS: "-ObjC"
         INFOPLIST_FILE: HungrySharkEvolution/Info.plist
+        DEVELOPMENT_TEAM: 3N2FUK7M23
+        CODE_SIGN_STYLE: Automatic
 `;
 }
 
@@ -7796,15 +7799,7 @@ function main() {
     }
   }
 
-  // 3. Write Xcode project files (project.pbxproj, project.yml, Package.swift)
-  const allBundledPngFiles = fs
-    .readdirSync(assetsDst)
-    .filter((f) => f.endsWith('.png'));
-  fs.writeFileSync(
-    path.join(IOS_ROOT, 'HungrySharkEvolution.xcodeproj', 'project.pbxproj'),
-    generatePbxproj(allBundledPngFiles),
-    'utf8'
-  );
+  // 3. Write Xcode project configuration (project.yml, Package.swift)
   fs.writeFileSync(
     path.join(IOS_ROOT, 'project.yml'),
     generateXcodeGenProjectYml(),
@@ -7815,6 +7810,42 @@ function main() {
     generatePackageSwift(),
     'utf8'
   );
+
+  // Generate 100% Apple-compliant project.pbxproj via XcodeGen if available
+  let xcodegenSuccess = false;
+  try {
+    child_process.execSync('xcodegen generate', { cwd: IOS_ROOT, stdio: 'inherit' });
+    xcodegenSuccess = true;
+    console.log('[build:ios] ✅ Generated Xcode project via XcodeGen (100% Apple native format).');
+  } catch (e) {
+    console.warn('[build:ios] ⚠️ XcodeGen not available or failed, falling back to built-in template.');
+  }
+
+  if (!xcodegenSuccess) {
+    const allBundledPngFiles = fs
+      .readdirSync(assetsDst)
+      .filter((f) => f.endsWith('.png'));
+    const xcodeProjDir = path.join(IOS_ROOT, 'HungrySharkEvolution.xcodeproj');
+    if (!fs.existsSync(xcodeProjDir)) {
+      fs.mkdirSync(xcodeProjDir, { recursive: true });
+    }
+    fs.writeFileSync(
+      path.join(xcodeProjDir, 'project.pbxproj'),
+      generatePbxproj(allBundledPngFiles),
+      'utf8'
+    );
+  }
+
+  // Clean stale UI session state so Xcode opens fresh without "InitialEditorMissingFile" or corrupted cache
+  const xcuserState = path.join(
+    IOS_ROOT,
+    'HungrySharkEvolution.xcodeproj',
+    'project.xcworkspace',
+    'xcuserdata'
+  );
+  if (fs.existsSync(xcuserState)) {
+    fs.rmSync(xcuserState, { recursive: true, force: true });
+  }
 
   console.log(
     `[build:ios] Native iOS project (SwiftUI + SpriteKit/Metal, ZERO WebView) generated at ./ios-native/`
