@@ -104,7 +104,7 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_E4306DB6-AA4F-4967-8D15-9E88BD55A8B1" /* Resources */ = {
+		"TEMP_D271BD4D-A3AF-49A2-938D-F1D529655485" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -326,7 +326,12 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3N2FUK7M23;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
+				INFOPLIST_KEY_GADApplicationIdentifier = "ca-app-pub-9273669553362347~9016886171";
+				INFOPLIST_KEY_GADIsAdManagerApp = YES;
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "允许追踪以提供个性化深海狩猎激励视频广告体验";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -349,7 +354,12 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 3N2FUK7M23;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
+				INFOPLIST_KEY_GADApplicationIdentifier = "ca-app-pub-9273669553362347~9016886171";
+				INFOPLIST_KEY_GADIsAdManagerApp = YES;
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "允许追踪以提供个性化深海狩猎激励视频广告体验";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

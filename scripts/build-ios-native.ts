@@ -2375,6 +2375,7 @@ function generateOceanGameSceneSwift(): string {
 import SwiftUI
 import UIKit
 import AudioToolbox
+import ObjectiveC
 import simd
 #if canImport(AppTrackingTransparency)
 import AppTrackingTransparency
@@ -2382,6 +2383,70 @@ import AppTrackingTransparency
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
+
+/// Runtime Info.plist Guard & Auto-Injector for Google Mobile Ads SDK.
+/// Prevents uncaught Objective-C NSException 'GADInvalidInitializationException' even when
+/// an Xcode 15/16 target uses GENERATE_INFOPLIST_FILE=YES or omits Info.plist keys.
+public enum GADInfoPlistRuntimePatch {
+    private static var isInstalled = false
+    private static let lock = NSLock()
+
+    public static func installIfNeeded() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isInstalled else { return }
+        isInstalled = true
+
+        if let existing = Bundle.main.infoDictionary?["GADApplicationIdentifier"] as? String,
+           existing.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("ca-app-pub-") {
+            return
+        }
+
+        let origObjSel = #selector(Bundle.object(forInfoDictionaryKey:))
+        let swizObjSel = #selector(Bundle.gad_swizzled_object(forInfoDictionaryKey:))
+        if let origMethod = class_getInstanceMethod(Bundle.self, origObjSel),
+           let swizMethod = class_getInstanceMethod(Bundle.self, swizObjSel) {
+            method_exchangeImplementations(origMethod, swizMethod)
+        }
+
+        let origDictSel = #selector(getter: Bundle.infoDictionary)
+        let swizDictSel = #selector(Bundle.gad_swizzled_infoDictionary)
+        if let origDictMethod = class_getInstanceMethod(Bundle.self, origDictSel),
+           let swizDictMethod = class_getInstanceMethod(Bundle.self, swizDictSel) {
+            method_exchangeImplementations(origDictMethod, swizDictMethod)
+        }
+    }
+}
+
+extension Bundle {
+    @objc fileprivate func gad_swizzled_object(forInfoDictionaryKey key: String) -> Any? {
+        if let val = self.gad_swizzled_object(forInfoDictionaryKey: key) {
+            return val
+        }
+        if self == Bundle.main {
+            if key == "GADApplicationIdentifier" {
+                return GameConfigGenerated.googleAdMobAppId
+            }
+            if key == "GADIsAdManagerApp" {
+                return NSNumber(value: true)
+            }
+        }
+        return nil
+    }
+
+    @objc fileprivate func gad_swizzled_infoDictionary() -> [String: Any]? {
+        var dict = self.gad_swizzled_infoDictionary() ?? [:]
+        if self == Bundle.main {
+            if dict["GADApplicationIdentifier"] == nil {
+                dict["GADApplicationIdentifier"] = GameConfigGenerated.googleAdMobAppId
+            }
+            if dict["GADIsAdManagerApp"] == nil {
+                dict["GADIsAdManagerApp"] = true
+            }
+        }
+        return dict
+    }
+}
 
 /// Production Google AdMob Rewarded Video Bridge (App ID: ${GOOGLE_ADS_CONFIG.admobAppId}, Unit ID: ${GOOGLE_ADS_CONFIG.admobRewardedAdUnitId}).
 /// Automatically activates real GADRewardedAd when GoogleMobileAds SPM package is linked in Xcode,
@@ -2405,8 +2470,28 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
     private var timeoutTask: Task<Void, Never>? = nil
     #endif
 
+    public override init() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
+        super.init()
+    }
+
+    public var hasValidPlistAdMobConfig: Bool {
+        GADInfoPlistRuntimePatch.installIfNeeded()
+        if let gadAppId = Bundle.main.object(forInfoDictionaryKey: "GADApplicationIdentifier") as? String,
+           gadAppId.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("ca-app-pub-") {
+            return true
+        }
+        if let isAdManager = Bundle.main.object(forInfoDictionaryKey: "GADIsAdManagerApp") as? Bool,
+           isAdManager {
+            return true
+        }
+        return false
+    }
+
     public func startSDKAndPreload() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
         #if canImport(GoogleMobileAds)
+        guard hasValidPlistAdMobConfig else { return }
         if !sdkStarted {
             sdkStarted = true
             print("[GoogleAdMob] 🚀 Starting Google Mobile Ads SDK...")
@@ -2448,7 +2533,9 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
     }
 
     public func preloadRewardedAd() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
         #if canImport(GoogleMobileAds)
+        guard hasValidPlistAdMobConfig else { return }
         guard !isLoadingAd, rewardedAd == nil else { return }
         isLoadingAd = true
         print("[GoogleAdMob] 📡 Preloading Google rewarded video ad into memory pool...")
@@ -2667,6 +2754,7 @@ public final class GameViewModel: ObservableObject {
     private let onboardingDoneKey = "hungry_shark_onboarding_v2_done"
 
     public init() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
         if let data = UserDefaults.standard.data(forKey: saveKey),
            let decoded = try? JSONDecoder().decode(SharkMetaSaveData.self, from: data) {
             self.save = decoded
@@ -5181,7 +5269,9 @@ public struct ContentView: View {
     }()
     @State private var knobOffset: CGSize = .zero
 
-    public init() {}
+    public init() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
+    }
 
     public var body: some View {
         GeometryReader { geo in
@@ -7215,6 +7305,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 struct HungrySharkEvolutionApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    init() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -7385,9 +7479,14 @@ targets:
         SWIFT_VERSION: 5.9
         TARGETED_DEVICE_FAMILY: "1,2"
         OTHER_LDFLAGS: "-ObjC"
+        GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: HungrySharkEvolution/Info.plist
         DEVELOPMENT_TEAM: 3N2FUK7M23
         CODE_SIGN_STYLE: Automatic
+        INFOPLIST_KEY_CFBundleDisplayName: "deepsea:evolution"
+        INFOPLIST_KEY_GADApplicationIdentifier: "${GOOGLE_ADS_CONFIG.admobAppId}"
+        INFOPLIST_KEY_GADIsAdManagerApp: YES
+        INFOPLIST_KEY_NSUserTrackingUsageDescription: "允许追踪以提供个性化深海狩猎激励视频广告体验"
 `;
 }
 
@@ -7644,7 +7743,12 @@ ${assetResourceEntries}
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
+				INFOPLIST_KEY_GADApplicationIdentifier = "${GOOGLE_ADS_CONFIG.admobAppId}";
+				INFOPLIST_KEY_GADIsAdManagerApp = YES;
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "允许追踪以提供个性化深海狩猎激励视频广告体验";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -7665,7 +7769,12 @@ ${assetResourceEntries}
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
+				INFOPLIST_KEY_GADApplicationIdentifier = "${GOOGLE_ADS_CONFIG.admobAppId}";
+				INFOPLIST_KEY_GADIsAdManagerApp = YES;
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "允许追踪以提供个性化深海狩猎激励视频广告体验";
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",

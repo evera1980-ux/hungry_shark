@@ -2,6 +2,7 @@ import SpriteKit
 import SwiftUI
 import UIKit
 import AudioToolbox
+import ObjectiveC
 import simd
 #if canImport(AppTrackingTransparency)
 import AppTrackingTransparency
@@ -9,6 +10,70 @@ import AppTrackingTransparency
 #if canImport(GoogleMobileAds)
 import GoogleMobileAds
 #endif
+
+/// Runtime Info.plist Guard & Auto-Injector for Google Mobile Ads SDK.
+/// Prevents uncaught Objective-C NSException 'GADInvalidInitializationException' even when
+/// an Xcode 15/16 target uses GENERATE_INFOPLIST_FILE=YES or omits Info.plist keys.
+public enum GADInfoPlistRuntimePatch {
+    private static var isInstalled = false
+    private static let lock = NSLock()
+
+    public static func installIfNeeded() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isInstalled else { return }
+        isInstalled = true
+
+        if let existing = Bundle.main.infoDictionary?["GADApplicationIdentifier"] as? String,
+           existing.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("ca-app-pub-") {
+            return
+        }
+
+        let origObjSel = #selector(Bundle.object(forInfoDictionaryKey:))
+        let swizObjSel = #selector(Bundle.gad_swizzled_object(forInfoDictionaryKey:))
+        if let origMethod = class_getInstanceMethod(Bundle.self, origObjSel),
+           let swizMethod = class_getInstanceMethod(Bundle.self, swizObjSel) {
+            method_exchangeImplementations(origMethod, swizMethod)
+        }
+
+        let origDictSel = #selector(getter: Bundle.infoDictionary)
+        let swizDictSel = #selector(Bundle.gad_swizzled_infoDictionary)
+        if let origDictMethod = class_getInstanceMethod(Bundle.self, origDictSel),
+           let swizDictMethod = class_getInstanceMethod(Bundle.self, swizDictSel) {
+            method_exchangeImplementations(origDictMethod, swizDictMethod)
+        }
+    }
+}
+
+extension Bundle {
+    @objc fileprivate func gad_swizzled_object(forInfoDictionaryKey key: String) -> Any? {
+        if let val = self.gad_swizzled_object(forInfoDictionaryKey: key) {
+            return val
+        }
+        if self == Bundle.main {
+            if key == "GADApplicationIdentifier" {
+                return GameConfigGenerated.googleAdMobAppId
+            }
+            if key == "GADIsAdManagerApp" {
+                return NSNumber(value: true)
+            }
+        }
+        return nil
+    }
+
+    @objc fileprivate func gad_swizzled_infoDictionary() -> [String: Any]? {
+        var dict = self.gad_swizzled_infoDictionary() ?? [:]
+        if self == Bundle.main {
+            if dict["GADApplicationIdentifier"] == nil {
+                dict["GADApplicationIdentifier"] = GameConfigGenerated.googleAdMobAppId
+            }
+            if dict["GADIsAdManagerApp"] == nil {
+                dict["GADIsAdManagerApp"] = true
+            }
+        }
+        return dict
+    }
+}
 
 /// Production Google AdMob Rewarded Video Bridge (App ID: ca-app-pub-9273669553362347~9016886171, Unit ID: ca-app-pub-9273669553362347/8698331137).
 /// Automatically activates real GADRewardedAd when GoogleMobileAds SPM package is linked in Xcode,
@@ -32,8 +97,28 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
     private var timeoutTask: Task<Void, Never>? = nil
     #endif
 
+    public override init() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
+        super.init()
+    }
+
+    public var hasValidPlistAdMobConfig: Bool {
+        GADInfoPlistRuntimePatch.installIfNeeded()
+        if let gadAppId = Bundle.main.object(forInfoDictionaryKey: "GADApplicationIdentifier") as? String,
+           gadAppId.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("ca-app-pub-") {
+            return true
+        }
+        if let isAdManager = Bundle.main.object(forInfoDictionaryKey: "GADIsAdManagerApp") as? Bool,
+           isAdManager {
+            return true
+        }
+        return false
+    }
+
     public func startSDKAndPreload() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
         #if canImport(GoogleMobileAds)
+        guard hasValidPlistAdMobConfig else { return }
         if !sdkStarted {
             sdkStarted = true
             print("[GoogleAdMob] 🚀 Starting Google Mobile Ads SDK...")
@@ -75,7 +160,9 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
     }
 
     public func preloadRewardedAd() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
         #if canImport(GoogleMobileAds)
+        guard hasValidPlistAdMobConfig else { return }
         guard !isLoadingAd, rewardedAd == nil else { return }
         isLoadingAd = true
         print("[GoogleAdMob] 📡 Preloading Google rewarded video ad into memory pool...")
@@ -294,6 +381,7 @@ public final class GameViewModel: ObservableObject {
     private let onboardingDoneKey = "hungry_shark_onboarding_v2_done"
 
     public init() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
         if let data = UserDefaults.standard.data(forKey: saveKey),
            let decoded = try? JSONDecoder().decode(SharkMetaSaveData.self, from: data) {
             self.save = decoded

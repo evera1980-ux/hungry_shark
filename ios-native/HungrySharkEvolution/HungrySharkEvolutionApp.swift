@@ -16,6 +16,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 struct HungrySharkEvolutionApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    init() {
+        GADInfoPlistRuntimePatch.installIfNeeded()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

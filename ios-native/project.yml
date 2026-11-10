@@ -33,6 +33,11 @@ targets:
         SWIFT_VERSION: 5.9
         TARGETED_DEVICE_FAMILY: "1,2"
         OTHER_LDFLAGS: "-ObjC"
+        GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_FILE: HungrySharkEvolution/Info.plist
         DEVELOPMENT_TEAM: 3N2FUK7M23
         CODE_SIGN_STYLE: Automatic
+        INFOPLIST_KEY_CFBundleDisplayName: "deepsea:evolution"
+        INFOPLIST_KEY_GADApplicationIdentifier: "ca-app-pub-9273669553362347~9016886171"
+        INFOPLIST_KEY_GADIsAdManagerApp: YES
+        INFOPLIST_KEY_NSUserTrackingUsageDescription: "允许追踪以提供个性化深海狩猎激励视频广告体验"
