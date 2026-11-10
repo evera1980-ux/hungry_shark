@@ -104,7 +104,7 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_D271BD4D-A3AF-49A2-938D-F1D529655485" /* Resources */ = {
+		"TEMP_4DB59182-287F-4E91-9381-DB3763E91F79" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
