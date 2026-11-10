@@ -14,6 +14,7 @@
 		A10000052B00000000000001 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* OceanGameScene.swift */; };
 		A10000062B00000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* ContentView.swift */; };
 		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
+		A10000092B00000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = A99000022B00000000000001 /* GoogleMobileAds */; };
 		B10000012B00000000000001 /* __2026-11-06_16.03.20_b9855750.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000012B00000000000001 /* __2026-11-06_16.03.20_b9855750.png */; };
 		B10000022B00000000000001 /* bg_abyss_0_1bbf506a.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000022B00000000000001 /* bg_abyss_0_1bbf506a.png */; };
 		B10000032B00000000000001 /* bg_abyss_1_75e4a628.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000032B00000000000001 /* bg_abyss_1_75e4a628.png */; };
@@ -93,12 +94,12 @@
 /* Begin PBXFileReference section */
 		A00000012B00000000000001 /* HungrySharkEvolution.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HungrySharkEvolution.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000012B00000000000001 /* HungrySharkEvolutionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HungrySharkEvolutionApp.swift; sourceTree = "<group>"; };
-		A20000022B00000000000001 /* GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/GameConfigGenerated.swift; sourceTree = "<group>"; };
-		A20000032B00000000000001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/GameRules.swift; sourceTree = "<group>"; };
-		A20000042B00000000000001 /* SpriteAtlasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/SpriteAtlasManager.swift; sourceTree = "<group>"; };
-		A20000052B00000000000001 /* OceanGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/OceanGameScene.swift; sourceTree = "<group>"; };
-		A20000062B00000000000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/ContentView.swift; sourceTree = "<group>"; };
-		A20000072B00000000000001 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Assets; sourceTree = "<group>"; };
+		A20000022B00000000000001 /* GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Generated/GameConfigGenerated.swift"; sourceTree = "<group>"; };
+		A20000032B00000000000001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/GameRules.swift"; sourceTree = "<group>"; };
+		A20000042B00000000000001 /* SpriteAtlasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/SpriteAtlasManager.swift"; sourceTree = "<group>"; };
+		A20000052B00000000000001 /* OceanGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/OceanGameScene.swift"; sourceTree = "<group>"; };
+		A20000062B00000000000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/ContentView.swift"; sourceTree = "<group>"; };
+		A20000072B00000000000001 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Resources/Assets"; sourceTree = "<group>"; };
 		A20000082B00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000012B00000000000001 /* __2026-11-06_16.03.20_b9855750.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "__2026-11-06_16.03.20_b9855750.png"; path = "Resources/Assets/__2026-11-06_16.03.20_b9855750.png"; sourceTree = "<group>"; };
 		B20000022B00000000000001 /* bg_abyss_0_1bbf506a.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "bg_abyss_0_1bbf506a.png"; path = "Resources/Assets/bg_abyss_0_1bbf506a.png"; sourceTree = "<group>"; };
@@ -181,6 +182,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000092B00000000000001 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -234,6 +236,9 @@
 			dependencies = (
 			);
 			name = HungrySharkEvolution;
+			packageProductDependencies = (
+				A99000022B00000000000001 /* GoogleMobileAds */,
+			);
 			productName = HungrySharkEvolution;
 			productReference = A00000012B00000000000001 /* HungrySharkEvolution.app */;
 			productType = "com.apple.product-type.application";
@@ -258,6 +263,9 @@
 				Base,
 			);
 			mainGroup = A40000012B00000000000001;
+			packageReferences = (
+				A99000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+			);
 			productRefGroup = A40000032B00000000000001 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -381,14 +389,14 @@
 				ENABLE_TESTABILITY = YES;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_LDFLAGS = "-ObjC";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = "5.0";
 			};
 			name = Debug;
 		};
@@ -402,13 +410,13 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
 				MTL_ENABLE_DEBUG_INFO = NO;
 				OTHER_LDFLAGS = "-ObjC";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = "5.0";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -419,22 +427,22 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
+				INFOPLIST_FILE = "HungrySharkEvolution/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
 				INFOPLIST_KEY_GADApplicationIdentifier = "ca-app-pub-9273669553362347~9016886171";
 				INFOPLIST_KEY_GADIsAdManagerApp = YES;
-				INFOPLIST_KEY_NSUserTrackingUsageDescription = "允许追踪以提供个性化深海狩猎激励视频广告体验";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "Allow tracking to deliver personalized rewarded video ads.";
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = "1.0.0";
 				OTHER_LDFLAGS = "-ObjC";
-				PRODUCT_BUNDLE_IDENTIFIER = com.deepsea.hungryshark.evolution;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolution";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = "5.0";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -445,22 +453,22 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
+				INFOPLIST_FILE = "HungrySharkEvolution/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
 				INFOPLIST_KEY_GADApplicationIdentifier = "ca-app-pub-9273669553362347~9016886171";
 				INFOPLIST_KEY_GADIsAdManagerApp = YES;
-				INFOPLIST_KEY_NSUserTrackingUsageDescription = "允许追踪以提供个性化深海狩猎激励视频广告体验";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "Allow tracking to deliver personalized rewarded video ads.";
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = "1.0.0";
 				OTHER_LDFLAGS = "-ObjC";
-				PRODUCT_BUNDLE_IDENTIFIER = com.deepsea.hungryshark.evolution;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolution";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = "5.0";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -487,6 +495,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A99000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = "11.2.0";
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A99000022B00000000000001 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A99000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A70000012B00000000000001 /* Project object */;
 }

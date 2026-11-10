@@ -7456,21 +7456,27 @@ let package = Package(
 
 function generatePbxproj(assetFiles: string[] = []): string {
   // Valid Xcode 15/16 project.pbxproj referencing all 6 Swift files, the bundled Assets folder,
-  // AND every individual PNG asset (including shark_form_00@3x.png .. shark_form_47@3x.png)
-  // so Xcode copies all 48 @3x shark PNGs on incremental builds without needing Clean Build Folder.
-  const sortedAssets = [...assetFiles].sort();
+  // GoogleMobileAds Swift Package (with strictly quoted minimumVersion = "11.2.0"),
+  // AND every individual PNG asset (including shark_form_00@3x.png .. shark_form_47@3x.png).
+  const sortedAssets = [...assetFiles]
+    .map((f) => f.trim())
+    .filter((f) => f.length > 0 && f.endsWith('.png'))
+    .sort();
+
   const assetBuildFiles = sortedAssets
     .map((f, i) => {
       const idxHex = String(i + 1).padStart(4, '0');
       return `\t\tB100${idxHex}2B00000000000001 /* ${f} in Resources */ = {isa = PBXBuildFile; fileRef = B200${idxHex}2B00000000000001 /* ${f} */; };`;
     })
     .join('\n');
+
   const assetFileRefs = sortedAssets
     .map((f, i) => {
       const idxHex = String(i + 1).padStart(4, '0');
       return `\t\tB200${idxHex}2B00000000000001 /* ${f} */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "${f}"; path = "Resources/Assets/${f}"; sourceTree = "<group>"; };`;
     })
     .join('\n');
+
   const assetResourceEntries = sortedAssets
     .map((f, i) => {
       const idxHex = String(i + 1).padStart(4, '0');
@@ -7494,18 +7500,19 @@ function generatePbxproj(assetFiles: string[] = []): string {
 		A10000052B00000000000001 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* OceanGameScene.swift */; };
 		A10000062B00000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* ContentView.swift */; };
 		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
+		A10000092B00000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = A99000022B00000000000001 /* GoogleMobileAds */; };
 ${assetBuildFiles}
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A00000012B00000000000001 /* HungrySharkEvolution.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HungrySharkEvolution.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000012B00000000000001 /* HungrySharkEvolutionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HungrySharkEvolutionApp.swift; sourceTree = "<group>"; };
-		A20000022B00000000000001 /* GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Generated/GameConfigGenerated.swift; sourceTree = "<group>"; };
-		A20000032B00000000000001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Core/GameRules.swift; sourceTree = "<group>"; };
-		A20000042B00000000000001 /* SpriteAtlasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/SpriteAtlasManager.swift; sourceTree = "<group>"; };
-		A20000052B00000000000001 /* OceanGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Rendering/OceanGameScene.swift; sourceTree = "<group>"; };
-		A20000062B00000000000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/ContentView.swift; sourceTree = "<group>"; };
-		A20000072B00000000000001 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Resources/Assets; sourceTree = "<group>"; };
+		A20000022B00000000000001 /* GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Generated/GameConfigGenerated.swift"; sourceTree = "<group>"; };
+		A20000032B00000000000001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/GameRules.swift"; sourceTree = "<group>"; };
+		A20000042B00000000000001 /* SpriteAtlasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/SpriteAtlasManager.swift"; sourceTree = "<group>"; };
+		A20000052B00000000000001 /* OceanGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/OceanGameScene.swift"; sourceTree = "<group>"; };
+		A20000062B00000000000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/ContentView.swift"; sourceTree = "<group>"; };
+		A20000072B00000000000001 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Resources/Assets"; sourceTree = "<group>"; };
 		A20000082B00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 ${assetFileRefs}
 /* End PBXFileReference section */
@@ -7515,6 +7522,7 @@ ${assetFileRefs}
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000092B00000000000001 /* GoogleMobileAds in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -7568,6 +7576,9 @@ ${assetFileRefs}
 			dependencies = (
 			);
 			name = HungrySharkEvolution;
+			packageProductDependencies = (
+				A99000022B00000000000001 /* GoogleMobileAds */,
+			);
 			productName = HungrySharkEvolution;
 			productReference = A00000012B00000000000001 /* HungrySharkEvolution.app */;
 			productType = "com.apple.product-type.application";
@@ -7592,6 +7603,9 @@ ${assetFileRefs}
 				Base,
 			);
 			mainGroup = A40000012B00000000000001;
+			packageReferences = (
+				A99000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
+			);
 			productRefGroup = A40000032B00000000000001 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -7642,14 +7656,14 @@ ${assetResourceEntries}
 				ENABLE_TESTABILITY = YES;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_LDFLAGS = "-ObjC";
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = "5.0";
 			};
 			name = Debug;
 		};
@@ -7663,13 +7677,13 @@ ${assetResourceEntries}
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
 				MTL_ENABLE_DEBUG_INFO = NO;
 				OTHER_LDFLAGS = "-ObjC";
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = "5.0";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -7680,22 +7694,22 @@ ${assetResourceEntries}
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
+				INFOPLIST_FILE = "HungrySharkEvolution/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
 				INFOPLIST_KEY_GADApplicationIdentifier = "${GOOGLE_ADS_CONFIG.admobAppId}";
 				INFOPLIST_KEY_GADIsAdManagerApp = YES;
-				INFOPLIST_KEY_NSUserTrackingUsageDescription = "允许追踪以提供个性化深海狩猎激励视频广告体验";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "Allow tracking to deliver personalized rewarded video ads.";
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = "1.0.0";
 				OTHER_LDFLAGS = "-ObjC";
-				PRODUCT_BUNDLE_IDENTIFIER = com.deepsea.hungryshark.evolution;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolution";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = "5.0";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
@@ -7706,22 +7720,22 @@ ${assetResourceEntries}
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = HungrySharkEvolution/Info.plist;
+				INFOPLIST_FILE = "HungrySharkEvolution/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
 				INFOPLIST_KEY_GADApplicationIdentifier = "${GOOGLE_ADS_CONFIG.admobAppId}";
 				INFOPLIST_KEY_GADIsAdManagerApp = YES;
-				INFOPLIST_KEY_NSUserTrackingUsageDescription = "允许追踪以提供个性化深海狩猎激励视频广告体验";
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				INFOPLIST_KEY_NSUserTrackingUsageDescription = "Allow tracking to deliver personalized rewarded video ads.";
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.0;
+				MARKETING_VERSION = "1.0.0";
 				OTHER_LDFLAGS = "-ObjC";
-				PRODUCT_BUNDLE_IDENTIFIER = com.deepsea.hungryshark.evolution;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolution";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = "5.0";
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
@@ -7748,10 +7762,81 @@ ${assetResourceEntries}
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A99000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = "11.2.0";
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A99000022B00000000000001 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A99000012B00000000000001 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A70000012B00000000000001 /* Project object */;
 }
 `;
+}
+
+/**
+ * Validates that the generated project.pbxproj strictly conforms to Xcode's OpenStep PropertyList grammar:
+ * 1. Pure ASCII only (prevents CFPropertyList encoding rejections).
+ * 2. No unquoted multi-dot version numbers (e.g. minimumVersion = 11.2.0; or MARKETING_VERSION = 1.0.0;).
+ * 3. No empty array elements / stray commas / balanced braces & parentheses.
+ */
+function validateOpenStepPbxproj(pbx: string): void {
+  for (let i = 0; i < pbx.length; i++) {
+    const code = pbx.charCodeAt(i);
+    if (code > 127) {
+      throw new Error(
+        `[build:ios] OpenStep Plist validation failed: Non-ASCII character (code ${code}) at offset ${i}`
+      );
+    }
+  }
+  const stripped = pbx.replace(/\/\*[\s\S]*?\*\//g, '');
+  if (/=\s*\d+\.\d+\.\d+\s*;/.test(stripped)) {
+    throw new Error(
+      `[build:ios] OpenStep Plist validation failed: Unquoted semantic version detected in project.pbxproj`
+    );
+  }
+  if (/,\s*,/.test(stripped) || /\(\s*,/.test(stripped)) {
+    throw new Error(
+      `[build:ios] OpenStep Plist validation failed: Empty array item / stray comma detected in project.pbxproj`
+    );
+  }
+  let braceDepth = 0;
+  let parenDepth = 0;
+  let inQuotes = false;
+  for (let i = 0; i < stripped.length; i++) {
+    const ch = stripped[i];
+    if (ch === '"' && stripped[i - 1] !== '\\') {
+      inQuotes = !inQuotes;
+    } else if (!inQuotes) {
+      if (ch === '{') braceDepth++;
+      else if (ch === '}') braceDepth--;
+      else if (ch === '(') parenDepth++;
+      else if (ch === ')') parenDepth--;
+      if (braceDepth < 0 || parenDepth < 0) {
+        throw new Error(
+          `[build:ios] OpenStep Plist validation failed: Unbalanced delimiter at offset ${i}`
+        );
+      }
+    }
+  }
+  if (inQuotes || braceDepth !== 0 || parenDepth !== 0) {
+    throw new Error(
+      `[build:ios] OpenStep Plist validation failed: Unclosed quotes or delimiters (brace=${braceDepth}, paren=${parenDepth})`
+    );
+  }
 }
 
 function main() {
@@ -7761,7 +7846,27 @@ function main() {
   ensureDir(path.join(APP_DIR, 'UI'));
   const assetsDst = path.join(APP_DIR, 'Resources', 'Assets');
   ensureDir(assetsDst);
-  ensureDir(path.join(IOS_ROOT, 'HungrySharkEvolution.xcodeproj'));
+  const xcodeprojDir = path.join(IOS_ROOT, 'HungrySharkEvolution.xcodeproj');
+  const xcworkspaceDir = path.join(xcodeprojDir, 'project.xcworkspace');
+  ensureDir(xcodeprojDir);
+  ensureDir(xcworkspaceDir);
+
+  // Clean up any stale Xcode user session caches (xcuserdata) that can trigger InitialEditorMissingFile
+  for (const staleUserDir of [
+    path.join(xcodeprojDir, 'xcuserdata'),
+    path.join(xcworkspaceDir, 'xcuserdata'),
+  ]) {
+    if (fs.existsSync(staleUserDir)) {
+      fs.rmSync(staleUserDir, { recursive: true, force: true });
+    }
+  }
+
+  // Write clean project.xcworkspace/contents.xcworkspacedata
+  fs.writeFileSync(
+    path.join(xcworkspaceDir, 'contents.xcworkspacedata'),
+    `<?xml version="1.0" encoding="UTF-8"?>\n<Workspace\n   version = "1.0">\n   <FileRef\n      location = "self:">\n   </FileRef>\n</Workspace>\n`,
+    'utf8'
+  );
 
   // 1. Write Swift source files
   fs.writeFileSync(
@@ -7816,7 +7921,6 @@ function main() {
     }
   }
   const srcSharks3xDir = path.join(ROOT_DIR, 'public', 'assets', 'sharks_3x');
-  let copiedSharks3xCount = 0;
   if (fs.existsSync(srcSharks3xDir)) {
     for (const file of fs.readdirSync(srcSharks3xDir)) {
       if (file.endsWith('.png')) {
@@ -7825,18 +7929,20 @@ function main() {
           path.join(assetsDst, file)
         );
         copiedCount++;
-        copiedSharks3xCount++;
       }
     }
   }
 
-  // 3. Write Xcode project files (project.pbxproj, project.yml, Package.swift)
+  // 3. Write & validate Xcode project files (project.pbxproj, project.yml, Package.swift)
   const allBundledPngFiles = fs
     .readdirSync(assetsDst)
     .filter((f) => f.endsWith('.png'));
+  const pbxprojContent = generatePbxproj(allBundledPngFiles);
+  validateOpenStepPbxproj(pbxprojContent);
+
   fs.writeFileSync(
-    path.join(IOS_ROOT, 'HungrySharkEvolution.xcodeproj', 'project.pbxproj'),
-    generatePbxproj(allBundledPngFiles),
+    path.join(xcodeprojDir, 'project.pbxproj'),
+    pbxprojContent,
     'utf8'
   );
   fs.writeFileSync(
