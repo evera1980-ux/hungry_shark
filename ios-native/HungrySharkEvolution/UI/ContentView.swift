@@ -581,208 +581,288 @@ public struct StartupLoadingView: View {
 
     public var body: some View {
         GeometryReader { geo in
-            let fullW = max(geo.size.width, UIScreen.main.bounds.width)
-            let fullH = max(geo.size.height, UIScreen.main.bounds.height)
-            let barW = min(460.0, fullW * 0.62)
+            let fullW: CGFloat = max(geo.size.width, UIScreen.main.bounds.width)
+            let fullH: CGFloat = max(geo.size.height, UIScreen.main.bounds.height)
+            let barW: CGFloat = min(460.0, fullW * 0.62)
             let barH: CGFloat = 12.0
-            let progress = max(0.0, min(1.0, atlasManager.loadingProgress))
+            let progress: Double = max(0.0, min(1.0, atlasManager.loadingProgress))
 
             TimelineView(.animation) { timeline in
-                let t = timeline.date.timeIntervalSinceReferenceDate
-                ZStack {
-                    // 1. Base Abyssal Blue (#061528) matching UILaunchScreen LaunchBg 1:1
-                    Color(red: 6/255, green: 21/255, blue: 40/255)
-                        .ignoresSafeArea()
-
-                    // 2. Hot-Replaceable Loading Background Poster (loading_background.png)
-                    if let bgImg = atlasManager.loadingBackgroundImage() {
-                        Image(uiImage: bgImg)
-                            .resizable()
-                            .interpolation(.high)
-                            .scaledToFill()
-                            .frame(width: fullW, height: fullH)
-                            .clipped()
-                            .ignoresSafeArea()
-                    }
-
-                    // 3. Procedural 60/120fps Caustic Light Rays & Rising Bioluminescent Bubbles (Zero Extra Asset Dependency)
-                    Canvas { ctx, size in
-                        // 3a. Shimmering diagonal underwater caustic light rays
-                        for rayIdx in 0..<5 {
-                            let fi = Double(rayIdx)
-                            let sway = sin(t * 0.75 + fi * 1.15) * 36.0
-                            let topX = size.width * (0.18 + fi * 0.16) + sway
-                            let rayW = 55.0 + 18.0 * sin(t * 1.1 + fi)
-                            var path = Path()
-                            path.move(to: CGPoint(x: topX - rayW * 0.45, y: -10))
-                            path.addLine(to: CGPoint(x: topX + rayW * 0.45, y: -10))
-                            path.addLine(to: CGPoint(x: topX + rayW * 1.45 + 45.0, y: size.height * 0.85))
-                            path.addLine(to: CGPoint(x: topX - rayW * 1.15 + 45.0, y: size.height * 0.85))
-                            path.closeSubpath()
-
-                            let rayAlpha = 0.055 + 0.025 * sin(t * 1.4 + fi * 0.9)
-                            ctx.fill(
-                                path,
-                                with: .linearGradient(
-                                    Gradient(colors: [
-                                        Color(red: 56/255, green: 189/255, blue: 248/255).opacity(rayAlpha),
-                                        Color(red: 14/255, green: 165/255, blue: 233/255).opacity(rayAlpha * 0.35),
-                                        Color.clear
-                                    ]),
-                                    startPoint: CGPoint(x: topX, y: 0),
-                                    endPoint: CGPoint(x: topX + 35.0, y: size.height * 0.85)
-                                )
-                            )
-                        }
-
-                        // 3b. 28 Rising deep-sea bubbles & bioluminescent particles
-                        for bIdx in 0..<28 {
-                            let seed = Double(bIdx) * 137.5
-                            let speed = 22.0 + Double(bIdx % 7) * 6.5
-                            let rawY = (size.height + 40.0) - ((t * speed + seed).truncatingRemainder(dividingBy: Double(size.height + 60.0)))
-                            let baseX = ((seed * 3.7).truncatingRemainder(dividingBy: Double(max(1.0, size.width))))
-                            let wobbleX = sin(t * 2.1 + Double(bIdx)) * (8.0 + Double(bIdx % 4) * 3.0)
-                            let bx = baseX + wobbleX
-                            let radius = CGFloat(2.2 + Double(bIdx % 5) * 1.35)
-                            let pulse = 0.32 + 0.24 * sin(t * 2.8 + Double(bIdx))
-
-                            let bubbleRect = CGRect(x: bx - radius, y: rawY - radius, width: radius * 2, height: radius * 2)
-                            if bIdx % 3 == 0 {
-                                ctx.fill(
-                                    Path(ellipseIn: bubbleRect),
-                                    with: .color(Color.cyan.opacity(pulse * 0.75))
-                                )
-                            } else {
-                                ctx.stroke(
-                                    Path(ellipseIn: bubbleRect),
-                                    with: .color(Color(red: 186/255, green: 230/255, blue: 253/255).opacity(pulse)),
-                                    lineWidth: 1.1
-                                )
-                                let specRect = CGRect(
-                                    x: bx - radius * 0.45,
-                                    y: rawY - radius * 0.45,
-                                    width: radius * 0.45,
-                                    height: radius * 0.45
-                                )
-                                ctx.fill(
-                                    Path(ellipseIn: specRect),
-                                    with: .color(Color.white.opacity(pulse * 0.9))
-                                )
-                            }
-                        }
-                    }
-                    .ignoresSafeArea()
-                    .allowsHitTesting(false)
-
-                    // 4. Foreground Content: Breathing Brand Logo + Swimming Mascot Shark + Progress Bar
-                    VStack(spacing: 0) {
-                        Spacer(minLength: fullH * 0.08)
-
-                        // Hot-Replaceable Brand Title (loading_logo.png) with sinusoidal Breathe Effect
-                        let breatheScale = 1.0 + 0.028 * sin(t * 2.3)
-                        let floatOffsetY = sin(t * 1.7) * 4.5
-                        let titleAspect: CGFloat = 1323.0 / 371.0
-                        let logoW = min(680.0, min(fullW * 0.70, (fullH * 0.34) * titleAspect))
-                        let logoH = logoW / titleAspect
-
-                        if let logoImg = atlasManager.loadingLogoImage() {
-                            Image(uiImage: logoImg)
-                                .resizable()
-                                .interpolation(.high)
-                                .scaledToFit()
-                                .frame(width: logoW, height: logoH)
-                                .scaleEffect(breatheScale)
-                                .offset(y: floatOffsetY)
-                                .shadow(color: Color.cyan.opacity(0.42 + 0.18 * sin(t * 2.3)), radius: 18, x: 0, y: 4)
-                                .shadow(color: Color.black.opacity(0.9), radius: 14, x: 0, y: 6)
-                        }
-
-                        Spacer()
-
-                        // Progress Track & Swimming Mascot Shark (loading_mascot.png)
-                        VStack(spacing: 8) {
-                            // Swimming Mascot Track directly above the progress bar
-                            let mascotW: CGFloat = 68.0
-                            let mascotH: CGFloat = 42.0
-                            let mascotX = -barW * 0.5 + barW * CGFloat(progress)
-                            let swimPitch = sin(t * 9.5) * 4.8
-                            let swimBobY = cos(t * 6.5) * 2.8
-
-                            ZStack {
-                                // Trailing wake bubbles behind mascot shark tail
-                                ForEach(0..<4, id: .self) { wakeIdx in
-                                    let wSeed = Double(wakeIdx)
-                                    let wakePhase = (t * 3.8 + wSeed * 0.25).truncatingRemainder(dividingBy: 1.0)
-                                    Circle()
-                                        .fill(Color.cyan.opacity((1.0 - wakePhase) * 0.75))
-                                        .frame(width: CGFloat(6.5 - wakePhase * 3.5), height: CGFloat(6.5 - wakePhase * 3.5))
-                                        .offset(
-                                            x: mascotX - 28.0 - CGFloat(wakePhase * 26.0),
-                                            y: swimBobY + CGFloat(sin(t * 8.0 + wSeed) * 4.0)
-                                        )
-                                }
-
-                                if let mascotImg = atlasManager.loadingMascotImage() {
-                                    Image(uiImage: mascotImg)
-                                        .resizable()
-                                        .interpolation(.high)
-                                        .scaledToFit()
-                                        .frame(width: mascotW, height: mascotH)
-                                        .rotationEffect(.degrees(swimPitch))
-                                        .offset(x: mascotX, y: swimBobY)
-                                        .shadow(color: Color.cyan.opacity(0.75), radius: 8, x: 0, y: 2)
-                                }
-                            }
-                            .frame(width: barW, height: mascotH + 6)
-                            .animation(.easeOut(duration: 0.22), value: progress)
-
-                            // Glowing Progress Bar
-                            ZStack(alignment: .leading) {
-                                Capsule()
-                                    .fill(Color(red: 2/255, green: 10/255, blue: 24/255).opacity(0.88))
-                                    .frame(width: barW, height: barH)
-                                    .overlay(
-                                        Capsule()
-                                            .stroke(Color.cyan.opacity(0.42), lineWidth: 1.2)
-                                    )
-
-                                Capsule()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                Color(red: 2/255, green: 132/255, blue: 199/255),
-                                                Color(red: 34/255, green: 211/255, blue: 238/255),
-                                                Color(red: 110/255, green: 231/255, blue: 183/255)
-                                            ],
-                                            startPoint: .leading,
-                                            endPoint: .trailing
-                                        )
-                                    )
-                                    .frame(width: max(barH, barW * CGFloat(progress)), height: barH - 2)
-                                    .padding(.leading, 1)
-                                    .shadow(color: Color.cyan.opacity(0.8), radius: 6)
-                                    .animation(.easeOut(duration: 0.22), value: progress)
-                            }
-                            .frame(width: barW, height: barH)
-
-                            // Stage Label & Percentage Readout
-                            HStack {
-                                Text(vm.lang == "zh" ? atlasManager.loadingStageZh : atlasManager.loadingStageEn)
-                                    .font(.system(size: 11.5, weight: .bold))
-                                    .foregroundColor(Color(red: 186/255, green: 230/255, blue: 253/255).opacity(0.92))
-                                Spacer()
-                                Text("\(Int((progress * 100.0).rounded()))%")
-                                    .font(.system(size: 12, weight: .black, design: .monospaced))
-                                    .foregroundColor(.cyan)
-                            }
-                            .frame(width: barW)
-                        }
-                        .padding(.bottom, max(22.0, fullH * 0.07))
-                    }
-                }
+                let t: Double = timeline.date.timeIntervalSinceReferenceDate
+                loadingStageContent(
+                    fullW: fullW,
+                    fullH: fullH,
+                    barW: barW,
+                    barH: barH,
+                    progress: progress,
+                    t: t
+                )
             }
         }
         .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private func loadingStageContent(
+        fullW: CGFloat,
+        fullH: CGFloat,
+        barW: CGFloat,
+        barH: CGFloat,
+        progress: Double,
+        t: Double
+    ) -> some View {
+        ZStack {
+            // 1. Base Abyssal Blue (#061528) matching UILaunchScreen LaunchBg 1:1
+            Color(red: 6.0 / 255.0, green: 21.0 / 255.0, blue: 40.0 / 255.0)
+                .ignoresSafeArea()
+
+            // 2. Hot-Replaceable Loading Background Poster (loading_background.png)
+            if let bgImg = atlasManager.loadingBackgroundImage() {
+                Image(uiImage: bgImg)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFill()
+                    .frame(width: fullW, height: fullH)
+                    .clipped()
+                    .ignoresSafeArea()
+            }
+
+            // 3. Procedural 60/120fps Caustic Light Rays & Rising Bioluminescent Bubbles
+            Canvas { (ctx: inout GraphicsContext, size: CGSize) in
+                drawUnderwaterAtmosphere(ctx: &ctx, size: size, t: t)
+            }
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
+            // 4. Foreground Content: Breathing Brand Logo + Swimming Mascot Shark + Progress Bar
+            VStack(spacing: 0) {
+                Spacer(minLength: fullH * 0.08)
+                brandLogoSection(fullW: fullW, fullH: fullH, t: t)
+                Spacer()
+                mascotAndProgressSection(barW: barW, barH: barH, fullH: fullH, progress: progress, t: t)
+            }
+        }
+    }
+
+    private func drawUnderwaterAtmosphere(ctx: inout GraphicsContext, size: CGSize, t: Double) {
+        let widthD: Double = max(1.0, Double(size.width))
+        let heightD: Double = max(1.0, Double(size.height))
+        for rayIdx in 0..<5 {
+            drawCausticRay(ctx: &ctx, widthD: widthD, heightD: heightD, t: t, rayIdx: rayIdx)
+        }
+        for bIdx in 0..<28 {
+            drawRisingBubble(ctx: &ctx, widthD: widthD, heightD: heightD, t: t, bIdx: bIdx)
+        }
+    }
+
+    private func drawCausticRay(
+        ctx: inout GraphicsContext,
+        widthD: Double,
+        heightD: Double,
+        t: Double,
+        rayIdx: Int
+    ) {
+        let fi: Double = Double(rayIdx)
+        let sway: Double = sin(t * 0.75 + fi * 1.15) * 36.0
+        let anchorRatio: Double = 0.18 + fi * 0.16
+        let topX: Double = widthD * anchorRatio + sway
+        let rayW: Double = 55.0 + 18.0 * sin(t * 1.1 + fi)
+        let bottomY: Double = heightD * 0.85
+
+        var path = Path()
+        path.move(to: CGPoint(x: topX - rayW * 0.45, y: -10.0))
+        path.addLine(to: CGPoint(x: topX + rayW * 0.45, y: -10.0))
+        path.addLine(to: CGPoint(x: topX + rayW * 1.45 + 45.0, y: bottomY))
+        path.addLine(to: CGPoint(x: topX - rayW * 1.15 + 45.0, y: bottomY))
+        path.closeSubpath()
+
+        let rayAlpha: Double = 0.055 + 0.025 * sin(t * 1.4 + fi * 0.9)
+        let cTop = Color(red: 56.0 / 255.0, green: 189.0 / 255.0, blue: 248.0 / 255.0).opacity(rayAlpha)
+        let cMid = Color(red: 14.0 / 255.0, green: 165.0 / 255.0, blue: 233.0 / 255.0).opacity(rayAlpha * 0.35)
+        let grad = Gradient(colors: [cTop, cMid, Color.clear])
+
+        ctx.fill(
+            path,
+            with: .linearGradient(
+                grad,
+                startPoint: CGPoint(x: topX, y: 0.0),
+                endPoint: CGPoint(x: topX + 35.0, y: bottomY)
+            )
+        )
+    }
+
+    private func drawRisingBubble(
+        ctx: inout GraphicsContext,
+        widthD: Double,
+        heightD: Double,
+        t: Double,
+        bIdx: Int
+    ) {
+        let idxD: Double = Double(bIdx)
+        let mod7D: Double = Double(bIdx % 7)
+        let mod4D: Double = Double(bIdx % 4)
+        let mod5D: Double = Double(bIdx % 5)
+
+        let seed: Double = idxD * 137.5
+        let speed: Double = 22.0 + mod7D * 6.5
+        let cycleSpan: Double = heightD + 60.0
+        let travelY: Double = (t * speed + seed).truncatingRemainder(dividingBy: cycleSpan)
+        let rawY: Double = (heightD + 40.0) - travelY
+
+        let baseX: Double = (seed * 3.7).truncatingRemainder(dividingBy: widthD)
+        let wobbleAmp: Double = 8.0 + mod4D * 3.0
+        let wobbleX: Double = sin(t * 2.1 + idxD) * wobbleAmp
+        let bx: Double = baseX + wobbleX
+        let radius: Double = 2.2 + mod5D * 1.35
+        let diameter: Double = radius * 2.0
+        let pulse: Double = 0.32 + 0.24 * sin(t * 2.8 + idxD)
+
+        let bubbleRect = CGRect(x: bx - radius, y: rawY - radius, width: diameter, height: diameter)
+        if bIdx % 3 == 0 {
+            ctx.fill(
+                Path(ellipseIn: bubbleRect),
+                with: .color(Color.cyan.opacity(pulse * 0.75))
+            )
+        } else {
+            let rimColor = Color(red: 186.0 / 255.0, green: 230.0 / 255.0, blue: 253.0 / 255.0).opacity(pulse)
+            ctx.stroke(
+                Path(ellipseIn: bubbleRect),
+                with: .color(rimColor),
+                lineWidth: 1.1
+            )
+            let specOffset: Double = radius * 0.45
+            let specRect = CGRect(
+                x: bx - specOffset,
+                y: rawY - specOffset,
+                width: specOffset,
+                height: specOffset
+            )
+            ctx.fill(
+                Path(ellipseIn: specRect),
+                with: .color(Color.white.opacity(pulse * 0.9))
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func brandLogoSection(fullW: CGFloat, fullH: CGFloat, t: Double) -> some View {
+        let breatheScale: CGFloat = CGFloat(1.0 + 0.028 * sin(t * 2.3))
+        let floatOffsetY: CGFloat = CGFloat(sin(t * 1.7) * 4.5)
+        let glowAlpha: Double = 0.42 + 0.18 * sin(t * 2.3)
+        let titleAspect: CGFloat = 1323.0 / 371.0
+        let maxWByHeight: CGFloat = (fullH * 0.34) * titleAspect
+        let logoW: CGFloat = min(680.0, min(fullW * 0.70, maxWByHeight))
+        let logoH: CGFloat = logoW / titleAspect
+
+        if let logoImg = atlasManager.loadingLogoImage() {
+            Image(uiImage: logoImg)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: logoW, height: logoH)
+                .scaleEffect(breatheScale)
+                .offset(y: floatOffsetY)
+                .shadow(color: Color.cyan.opacity(glowAlpha), radius: 18, x: 0, y: 4)
+                .shadow(color: Color.black.opacity(0.9), radius: 14, x: 0, y: 6)
+        }
+    }
+
+    private func mascotAndProgressSection(
+        barW: CGFloat,
+        barH: CGFloat,
+        fullH: CGFloat,
+        progress: Double,
+        t: Double
+    ) -> some View {
+        let mascotW: CGFloat = 68.0
+        let mascotH: CGFloat = 42.0
+        let progressCG: CGFloat = CGFloat(progress)
+        let mascotX: CGFloat = -barW * 0.5 + barW * progressCG
+        let swimPitch: Double = sin(t * 9.5) * 4.8
+        let swimBobY: CGFloat = CGFloat(cos(t * 6.5) * 2.8)
+        let fillW: CGFloat = max(barH, barW * progressCG)
+        let pctInt: Int = Int((progress * 100.0).rounded())
+        let stageText: String = vm.lang == "zh" ? atlasManager.loadingStageZh : atlasManager.loadingStageEn
+
+        return VStack(spacing: 8) {
+            ZStack {
+                ForEach(0..<4, id: .self) { wakeIdx in
+                    mascotWakeBubble(wakeIdx: wakeIdx, mascotX: mascotX, swimBobY: swimBobY, t: t)
+                }
+
+                if let mascotImg = atlasManager.loadingMascotImage() {
+                    Image(uiImage: mascotImg)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: mascotW, height: mascotH)
+                        .rotationEffect(.degrees(swimPitch))
+                        .offset(x: mascotX, y: swimBobY)
+                        .shadow(color: Color.cyan.opacity(0.75), radius: 8, x: 0, y: 2)
+                }
+            }
+            .frame(width: barW, height: mascotH + 6.0)
+            .animation(.easeOut(duration: 0.22), value: progress)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color(red: 2.0 / 255.0, green: 10.0 / 255.0, blue: 24.0 / 255.0).opacity(0.88))
+                    .frame(width: barW, height: barH)
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.cyan.opacity(0.42), lineWidth: 1.2)
+                    )
+
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 2.0 / 255.0, green: 132.0 / 255.0, blue: 199.0 / 255.0),
+                                Color(red: 34.0 / 255.0, green: 211.0 / 255.0, blue: 238.0 / 255.0),
+                                Color(red: 110.0 / 255.0, green: 231.0 / 255.0, blue: 183.0 / 255.0)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(width: fillW, height: barH - 2.0)
+                    .padding(.leading, 1)
+                    .shadow(color: Color.cyan.opacity(0.8), radius: 6)
+                    .animation(.easeOut(duration: 0.22), value: progress)
+            }
+            .frame(width: barW, height: barH)
+
+            HStack {
+                Text(stageText)
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundColor(Color(red: 186.0 / 255.0, green: 230.0 / 255.0, blue: 253.0 / 255.0).opacity(0.92))
+                Spacer()
+                Text("\(pctInt)%")
+                    .font(.system(size: 12, weight: .black, design: .monospaced))
+                    .foregroundColor(.cyan)
+            }
+            .frame(width: barW)
+        }
+        .padding(.bottom, max(22.0, fullH * 0.07))
+    }
+
+    private func mascotWakeBubble(
+        wakeIdx: Int,
+        mascotX: CGFloat,
+        swimBobY: CGFloat,
+        t: Double
+    ) -> some View {
+        let wSeed: Double = Double(wakeIdx)
+        let wakePhase: Double = (t * 3.8 + wSeed * 0.25).truncatingRemainder(dividingBy: 1.0)
+        let bubbleAlpha: Double = (1.0 - wakePhase) * 0.75
+        let bubbleDiameter: CGFloat = CGFloat(6.5 - wakePhase * 3.5)
+        let trailDx: CGFloat = CGFloat(28.0 + wakePhase * 26.0)
+        let trailDy: CGFloat = CGFloat(sin(t * 8.0 + wSeed) * 4.0)
+
+        return Circle()
+            .fill(Color.cyan.opacity(bubbleAlpha))
+            .frame(width: bubbleDiameter, height: bubbleDiameter)
+            .offset(x: mascotX - trailDx, y: swimBobY + trailDy)
     }
 }
 
@@ -805,136 +885,143 @@ public struct ContentView: View {
 
     public var body: some View {
         GeometryReader { geo in
-            let isCompactH = geo.size.height < 430
+            let isCompactH: Bool = geo.size.height < 430
             ZStack {
                 // 0. Base Abyssal Backdrop (#061528) so the root container is never black
-                Color(red: 6/255, green: 21/255, blue: 40/255)
+                Color(red: 6.0 / 255.0, green: 21.0 / 255.0, blue: 40.0 / 255.0)
                     .ignoresSafeArea()
 
                 // 1. Native Metal-Accelerated SpriteKit Ocean Canvas (Zero WebView!)
-                SpriteView(scene: scene, preferredFramesPerSecond: 120)
-                    .ignoresSafeArea()
-                    .onAppear {
-                        atlasManager.startAsyncPreloadIfNeeded()
-                        scene.viewModel = vm
-                        scene.refreshSharkTexture()
-                    }
-                    .onChange(of: atlasManager.isReady) { ready in
-                        if ready {
-                            scene.onAtlasPreloadCompleted()
-                        }
-                    }
-                    .onChange(of: vm.save.selectedSharkId) { _ in
-                        scene.refreshSharkTexture()
-                    }
-                    .onChange(of: vm.trialSharkIdForRun) { _ in
-                        scene.refreshSharkTexture()
-                    }
+                oceanSpriteCanvasLayer
 
-                // 2. Top HUD Bar (Only visible during active gameplay so Title Screen top is 100% clear for the maximized Title Logo)
-                if vm.gameState == "playing" {
-                    VStack(spacing: 3) {
-                        HStack(alignment: .top, spacing: 8) {
-                            UiAvatarDataBarView(vm: vm, height: isCompactH ? 56 : 64)
-                            Spacer(minLength: 4)
-                            telemetryPill(isCompact: isCompactH)
-                            Spacer(minLength: 4)
-                            pauseMedallionButton
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.top, 6)
+                // 2. Active Gameplay or Title Screen HUD Layer
+                activeStateHudLayer(geo: geo, isCompactH: isCompactH)
 
-                        hudRow2Overlays
-                            .allowsHitTesting(false)
-                        Spacer()
-                    }
-                }
+                // 3. Pause, GameOver & 48-Shark Evolution Atlas Modals
+                modalAndAtlasLayer(geo: geo)
 
-                // 3. Title Screen Hero & Bottom 3 Sliced Banner Buttons (UI_BAR_BTN_GREEN / BLUE / GOLD)
-                if vm.gameState == "title" {
-                    titleScreenOverlay(geo: geo)
-                }
-
-                // 4. In-Game Multi-Touch Sonar Joystick (Bottom-Left) + Onboarding Guide (Bottom-Center) + 90° MOBA Skill Fan (Bottom-Right)
-                if vm.gameState == "playing" {
-                    VStack {
-                        Spacer()
-                        HStack(alignment: .bottom) {
-                            sonarJoystick
-                                .padding(.leading, 26)
-                                .padding(.bottom, 18)
-                            Spacer(minLength: 6)
-                            if vm.onboardingStep != .DONE {
-                                onboardingBottomBanner
-                                    .padding(.bottom, 14)
-                            }
-                            Spacer(minLength: 6)
-                            mobaSkillFan
-                                .padding(.trailing, 22)
-                                .padding(.bottom, 16)
-                        }
-                    }
-                }
-
-                // 5. Pause Modal (1:1 setting_83a7a273.png replication)
-                if vm.gameState == "paused" {
-                    pauseModalOverlay(geo: geo)
-                }
-
-                // 6. Game Over Revive & Settlement Modal (1:1 setting_83a7a273.png replication)
-                if vm.gameState == "gameover" {
-                    gameOverModalOverlay(geo: geo)
-                }
-
-                // 7. Full-Screen 48-Shark Evolution Atlas Modal
-                if vm.showEvolutionAtlas {
-                    EvolutionAtlasSheetView(vm: vm)
-                        .transition(.opacity)
-                        .zIndex(50)
-                }
-
-                // 7.5 Google Ad Connecting Loading HUD
-                if adManager.isConnectingAd {
-                    ZStack {
-                        Color.black.opacity(0.72).ignoresSafeArea()
-                        VStack(spacing: 14) {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .yellow))
-                                .scaleEffect(1.6)
-                            Text(vm.lang == "zh" ? "正在连接 Google 激励视频广告..." : "Connecting to Google Video Ad...")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(.white)
-                            Text(vm.lang == "zh" ? "广告准备中，即将为您全屏播放" : "Preparing full-screen player...")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        .padding(24)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(Color(red: 15/255, green: 23/255, blue: 42/255).opacity(0.96))
-                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.yellow.opacity(0.7), lineWidth: 1.5))
-                        )
-                    }
-                    .zIndex(75)
-                    .transition(.opacity)
-                }
-
-                // 8. Ad Unavailable Alert Modal (iOS Native: No 3s simulation fallback)
-                if let msg = vm.adUnavailableMessage {
-                    adUnavailableAlertModal(message: msg)
-                        .zIndex(85)
-                        .transition(.opacity.combined(with: .scale(scale: 0.95)))
-                }
-
-                // 9. Layer 2 Dynamic Interactive Startup Loading Overlay (Fades out smoothly once Metal GPU preload completes)
-                if !atlasManager.isReady {
-                    StartupLoadingView(vm: vm, atlasManager: atlasManager)
-                        .zIndex(200)
-                        .transition(.opacity)
-                }
+                // 4. Ad Connection, Ad Alert & Layer 2 Dynamic Startup Loading Overlay
+                systemAndStartupOverlayLayer
             }
         }
         .statusBarHidden(true)
+    }
+
+    private var oceanSpriteCanvasLayer: some View {
+        SpriteView(scene: scene, preferredFramesPerSecond: 120)
+            .ignoresSafeArea()
+            .onAppear {
+                atlasManager.startAsyncPreloadIfNeeded()
+                scene.viewModel = vm
+                scene.refreshSharkTexture()
+            }
+            .onChange(of: atlasManager.isReady) { ready in
+                if ready {
+                    scene.onAtlasPreloadCompleted()
+                }
+            }
+            .onChange(of: vm.save.selectedSharkId) { _ in
+                scene.refreshSharkTexture()
+            }
+            .onChange(of: vm.trialSharkIdForRun) { _ in
+                scene.refreshSharkTexture()
+            }
+    }
+
+    @ViewBuilder
+    private func activeStateHudLayer(geo: GeometryProxy, isCompactH: Bool) -> some View {
+        if vm.gameState == "playing" {
+            VStack(spacing: 3) {
+                HStack(alignment: .top, spacing: 8) {
+                    UiAvatarDataBarView(vm: vm, height: isCompactH ? 56 : 64)
+                    Spacer(minLength: 4)
+                    telemetryPill(isCompact: isCompactH)
+                    Spacer(minLength: 4)
+                    pauseMedallionButton
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+
+                hudRow2Overlays
+                    .allowsHitTesting(false)
+                Spacer()
+            }
+
+            VStack {
+                Spacer()
+                HStack(alignment: .bottom) {
+                    sonarJoystick
+                        .padding(.leading, 26)
+                        .padding(.bottom, 18)
+                    Spacer(minLength: 6)
+                    if vm.onboardingStep != .DONE {
+                        onboardingBottomBanner
+                            .padding(.bottom, 14)
+                    }
+                    Spacer(minLength: 6)
+                    mobaSkillFan
+                        .padding(.trailing, 22)
+                        .padding(.bottom, 16)
+                }
+            }
+        } else if vm.gameState == "title" {
+            titleScreenOverlay(geo: geo)
+        }
+    }
+
+    @ViewBuilder
+    private func modalAndAtlasLayer(geo: GeometryProxy) -> some View {
+        if vm.gameState == "paused" {
+            pauseModalOverlay(geo: geo)
+        }
+        if vm.gameState == "gameover" {
+            gameOverModalOverlay(geo: geo)
+        }
+        if vm.showEvolutionAtlas {
+            EvolutionAtlasSheetView(vm: vm)
+                .transition(.opacity)
+                .zIndex(50)
+        }
+    }
+
+    @ViewBuilder
+    private var systemAndStartupOverlayLayer: some View {
+        if adManager.isConnectingAd {
+            ZStack {
+                Color.black.opacity(0.72).ignoresSafeArea()
+                VStack(spacing: 14) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .yellow))
+                        .scaleEffect(1.6)
+                    Text(vm.lang == "zh" ? "正在连接 Google 激励视频广告..." : "Connecting to Google Video Ad...")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                    Text(vm.lang == "zh" ? "广告准备中，即将为您全屏播放" : "Preparing full-screen player...")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                .padding(24)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color(red: 15.0 / 255.0, green: 23.0 / 255.0, blue: 42.0 / 255.0).opacity(0.96))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.yellow.opacity(0.7), lineWidth: 1.5))
+                )
+            }
+            .zIndex(75)
+            .transition(.opacity)
+        }
+
+        if let msg = vm.adUnavailableMessage {
+            adUnavailableAlertModal(message: msg)
+                .zIndex(85)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+        }
+
+        if !atlasManager.isReady {
+            StartupLoadingView(vm: vm, atlasManager: atlasManager)
+                .zIndex(200)
+                .transition(.opacity)
+        }
     }
 
     // MARK: - Title Screen Overlay
