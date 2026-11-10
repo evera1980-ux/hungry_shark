@@ -705,22 +705,40 @@ public struct ContentView: View {
     private func titleScreenOverlay(geo: GeometryProxy) -> some View {
         let showcase = vm.nextShowcaseSharkForm
         let showcaseName = vm.lang == "zh" ? showcase.nameZh : showcase.nameEn
+        let screenBounds = UIScreen.main.bounds.size
+        let fullW = max(geo.size.width, screenBounds.width)
+        let fullH = max(geo.size.height, screenBounds.height)
+        // Exact 1323x371 (3.566:1) aspect ratio box so SwiftUI never adds vertical centering dead space above the title
+        let titleAspect: CGFloat = 1323.0 / 371.0
+        let maxTitleH = fullH * 0.36
+        let targetTitleW = min(760.0, min(fullW * 0.74, maxTitleH * titleAspect))
+        let targetTitleH = targetTitleW / titleAspect
         let btnW = min(226.0, max(168.0, (geo.size.width - 56.0) / 3.0))
         let btnH = max(50.0, btnW / 3.6)
 
-        return VStack {
-            // Upper Title Banner (Wide 3.57:1 horizontal banner title3_cae0290c.png, maximized across top zone)
+        return ZStack {
+            // Matching radial vignette from Web preview so white brush title pops against shallow water
+            RadialGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 2/255, green: 132/255, blue: 199/255).opacity(0.12),
+                    Color(red: 2/255, green: 6/255, blue: 23/255).opacity(0.76)
+                ]),
+                center: UnitPoint(x: 0.5, y: 0.35),
+                startRadius: 20,
+                endRadius: max(fullW, fullH) * 0.7
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
             VStack(spacing: 0) {
+                // Upper Title Banner (Wide 3.57:1 horizontal banner title3_cae0290c.png, pinned flush to top)
                 if let titleImg = SpriteAtlasManager.shared.titleLogoImage() {
                     Image(uiImage: titleImg)
                         .resizable()
                         .interpolation(.high)
-                        .scaledToFit()
-                        .frame(
-                            width: min(680, max(330, geo.size.width * 0.78)),
-                            height: min(176, max(90, geo.size.height * 0.28))
-                        )
+                        .frame(width: targetTitleW, height: targetTitleH, alignment: .top)
                         .shadow(color: .black.opacity(0.9), radius: 16, x: 0, y: 6)
+                        .padding(.top, 2)
                 } else {
                     Text(vm.t("game_title"))
                         .font(.system(size: min(40, max(26, geo.size.width * 0.05)), weight: .black))
@@ -732,11 +750,10 @@ public struct ContentView: View {
                             )
                         )
                         .shadow(color: .black.opacity(0.85), radius: 8, x: 0, y: 3)
+                        .padding(.top, 6)
                 }
-            }
-            .padding(.top, max(4, geo.size.height * 0.012))
 
-            Spacer()
+                Spacer(minLength: 0)
 
             // Bottom 3 Sliced Banner Buttons (UI_BAR_BTN_GREEN, UI_BAR_BTN_BLUE, UI_BAR_BTN_GOLD)
             HStack(spacing: 12) {
@@ -795,7 +812,8 @@ public struct ContentView: View {
                     }
                 )
             }
-            .padding(.bottom, 18)
+            .padding(.bottom, 8)
+            }
         }
     }
 

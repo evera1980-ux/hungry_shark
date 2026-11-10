@@ -169,12 +169,12 @@ public final class SpriteAtlasManager {
         let roots: [URL] = [Bundle.main.resourceURL, Bundle.main.bundleURL].compactMap { $0 }
         for root in roots {
             let candidates = [
-                root.appendingPathComponent("Assets/(cleanBase).png"),
-                root.appendingPathComponent("Assets/(cleanBase)@3x.png"),
-                root.appendingPathComponent("Resources/Assets/(cleanBase).png"),
-                root.appendingPathComponent("Resources/Assets/(cleanBase)@3x.png"),
-                root.appendingPathComponent("(cleanBase).png"),
-                root.appendingPathComponent("(cleanBase)@3x.png")
+                root.appendingPathComponent("Assets/\(cleanBase).png"),
+                root.appendingPathComponent("Assets/\(cleanBase)@3x.png"),
+                root.appendingPathComponent("Resources/Assets/\(cleanBase).png"),
+                root.appendingPathComponent("Resources/Assets/\(cleanBase)@3x.png"),
+                root.appendingPathComponent("\(cleanBase).png"),
+                root.appendingPathComponent("\(cleanBase)@3x.png")
             ]
             for url in candidates {
                 if FileManager.default.fileExists(atPath: url.path),
@@ -191,11 +191,11 @@ public final class SpriteAtlasManager {
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: "(cleanBase)@3x", ofType: "png"),
+        if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: "png"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: "(cleanBase)@3x", ofType: "png", inDirectory: "Assets"),
+        if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: "png", inDirectory: "Assets"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
@@ -207,7 +207,7 @@ public final class SpriteAtlasManager {
         var missingForms: [SharkFormConfig] = []
         for form in GameConfigGenerated.sharkForms {
             let baseName = String(format: "shark_form_%02d", form.index)
-            if let rawImg = loadBundledImage(named: "(baseName)@3x") ?? loadBundledImage(named: baseName),
+            if let rawImg = loadBundledImage(named: "\(baseName)@3x") ?? loadBundledImage(named: baseName),
                let cg = rawImg.cgImage {
                 let img3x = UIImage(cgImage: cg, scale: 3.0, orientation: .up)
                 sharkUIImages[form.spriteKey] = img3x

@@ -299,7 +299,7 @@ extension GoogleAdMobManager: GADFullScreenContentDelegate {
     }
 
     public func ad(_ ad: GADFullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
-        print("[GoogleAdMob] ❌ Failed to present full screen ad: (error.localizedDescription)")
+        print("[GoogleAdMob] ❌ Failed to present full screen ad: \(error.localizedDescription)")
         failPendingAdIfAny()
     }
 }
@@ -1128,9 +1128,11 @@ public final class OceanGameScene: SKScene {
             }
         }
 
-        // 2. Sea-Surface Locked Camera Tracking (keeps shark vertically centered at 50% screen height on Title Screen)
+        // 2. Sea-Surface Locked Camera Tracking (keeps shark centered at 50% X, 50% Y on Title Screen)
         let minSurfaceCameraY = 40.0
-        let targetCamX = sharkX + cos(sharkAngle) * 58.0
+        let targetCamX = vm.gameState == "title"
+            ? sharkX
+            : (sharkX + cos(sharkAngle) * 58.0)
         let targetCamY = vm.gameState == "title"
             ? max(minSurfaceCameraY, sharkY)
             : max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0)

@@ -3702,7 +3702,7 @@ export default function App() {
             }}
           >
             {/* Top Section: Maximized Wide Horizontal Title Banner (3.57:1 aspect ratio, 100% unobstructed top zone) */}
-            <div className="w-full flex flex-col items-center pt-1 sm:pt-1.5 md:pt-2">
+            <div className="w-full flex flex-col items-center pt-0.5 sm:pt-1">
               <motion.div
                 initial={{ opacity: 0, scale: 0.92, y: -12 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -3715,7 +3715,10 @@ export default function App() {
                     src="/assets/aistudio/title3_cae0290c.png"
                     alt={t('game_title')}
                     draggable={false}
-                    className="w-[360px] sm:w-[560px] md:w-[700px] lg:w-[820px] max-w-[92vw] sm:max-w-[86vw] max-h-[27vh] sm:max-h-[30vh] h-auto object-contain select-none drop-shadow-[0_10px_26px_rgba(0,0,0,0.9)]"
+                    style={{
+                      width: 'min(760px, 74vw, calc(36dvh * 3.566))',
+                    }}
+                    className="h-auto object-contain object-top select-none drop-shadow-[0_10px_26px_rgba(0,0,0,0.9)]"
                   />
                   <span className="sr-only">{t('game_title')}</span>
                 </h1>

@@ -1050,12 +1050,12 @@ public final class SpriteAtlasManager {
         let roots: [URL] = [Bundle.main.resourceURL, Bundle.main.bundleURL].compactMap { $0 }
         for root in roots {
             let candidates = [
-                root.appendingPathComponent("Assets/\(cleanBase).png"),
-                root.appendingPathComponent("Assets/\(cleanBase)@3x.png"),
-                root.appendingPathComponent("Resources/Assets/\(cleanBase).png"),
-                root.appendingPathComponent("Resources/Assets/\(cleanBase)@3x.png"),
-                root.appendingPathComponent("\(cleanBase).png"),
-                root.appendingPathComponent("\(cleanBase)@3x.png")
+                root.appendingPathComponent("Assets/\\(cleanBase).png"),
+                root.appendingPathComponent("Assets/\\(cleanBase)@3x.png"),
+                root.appendingPathComponent("Resources/Assets/\\(cleanBase).png"),
+                root.appendingPathComponent("Resources/Assets/\\(cleanBase)@3x.png"),
+                root.appendingPathComponent("\\(cleanBase).png"),
+                root.appendingPathComponent("\\(cleanBase)@3x.png")
             ]
             for url in candidates {
                 if FileManager.default.fileExists(atPath: url.path),
@@ -1072,11 +1072,11 @@ public final class SpriteAtlasManager {
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: "png"),
+        if let path = Bundle.main.path(forResource: "\\(cleanBase)@3x", ofType: "png"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
-        if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: "png", inDirectory: "Assets"),
+        if let path = Bundle.main.path(forResource: "\\(cleanBase)@3x", ofType: "png", inDirectory: "Assets"),
            let img = UIImage(contentsOfFile: path) {
             return img
         }
@@ -1088,7 +1088,7 @@ public final class SpriteAtlasManager {
         var missingForms: [SharkFormConfig] = []
         for form in GameConfigGenerated.sharkForms {
             let baseName = String(format: "shark_form_%02d", form.index)
-            if let rawImg = loadBundledImage(named: "\(baseName)@3x") ?? loadBundledImage(named: baseName),
+            if let rawImg = loadBundledImage(named: "\\(baseName)@3x") ?? loadBundledImage(named: baseName),
                let cg = rawImg.cgImage {
                 let img3x = UIImage(cgImage: cg, scale: 3.0, orientation: .up)
                 sharkUIImages[form.spriteKey] = img3x
@@ -2672,7 +2672,7 @@ extension GoogleAdMobManager: GADFullScreenContentDelegate {
     }
 
     public func ad(_ ad: GADFullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
-        print("[GoogleAdMob] ❌ Failed to present full screen ad: \(error.localizedDescription)")
+        print("[GoogleAdMob] ❌ Failed to present full screen ad: \\(error.localizedDescription)")
         failPendingAdIfAny()
     }
 }
@@ -3501,9 +3501,11 @@ public final class OceanGameScene: SKScene {
             }
         }
 
-        // 2. Sea-Surface Locked Camera Tracking (keeps shark vertically centered at 50% screen height on Title Screen)
+        // 2. Sea-Surface Locked Camera Tracking (keeps shark centered at 50% X, 50% Y on Title Screen)
         let minSurfaceCameraY = 40.0
-        let targetCamX = sharkX + cos(sharkAngle) * 58.0
+        let targetCamX = vm.gameState == "title"
+            ? sharkX
+            : (sharkX + cos(sharkAngle) * 58.0)
         let targetCamY = vm.gameState == "title"
             ? max(minSurfaceCameraY, sharkY)
             : max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0)
@@ -5395,22 +5397,40 @@ public struct ContentView: View {
     private func titleScreenOverlay(geo: GeometryProxy) -> some View {
         let showcase = vm.nextShowcaseSharkForm
         let showcaseName = vm.lang == "zh" ? showcase.nameZh : showcase.nameEn
+        let screenBounds = UIScreen.main.bounds.size
+        let fullW = max(geo.size.width, screenBounds.width)
+        let fullH = max(geo.size.height, screenBounds.height)
+        // Exact 1323x371 (3.566:1) aspect ratio box so SwiftUI never adds vertical centering dead space above the title
+        let titleAspect: CGFloat = 1323.0 / 371.0
+        let maxTitleH = fullH * 0.36
+        let targetTitleW = min(760.0, min(fullW * 0.74, maxTitleH * titleAspect))
+        let targetTitleH = targetTitleW / titleAspect
         let btnW = min(226.0, max(168.0, (geo.size.width - 56.0) / 3.0))
         let btnH = max(50.0, btnW / 3.6)
 
-        return VStack {
-            // Upper Title Banner (Wide 3.57:1 horizontal banner title3_cae0290c.png, maximized across top zone)
+        return ZStack {
+            // Matching radial vignette from Web preview so white brush title pops against shallow water
+            RadialGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 2/255, green: 132/255, blue: 199/255).opacity(0.12),
+                    Color(red: 2/255, green: 6/255, blue: 23/255).opacity(0.76)
+                ]),
+                center: UnitPoint(x: 0.5, y: 0.35),
+                startRadius: 20,
+                endRadius: max(fullW, fullH) * 0.7
+            )
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+
             VStack(spacing: 0) {
+                // Upper Title Banner (Wide 3.57:1 horizontal banner title3_cae0290c.png, pinned flush to top)
                 if let titleImg = SpriteAtlasManager.shared.titleLogoImage() {
                     Image(uiImage: titleImg)
                         .resizable()
                         .interpolation(.high)
-                        .scaledToFit()
-                        .frame(
-                            width: min(680, max(330, geo.size.width * 0.78)),
-                            height: min(176, max(90, geo.size.height * 0.28))
-                        )
+                        .frame(width: targetTitleW, height: targetTitleH, alignment: .top)
                         .shadow(color: .black.opacity(0.9), radius: 16, x: 0, y: 6)
+                        .padding(.top, 2)
                 } else {
                     Text(vm.t("game_title"))
                         .font(.system(size: min(40, max(26, geo.size.width * 0.05)), weight: .black))
@@ -5422,11 +5442,10 @@ public struct ContentView: View {
                             )
                         )
                         .shadow(color: .black.opacity(0.85), radius: 8, x: 0, y: 3)
+                        .padding(.top, 6)
                 }
-            }
-            .padding(.top, max(4, geo.size.height * 0.012))
 
-            Spacer()
+                Spacer(minLength: 0)
 
             // Bottom 3 Sliced Banner Buttons (UI_BAR_BTN_GREEN, UI_BAR_BTN_BLUE, UI_BAR_BTN_GOLD)
             HStack(spacing: 12) {
@@ -5485,7 +5504,8 @@ public struct ContentView: View {
                     }
                 )
             }
-            .padding(.bottom, 18)
+            .padding(.bottom, 8)
+            }
         }
     }
 
@@ -8006,18 +8026,7 @@ function main() {
     }
   }
 
-  // 3. Write & validate Xcode project files (project.pbxproj, project.yml, Package.swift)
-  const allBundledPngFiles = fs
-    .readdirSync(assetsDst)
-    .filter((f) => f.endsWith('.png'));
-  const pbxprojContent = generatePbxproj(allBundledPngFiles);
-  validateOpenStepPbxproj(pbxprojContent);
-
-  fs.writeFileSync(
-    path.join(xcodeprojDir, 'project.pbxproj'),
-    pbxprojContent,
-    'utf8'
-  );
+  // 3. Write XcodeGen spec (project.yml) & Package.swift, then generate or preserve project.pbxproj
   fs.writeFileSync(
     path.join(IOS_ROOT, 'project.yml'),
     generateXcodeGenProjectYml(),
@@ -8029,29 +8038,33 @@ function main() {
     'utf8'
   );
 
+  const pbxprojPath = path.join(xcodeprojDir, 'project.pbxproj');
+  const existingPbxproj = fs.existsSync(pbxprojPath)
+    ? fs.readFileSync(pbxprojPath, 'utf8')
+    : '';
+
   // Generate 100% Apple-compliant project.pbxproj via XcodeGen if available
   let xcodegenSuccess = false;
   try {
-    child_process.execSync('xcodegen generate', { cwd: IOS_ROOT, stdio: 'inherit' });
+    child_process.execSync('xcodegen generate', { cwd: IOS_ROOT, stdio: 'pipe' });
     xcodegenSuccess = true;
     console.log('[build:ios] ✅ Generated Xcode project via XcodeGen (100% Apple native format).');
-  } catch (e) {
-    console.warn('[build:ios] ⚠️ XcodeGen not available or failed, falling back to built-in template.');
+  } catch {
+    if (existingPbxproj.includes('objectVersion = 77')) {
+      xcodegenSuccess = true;
+      console.log('[build:ios] ℹ️ Preserved existing XcodeGen project.pbxproj (objectVersion = 77).');
+    } else {
+      console.warn('[build:ios] ⚠️ XcodeGen not available, falling back to built-in OpenStep template.');
+    }
   }
 
   if (!xcodegenSuccess) {
     const allBundledPngFiles = fs
       .readdirSync(assetsDst)
       .filter((f) => f.endsWith('.png'));
-    const xcodeProjDir = path.join(IOS_ROOT, 'HungrySharkEvolution.xcodeproj');
-    if (!fs.existsSync(xcodeProjDir)) {
-      fs.mkdirSync(xcodeProjDir, { recursive: true });
-    }
-    fs.writeFileSync(
-      path.join(xcodeProjDir, 'project.pbxproj'),
-      generatePbxproj(allBundledPngFiles),
-      'utf8'
-    );
+    const pbxprojContent = generatePbxproj(allBundledPngFiles);
+    validateOpenStepPbxproj(pbxprojContent);
+    fs.writeFileSync(pbxprojPath, pbxprojContent, 'utf8');
   }
 
   // Clean stale UI session state so Xcode opens fresh without "InitialEditorMissingFile" or corrupted cache
