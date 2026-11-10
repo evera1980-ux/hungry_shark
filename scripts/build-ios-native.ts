@@ -3501,11 +3501,12 @@ public final class OceanGameScene: SKScene {
             }
         }
 
-        // 2. Sea-Surface Locked Camera Tracking (keeps shark centered below top HUD bars, and shifted lower on Title Screen!)
+        // 2. Sea-Surface Locked Camera Tracking (keeps shark vertically centered at 50% screen height on Title Screen)
         let minSurfaceCameraY = 40.0
         let targetCamX = sharkX + cos(sharkAngle) * 58.0
-        let titleDownOffset = vm.gameState == "title" ? (viewH * 0.105) / max(0.5, stats.cameraZoom) : 0.0
-        let targetCamY = max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0 - titleDownOffset)
+        let targetCamY = vm.gameState == "title"
+            ? max(minSurfaceCameraY, sharkY)
+            : max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0)
         cameraX += (targetCamX - cameraX) * min(1.0, dt * 6.5)
         cameraY += (targetCamY - cameraY) * min(1.0, dt * 6.5)
 
@@ -5406,8 +5407,8 @@ public struct ContentView: View {
                         .interpolation(.high)
                         .scaledToFit()
                         .frame(
-                            width: min(720, max(340, geo.size.width * 0.82)),
-                            height: min(210, max(98, geo.size.height * 0.34))
+                            width: min(680, max(330, geo.size.width * 0.78)),
+                            height: min(176, max(90, geo.size.height * 0.28))
                         )
                         .shadow(color: .black.opacity(0.9), radius: 16, x: 0, y: 6)
                 } else {
@@ -5423,7 +5424,7 @@ public struct ContentView: View {
                         .shadow(color: .black.opacity(0.85), radius: 8, x: 0, y: 3)
                 }
             }
-            .padding(.top, max(8, geo.size.height * 0.02))
+            .padding(.top, max(4, geo.size.height * 0.012))
 
             Spacer()
 

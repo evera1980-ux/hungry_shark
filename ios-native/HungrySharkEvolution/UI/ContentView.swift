@@ -717,8 +717,8 @@ public struct ContentView: View {
                         .interpolation(.high)
                         .scaledToFit()
                         .frame(
-                            width: min(720, max(340, geo.size.width * 0.82)),
-                            height: min(210, max(98, geo.size.height * 0.34))
+                            width: min(680, max(330, geo.size.width * 0.78)),
+                            height: min(176, max(90, geo.size.height * 0.28))
                         )
                         .shadow(color: .black.opacity(0.9), radius: 16, x: 0, y: 6)
                 } else {
@@ -734,7 +734,7 @@ public struct ContentView: View {
                         .shadow(color: .black.opacity(0.85), radius: 8, x: 0, y: 3)
                 }
             }
-            .padding(.top, max(8, geo.size.height * 0.02))
+            .padding(.top, max(4, geo.size.height * 0.012))
 
             Spacer()
 
