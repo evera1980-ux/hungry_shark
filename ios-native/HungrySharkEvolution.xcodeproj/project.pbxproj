@@ -10,6 +10,7 @@
 		19B310C9805C4C2BCF0E24C2 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = C4985E4589C8C40D02C128F3 /* GoogleMobileAds */; };
 		3AF3C1BC59ABE3C6EFF3E9D9 /* GameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101F4A15326A47655B1C7F1A /* GameRules.swift */; };
 		5C9CD805F6DD528B440D645B /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = 69B3C0D7DB4F3DBF47B29DF6 /* Assets */; };
+		7D88A1109922000100ABCDEF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8E99A2209922000100ABCDEF /* Assets.xcassets */; };
 		9FCA7C383322B025DF85B098 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DDC40AEEDFC7A0A44F40C33 /* OceanGameScene.swift */; };
 		B25AF8EC2FED9914C37427EC /* HungrySharkEvolutionApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49817EAED6ADE3BE4FCFFA36 /* HungrySharkEvolutionApp.swift */; };
 		B50F2EF693A364C21A3B93E3 /* SpriteAtlasManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 583132C9A07A0F6F7CBD89C7 /* SpriteAtlasManager.swift */; };
@@ -24,6 +25,7 @@
 		583132C9A07A0F6F7CBD89C7 /* SpriteAtlasManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpriteAtlasManager.swift; sourceTree = "<group>"; };
 		69B3C0D7DB4F3DBF47B29DF6 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets; path = HungrySharkEvolution/Resources/Assets; sourceTree = SOURCE_ROOT; };
 		8B9BAD62F7CEE8C738E16233 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		8E99A2209922000100ABCDEF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9B9BC5CF0B867969C10622B9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9F85933870EF8272B95A7969 /* HungrySharkEvolution.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = HungrySharkEvolution.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AFFC184653342AD5FE917FC1 /* GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameConfigGenerated.swift; sourceTree = "<group>"; };
@@ -71,6 +73,7 @@
 			isa = PBXGroup;
 			children = (
 				49817EAED6ADE3BE4FCFFA36 /* HungrySharkEvolutionApp.swift */,
+				8E99A2209922000100ABCDEF /* Assets.xcassets */,
 				9B9BC5CF0B867969C10622B9 /* Info.plist */,
 				BAECEA42929840FA703ED78D /* Core */,
 				ADB565A34C5AEC9B6F956814 /* Generated */,
@@ -177,6 +180,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				5C9CD805F6DD528B440D645B /* Assets in Resources */,
+				7D88A1109922000100ABCDEF /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -963,11 +963,12 @@ public final class OceanGameScene: SKScene {
     private let maxActivePreys = 22
 
     public override func didMove(to view: SKView) {
-        backgroundColor = UIColor(red: 6/255, green: 148/255, blue: 194/255, alpha: 1)
+        backgroundColor = UIColor(red: 6/255, green: 21/255, blue: 40/255, alpha: 1)
         scaleMode = .resizeFill
         anchorPoint = CGPoint(x: 0, y: 0)
 
-        SpriteAtlasManager.shared.preloadAllIfNeeded()
+        // Start off-main-thread asynchronous texture decoding & Metal GPU warm-up (zero main-thread blocking!)
+        SpriteAtlasManager.shared.startAsyncPreloadIfNeeded()
 
         removeAllChildren()
         addChild(waterBgNode)
@@ -996,6 +997,15 @@ public final class OceanGameScene: SKScene {
         refreshSharkTexture()
         initAmbientBubblesIfNeeded(viewW: Double(max(640, size.width)), viewH: Double(max(360, size.height)))
         syncPreyPopulation()
+    }
+
+    public func onAtlasPreloadCompleted() {
+        refreshSharkTexture()
+        for prey in activePreys where prey.node.texture == nil {
+            if let tex = SpriteAtlasManager.shared.preyTexture(for: prey.config.spriteKey) {
+                prey.node.texture = tex
+            }
+        }
     }
 
     public func refreshSharkTexture() {
@@ -2277,6 +2287,10 @@ public final class OceanGameScene: SKScene {
             let screenY = viewH * 0.5 - (p.y - cameraY) * zoom
             let inflateScale = 1.0 + p.inflateRatio * 0.38
             let baseSize = p.config.radius * GameRules.preyRadiusToDrawSize * visualScale * inflateScale * zoom
+            if p.node.texture == nil,
+               let loadedTex = SpriteAtlasManager.shared.preyTexture(for: p.config.spriteKey) {
+                p.node.texture = loadedTex
+            }
             let texAspect: Double
             if let tex = p.node.texture, tex.size().height > 0 {
                 texAspect = Double(tex.size().width / tex.size().height)

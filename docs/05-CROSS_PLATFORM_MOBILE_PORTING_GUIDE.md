@@ -87,23 +87,48 @@
 
 ---
 
-## 4. 新平台打包上线前 13 项必检清单 (Pre-Release QA Checklist)
+### 3.4 专题四：iOS 首屏零黑屏「双层无缝过渡体系」与方案 A 热替换加载页规范
+在真机冷启动时，若缺失静态 `UILaunchScreen` 且在 `SKScene.didMove(to:)` 主线程同步执行全量 `@3x` 纹理切片与 `SKTexture.preload` GPU 上传，会导致 **0 ~ 0.3s 系统黑底 + 0.3 ~ 3.0s 主线程阻塞** 共计约 3 秒的纯黑屏等待。项目统一采用商业手游标准的**双层无缝过渡架构 + 方案 A 静态图片热替换约定**：
+
+1. **第一层：系统级 `UILaunchScreen` + `UIWindow` 深海底色（消除 0.0s ~ 0.3s 窗口黑屏）**：
+   - 在 `HungrySharkEvolution/Assets.xcassets` 中配置 `LaunchBg.colorset`（`#061528`，即 `RGB(6, 21, 40)` 深海幽蓝）与 `LaunchLogo.imageset`（默认绑定品牌大标题图 `loading_logo.png`）。
+   - 在 `Info.plist` 的 `UILaunchScreen` 字典中绑定 `UIColorName = LaunchBg` 与 `UIImageName = LaunchLogo`，并在 `AppDelegate.didFinishLaunchingWithOptions` 中将 `UIWindow.appearance().backgroundColor` 同步设为 `#061528`。
+   - **效果**：手指点击桌面图标的 `0ms` 瞬间即呈现 `#061528` 深海幽蓝底色与品牌剪影，彻底消除黑屏或白屏闪烁。
+2. **第二层：后台异步纹理解码与 `StartupLoadingView` 60/120fps 动态加载层（消除 0.3s ~ 3.0s 主线程冻结）**：
+   - **主线程零阻塞**：`OceanGameScene.didMove(to:)` 严禁同步调用耗时纹理解码，改为调用 `SpriteAtlasManager.shared.startAsyncPreloadIfNeeded()`，并在首帧仅通过 `loadSingleSharkOnDemand` 按需秒级加载当前选中的 1 条主角鲨鱼。
+   - **后台分阶段异步预热**：在 `Task.detached(priority: .userInitiated)` 后台高优线程中依次完成：① UI 金属按钮/横幅与 9-Slice 结算框裁切（`0% -> 18%`）→ ② 48 阶 `@3x` 鲨鱼高清纹理加载（`18% -> 58%`）→ ③ 33 种海洋猎物去底切片（`58% -> 82%`）→ ④ 12 层深海视差背景去底（`82% -> 92%`）→ ⑤ `SKTexture.preload` 异步上传 Metal GPU（`92% -> 100%`），通过 `@MainActor` 实时驱动 `@Published loadingProgress`（`0.0 ~ 1.0`）。
+   - **丝滑淡出交接**：当 `atlas.isReady == true` 时，自动回调 `scene.onAtlasPreloadCompleted()` 刷新场景纹理，同时 `StartupLoadingView` 执行 `0.45s` 平滑透明度淡出，无缝露出已发光就绪的首页标题界面。
+3. **方案 A：零代码改动的静态素材热替换约定（Hot-Replaceable Assets）**：
+   - 资源目录（Web 源目录 `public/assets/aistudio/` 同步拷贝至 iOS `HungrySharkEvolution/Resources/Assets/`）固定约定以下 3 个标准文件名：
+     - `loading_background.png`：加载背景图 / 节日海报（若透明或局部透出则自动叠合 `#061528` 深海底色）
+     - `loading_logo.png`：品牌 / 游戏大标题（同步拷贝至 `Assets.xcassets/LaunchLogo.imageset`）
+     - `loading_mascot.png`：进度条上方游动的吉祥物小鲨鱼
+   - **内置纯代码动效表现（无需额外序列帧资源）**：
+     - 背景层自带 `TimelineView(.animation)` + `Canvas` 实时渲染的 **6 道深海体积光束（Caustic Light Rays）** 与 **28 颗视差上升气泡（Rising Bubbles）**；
+     - `loading_logo.png` 带有连续正弦呼吸脉动（Breathe Effect）与青蓝光晕；
+     - `loading_mascot.png` 在进度条正上方随着加载百分比（`0% → 100%`）从左向右平滑游动，自带游动俯仰摆动与尾部吐泡粒子。
+   - **后续换皮方式**：未来更换春节版、万圣节版或新品牌 Logo 时，仅需替换 `public/assets/aistudio/` 下的 `loading_background.png`、`loading_logo.png` 或 `loading_mascot.png` 并运行 `npm run build:ios`，**Swift 代码一行无需修改**。
+
+---
+
+## 4. 新平台打包上线前 14 项必检清单 (Pre-Release QA Checklist)
 
 未来打包至 **iOS / Android / HarmonyOS / 小游戏** 真机提审前，必须逐项打钩确认：
 
-- [ ] **1. 原生图集抠图完备性**：首页三色横幅按钮、左上角镂空金属头像栏、左下角声呐摇杆底座与握把、右下角 90° 技能扇区圆章、暂停/复活/结算金属框与三宫格鲨鱼卡是否 100% 使用裁剪去底后的原版美术素材？
-- [ ] **2. 多语言零漏翻与零 `{var}` 裸露**：切换中文/英文，检查首页、局内连击（触发 2 连击以上）、狩猎热度（Lv.1~3）、3 步新手引导、冲刺键底部文字、暂停窗、复活窗、结算窗、进化图谱，确认无任何 `hud_*`、`onboard_*` 或 `{count}`、`{mult}` 裸露。
-- [ ] **3. 文本单行防折行**：在最窄手机横屏（如 `667×375`）下，左上角血条处于满血、濒危（`<28%`）、狂暴（`FRENZY`）三种状态时，文字是否均保持单行且无上下断行？
-- [ ] **4. 中心视野零遮挡**：将鲨鱼游至海平面最顶端（`depth = 4m`）并同时触发连击、黄金狂暴与新手引导，确认所有 HUD 胶囊均未遮挡正在游动的鲨鱼本体。
-- [ ] **5. 背景零分界线与下潜零卡顿**：在阳光浅海、暮光带、深渊带上下左右游动，确认海面波光层底部无白色横线、水平循环拼接处采用物理像素精确对齐（`x0 -> x1` **严禁对半透明背景块使用 `+2.0pt` 宽度重叠**，防止双倍 Alpha 叠加形成屏幕中央竖向黑线），且 12 张背景纹理已在启动阶段预加载预热（`SKTexture.preload`）+ 节点池化复用，首次下潜跨深度带 0 卡顿。
-- [ ] **6. 猎物步态与轨迹**：观察小丑鱼、水母、电鳗、河豚、潜艇 5 类生物，确认鱼尾方向正确（鱼吻在前、尾鳍摆动在后）、摆尾幅度与鲨鱼一样前稳后柔、不夸张扭动。
-- [ ] **7. 视觉体型 === 可吞噬性**：确认屏幕上所有比玩家鲨鱼小的鱼均可直接一口吞噬，所有比玩家鲨鱼大的鱼均不可常态直吞。
-- [ ] **8. 吞噬五位一体特效**：确认靠近小鱼时有吸口牵引，吞噬瞬间有鲨鱼前扑张嘴动画、绿色/金色粘液气泡爆散、3D 翻转金币与基因结晶磁吸飞入、以及双语浮动加分飘字。
-- [ ] **9. 进化转轮 iPhone 闹钟级丝滑度**：打开进化图谱，慢速拖动与快速连续甩动底部弧形鲨鱼列表，确认具备 iPhone 闹钟滚轮级的长惯性滑行、连拨动量叠加与棘轮刻度震动反馈。
-- [ ] **10. 双手多点触控**：左手大拇指按住摇杆持续画圈游动的同时，右手连续点击强化、突破、狂暴与按住冲刺，确认 100% 即时响应且绝不打断左手摇杆。
-- [ ] **11. 跨语言数据模型字段与枚举值 100% 契约对齐**：代码生成器（如 `scripts/build-ios-native.ts`）中 `GameModels.swift` 定义的 `ComputedSharkStats` 属性名（如 `magnetRadius`、`jawSuctionMultiplier`）及 `PreyBehavior` 枚举分支（如 `.MINE_HAZARD`）与渲染层 `OceanGameScene.swift` 引用处必须 100% 严格一致，严禁手写臆造未定义的成员名（如 `magnetRadiusBonus` 或 `.MINE_STATIC`）。
-- [ ] **12. 自动化测试与构建**：`npx tsx --test src/game/rules.test.ts`、`npm run lint`、`npm run build`（及对应平台构建脚本如 `npm run build:ios`）全部零错误通过。
-- [ ] **13. 文档同步**：所有变更已同步更新至 `docs/01 ~ 05.md`。
+- [ ] **1. 首屏零黑屏双层启动过渡**：冷启动点击图标瞬间是否为 `#061528` 深海幽蓝底色，且毫秒级切入带游动小鲨鱼进度条的 `StartupLoadingView`，全程 60/120fps 零卡顿并在 `100%` 后平滑淡出至首页？
+- [ ] **2. 原生图集抠图完备性**：首页三色横幅按钮、左上角镂空金属头像栏、左下角声呐摇杆底座与握把、右下角 90° 技能扇区圆章、暂停/复活/结算金属框与三宫格鲨鱼卡是否 100% 使用裁剪去底后的原版美术素材？
+- [ ] **3. 多语言零漏翻与零 `{var}` 裸露**：切换中文/英文，检查首页、局内连击（触发 2 连击以上）、狩猎热度（Lv.1~3）、3 步新手引导、冲刺键底部文字、暂停窗、复活窗、结算窗、进化图谱，确认无任何 `hud_*`、`onboard_*` 或 `{count}`、`{mult}` 裸露。
+- [ ] **4. 文本单行防折行**：在最窄手机横屏（如 `667×375`）下，左上角血条处于满血、濒危（`<28%`）、狂暴（`FRENZY`）三种状态时，文字是否均保持单行且无上下断行？
+- [ ] **5. 中心视野零遮挡**：将鲨鱼游至海平面最顶端（`depth = 4m`）并同时触发连击、黄金狂暴与新手引导，确认所有 HUD 胶囊均未遮挡正在游动的鲨鱼本体。
+- [ ] **6. 背景零分界线与下潜零卡顿**：在阳光浅海、暮光带、深渊带上下左右游动，确认海面波光层底部无白色横线、水平循环拼接处采用物理像素精确对齐（`x0 -> x1` **严禁对半透明背景块使用 `+2.0pt` 宽度重叠**，防止双倍 Alpha 叠加形成屏幕中央竖向黑线），且 12 张背景纹理已在启动阶段预加载预热（`SKTexture.preload`）+ 节点池化复用，首次下潜跨深度带 0 卡顿。
+- [ ] **7. 猎物步态与轨迹**：观察小丑鱼、水母、电鳗、河豚、潜艇 5 类生物，确认鱼尾方向正确（鱼吻在前、尾鳍摆动在后）、摆尾幅度与鲨鱼一样前稳后柔、不夸张扭动。
+- [ ] **8. 视觉体型 === 可吞噬性**：确认屏幕上所有比玩家鲨鱼小的鱼均可直接一口吞噬，所有比玩家鲨鱼大的鱼均不可常态直吞。
+- [ ] **9. 吞噬五位一体特效**：确认靠近小鱼时有吸口牵引，吞噬瞬间有鲨鱼前扑张嘴动画、绿色/金色粘液气泡爆散、3D 翻转金币与基因结晶磁吸飞入、以及双语浮动加分飘字。
+- [ ] **10. 进化转轮 iPhone 闹钟级丝滑度**：打开进化图谱，慢速拖动与快速连续甩动底部弧形鲨鱼列表，确认具备 iPhone 闹钟滚轮级的长惯性滑行、连拨动量叠加与棘轮刻度震动反馈。
+- [ ] **11. 双手多点触控**：左手大拇指按住摇杆持续画圈游动的同时，右手连续点击强化、突破、狂暴与按住冲刺，确认 100% 即时响应且绝不打断左手摇杆。
+- [ ] **12. 跨语言数据模型字段与枚举值 100% 契约对齐**：代码生成器（如 `scripts/build-ios-native.ts`）中 `GameModels.swift` 定义的 `ComputedSharkStats` 属性名（如 `magnetRadius`、`jawSuctionMultiplier`）及 `PreyBehavior` 枚举分支（如 `.MINE_HAZARD`）与渲染层 `OceanGameScene.swift` 引用处必须 100% 严格一致，严禁手写臆造未定义的成员名（如 `magnetRadiusBonus` 或 `.MINE_STATIC`）。
+- [ ] **13. 自动化测试与构建**：`npx tsx --test src/game/rules.test.ts`、`npm run lint`、`npm run build`（及对应平台构建脚本如 `npm run build:ios`）全部零错误通过。
+- [ ] **14. 文档同步**：所有变更已同步更新至 `docs/01 ~ 06.md`。
 
 ---
 
@@ -111,6 +136,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-10 | **消除 iOS 首次启动 3 秒黑屏（双层无缝过渡体系 + 方案 A 静态素材热替换 `StartupLoadingView`）**：① **第一层系统级 `UILaunchScreen`**：在 `Assets.xcassets` 中生成 `LaunchBg.colorset`（`#061528` 深海幽蓝）与 `LaunchLogo.imageset`，配置 `Info.plist` `UILaunchScreen` 与 `UIWindow` 默认底色，消除 `0 ~ 0.3s` 系统级黑底闪烁；② **第二层后台异步纹理解码与预热**：将原本阻塞主线程的 `SpriteAtlasManager.preloadAllIfNeeded()` 升级为 `@MainActor ObservableObject` + `Task.detached(priority: .userInitiated)` 后台异步 5 阶段解码与 `SKTexture.preload` GPU 预热，并提供 `loadSingleSharkOnDemand` 首帧按需秒载与 `OceanGameScene.onAtlasPreloadCompleted()` 完成回调；③ **方案 A 热替换 `StartupLoadingView`**：固定约定 `loading_background.png`、`loading_logo.png`、`loading_mascot.png` 三大热替换资源名，内置 60/120fps 动态深海体积光束、上升气泡粒子、Logo 呼吸脉动、以及随 `0% -> 100%` 加载进度向前平滑游动并吐泡的小鲨鱼进度条，加载完成后 `0.45s` 平滑淡出至标题界面 | `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution.xcodeproj/project.pbxproj`, `public/assets/aistudio/loading_background.png`, `public/assets/aistudio/loading_logo.png`, `public/assets/aistudio/loading_mascot.png`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-09 | **修复 iOS 首页标题图定位与缩放差异 + XcodeGen `project.pbxproj` 兼容与 `GADInvalidInitializationException` 防御 + 48 条鲨鱼独立 `@3x` 超分重绘单图直载**：① 排查并修复 iOS 真机首页标题图与 Web 预览效果不一致的 4 项根因：移除 SwiftUI `.scaledToFit().frame(width, height)` 双重约束在 21.6:9 手机横屏下的高度过度压缩与默认 `.center` 垂直居中空白，改为基于全屏尺寸 `UIScreen.main.bounds.size` 与 `3.566:1` 真实宽高比计算的精确帧尺寸（`targetTitleW = min(760, fullW * 0.74, fullH * 0.36 * 3.566)`、`alignment: .top` 贴顶对齐），补齐首页径向暗角背景滤镜，并将首页镜头水平与垂直均锁定于主角鲨鱼中心（`targetCamX = sharkX`、`targetCamY = max(minSurfaceCameraY, sharkY)`）；② 修复 `SpriteAtlasManager.swift` 生成模板中 `\\(cleanBase)` 与 `\\(baseName)` 字符串插值转义问题；③ 支持优先调用 `xcodegen generate` 或保留已有 `objectVersion = 77` 原生工程文件并自动清理 `xcuserdata`；④ 针对 `GADInvalidInitializationException` 实施三层防御并接入纯正原生 Google AdMob 激励视频池与 ATT 授权请求 | `scripts/build-ios-native.ts`, `ios-native/project.yml`, `src/App.tsx`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-08 | 接入真实 Google AdMob 激励视频（App ID: `ca-app-pub-9273669553362347~9016886171`, Rewarded Unit ID: `ca-app-pub-9273669553362347/8698331137`）与 Google H5 Games Ads / IMA HTML5 视频广告 SDK（Client ID: `ca-pub-9273669553362347`）：Web 端引入 `ima3.js` + `GoogleRewardedVideoAdOverlay.tsx` 播放真实 Google VAST 视频流；iOS 端在 `project.pbxproj` 中自动绑定 `GoogleMobileAds` SPM 依赖（含 `-ObjC` 与模拟器无填充自动切换官方测试视频单元 `ca-app-pub-3940256099942544/1712485313` + `AVKit.VideoPlayer` 视频流保底），彻底移除静态文字模拟广告框 | `.env.example`, `index.html`, `src/game/adManager.ts`, `src/components/GoogleRewardedVideoAdOverlay.tsx`, `src/App.tsx`, `scripts/build-ios-native.ts` |
 | 2026-11-06 | 将全平台游戏名称（`I18N.zh.game_title`、`I18N.en.game_title`、`index.html` `<title>` 及 iOS `Info.plist` `CFBundleDisplayName`）统一修改为 `deepsea:evolution` | `src/game/i18n.ts`, `index.html`, `scripts/build-ios-native.ts` |
@@ -120,4 +146,5 @@
 | 2026-11-06 | **iOS 原生端 5 项体验与视效对齐 Web 端**：① 全平台鲨鱼与 33 种猎物基础游动速度下调 50%（`baseSharkSpeed = 140`，按住冲刺速度 `280` 等于原常态速度）；② 修复 iOS 猎物鱼头尾朝向与脊柱波动方向反转问题（原图集全部鱼类面朝右侧 `u = 1.0` 为鱼头、`u = 0.0` 为鱼尾，修正 `tailProgress = 1.0 - u` 且 `facingSign = vx >= 0 ? 1 : -1`）；③ 1:1 复刻 Web `parallaxBackground.ts` 跨深度带连续 Alpha 混合过渡（`420m~680m` 浅海↔暮光、`1040m~1340m` 暮光↔深渊），移除暮光/深渊水幕 `surfaceLift` 半屏抬升导致的屏幕中部水平断层线，并修复 HUD 深度显示系数；④ 补齐 iOS 海水泡泡系统（42 颗随深度自适应形态的环境上浮气泡/发光孢子/深渊余烬 + 鲨鱼游动/冲刺尾流气泡）；⑤ 补齐 iOS 黄金狂暴（Gold Frenzy）24K 流光金鲨鱼本体染色、全屏猎物鎏金转化与金色尾流粒子特效 | `src/game/config.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-06 | 修复 Xcode 编译时 `OceanGameScene.swift` 中 `ComputedSharkStats.magnetRadius`（原误写为 `magnetRadiusBonus`）与 `PreyBehavior.MINE_HAZARD`（原误写为 `.MINE_STATIC`）的字段/枚举名不匹配问题，并补充跨语言模型字段契约对齐检查项 | `scripts/build-ios-native.ts`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-05 | 首次创建《移动端与跨平台原生移植避坑指南》，系统总结 iOS 真机调试中发现的 10 大跨平台问题（UI 图集去底与切片、多语言 `{count}/{mult}` 占位符、HUD 遮挡主角、背景水平/垂直分界线、猎物生物力学步态与曲线轨迹、进化图谱连续惯性转轮、吞噬五位一体特效等）及 12 项上线必检清单 | `scripts/build-ios-native.ts`, `src/game/i18n.ts`, `src/App.tsx`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
+
 

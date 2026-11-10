@@ -19,6 +19,7 @@
 | [`docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`](./docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md) | **核心数值策划案（Lv/T 计算、48阶进化、经济、生态深度）** | 修改任何计算公式、升级消耗、属性成长、猎物体型算法、鱼类深度分布时 |
 | [`docs/04-COLLABORATION_AND_DEPLOYMENT.md`](./docs/04-COLLABORATION_AND_DEPLOYMENT.md) | **多人协同流程、单元测试与 Vercel 部署手册** | 修改 `package.json` 依赖、构建脚本、分支策略、测试用例或部署配置时 |
 | [`docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md`](./docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md) | **移动端与跨平台原生移植避坑指南（iOS/Android/小游戏）** | 修改 `scripts/build-ios-native.ts`、跨平台图集处理、多语言模板或移动端适配逻辑时 |
+| [`docs/06-PREY_DATABASE_140.md`](./docs/06-PREY_DATABASE_140.md) | **140 种统一猎物数据库与 Nano Banana `@3x` 透明资产进度看板** | 新增/继续生成 140 种猎物透明 PNG 资产（`scripts/process-prey-140.ts`）或调整猎物规划表时 |
 
 ---
 

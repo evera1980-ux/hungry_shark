@@ -10,6 +10,8 @@
 4. **[`docs/02-DESIGN_SPEC.md`](./docs/02-DESIGN_SPEC.md)** —— 视觉渲染、HUD 规范与移动端多点触控规范
 5. **[`docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`](./docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md)** —— 完整数值策划案（等级 `Lv`、咬合阶位 `T`、48 阶进化矩阵、猎物体型算法、鱼类深度分布）
 6. **[`docs/04-COLLABORATION_AND_DEPLOYMENT.md`](./docs/04-COLLABORATION_AND_DEPLOYMENT.md)** —— 多人 Git 协作、自动化测试与 Vercel 部署指南
+7. **[`docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md`](./docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md)** —— 移动端与跨平台原生移植避坑指南
+8. **[`docs/06-PREY_DATABASE_140.md`](./docs/06-PREY_DATABASE_140.md)** —— 140 种统一猎物数据库与 Nano Banana `@3x` 透明资产进度看板
 
 ---
 

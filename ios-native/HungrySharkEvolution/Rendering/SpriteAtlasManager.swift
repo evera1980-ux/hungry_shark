@@ -1,6 +1,7 @@
 import UIKit
 import SpriteKit
 import CoreGraphics
+import SwiftUI
 
 public struct AvatarBarHollowMetrics: Sendable {
     public let cxPct: CGFloat
@@ -13,10 +14,15 @@ public struct AvatarBarHollowMetrics: Sendable {
 /// Pure Native CoreGraphics Offscreen Sprite Sheet Processor & Texture Cache
 /// Performs perimeter BFS flood-fill + Color-to-Alpha boundary unmixing on the 4K shark atlas,
 /// prey sheets, 6x4 UI icon sheet, banner button sheet (buttons_16e3a0cf), setting modal sheet (setting_83a7a273),
-/// and ocean parallax layers without any WebView dependency.
+/// and ocean parallax layers on a background Task.detached thread with zero main-thread blocking.
 @MainActor
-public final class SpriteAtlasManager {
+public final class SpriteAtlasManager: ObservableObject {
     public static let shared = SpriteAtlasManager()
+
+    @Published public private(set) var loadingProgress: Double = 0.0
+    @Published public private(set) var loadingStageZh: String = "正在潜入深海基因库..."
+    @Published public private(set) var loadingStageEn: String = "Diving into Abyssal Gene Bank..."
+    @Published public private(set) var isReady: Bool = false
 
     private var sharkTextures: [String: SKTexture] = [:]
     private var sharkUIImages: [String: UIImage] = [:]
@@ -27,7 +33,13 @@ public final class SpriteAtlasManager {
     private var uiSettingImages: [String: UIImage] = [:]
     private var uiSettingIconImages: [String: UIImage] = [:]
     private var oceanLayerTextures: [String: SKTexture] = [:]
+
+    private var cachedLoadingBg: UIImage?
+    private var cachedLoadingLogo: UIImage?
+    private var cachedLoadingMascot: UIImage?
+
     private var isPreloaded = false
+    private var isPreloading = false
 
     public private(set) var avatarBarHollowMetrics = AvatarBarHollowMetrics(
         cxPct: 23.0,
@@ -39,132 +51,310 @@ public final class SpriteAtlasManager {
 
     private init() {}
 
-    public func preloadAllIfNeeded() {
-        guard !isPreloaded else { return }
-        isPreloaded = true
+    // MARK: - Scheme A Hot-Replaceable Startup Loading Assets (Instant, Zero Atlas Wait)
+    /// Convention: Replace `loading_background.png`, `loading_logo.png`, or `loading_mascot.png` in Resources/Assets
+    /// to reskin holiday/festival loading screens without modifying any Swift code.
+    public func loadingBackgroundImage() -> UIImage? {
+        if let cached = cachedLoadingBg { return cached }
+        let img = Self.loadBundledImage(named: "loading_background")
+        cachedLoadingBg = img
+        return img
+    }
 
-        // 1. Load 48 individual @3x Super-Resolved Shark PNGs (shark_form_00@3x.png .. shark_form_47@3x.png),
-        //    with automatic fallback to slicing sharks_ec921c3b.png if any @3x file is absent.
-        loadOrSliceSharks()
+    public func loadingLogoImage() -> UIImage? {
+        if let cached = cachedLoadingLogo { return cached }
+        let img = Self.loadBundledImage(named: "loading_logo") ?? titleLogoImage()
+        cachedLoadingLogo = img
+        return img
+    }
 
-        // 2. Slice Prey Sprite Sheets (fish_24bdaa5a.png & fish2_fc857cfa.png)
-        let primarySheet = loadBundledImage(named: "fish_24bdaa5a")
-        let fish2Sheet = loadBundledImage(named: "fish2_fc857cfa")
-        for prey in GameConfigGenerated.preyTiers {
-            if preyTextures[prey.spriteKey] != nil { continue }
-            let srcImg = prey.sheetName == "fish2_fc857cfa" ? fish2Sheet : primarySheet
-            if let img = srcImg,
-               let sliced = sliceAndKeyNormalizedCell(
-                   from: img,
-                   bounds: prey.normalizedBounds,
-                   preserveInteriorWhite: false
-               ) {
-                preyUIImages[prey.spriteKey] = sliced
-                let tex = SKTexture(image: sliced)
-                tex.filteringMode = .linear
-                preyTextures[prey.spriteKey] = tex
+    public func loadingMascotImage() -> UIImage? {
+        if let cached = cachedLoadingMascot { return cached }
+        if let raw = Self.loadBundledImage(named: "loading_mascot") ?? Self.loadBundledImage(named: "shark_form_00@3x"),
+           let cg = raw.cgImage {
+            let img = UIImage(cgImage: cg, scale: 3.0, orientation: .up)
+            cachedLoadingMascot = img
+            return img
+        }
+        return nil
+    }
+
+    /// Launches asynchronous off-main-thread texture decoding, sprite sheet slicing & Metal GPU warm-up.
+    /// Keeps the main thread 100% free on frame 1 so `StartupLoadingView` renders immediately at 60/120fps.
+    public func startAsyncPreloadIfNeeded() {
+        if isPreloaded {
+            if !isReady { isReady = true }
+            return
+        }
+        guard !isPreloading else { return }
+        isPreloading = true
+        loadingProgress = 0.04
+        loadingStageZh = "正在唤醒 48 阶深海巨鲨..."
+        loadingStageEn = "Awakening 48 Abyssal Sharks..."
+
+        Task.detached(priority: .userInitiated) {
+            // Stage 1 (0.04 -> 0.36): Decode 48 @3x Shark PNGs (with sheet fallback if any file is absent)
+            var localSharkUI: [String: UIImage] = [:]
+            var localSharkTex: [String: SKTexture] = [:]
+            var missingForms: [SharkFormConfig] = []
+            let allForms = GameConfigGenerated.sharkForms
+            let totalSharks = max(1, allForms.count)
+
+            for (idx, form) in allForms.enumerated() {
+                let baseName = String(format: "shark_form_%02d", form.index)
+                if let rawImg = Self.loadBundledImage(named: "\(baseName)@3x") ?? Self.loadBundledImage(named: baseName),
+                   let cg = rawImg.cgImage {
+                    let img3x = UIImage(cgImage: cg, scale: 3.0, orientation: .up)
+                    localSharkUI[form.spriteKey] = img3x
+                    let tex = SKTexture(image: img3x)
+                    tex.filteringMode = .linear
+                    localSharkTex[form.spriteKey] = tex
+                } else {
+                    missingForms.append(form)
+                }
+
+                if idx % 8 == 7 || idx == totalSharks - 1 {
+                    let prog = 0.04 + (Double(idx + 1) / Double(totalSharks)) * 0.32
+                    await MainActor.run {
+                        self.loadingProgress = max(self.loadingProgress, prog)
+                    }
+                }
+            }
+
+            if !missingForms.isEmpty, let sharkSheet = Self.loadBundledImage(named: "sharks_ec921c3b") {
+                for form in missingForms {
+                    if let sliced = Self.sliceAndKeyNormalizedCell(
+                        from: sharkSheet,
+                        bounds: form.normalizedBounds,
+                        preserveInteriorWhite: true
+                    ) {
+                        localSharkUI[form.spriteKey] = sliced
+                        let tex = SKTexture(image: sliced)
+                        tex.filteringMode = .linear
+                        localSharkTex[form.spriteKey] = tex
+                    }
+                }
+            }
+
+            let committedSharkUI = localSharkUI
+            let committedSharkTex = localSharkTex
+            await MainActor.run {
+                self.sharkUIImages.merge(committedSharkUI) { _, new in new }
+                self.sharkTextures.merge(committedSharkTex) { _, new in new }
+                self.loadingProgress = 0.38
+                self.loadingStageZh = "正在演化深海生态鱼群..."
+                self.loadingStageEn = "Spawning Marine Ecosystem..."
+            }
+
+            // Stage 2 (0.38 -> 0.56): Slice 33 Prey Species (fish_24bdaa5a.png & fish2_fc857cfa.png)
+            var localPreyUI: [String: UIImage] = [:]
+            var localPreyTex: [String: SKTexture] = [:]
+            let primarySheet = Self.loadBundledImage(named: "fish_24bdaa5a")
+            let fish2Sheet = Self.loadBundledImage(named: "fish2_fc857cfa")
+            let allPreys = GameConfigGenerated.preyTiers
+            let totalPreys = max(1, allPreys.count)
+
+            for (idx, prey) in allPreys.enumerated() {
+                if localPreyTex[prey.spriteKey] != nil { continue }
+                let srcImg = prey.sheetName == "fish2_fc857cfa" ? fish2Sheet : primarySheet
+                if let img = srcImg,
+                   let sliced = Self.sliceAndKeyNormalizedCell(
+                       from: img,
+                       bounds: prey.normalizedBounds,
+                       preserveInteriorWhite: false
+                   ) {
+                    localPreyUI[prey.spriteKey] = sliced
+                    let tex = SKTexture(image: sliced)
+                    tex.filteringMode = .linear
+                    localPreyTex[prey.spriteKey] = tex
+                }
+                if idx % 8 == 7 || idx == totalPreys - 1 {
+                    let prog = 0.38 + (Double(idx + 1) / Double(totalPreys)) * 0.18
+                    await MainActor.run {
+                        self.loadingProgress = max(self.loadingProgress, prog)
+                    }
+                }
+            }
+
+            let committedPreyUI = localPreyUI
+            let committedPreyTex = localPreyTex
+            await MainActor.run {
+                self.preyUIImages = committedPreyUI
+                self.preyTextures = committedPreyTex
+                self.loadingProgress = 0.56
+                self.loadingStageZh = "正在校准深海声呐与装甲界面..."
+                self.loadingStageEn = "Calibrating Sonar & HUD..."
+            }
+
+            // Stage 3 (0.56 -> 0.72): Slice UI Icon Sheet, Banner Sheet & Setting Sheet
+            let localIcons: [String: UIImage]
+            if let iconSheet = Self.loadBundledImage(named: "icons_f5128c12") {
+                localIcons = Self.sliceUiIconSheet(iconSheet)
+            } else {
+                localIcons = [:]
+            }
+            await MainActor.run {
+                self.uiIconImages = localIcons
+                self.loadingProgress = 0.62
+            }
+
+            let bannerResult: (images: [String: UIImage], metrics: AvatarBarHollowMetrics?)
+            if let bannerSheet = Self.loadBundledImage(named: "buttons_16e3a0cf") {
+                bannerResult = Self.sliceUiBannerSheet(bannerSheet)
+            } else {
+                bannerResult = ([:], nil)
+            }
+            await MainActor.run {
+                self.uiBannerImages = bannerResult.images
+                if let m = bannerResult.metrics {
+                    self.avatarBarHollowMetrics = m
+                }
+                self.loadingProgress = 0.67
+            }
+
+            let settingResult: (images: [String: UIImage], icons: [String: UIImage])
+            if let settingSheet = Self.loadBundledImage(named: "setting_83a7a273") {
+                settingResult = Self.sliceUiSettingSheet(settingSheet)
+            } else {
+                settingResult = ([:], [:])
+            }
+            await MainActor.run {
+                self.uiSettingImages = settingResult.images
+                self.uiSettingIconImages = settingResult.icons
+                self.loadingProgress = 0.72
+                self.loadingStageZh = "正在构建无缝深海视差洋流..."
+                self.loadingStageEn = "Building Seamless Ocean Biomes..."
+            }
+
+            // Stage 4 (0.72 -> 0.94): Process all 12 Multi-Biome Ocean Parallax Layers
+            let oceanLayers: [(name: String, isWater: Bool)] = [
+                ("bg_shallow_0_water_0e65cb68", true),
+                ("bg_shallow_1_far_8898229a", false),
+                ("bg_shallow_2_mid_b4e0d30a", false),
+                ("bg_shallow_3_near_96e92ee1", false),
+                ("bg_twilight_0_17bcb84c", true),
+                ("bg_twilight_1_04f5d35f", false),
+                ("bg_twilight_2_fd5a1b33", false),
+                ("bg_twilight_3_6e0dd7c1", false),
+                ("bg_abyss_0_1bbf506a", true),
+                ("bg_abyss_1_75e4a628", false),
+                ("bg_abyss_2_6ce66695", false),
+                ("bg_abyss_3_a4986280", false)
+            ]
+            var localOceanTex: [String: SKTexture] = [:]
+            for (idx, layer) in oceanLayers.enumerated() {
+                if let rawImg = Self.loadBundledImage(named: layer.name) {
+                    let processed: UIImage
+                    if layer.isWater {
+                        processed = Self.processWaterLayerToSeamlessTile(rawImg, assetName: layer.name) ?? rawImg
+                    } else {
+                        processed = Self.processTerrainLayerToSeamlessStrip(rawImg, assetName: layer.name) ?? rawImg
+                    }
+                    let tex = SKTexture(image: processed)
+                    tex.filteringMode = .linear
+                    localOceanTex[layer.name] = tex
+                }
+                let prog = 0.72 + (Double(idx + 1) / Double(oceanLayers.count)) * 0.22
+                let partialOcean = localOceanTex
+                await MainActor.run {
+                    self.oceanLayerTextures = partialOcean
+                    self.loadingProgress = max(self.loadingProgress, prog)
+                }
+            }
+
+            // Stage 5 (0.94 -> 1.00): Metal GPU Texture Preload & Smooth Fade-Out
+            await MainActor.run {
+                self.loadingProgress = 0.95
+                self.loadingStageZh = "正在预热 Metal GPU 渲染管线..."
+                self.loadingStageEn = "Warming Metal GPU Pipeline..."
+
+                let allGpuTextures = Array(self.sharkTextures.values)
+                    + Array(self.preyTextures.values)
+                    + Array(self.oceanLayerTextures.values)
+
+                SKTexture.preload(allGpuTextures) {
+                    Task { @MainActor in
+                        self.loadingProgress = 1.0
+                        self.loadingStageZh = "深海猎场已就绪！"
+                        self.loadingStageEn = "Abyssal Hunting Grounds Ready!"
+                        self.isPreloaded = true
+                        self.isPreloading = false
+                        try? await Task.sleep(nanoseconds: 140_000_000)
+                        withAnimation(.easeInOut(duration: 0.45)) {
+                            self.isReady = true
+                        }
+                    }
+                }
             }
         }
+    }
 
-        // 3. Slice 6x4 UI Icon Sheet (icons_f5128c12.png) with hollow ring seeding & 128x128 normalization
-        if let iconSheet = loadBundledImage(named: "icons_f5128c12") {
-            sliceUiIconSheet(iconSheet)
-        }
+    public func preloadAllIfNeeded() {
+        startAsyncPreloadIfNeeded()
+    }
 
-        // 4. Slice Home/HUD Banner & Avatar Plate Sheet (buttons_16e3a0cf.png)
-        if let bannerSheet = loadBundledImage(named: "buttons_16e3a0cf") {
-            sliceUiBannerSheet(bannerSheet)
+    /// Fast single-shark on-demand loader (<1ms) if queried before full background preload finishes
+    private func loadSingleSharkOnDemand(for spriteKey: String) {
+        guard sharkTextures[spriteKey] == nil else { return }
+        guard let form = GameConfigGenerated.sharkForms.first(where: { $0.id == spriteKey || $0.spriteKey == spriteKey }) else { return }
+        let baseName = String(format: "shark_form_%02d", form.index)
+        if let rawImg = Self.loadBundledImage(named: "\(baseName)@3x") ?? Self.loadBundledImage(named: baseName),
+           let cg = rawImg.cgImage {
+            let img3x = UIImage(cgImage: cg, scale: 3.0, orientation: .up)
+            sharkUIImages[form.spriteKey] = img3x
+            let tex = SKTexture(image: img3x)
+            tex.filteringMode = .linear
+            sharkTextures[form.spriteKey] = tex
         }
-
-        // 5. Slice Pause/Settings/GameOver Sci-Fi Modal & Octagonal Button Sheet (setting_83a7a273.png)
-        if let settingSheet = loadBundledImage(named: "setting_83a7a273") {
-            sliceUiSettingSheet(settingSheet)
-        }
-
-        // 6. Pre-process & GPU-warm all 12 Multi-Biome Ocean Parallax Layers up front (zero stutter when diving to Twilight/Abyss!)
-        let oceanLayers: [(name: String, isWater: Bool)] = [
-            ("bg_shallow_0_water_0e65cb68", true),
-            ("bg_shallow_1_far_8898229a", false),
-            ("bg_shallow_2_mid_b4e0d30a", false),
-            ("bg_shallow_3_near_96e92ee1", false),
-            ("bg_twilight_0_17bcb84c", true),
-            ("bg_twilight_1_04f5d35f", false),
-            ("bg_twilight_2_fd5a1b33", false),
-            ("bg_twilight_3_6e0dd7c1", false),
-            ("bg_abyss_0_1bbf506a", true),
-            ("bg_abyss_1_75e4a628", false),
-            ("bg_abyss_2_6ce66695", false),
-            ("bg_abyss_3_a4986280", false)
-        ]
-        for layer in oceanLayers {
-            _ = oceanParallaxTexture(named: layer.name, isWaterCanopy: layer.isWater)
-        }
-        let allGpuTextures = Array(sharkTextures.values) + Array(preyTextures.values) + Array(oceanLayerTextures.values)
-        SKTexture.preload(allGpuTextures) {}
     }
 
     public func sharkTexture(for spriteKey: String) -> SKTexture? {
-        preloadAllIfNeeded()
+        if let tex = sharkTextures[spriteKey] { return tex }
+        loadSingleSharkOnDemand(for: spriteKey)
         return sharkTextures[spriteKey]
     }
 
     public func sharkUIImage(for spriteKey: String) -> UIImage? {
-        preloadAllIfNeeded()
+        if let img = sharkUIImages[spriteKey] { return img }
+        loadSingleSharkOnDemand(for: spriteKey)
         return sharkUIImages[spriteKey]
     }
 
     public func preyTexture(for spriteKey: String) -> SKTexture? {
-        preloadAllIfNeeded()
         return preyTextures[spriteKey]
     }
 
     public func preyUIImage(for spriteKey: String) -> UIImage? {
-        preloadAllIfNeeded()
         return preyUIImages[spriteKey]
     }
 
     public func uiIconImage(for key: String) -> UIImage? {
-        preloadAllIfNeeded()
         return uiIconImages[key]
     }
 
     public func uiBannerImage(for key: String) -> UIImage? {
-        preloadAllIfNeeded()
         return uiBannerImages[key]
     }
 
     public func uiSettingImage(for key: String) -> UIImage? {
-        preloadAllIfNeeded()
         return uiSettingImages[key]
     }
 
     public func uiSettingIconImage(for key: String) -> UIImage? {
-        preloadAllIfNeeded()
         return uiSettingIconImages[key]
     }
 
     public func titleLogoImage() -> UIImage? {
-        return loadBundledImage(named: "title3_cae0290c") ?? loadBundledImage(named: "title2_dbfd9f83") ?? loadBundledImage(named: "title_11de9fff")
+        return Self.loadBundledImage(named: "title3_cae0290c")
+            ?? Self.loadBundledImage(named: "title2_dbfd9f83")
+            ?? Self.loadBundledImage(named: "title_11de9fff")
     }
 
     public func oceanParallaxTexture(named assetName: String, isWaterCanopy: Bool = false) -> SKTexture? {
-        if let cached = oceanLayerTextures[assetName] {
-            return cached
-        }
-        guard let rawImg = loadBundledImage(named: assetName) else { return nil }
-        let processed: UIImage
-        if isWaterCanopy {
-            processed = processWaterLayerToSeamlessTile(rawImg, assetName: assetName) ?? rawImg
-        } else {
-            processed = processTerrainLayerToSeamlessStrip(rawImg, assetName: assetName) ?? rawImg
-        }
-        let tex = SKTexture(image: processed)
-        tex.filteringMode = .linear
-        oceanLayerTextures[assetName] = tex
-        return tex
+        return oceanLayerTextures[assetName]
     }
 
-    private func loadBundledImage(named name: String) -> UIImage? {
+    nonisolated private static func loadBundledImage(named name: String) -> UIImage? {
         let cleanBase = name.hasSuffix(".png") ? String(name.dropLast(4)) : name
         let roots: [URL] = [Bundle.main.resourceURL, Bundle.main.bundleURL].compactMap { $0 }
         for root in roots {
@@ -203,46 +393,11 @@ public final class SpriteAtlasManager {
         return nil
     }
 
-    private func loadOrSliceSharks() {
-        var missingForms: [SharkFormConfig] = []
-        for form in GameConfigGenerated.sharkForms {
-            let baseName = String(format: "shark_form_%02d", form.index)
-            if let rawImg = loadBundledImage(named: "\(baseName)@3x") ?? loadBundledImage(named: baseName),
-               let cg = rawImg.cgImage {
-                let img3x = UIImage(cgImage: cg, scale: 3.0, orientation: .up)
-                sharkUIImages[form.spriteKey] = img3x
-                let tex = SKTexture(image: img3x)
-                tex.filteringMode = .linear
-                sharkTextures[form.spriteKey] = tex
-            } else {
-                missingForms.append(form)
-            }
-        }
-        if !missingForms.isEmpty, let sharkSheet = loadBundledImage(named: "sharks_ec921c3b") {
-            sliceSharkSheet(sharkSheet, onlyForms: missingForms)
-        }
-    }
-
-    private func sliceSharkSheet(_ sheetImage: UIImage, onlyForms: [SharkFormConfig]? = nil) {
-        let targetForms = onlyForms ?? GameConfigGenerated.sharkForms
-        for form in targetForms {
-            if let sliced = sliceAndKeyNormalizedCell(
-                from: sheetImage,
-                bounds: form.normalizedBounds,
-                preserveInteriorWhite: true
-            ) {
-                sharkUIImages[form.spriteKey] = sliced
-                let tex = SKTexture(image: sliced)
-                tex.filteringMode = .linear
-                sharkTextures[form.spriteKey] = tex
-            }
-        }
-    }
-
     /// Slices the 6x4 UI Icon Sheet (icons_f5128c12.png) with center hollow seed for UI_AVATAR_FRAME & UI_JOYSTICK_BASE
     /// and tight bounding-box aspect-fit normalization into a 128x128 square UIImage.
-    private func sliceUiIconSheet(_ sheetImage: UIImage) {
-        guard let cgSheet = sheetImage.cgImage else { return }
+    nonisolated private static func sliceUiIconSheet(_ sheetImage: UIImage) -> [String: UIImage] {
+        var outIcons: [String: UIImage] = [:]
+        guard let cgSheet = sheetImage.cgImage else { return outIcons }
         let fullW = Double(cgSheet.width)
         let fullH = Double(cgSheet.height)
         let cols = 6.0
@@ -392,21 +547,24 @@ public final class SpriteAtlasManager {
                     format.scale = 1.0
                     format.opaque = false
                     let renderer = UIGraphicsImageRenderer(size: CGSize(width: outSize, height: outSize), format: format)
-                    let normImg = renderer.image { rCtx in
+                    let normImg = renderer.image { _ in
                         UIImage(cgImage: tightCG).draw(in: CGRect(x: drawX, y: drawY, width: drawW, height: drawH))
                     }
-                    uiIconImages[key] = normImg
+                    outIcons[key] = normImg
                     continue
                 }
             }
-            uiIconImages[key] = UIImage(cgImage: keyedCG)
+            outIcons[key] = UIImage(cgImage: keyedCG)
         }
+        return outIcons
     }
 
     /// Slices the Banner & Avatar Plate Sheet (buttons_16e3a0cf.png)
     /// Neutral dark grey background (~RGB 60,60,60), hollowing out the circular shark window in UI_PLATE_AVATAR_BAR.
-    private func sliceUiBannerSheet(_ sheetImage: UIImage) {
-        guard let cgSheet = sheetImage.cgImage else { return }
+    nonisolated private static func sliceUiBannerSheet(_ sheetImage: UIImage) -> (images: [String: UIImage], metrics: AvatarBarHollowMetrics?) {
+        var outBanners: [String: UIImage] = [:]
+        var outMetrics: AvatarBarHollowMetrics? = nil
+        guard let cgSheet = sheetImage.cgImage else { return (outBanners, outMetrics) }
         let fullW = Double(cgSheet.width)
         let fullH = Double(cgSheet.height)
 
@@ -552,7 +710,7 @@ public final class SpriteAtlasManager {
                     let holeCy = (0.3125 * fullH - Double(sy) - Double(minY)) / Double(bh)
                     let holeInnerDia = (0.1406 * fullW) / Double(bh)
                     let holeOuterDia = (0.1750 * fullW) / Double(bh)
-                    avatarBarHollowMetrics = AvatarBarHollowMetrics(
+                    outMetrics = AvatarBarHollowMetrics(
                         cxPct: CGFloat(holeCx * 100.0),
                         cyPct: CGFloat(holeCy * 100.0),
                         innerDiaPctH: CGFloat(holeInnerDia * 100.0),
@@ -562,19 +720,22 @@ public final class SpriteAtlasManager {
                 }
 
                 if let tightCG = keyedCG.cropping(to: CGRect(x: minX, y: minY, width: bw, height: bh)) {
-                    uiBannerImages[key] = UIImage(cgImage: tightCG)
+                    outBanners[key] = UIImage(cgImage: tightCG)
                     continue
                 }
             }
-            uiBannerImages[key] = UIImage(cgImage: keyedCG)
+            outBanners[key] = UIImage(cgImage: keyedCG)
         }
+        return (outBanners, outMetrics)
     }
 
     /// Slices the Pause / Settings / GameOver Modal & Button Sheet (setting_83a7a273.png)
     /// Includes inner window hollowing for SETTING_MODAL_FRAME, clean medallion variant SETTING_MODAL_FRAME_CLEAN,
-    /// 3-slice horizontal widening for SETTING_SHARK_CARD (6.05:1), and icon extraction + scanline patching for SETTING_BTN_*.
-    private func sliceUiSettingSheet(_ sheetImage: UIImage) {
-        guard let cgSheet = sheetImage.cgImage else { return }
+    /// 5-slice horizontal widening for SETTING_SHARK_CARD (4.80:1), and icon extraction + scanline patching for SETTING_BTN_*.
+    nonisolated private static func sliceUiSettingSheet(_ sheetImage: UIImage) -> (images: [String: UIImage], icons: [String: UIImage]) {
+        var outImages: [String: UIImage] = [:]
+        var outIcons: [String: UIImage] = [:]
+        guard let cgSheet = sheetImage.cgImage else { return (outImages, outIcons) }
         let fullW = Double(cgSheet.width)
         let fullH = Double(cgSheet.height)
 
@@ -754,7 +915,7 @@ public final class SpriteAtlasManager {
                     format.scale = 1.0
                     format.opaque = false
                     let renderer = UIGraphicsImageRenderer(size: CGSize(width: iconSize, height: iconSize), format: format)
-                    uiSettingIconImages[key] = renderer.image { _ in
+                    outIcons[key] = renderer.image { _ in
                         UIImage(cgImage: tightIconCG).draw(in: CGRect(x: (CGFloat(iconSize) - dw) * 0.5, y: (CGFloat(iconSize) - dh) * 0.5, width: dw, height: dh))
                     }
                 }
@@ -849,11 +1010,11 @@ public final class SpriteAtlasManager {
                         UIImage(cgImage: c5).draw(in: CGRect(x: dstX, y: 0, width: s5W, height: bh))
                     }
                 }
-                uiSettingImages[key] = wideImg
+                outImages[key] = wideImg
                 continue
             }
 
-            uiSettingImages[key] = UIImage(cgImage: tightCG)
+            outImages[key] = UIImage(cgImage: tightCG)
 
             // Also generate SETTING_MODAL_FRAME_CLEAN with top medallion pause bars smoothed out for GameOver modal
             if key == "SETTING_MODAL_FRAME" {
@@ -879,14 +1040,15 @@ public final class SpriteAtlasManager {
                 }
                 if let cleanFullCG = ctx.makeImage(),
                    let cleanTightCG = cleanFullCG.cropping(to: CGRect(x: minX, y: minY, width: bw, height: bh)) {
-                    uiSettingImages["SETTING_MODAL_FRAME_CLEAN"] = UIImage(cgImage: cleanTightCG)
+                    outImages["SETTING_MODAL_FRAME_CLEAN"] = UIImage(cgImage: cleanTightCG)
                 }
             }
         }
+        return (outImages, outIcons)
     }
 
     /// CoreGraphics Perimeter BFS Flood-Fill + Boundary Color-to-Alpha White Unmixing
-    private func sliceAndKeyNormalizedCell(
+    nonisolated private static func sliceAndKeyNormalizedCell(
         from sheetImage: UIImage,
         bounds: SIMD4<Double>,
         preserveInteriorWhite: Bool,
@@ -1049,7 +1211,7 @@ public final class SpriteAtlasManager {
 
     /// Synthesizes a horizontally-seamless tile from an RGBA pixel buffer by cross-fading a seamRatio overlap band
     /// using a cosine weight curve (zero vertical seam lines between repeated tiles).
-    private func makeHorizontallySeamlessImage(
+    nonisolated private static func makeHorizontallySeamlessImage(
         rgba sBuf: [UInt8],
         width sw: Int,
         height sh: Int,
@@ -1131,7 +1293,7 @@ public final class SpriteAtlasManager {
     /// - Trims top/bottom white margins and right-edge white border on 'bg_shallow_0_water'
     /// - Smoothly unmixes the bottom #FFFFFF fade using a C1 cosine vertical envelope so sunbeams dissolve invisibly into the water column (zero horizontal cutoff line!)
     /// - Applies cosine horizontal cross-fading so repeated tiles have zero vertical seam lines!
-    private func processWaterLayerToSeamlessTile(_ image: UIImage, assetName: String) -> UIImage? {
+    nonisolated private static func processWaterLayerToSeamlessTile(_ image: UIImage, assetName: String) -> UIImage? {
         guard let cgImg = image.cgImage else { return nil }
         let srcW = cgImg.width
         let srcH = cgImg.height
@@ -1233,13 +1395,7 @@ public final class SpriteAtlasManager {
     }
 
     /// Processes Far / Mid / Near Ocean Terrain Layers ('bg_{zone}_{1|2|3}') with 1:1 parity to 'parallaxBackground.ts':
-    /// - Applies bottom margin crop (0.915 on 'shallow_1_far', 0.935 on 'shallow_2_mid')
-    /// - Clears slice-overlap artifact rect [0, 0.78, 0.14, 1.0] and rounds flat top-left peak on 'shallow_1_far'
-    /// - Runs BFS sky flood-fill + punches enclosed white coral/archway holes ('punchUpperInteriorWhiteHoles')
-    /// - Despills 2px white/magenta boundary halo
-    /// - Grounds bottom column notches ('groundBottomColumns') so stacked parallax layers have a 100% solid base
-    /// - Trims vertical [minY, maxY] and applies cosine horizontal seam blending ('makeHorizontallySeamlessImage')
-    private func processTerrainLayerToSeamlessStrip(_ image: UIImage, assetName: String) -> UIImage? {
+    nonisolated private static func processTerrainLayerToSeamlessStrip(_ image: UIImage, assetName: String) -> UIImage? {
         guard let cgImg = image.cgImage else { return nil }
         let srcW = cgImg.width
         let srcH = cgImg.height
@@ -1247,7 +1403,6 @@ public final class SpriteAtlasManager {
         let isShallowFar = assetName.contains("shallow_1_far")
         let isShallowMid = assetName.contains("shallow_2_mid")
         let isShallowNear = assetName.contains("shallow_3_near")
-        let isAbyssMid = assetName.contains("abyss_2")
 
         let cropBottomRatio: Double = isShallowFar ? 0.915 : (isShallowMid ? 0.935 : 1.0)
         // Also trim 1% off left/right raw edges if there is any thin border artifact
@@ -1412,33 +1567,30 @@ public final class SpriteAtlasManager {
         }
 
         // 5. Ground bottom columns so elevated parallax planes have a 100% solid base (zero bottom gap lines!)
-        let shouldGroundBottom = true
-        if shouldGroundBottom {
-            let bandRatio = isShallowFar ? 0.24 : (isShallowMid ? 0.14 : 0.18)
-            let minSearchY = max(4, Int(Double(h) * (1.0 - bandRatio)))
-            for x in 0..<w {
-                var lastSolidY = -1
-                for y in stride(from: h - 1, through: minSearchY, by: -1) {
-                    let p = (y * w + x) * 4
-                    let r = Int(rgba[p])
-                    let g = Int(rgba[p + 1])
-                    let b = Int(rgba[p + 2])
-                    let minC = min(r, min(g, b))
-                    let maxC = max(r, max(g, b))
-                    let isWhiteMargin = minC >= 210 && (maxC - minC) <= 34
-                    if rgba[p + 3] > 200 && !isWhiteMargin {
-                        lastSolidY = y
-                        break
-                    }
+        let bandRatio = isShallowFar ? 0.24 : (isShallowMid ? 0.14 : 0.18)
+        let minSearchY = max(4, Int(Double(h) * (1.0 - bandRatio)))
+        for x in 0..<w {
+            var lastSolidY = -1
+            for y in stride(from: h - 1, through: minSearchY, by: -1) {
+                let p = (y * w + x) * 4
+                let r = Int(rgba[p])
+                let g = Int(rgba[p + 1])
+                let b = Int(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, max(g, b))
+                let isWhiteMargin = minC >= 210 && (maxC - minC) <= 34
+                if rgba[p + 3] > 200 && !isWhiteMargin {
+                    lastSolidY = y
+                    break
                 }
-                if lastSolidY >= minSearchY && lastSolidY < h - 1 {
-                    let srcY = max(0, lastSolidY - 2)
-                    let sp = (srcY * w + x) * 4
-                    let sr = rgba[sp], sg = rgba[sp + 1], sb = rgba[sp + 2]
-                    for y in lastSolidY..<h {
-                        let dp = (y * w + x) * 4
-                        rgba[dp] = sr; rgba[dp + 1] = sg; rgba[dp + 2] = sb; rgba[dp + 3] = 255
-                    }
+            }
+            if lastSolidY >= minSearchY && lastSolidY < h - 1 {
+                let srcY = max(0, lastSolidY - 2)
+                let sp = (srcY * w + x) * 4
+                let sr = rgba[sp], sg = rgba[sp + 1], sb = rgba[sp + 2]
+                for y in lastSolidY..<h {
+                    let dp = (y * w + x) * 4
+                    rgba[dp] = sr; rgba[dp + 1] = sg; rgba[dp + 2] = sb; rgba[dp + 3] = 255
                 }
             }
         }
