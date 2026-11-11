@@ -1,12 +1,12 @@
 {
   "totalCount": 140,
-  "completedCount": 52,
-  "pendingCount": 88,
+  "completedCount": 56,
+  "pendingCount": 84,
   "lastCompletedId": "PREY-066",
   "lastCompletedName": "蓝鱼",
-  "nextResumeId": "PREY-049",
-  "nextResumeName": "金眼鲷",
-  "updatedAt": "2026-11-10T08:48:18.105Z",
+  "nextResumeId": "PREY-053",
+  "nextResumeName": "蓝点河豚",
+  "updatedAt": "2026-11-10T23:50:11.210Z",
   "outputDirectory": "/public/assets/prey_140",
   "completed": [
     {
@@ -538,6 +538,17 @@
       "sourceArtifact": "prey_048_trevally_1794299770893.jpg"
     },
     {
+      "id": "PREY-049",
+      "name": "金眼鲷",
+      "category": "普通鱼类",
+      "sizeClass": "M",
+      "file3x": "/assets/prey_140/PREY-049@3x.png",
+      "width3x": 384,
+      "height3x": 211,
+      "bytes": 105750,
+      "sourceArtifact": "prey_049_alfonsino_1794354536753.jpg"
+    },
+    {
       "id": "PREY-050",
       "name": "黄箱鲀",
       "category": "普通鱼类",
@@ -547,6 +558,17 @@
       "height3x": 234,
       "bytes": 120909,
       "sourceArtifact": "prey_050_yellow_boxfish_1794299774630.jpg"
+    },
+    {
+      "id": "PREY-051",
+      "name": "狗脸鲀",
+      "category": "普通鱼类",
+      "sizeClass": "M",
+      "file3x": "/assets/prey_140/PREY-051@3x.png",
+      "width3x": 384,
+      "height3x": 204,
+      "bytes": 102929,
+      "sourceArtifact": "prey_051_dogface_puffer_1794354538513.jpg"
     },
     {
       "id": "PREY-052",
@@ -571,6 +593,28 @@
       "sourceArtifact": "prey_054_longhorn_cowfish_1794299780695.jpg"
     },
     {
+      "id": "PREY-057",
+      "name": "穆尔什偶像鱼",
+      "category": "普通鱼类",
+      "sizeClass": "S",
+      "file3x": "/assets/prey_140/PREY-057@3x.png",
+      "width3x": 384,
+      "height3x": 292,
+      "bytes": 88458,
+      "sourceArtifact": "prey_057_moorish_idol_1794354548550.jpg"
+    },
+    {
+      "id": "PREY-063",
+      "name": "蓝鳍金枪鱼",
+      "category": "普通鱼类",
+      "sizeClass": "XL",
+      "file3x": "/assets/prey_140/PREY-063@3x.png",
+      "width3x": 600,
+      "height3x": 301,
+      "bytes": 157992,
+      "sourceArtifact": "prey_063_bluefin_tuna_1794354562974.jpg"
+    },
+    {
       "id": "PREY-066",
       "name": "蓝鱼",
       "category": "普通鱼类",
@@ -583,18 +627,14 @@
     }
   ],
   "pendingIds": [
-    "PREY-049",
-    "PREY-051",
     "PREY-053",
     "PREY-055",
     "PREY-056",
-    "PREY-057",
     "PREY-058",
     "PREY-059",
     "PREY-060",
     "PREY-061",
     "PREY-062",
-    "PREY-063",
     "PREY-064",
     "PREY-065",
     "PREY-067",
