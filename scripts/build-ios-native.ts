@@ -5644,7 +5644,7 @@ public struct StartupLoadingView: View {
 
         return VStack(spacing: 8) {
             ZStack {
-                ForEach(0..<4, id: \.self) { wakeIdx in
+                ForEach(0..<4, id: \\.self) { wakeIdx in
                     mascotWakeBubble(wakeIdx: wakeIdx, mascotX: mascotX, swimBobY: swimBobY, t: t)
                 }
 
@@ -8440,8 +8440,10 @@ function validateOpenStepPbxproj(pbx: string): void {
 
 function generateLaunchAssetsCatalog(appDir: string, srcAssetsDir: string): void {
   const xcassetsDir = path.join(appDir, 'Assets.xcassets');
+  const appIconDir = path.join(xcassetsDir, 'AppIcon.appiconset');
   const launchBgDir = path.join(xcassetsDir, 'LaunchBg.colorset');
   const launchLogoDir = path.join(xcassetsDir, 'LaunchLogo.imageset');
+  ensureDir(appIconDir);
   ensureDir(launchBgDir);
   ensureDir(launchLogoDir);
 
@@ -8451,7 +8453,41 @@ function generateLaunchAssetsCatalog(appDir: string, srcAssetsDir: string): void
     'utf8'
   );
 
-  // Deep-sea abyssal blue (#061528) for Layer 1 UILaunchScreen background
+  // 0. AppIcon.appiconset (Required by actool when ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon)
+  const iconCandidates = [
+    path.join(srcAssetsDir, 'app_icon_1024.png'),
+    path.join(srcAssetsDir, 'loading_mascot.png'),
+  ];
+  for (const candidate of iconCandidates) {
+    if (fs.existsSync(candidate)) {
+      fs.copyFileSync(candidate, path.join(appIconDir, 'AppIcon.png'));
+      break;
+    }
+  }
+  fs.writeFileSync(
+    path.join(appIconDir, 'Contents.json'),
+    JSON.stringify(
+      {
+        images: [
+          {
+            filename: 'AppIcon.png',
+            idiom: 'universal',
+            platform: 'ios',
+            size: '1024x1024',
+          },
+        ],
+        info: {
+          author: 'xcode',
+          version: 1,
+        },
+      },
+      null,
+      2
+    ) + '\n',
+    'utf8'
+  );
+
+  // 1. Deep-sea abyssal blue (#061528) for Layer 1 UILaunchScreen background
   fs.writeFileSync(
     path.join(launchBgDir, 'Contents.json'),
     JSON.stringify(
@@ -8499,7 +8535,7 @@ function generateLaunchAssetsCatalog(appDir: string, srcAssetsDir: string): void
     'utf8'
   );
 
-  // Copy loading_logo.png (or fallback title3_cae0290c.png) into LaunchLogo.imageset
+  // 2. Copy loading_logo.png (or fallback title3_cae0290c.png) into LaunchLogo.imageset
   const logoCandidates = [
     path.join(srcAssetsDir, 'loading_logo.png'),
     path.join(srcAssetsDir, 'title3_cae0290c.png'),

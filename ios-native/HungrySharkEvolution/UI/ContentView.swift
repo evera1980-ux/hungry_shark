@@ -786,7 +786,7 @@ public struct StartupLoadingView: View {
 
         return VStack(spacing: 8) {
             ZStack {
-                ForEach(0..<4, id: .self) { wakeIdx in
+                ForEach(0..<4, id: \.self) { wakeIdx in
                     mascotWakeBubble(wakeIdx: wakeIdx, mascotX: mascotX, swimBobY: swimBobY, t: t)
                 }
 
