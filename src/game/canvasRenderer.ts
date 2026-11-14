@@ -240,7 +240,8 @@ function drawNaturalAspectFrame(
 
 export type SpriteTintVariant = 'NONE' | 'GOLD' | 'ABYSS' | 'FLASH' | 'LOCKED';
 
-const tintedFrameCache = new WeakMap<
+const MAX_TINTED_FRAME_CACHE_ENTRIES = 24;
+const tintedFrameCache = new Map<
   HTMLCanvasElement,
   Partial<Record<SpriteTintVariant, HTMLCanvasElement>>
 >();
@@ -248,8 +249,8 @@ const tintedFrameCache = new WeakMap<
 /**
  * Returns a pre-baked tinted offscreen canvas for Golden Frenzy / Golden Mutant ('GOLD'),
  * Abyss Behemoth ('ABYSS'), Damage/Morph Hit-Flash ('FLASH'), or Locked Atlas Preview ('LOCKED').
- * Caching the tinted frame once per sprite completely eliminates per-slice `ctx.filter`
- * evaluation during 60 FPS multi-slice ribbon rendering (avoiding 300+ CSS filter passes/frame).
+ * Uses a bounded LRU cache (max 24 base frames) and releases evicted offscreen canvas
+ * backing stores (`width = 0; height = 0`) so GPU/RAM memory never accumulates across 48 sharks & 140 preys.
  */
 export function getPrebakedTintedFrame(
   frame: HTMLCanvasElement | undefined,
@@ -260,12 +261,32 @@ export function getPrebakedTintedFrame(
   }
 
   let cacheEntry = tintedFrameCache.get(frame);
-  if (!cacheEntry) {
+  if (cacheEntry) {
+    // Refresh LRU order
+    tintedFrameCache.delete(frame);
+    tintedFrameCache.set(frame, cacheEntry);
+    const existing = cacheEntry[variant];
+    if (existing && existing.width > 0) return existing;
+  } else {
+    if (tintedFrameCache.size >= MAX_TINTED_FRAME_CACHE_ENTRIES) {
+      const oldestKey = tintedFrameCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        const evicted = tintedFrameCache.get(oldestKey);
+        tintedFrameCache.delete(oldestKey);
+        if (evicted) {
+          for (const k of Object.keys(evicted) as SpriteTintVariant[]) {
+            const c = evicted[k];
+            if (c) {
+              c.width = 0;
+              c.height = 0;
+            }
+          }
+        }
+      }
+    }
     cacheEntry = {};
     tintedFrameCache.set(frame, cacheEntry);
   }
-  const existing = cacheEntry[variant];
-  if (existing) return existing;
 
   if (typeof document === 'undefined') return frame;
   const out = document.createElement('canvas');

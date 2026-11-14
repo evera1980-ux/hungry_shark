@@ -1389,6 +1389,23 @@ public final class SpriteAtlasManager: ObservableObject {
                     }
                 }
             }
+        } else {
+            // Soft vertical atmospheric envelope for deep-water backdrops (bg_twilight_0 & bg_abyss_0)
+            // so they act as delicate volumetric light/ember veils rather than opaque full-screen wallpaper swaps
+            for y in 0..<h {
+                let v = Double(y) / Double(max(1, h - 1))
+                let topEnv = v < 0.08 ? (0.65 + 0.35 * sin((v / 0.08) * .pi * 0.5)) : 1.0
+                let botEnv = v <= 0.62 ? 1.0 : (0.16 + 0.84 * pow(cos(((v - 0.62) / 0.38) * .pi * 0.5), 1.5))
+                let envAlpha = topEnv * botEnv
+                let rowOff = y * w
+                for x in 0..<w {
+                    let idx = (rowOff + x) * 4
+                    rgba[idx] = UInt8(max(0.0, min(255.0, (Double(rgba[idx]) * envAlpha).rounded())))
+                    rgba[idx + 1] = UInt8(max(0.0, min(255.0, (Double(rgba[idx + 1]) * envAlpha).rounded())))
+                    rgba[idx + 2] = UInt8(max(0.0, min(255.0, (Double(rgba[idx + 2]) * envAlpha).rounded())))
+                    rgba[idx + 3] = UInt8(max(0.0, min(255.0, (Double(rgba[idx + 3]) * envAlpha).rounded())))
+                }
+            }
         }
 
         return makeHorizontallySeamlessImage(rgba: rgba, width: w, height: h, seamRatio: isShallowCanopy ? 0.10 : 0.14)
@@ -1403,6 +1420,8 @@ public final class SpriteAtlasManager: ObservableObject {
         let isShallowFar = assetName.contains("shallow_1_far")
         let isShallowMid = assetName.contains("shallow_2_mid")
         let isShallowNear = assetName.contains("shallow_3_near")
+        let unmixHydrothermalSmoke = assetName.contains("abyss_2") || assetName.contains("abyss_3")
+
 
         let cropBottomRatio: Double = isShallowFar ? 0.915 : (isShallowMid ? 0.935 : 1.0)
         // Also trim 1% off left/right raw edges if there is any thin border artifact
@@ -1538,6 +1557,98 @@ public final class SpriteAtlasManager: ObservableObject {
                 rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
             }
         }
+
+        // 3B. Unmix soft grey/black hydrothermal smoke plumes painted over #FFFFFF sky on bg_abyss_2 & bg_abyss_3
+        // while 100% preserving red-and-white tube worms in the lower volcanic bed (1:1 parity with Web parallaxBackground.ts)
+        if unmixHydrothermalSmoke {
+            let smokeMaxY = Int(Double(h) * 0.64)
+            var smokeVisited = [UInt8](repeating: 0, count: w * h)
+            var sHead = 0
+            var sTail = 0
+
+            func isSmokeMistCandidate(_ i: Int, _ y: Int) -> Bool {
+                if y >= smokeMaxY { return false }
+                let p = i * 4
+                let r = Int(rgba[p])
+                let g = Int(rgba[p + 1])
+                let b = Int(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, max(g, b))
+                return minC >= 78 && (maxC - minC) <= 32
+            }
+
+            for y in 0..<min(h, smokeMaxY) {
+                let rowOff = y * w
+                for x in 0..<w {
+                    let i = rowOff + x
+                    if visited[i] != 0 {
+                        smokeVisited[i] = 1
+                        queue[sTail] = i
+                        sTail += 1
+                    }
+                }
+            }
+
+            while sHead < sTail {
+                let curr = queue[sHead]
+                sHead += 1
+                let cx = curr % w
+                let cy = (curr - cx) / w
+                let neighbors = [
+                    cx > 0 ? curr - 1 : -1,
+                    cx + 1 < w ? curr + 1 : -1,
+                    cy > 0 ? curr - w : -1,
+                    cy + 1 < smokeMaxY ? curr + w : -1
+                ]
+                for n in neighbors where n >= 0 && smokeVisited[n] == 0 {
+                    let ny = n / w
+                    if isSmokeMistCandidate(n, ny) {
+                        smokeVisited[n] = 1
+                        queue[sTail] = n
+                        sTail += 1
+                    }
+                }
+            }
+
+            let fadeStartY = Double(h) * 0.52
+            let fadeSpan = max(1.0, Double(smokeMaxY) - fadeStartY)
+            for y in 0..<min(h, smokeMaxY) {
+                let vertFade = Double(y) < fadeStartY ? 1.0 : max(0.0, (Double(smokeMaxY) - Double(y)) / fadeSpan)
+                let rowOff = y * w
+                for x in 0..<w {
+                    let i = rowOff + x
+                    if smokeVisited[i] == 0 || visited[i] != 0 { continue }
+                    let p = i * 4
+                    let r = Double(rgba[p])
+                    let g = Double(rgba[p + 1])
+                    let b = Double(rgba[p + 2])
+                    let minC = min(r, min(g, b))
+                    if minC >= 212.0 {
+                        visited[i] = 1
+                        rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
+                    } else {
+                        let rawSmokeAlpha = max(0.0, min(1.0, (212.0 - minC) / (212.0 - 78.0)))
+                        let smokeAlpha = pow(rawSmokeAlpha, 1.2) * 0.92
+                        let effAlpha = (1.0 - vertFade) + vertFade * smokeAlpha
+                        let outA = Double(rgba[p + 3]) * effAlpha
+                        if outA < 8.0 {
+                            visited[i] = 1
+                            rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
+                        } else {
+                            let targetR = r * (1.0 - vertFade) + 22.0 * vertFade
+                            let targetG = g * (1.0 - vertFade) + 24.0 * vertFade
+                            let targetB = b * (1.0 - vertFade) + 28.0 * vertFade
+                            let aNorm = outA / 255.0
+                            rgba[p] = UInt8(max(0.0, min(255.0, (targetR * aNorm).rounded())))
+                            rgba[p + 1] = UInt8(max(0.0, min(255.0, (targetG * aNorm).rounded())))
+                            rgba[p + 2] = UInt8(max(0.0, min(255.0, (targetB * aNorm).rounded())))
+                            rgba[p + 3] = UInt8(max(0.0, min(255.0, outA.rounded())))
+                        }
+                    }
+                }
+            }
+        }
+
 
         // 4. Despill & feather 2px boundary halo around removed sky/background
         if h > 2 && w > 2 {

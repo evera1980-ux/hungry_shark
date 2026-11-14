@@ -12,6 +12,8 @@ import {
   getMaxMechaLoadout,
   getDepthZone,
   getParallaxLayerGrowthScales,
+  computeParallaxBiomeTransitionState,
+  quinticSmoothstep,
 } from './rules';
 import {
   createDefaultMetaSave,
@@ -37,6 +39,7 @@ import {
   getPreySwimGait,
 } from './canvasRenderer';
 import { sampleBathymetricWaterColor } from './parallaxBackground';
+import { ProceduralOceanWorldSystem } from './worldGenerationSystem';
 
 test('I18N dictionary has complete and matching keys in both zh and en', () => {
   const zhKeys = Object.keys(I18N.zh).sort();
@@ -1062,3 +1065,1862 @@ test('getParallaxLayerGrowthScales shrinks Near > Ambient > Mid > Far > Water in
   assert.equal(maxScales.farScale, 0.868);     // -13.2% shrink (0.22 weight)
   assert.equal(maxScales.waterScale, 0.91);    //  -9.0% shrink (0.15 weight)
 });
+
+test('computeParallaxBiomeTransitionState enforces C2 quintic continuity, staggered Far->Mid->Near optical lead, Porter-Duff coverage compensation, and non-negative spatial emergence', () => {
+  // 1. Quintic smoothstep endpoint & midpoint invariants
+  assert.equal(quinticSmoothstep(300, 700, 300), 0);
+  assert.equal(quinticSmoothstep(300, 700, 700), 1);
+  assert.equal(quinticSmoothstep(300, 700, 500), 0.5);
+
+  // 2. Staggered Optical Lead: at 470m (approaching the 520m thermocline),
+  //    Twilight Far horizon leads ahead of Mid cliffs, which leads ahead of Near seabed
+  const at470 = computeParallaxBiomeTransitionState(470);
+  assert.ok(
+    at470.twilight.farWeight > at470.twilight.midWeight &&
+      at470.twilight.midWeight > at470.twilight.nearWeight &&
+      at470.twilight.nearWeight > 0,
+    'Twilight Far horizon must emerge earlier than Mid cliffs, which must emerge earlier than Near seabed'
+  );
+
+  // Similarly at 1070m (approaching the 1150m abyssal boundary),
+  // Abyss Far volcanic ridge leads ahead of Mid black smokers, which leads ahead of Near lava bed
+  const at1070 = computeParallaxBiomeTransitionState(1070);
+  assert.ok(
+    at1070.abyss.farWeight > at1070.abyss.midWeight &&
+      at1070.abyss.midWeight > at1070.abyss.nearWeight &&
+      at1070.abyss.nearWeight > 0,
+    'Abyss Far horizon must emerge earlier than Mid black smokers, which must emerge earlier than Near lava bed'
+  );
+
+  // 3. Porter-Duff Constant-Coverage Opacity Compensation at Near crossfade midpoints (570m and 1200m)
+  const at570 = computeParallaxBiomeTransitionState(570);
+  const combinedNear570 =
+    1 - (1 - at570.shallow.nearAlpha) * (1 - at570.twilight.nearAlpha);
+  assert.ok(
+    combinedNear570 > 0.81,
+    `Combined Porter-Duff Near seabed coverage at 570m must exceed 81% to prevent transparency dip (got ${combinedNear570.toFixed(3)})`
+  );
+
+  const at1200 = computeParallaxBiomeTransitionState(1200);
+  const combinedNear1200 =
+    1 - (1 - at1200.twilight.nearAlpha) * (1 - at1200.abyss.nearAlpha);
+  assert.ok(
+    combinedNear1200 > 0.81,
+    `Combined Porter-Duff Near seabed coverage at 1200m must exceed 81% to prevent transparency dip (got ${combinedNear1200.toFixed(3)})`
+  );
+
+  // 4. Spatial Emergence & Subduction Offsets and Continuous Particle Weights across 0m .. 2000m (5m steps)
+  let prev = computeParallaxBiomeTransitionState(0);
+  for (let d = 0; d <= 2000; d += 5) {
+    const cur = computeParallaxBiomeTransitionState(d);
+
+    // Particle weights must always sum to 1.0
+    const pSum =
+      cur.particleShallowWeight +
+      cur.particleTwilightWeight +
+      cur.particleAbyssWeight;
+    assert.ok(
+      Math.abs(pSum - 1.0) < 1e-9,
+      `Particle weights must sum to 1.0 at depth ${d}m (got ${pSum})`
+    );
+
+    // All vertical transition offsets must be >= 0 (never lifting any terrain bottom edge above viewH)
+    // and bounded within each plane's physical emergence span
+    for (const biome of [cur.shallow, cur.twilight, cur.abyss]) {
+      assert.ok(biome.farTransitionOffsetY >= 0 && biome.farTransitionOffsetY <= 20.001);
+      assert.ok(biome.midTransitionOffsetY >= 0 && biome.midTransitionOffsetY <= 36.001);
+      assert.ok(biome.nearTransitionOffsetY >= 0 && biome.nearTransitionOffsetY <= 54.001);
+    }
+  }
+
+  // Incoming biomes during diving must exhibit Near > Mid > Far emergence offset (foreground rises fastest)
+  assert.ok(
+    at470.twilight.nearTransitionOffsetY > at470.twilight.midTransitionOffsetY &&
+      at470.twilight.midTransitionOffsetY > at470.twilight.farTransitionOffsetY,
+    'Incoming Twilight biome at 470m must have Near emergence offset > Mid > Far'
+  );
+  assert.ok(
+    at1070.abyss.nearTransitionOffsetY > at1070.abyss.midTransitionOffsetY &&
+      at1070.abyss.midTransitionOffsetY > at1070.abyss.farTransitionOffsetY,
+    'Incoming Abyss biome at 1070m must have Near emergence offset > Mid > Far'
+  );
+
+  prev = computeParallaxBiomeTransitionState(0);
+  for (let d = 0; d <= 2000; d += 5) {
+    const cur = computeParallaxBiomeTransitionState(d);
+
+    // Verify smooth step-to-step C1 continuity (zero abrupt jumps per 5m step)
+    assert.ok(
+      Math.abs(cur.shallow.nearAlpha - prev.shallow.nearAlpha) < 0.045 &&
+        Math.abs(cur.twilight.nearAlpha - prev.twilight.nearAlpha) < 0.045 &&
+        Math.abs(cur.abyss.nearAlpha - prev.abyss.nearAlpha) < 0.045 &&
+        Math.abs(cur.particleTwilightWeight - prev.particleTwilightWeight) < 0.035,
+      `Transition state jumped too abruptly between ${d - 5}m and ${d}m`
+    );
+    prev = cur;
+  }
+});
+
+test('ProceduralOceanWorldSystem (8-Module Architecture): L0 Macro Zones, L1 Continuous Chunk Boundaries, L2 Cave SDF, L3 Poisson Disk Clusters, and 6 Environmental Fields', () => {
+  const sys = new ProceduralOceanWorldSystem(20261110);
+
+  // 1. Six Continuous Environmental Fields & Probability Functions (WorldGenerator & BiomeManager)
+  const shallowEnv = sys.biomeManager.sampleEnvironmentFields(420, 120);
+  const abyssEnv = sys.biomeManager.sampleEnvironmentFields(420, 1480);
+
+  assert.ok(shallowEnv.light > 0.65 && abyssEnv.light < 0.08, 'Light field must attenuate with depth');
+  assert.ok(shallowEnv.slope >= 0 && shallowEnv.slope <= 1, 'Slope field must be normalized in [0, 1]');
+  assert.ok(
+    sys.worldGenerator.coralProbability(shallowEnv) >
+      sys.worldGenerator.coralProbability(abyssEnv),
+    'Coral probability must be significantly higher in sunlit shallow reef than in dark abyss'
+  );
+  assert.ok(
+    sys.worldGenerator.biolumProbability(abyssEnv) >
+      sys.worldGenerator.biolumProbability(shallowEnv),
+    'Bioluminescent flora probability must be higher in deep ocean than in shallow sunlit reef'
+  );
+
+  // 2. Chunk Boundary Continuity (Chunk 12 right edge === Chunk 13 left edge)
+  const chunk12 = sys.chunkManager.getOrGenerateChunk(12, 260, 1000);
+  const chunk13 = sys.chunkManager.getOrGenerateChunk(13, 260, 1000);
+  assert.equal(chunk12.endX, chunk13.startX, 'Adjacent chunks must share exact boundary coordinate');
+  const h12Right = chunk12.heightSamples[chunk12.heightSamples.length - 1];
+  const h13Left = chunk13.heightSamples[0];
+  assert.ok(
+    Math.abs(h12Right - h13Left) < 1e-6,
+    `Chunk 12 right edge height (${h12Right}) must equal Chunk 13 left edge height (${h13Left})`
+  );
+
+  // 3. Poisson Disk Sampling + Cluster minimum spacing invariant (EcologyGenerator)
+  const testCluster = chunk12.clusters[0] ?? {
+    id: 'test_coral_cluster',
+    center: { x: 1200, y: 180 },
+    radius: 320,
+    type: 'coral_reef' as const,
+    density: 0.75,
+    seed: 2381,
+    biome: 'SHALLOW_CORAL_REEF' as const,
+    preferredPreyArchetype: 'REEF_SWARM' as const,
+  };
+  const minDist = 42;
+  const poissonPts = sys.ecologyGenerator.samplePoissonDiskInCluster(testCluster, minDist, 10);
+  assert.ok(poissonPts.length >= 3, 'Poisson Disk sampler must generate multiple points in cluster');
+  for (let i = 0; i < poissonPts.length; i++) {
+    for (let j = i + 1; j < poissonPts.length; j++) {
+      const dist = Math.hypot(poissonPts[i].x - poissonPts[j].x, poissonPts[i].y - poissonPts[j].y);
+      assert.ok(
+        dist >= minDist - 1e-4,
+        `Poisson Disk samples (${i}, ${j}) violated minimum spacing: ${dist.toFixed(2)} < ${minDist}`
+      );
+    }
+  }
+
+  // 4. Macro Exploration Pacing & State Tracking (BiomeManager, ChunkManager, WorldStateManager)
+  for (let x = 0; x <= 12000; x += 900) {
+    const step = sys.stepExploration(x, 220, x);
+    assert.equal(step.activeChunks.length, sys.chunkManager.preloadRadiusChunks * 2 + 1);
+    assert.ok(step.terrainModulation.nearSeabedOffsetPx >= 0);
+  }
+  const serialized = sys.worldStateManager.serialize();
+  assert.ok(
+    serialized.discoveredBiomes.length >= 2,
+    'Horizontal exploration across 12,000m must traverse multiple macro exploration zones'
+  );
+});
+
+import {
+  WorldConfig,
+  type WorldConfigType,
+  validateWorldConfig,
+  worldToChunkCoord,
+  getChunkBounds,
+  isPointInChunkBounds,
+  formatChunkId,
+  parseChunkId,
+  clampWorldDepth,
+  getVisibleChunkRange,
+  meterDepthToWorldY,
+  worldYToMeterDepth,
+  engineCoordToWorldCoord,
+  worldCoordToEngineCoord,
+  worldDebug,
+  getWorldDebugEnabled,
+  setWorldDebugEnabled,
+  WorldSeedService,
+  createChunkRng,
+  createStableId,
+  TERRAIN_MAX_SLOPE,
+  evalRidgedTerrainWave,
+  evalSandyPlainFactor,
+  getTerrainCacheStats,
+  getFloorDepthAt,
+  getTerrainSlopeAt,
+  getTerrainSamples,
+  getEngineFloorDepthAt,
+  sampleSeabedAnchorAt,
+  getShallowCoralAtollAt,
+  getShallowCoralAtollOutcropsForChunk,
+  resolveSeabedCollision,
+  resolveSeabedKineticStep,
+  BIOME_IDS,
+  DEPTH_BAND_CONFIGS,
+  getMacroBiomeForIndex,
+  getDepthBandAt,
+  getBiomeAt,
+  getDepthVisualProfile,
+  biomeGenerator,
+  ECOLOGY_OBJECT_CONFIGS,
+  POI_CONFIGS,
+  POI_TYPES,
+  generateEcology,
+  generatePOIs,
+  getOverlappingPOIsForChunk,
+  generateChunk,
+  poiGenerator,
+  chunkGenerator,
+  isValidChunkStateTransition,
+  transitionChunkState,
+  WorldObjectPool,
+  getDesiredChunkWindow,
+  ChunkLifecycleManager,
+  PerformanceDegradationController,
+  PERFORMANCE_DEGRADATION_ORDER,
+  WorldPersistence,
+  WorldAssetRegistry,
+  PARALLAX_LAYER_FACTORS,
+  type ChunkLifecycleRecord,
+  type ChunkLifecycleState,
+  type EcologyObjectType,
+  type GeneratedObject,
+  type GeneratedPOI,
+} from './worldGenerationSystem';
+
+test('v1.0 Spec Stage A (#1): 2D Chunk positive/negative coordinates, Math.floor indexing, and half-open [start, end) bounds uniqueness', () => {
+  // Default Chunk size: width = 3000, height = 1500
+  assert.equal(WorldConfig.chunk.width, 3000);
+  assert.equal(WorldConfig.chunk.height, 1500);
+  assert.equal(WorldConfig.bounds.minDepth, 0);
+  assert.equal(WorldConfig.bounds.maxDepth, 20000);
+
+  // 1. Origin and positive coordinates
+  assert.deepEqual(worldToChunkCoord(0, 0), { chunkX: 0, chunkY: 0, chunkId: '0:0' });
+  assert.deepEqual(worldToChunkCoord(2999.999, 1499.999), { chunkX: 0, chunkY: 0, chunkId: '0:0' });
+  // Right/bottom boundary belongs to the NEXT chunk due to half-open [start, end)
+  assert.deepEqual(worldToChunkCoord(3000, 1500), { chunkX: 1, chunkY: 1, chunkId: '1:1' });
+
+  // 2. Negative coordinates MUST use Math.floor
+  assert.deepEqual(worldToChunkCoord(-0.001, 0), { chunkX: -1, chunkY: 0, chunkId: '-1:0' });
+  assert.deepEqual(worldToChunkCoord(-3000, 0), { chunkX: -1, chunkY: 0, chunkId: '-1:0' });
+  assert.deepEqual(worldToChunkCoord(-3000.001, 0), { chunkX: -2, chunkY: 0, chunkId: '-2:0' });
+  assert.deepEqual(worldToChunkCoord(-6000, 4500), { chunkX: -2, chunkY: 3, chunkId: '-2:3' });
+
+  // 3. Half-open interval [startX, endX) and [startY, endY) uniqueness across adjacent chunks
+  const bNeg1 = getChunkBounds(-1, 0);
+  const bZero = getChunkBounds(0, 0);
+  const bPos1 = getChunkBounds(1, 0);
+
+  assert.equal(bNeg1.startX, -3000);
+  assert.equal(bNeg1.endX, 0);
+  assert.equal(bZero.startX, 0);
+  assert.equal(bZero.endX, 3000);
+  assert.equal(bPos1.startX, 3000);
+  assert.equal(bPos1.endX, 6000);
+
+  // Boundary point X = 0 belongs ONLY to Chunk 0:0, NOT Chunk -1:0
+  assert.equal(isPointInChunkBounds(0, 500, bNeg1), false);
+  assert.equal(isPointInChunkBounds(0, 500, bZero), true);
+
+  // Boundary point X = 3000 belongs ONLY to Chunk 1:0, NOT Chunk 0:0
+  assert.equal(isPointInChunkBounds(3000, 500, bZero), false);
+  assert.equal(isPointInChunkBounds(3000, 500, bPos1), true);
+
+  // Boundary point X = -3000 belongs to Chunk -1:0
+  assert.equal(isPointInChunkBounds(-3000, 500, bNeg1), true);
+
+  // 4. chunkId formatting & parsing round-trip (including negative indices and -0 normalization)
+  assert.equal(formatChunkId(-0, -0), '0:0');
+  assert.deepEqual(parseChunkId('-3:12'), { chunkX: -3, chunkY: 12 });
+  assert.throws(() => parseChunkId('invalid_id'), /Invalid chunkId format/);
+  assert.throws(() => parseChunkId('1.5:2'), /Non-integer coordinates/);
+
+  // 5. Depth clamping & visible 2D Chunk range
+  assert.equal(clampWorldDepth(-500), 0);
+  assert.equal(clampWorldDepth(12345), 12345);
+  assert.equal(clampWorldDepth(35000), 20000);
+
+  const vis = getVisibleChunkRange({ x: -1500, y: 1200, width: 5000, height: 2000 });
+  assert.equal(vis.minChunkX, -1);
+  assert.equal(vis.maxChunkX, 1);
+  assert.equal(vis.minChunkY, 0);
+  assert.equal(vis.maxChunkY, 2);
+  assert.equal(vis.chunkCoords.length, 3 * 3);
+
+  // 6. Adapter layer lossless round-trip (1m = 1 worldPx, 0m ~ 20000m)
+  assert.equal(meterDepthToWorldY(520), 520);
+  assert.equal(worldYToMeterDepth(11500), 11500);
+  const wCoord = engineCoordToWorldCoord(-320, 1480);
+  assert.deepEqual(wCoord, { worldX: -320, worldY: 1480 });
+  assert.deepEqual(worldCoordToEngineCoord(wCoord.worldX, wCoord.worldY), {
+    engineX: -320,
+    engineY: 1480,
+  });
+
+  // 7. WorldDebug default off & toggle state
+  assert.equal(getWorldDebugEnabled(), false);
+  setWorldDebugEnabled(true);
+  assert.equal(worldDebug.isEnabled(), true);
+  setWorldDebugEnabled(false);
+  assert.equal(worldDebug.isEnabled(), false);
+});
+
+test('v1.0 Spec Stage A (#2): validateWorldConfig rejects illegal configuration values with clear errors', () => {
+  // Default config must pass
+  assert.equal(validateWorldConfig(WorldConfig), true);
+
+  const cloneConfig = (): WorldConfigType =>
+    JSON.parse(JSON.stringify(WorldConfig)) as WorldConfigType;
+
+  // Illegal generatorVersion
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.generatorVersion = 0;
+    validateWorldConfig(c);
+  }, /generatorVersion/);
+
+  // Illegal bounds (minDepth < 0 or maxDepth <= minDepth)
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.bounds.minDepth = -10;
+    validateWorldConfig(c);
+  }, /bounds\.minDepth/);
+
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.bounds.maxDepth = 0;
+    validateWorldConfig(c);
+  }, /bounds\.maxDepth/);
+
+  // Illegal chunk dimensions
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.chunk.width = -3000;
+    validateWorldConfig(c);
+  }, /chunk\.width/);
+
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.chunk.height = 0;
+    validateWorldConfig(c);
+  }, /chunk\.height/);
+
+  // Illegal biome transitionWidth >= macroWidth
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.biome.transitionWidth = c.biome.macroWidth;
+    validateWorldConfig(c);
+  }, /biome\.transitionWidth/);
+
+  // Illegal terrain sampleStepX not dividing chunk.width or invalid floor depths
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.terrain.sampleStepX = 137;
+    validateWorldConfig(c);
+  }, /chunk\.width must be an exact multiple of terrain\.sampleStepX/);
+
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.terrain.minFloorDepth = 19500;
+    c.terrain.maxFloorDepth = 19200;
+    validateWorldConfig(c);
+  }, /terrain\.minFloorDepth/);
+
+  // Illegal performance budget / cache limits
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.performance.generationBudgetMsPerFrame = 0;
+    validateWorldConfig(c);
+  }, /generationBudgetMsPerFrame/);
+
+  assert.throws(() => {
+    const c = cloneConfig();
+    c.performance.maxCachedChunkRecords = 0;
+    validateWorldConfig(c);
+  }, /maxCachedChunkRecords/);
+});
+
+test('v1.0 Spec Stage B (#3): Seed reproducibility and stable ID determinism across access orders', () => {
+  const seedA = 123456789;
+  const seedB = 987654321;
+  const rng1 = createChunkRng(seedA, 1, -4, 7, 'terrain');
+  const rng2 = createChunkRng(seedA, 1, -4, 7, 'terrain');
+  const rngDiffSeed = createChunkRng(seedB, 1, -4, 7, 'terrain');
+  const rngDiffVersion = createChunkRng(seedA, 2, -4, 7, 'terrain');
+  const rngDiffChunk = createChunkRng(seedA, 1, -3, 7, 'terrain');
+
+  const seq1 = Array.from({ length: 16 }, () => rng1());
+  const seq2 = Array.from({ length: 16 }, () => rng2());
+  const seqDiffSeed = Array.from({ length: 16 }, () => rngDiffSeed());
+  const seqDiffVer = Array.from({ length: 16 }, () => rngDiffVersion());
+  const seqDiffChunk = Array.from({ length: 16 }, () => rngDiffChunk());
+
+  // Identical inputs must yield bit-for-bit identical sequences in [0, 1)
+  assert.deepEqual(seq1, seq2);
+  for (const val of seq1) {
+    assert.ok(val >= 0 && val < 1, `RNG output ${val} must be in [0, 1)`);
+  }
+  assert.notDeepEqual(seq1, seqDiffSeed, 'Different worldSeed must yield different sequence');
+  assert.notDeepEqual(seq1, seqDiffVer, 'Different generatorVersion must yield different sequence');
+  assert.notDeepEqual(seq1, seqDiffChunk, 'Different chunk coordinate must yield different sequence');
+
+  // Stable ID must be 100% deterministic, independent of call order or intervening calls
+  const svc = new WorldSeedService(WorldConfig);
+  const idBefore = svc.createStableId('chest', -5, 3, 2);
+  // Generate 50 other IDs in between
+  for (let i = 0; i < 50; i++) {
+    svc.createStableId('coral', i - 25, i % 6, `slot_${i}`);
+  }
+  const idAfter = svc.createStableId('chest', -5, 3, 2);
+  assert.equal(idBefore, idAfter, 'Stable ID must be identical when regenerated at any time');
+  assert.equal(
+    idBefore,
+    createStableId(WorldConfig.worldSeed, WorldConfig.generatorVersion, 'chest', -5, 3, 2)
+  );
+  assert.notEqual(
+    idBefore,
+    createStableId(WorldConfig.worldSeed + 1, WorldConfig.generatorVersion, 'chest', -5, 3, 2)
+  );
+  assert.notEqual(
+    idBefore,
+    createStableId(WorldConfig.worldSeed, WorldConfig.generatorVersion + 1, 'chest', -5, 3, 2)
+  );
+});
+
+test('v1.0 Spec Stage B (#4): Subsystem RNG isolation (consuming fauna never alters poi, terrain, flora, or ambient)', () => {
+  const seed = WorldConfig.worldSeed;
+  const ver = WorldConfig.generatorVersion;
+  const cx = 8;
+  const cy = 4;
+
+  // Baseline POI and Terrain sequences without touching fauna
+  const poiBaselineRng = createChunkRng(seed, ver, cx, cy, 'poi');
+  const terrainBaselineRng = createChunkRng(seed, ver, cx, cy, 'terrain');
+  const poiBaseline = Array.from({ length: 20 }, () => poiBaselineRng());
+  const terrainBaseline = Array.from({ length: 20 }, () => terrainBaselineRng());
+
+  // Now create fauna, flora, ambient, poi, and terrain streams and draw heavily from fauna/flora/ambient
+  const faunaRng = createChunkRng(seed, ver, cx, cy, 'fauna');
+  const floraRng = createChunkRng(seed, ver, cx, cy, 'flora');
+  const ambientRng = createChunkRng(seed, ver, cx, cy, 'ambient');
+  const poiAfterRng = createChunkRng(seed, ver, cx, cy, 'poi');
+  const terrainAfterRng = createChunkRng(seed, ver, cx, cy, 'terrain');
+
+  const faunaSamples: number[] = [];
+  for (let i = 0; i < 500; i++) {
+    faunaSamples.push(faunaRng());
+    floraRng();
+    ambientRng();
+  }
+
+  const poiAfter = Array.from({ length: 20 }, () => poiAfterRng());
+  const terrainAfter = Array.from({ length: 20 }, () => terrainAfterRng());
+
+  assert.deepEqual(
+    poiBaseline,
+    poiAfter,
+    'Consuming fauna/flora/ambient RNG streams must have zero impact on poi RNG stream'
+  );
+  assert.deepEqual(
+    terrainBaseline,
+    terrainAfter,
+    'Consuming fauna/flora/ambient RNG streams must have zero impact on terrain RNG stream'
+  );
+  assert.notDeepEqual(
+    poiBaseline,
+    faunaSamples.slice(0, 20),
+    'Distinct subsystem keys on the same chunk must produce distinct RNG sequences'
+  );
+});
+
+test('v1.0 Spec Stage B (#5): Terrain Chunk seam consistency (last sample of chunkX === first sample of chunkX + 1 in any order)', () => {
+  // Query chunks in a shuffled non-sequential order to prove zero order dependency
+  const chunkIndices = [0, -1, 5, -8, 12, -12, 3, -4, 1, 2, -2, -3, 4, 6, -7, -6];
+  const sampleMap = new Map<number, ReturnType<typeof getTerrainSamples>>();
+  for (const cx of chunkIndices) {
+    sampleMap.set(cx, getTerrainSamples(cx, WorldConfig));
+  }
+
+  for (let cx = -12; cx <= 12; cx++) {
+    const leftChunk = sampleMap.get(cx) ?? getTerrainSamples(cx, WorldConfig);
+    const rightChunk = sampleMap.get(cx + 1) ?? getTerrainSamples(cx + 1, WorldConfig);
+
+    assert.equal(
+      leftChunk.endX,
+      rightChunk.startX,
+      `Chunk ${cx} endX (${leftChunk.endX}) must equal Chunk ${cx + 1} startX (${rightChunk.startX})`
+    );
+    const leftLastPt = leftChunk.points[leftChunk.points.length - 1];
+    const rightFirstPt = rightChunk.points[0];
+
+    assert.equal(leftLastPt.worldX, rightFirstPt.worldX);
+    assert.equal(
+      leftLastPt.floorY,
+      rightFirstPt.floorY,
+      `Seam mismatch between Chunk ${cx} right edge (${leftLastPt.floorY}) and Chunk ${cx + 1} left edge (${rightFirstPt.floorY})`
+    );
+    assert.equal(
+      leftLastPt.floorY,
+      getFloorDepthAt(leftChunk.endX, WorldConfig),
+      'Chunk boundary sample must exactly match getFloorDepthAt(endX)'
+    );
+  }
+});
+
+test('v1.0 Spec Stage B (#6): Terrain depth clamp (getFloorDepthAt always stays within [minFloorDepth, maxFloorDepth])', () => {
+  // 1. Default WorldConfig across wide positive and negative coordinates (including fractional X)
+  for (let x = -120000; x <= 120000; x += 237.5) {
+    const fy = getFloorDepthAt(x, WorldConfig);
+    assert.ok(
+      fy >= WorldConfig.terrain.minFloorDepth && fy <= WorldConfig.terrain.maxFloorDepth,
+      `floorY(${x}) = ${fy} violated [${WorldConfig.terrain.minFloorDepth}, ${WorldConfig.terrain.maxFloorDepth}]`
+    );
+  }
+
+  // 2. Extreme wave amplitudes that exceed min/max floor bounds must still be strictly clamped
+  const extremeConfig: WorldConfigType = {
+    ...WorldConfig,
+    terrain: {
+      ...WorldConfig.terrain,
+      baseFloorDepth: 14000,
+      largeWaveAmplitude: 50000,
+      mediumWaveAmplitude: 25000,
+      smallWaveAmplitude: 12000,
+      minFloorDepth: 800,
+      maxFloorDepth: 19800,
+    },
+  };
+  for (let x = -60000; x <= 60000; x += 311.25) {
+    const fy = getFloorDepthAt(x, extremeConfig);
+    assert.ok(
+      fy >= extremeConfig.terrain.minFloorDepth && fy <= extremeConfig.terrain.maxFloorDepth,
+      `Extreme config floorY(${x}) = ${fy} violated [${extremeConfig.terrain.minFloorDepth}, ${extremeConfig.terrain.maxFloorDepth}]`
+    );
+  }
+});
+
+test('v1.0 Spec Stage B (#7): Slope limit enforcement and single source of truth for seabed render, collision, and anchor sampling', () => {
+  // 1. Verify |s[i+1] - s[i]| / sampleStepX <= TERRAIN_MAX_SLOPE across chunks [-10..10]
+  for (let cx = -10; cx <= 10; cx++) {
+    const samples = getTerrainSamples(cx, WorldConfig);
+    assert.equal(samples.points.length, WorldConfig.chunk.width / WorldConfig.terrain.sampleStepX + 1);
+    assert.ok(
+      samples.maxAbsSlope <= TERRAIN_MAX_SLOPE + 1e-9,
+      `Chunk ${cx} maxAbsSlope (${samples.maxAbsSlope}) exceeded TERRAIN_MAX_SLOPE (${TERRAIN_MAX_SLOPE})`
+    );
+    for (let i = 0; i < samples.points.length - 1; i++) {
+      const p0 = samples.points[i];
+      const p1 = samples.points[i + 1];
+      const stepSlope = Math.abs(p1.floorY - p0.floorY) / samples.sampleStepX;
+      assert.ok(
+        stepSlope <= TERRAIN_MAX_SLOPE + 1e-9,
+        `Step slope at worldX=${p0.worldX} (${stepSlope}) exceeded TERRAIN_MAX_SLOPE (${TERRAIN_MAX_SLOPE})`
+      );
+      // Midpoint between p0 and p1 must match linear interpolation in getFloorDepthAt
+      const midX = (p0.worldX + p1.worldX) * 0.5;
+      const expectedMidY = (p0.floorY + p1.floorY) * 0.5;
+      assert.ok(
+        Math.abs(getFloorDepthAt(midX, WorldConfig) - expectedMidY) < 1e-9,
+        'getFloorDepthAt at midpoint must match linear segment of getTerrainSamples'
+      );
+      assert.ok(
+        Math.abs(getTerrainSlopeAt(midX, WorldConfig) - p0.slope) < 1e-9,
+        'getTerrainSlopeAt must match segment slope'
+      );
+    }
+  }
+
+  // 2. Verify single source of truth across getFloorDepthAt, getEngineFloorDepthAt, sampleSeabedAnchorAt, and resolveSeabedCollision
+  const testEngineX = -425.5;
+  const testWorldX = testEngineX;
+  const floorWorldY = getFloorDepthAt(testWorldX, WorldConfig);
+  const floorEngineY = getEngineFloorDepthAt(testEngineX, WorldConfig);
+  assert.ok(Math.abs(floorWorldY - floorEngineY) < 1e-9);
+
+  const anchor = sampleSeabedAnchorAt(testWorldX, -15, WorldConfig);
+  assert.equal(anchor.floorY, floorWorldY);
+  assert.equal(anchor.anchorY, floorWorldY - 15);
+  assert.equal(anchor.slope, getTerrainSlopeAt(testWorldX, WorldConfig));
+
+  // Above seabed: no collision
+  const radiusM = 24;
+  const aboveCollision = resolveSeabedCollision(testEngineX, floorEngineY - radiusM - 10, radiusM, 45, WorldConfig);
+  assert.equal(aboveCollision.collided, false);
+  assert.equal(aboveCollision.floorWorldY, floorWorldY);
+
+  // Below seabed: clamped to exact floorEngineY - radiusM
+  const belowCollision = resolveSeabedCollision(testEngineX, floorEngineY - radiusM + 18, radiusM, 80, WorldConfig);
+  assert.equal(belowCollision.collided, true);
+  assert.ok(Math.abs(belowCollision.engineY - (floorEngineY - radiusM)) < 1e-9);
+  assert.ok(belowCollision.vy <= 0, 'Downward velocity must be deflected upon seabed collision');
+});
+
+test('v1.0 Spec Stage C (#8): Biome reproducibility, macro region determinism (no per-Chunk random lottery), and distinct adjacent macro regions', () => {
+  // 1. Exact 5 macro biome IDs (shipwreck is a local POI, not a macro biome)
+  assert.deepEqual(BIOME_IDS, [
+    'coral_reef',
+    'rocky_shelf',
+    'open_ocean',
+    'underwater_canyon',
+    'deep_abyss',
+  ]);
+
+  // 2. Macro biome selection is a pure order-independent function of (worldSeed, generatorVersion, macroIndex)
+  const macroIndices = [0, -1, 1, 15, -15, 7, 8, -8, -9, 23, -24, 2, -2, 3, 4, 5, 6];
+  const recorded = new Map<number, string>();
+  for (const m of macroIndices) {
+    recorded.set(m, getMacroBiomeForIndex(m, WorldConfig));
+  }
+  for (let m = -25; m <= 25; m++) {
+    const b1 = getMacroBiomeForIndex(m, WorldConfig);
+    const b2 = recorded.get(m) ?? getMacroBiomeForIndex(m, WorldConfig);
+    assert.equal(b1, b2, `Macro biome at index ${m} must be 100% deterministic across query orders`);
+    assert.ok(BIOME_IDS.includes(b1));
+
+    // Adjacent macro indices m and m+1 are guaranteed to have distinct biomes
+    const bNext = getMacroBiomeForIndex(m + 1, WorldConfig);
+    assert.notEqual(
+      b1,
+      bNext,
+      `Adjacent macro regions ${m} and ${m + 1} must have distinct biomes (both were ${b1})`
+    );
+  }
+
+  // 3. Chunks inside the core [3000, 27000] of the same macro region (width 30000) share the exact same primaryBiome with blend=0
+  for (const m of [-3, -1, 0, 1, 4]) {
+    const expectedBiome = getMacroBiomeForIndex(m, WorldConfig);
+    const macroStart = m * WorldConfig.biome.macroWidth;
+    // Chunks +1 .. +8 inside this macro region lie strictly inside core [3000, 27000]
+    for (let localChunkOffset = 1; localChunkOffset <= 8; localChunkOffset++) {
+      const sampleX = macroStart + localChunkOffset * WorldConfig.chunk.width + 500;
+      const sample = getBiomeAt(sampleX, 3500, WorldConfig);
+      assert.equal(sample.macroIndex, m);
+      assert.equal(sample.primaryBiome, expectedBiome);
+      assert.equal(sample.secondaryBiome, undefined);
+      assert.equal(sample.blend, 0);
+      assert.equal(sample.weights[expectedBiome], 1);
+    }
+  }
+
+  // 4. Changing worldSeed or generatorVersion changes the macro sequence
+  const altSeedConfig: WorldConfigType = { ...WorldConfig, worldSeed: 999888777 };
+  const seqDefault = Array.from({ length: 12 }, (_, i) => getMacroBiomeForIndex(i - 6, WorldConfig));
+  const seqAltSeed = Array.from({ length: 12 }, (_, i) => getMacroBiomeForIndex(i - 6, altSeedConfig));
+  assert.notDeepEqual(seqDefault, seqAltSeed, 'Different worldSeed must produce a different macro biome sequence');
+});
+
+test('v1.0 Spec Stage C (#9): Biome blend 0..1 and C2 continuity across macro boundaries + unified DepthBand & getDepthVisualProfile continuity', () => {
+  // 1. Verify horizontal biome blending across [-60000 .. +60000] (spanning 4 macro boundaries at -60k, -30k, 0, +30k, +60k)
+  const stepX = 100;
+  let prevSample = getBiomeAt(-60000, 4200, WorldConfig);
+
+  for (let x = -60000; x <= 60000; x += stepX) {
+    const cur = getBiomeAt(x, 4200, WorldConfig);
+
+    // blend must always be in [0, 1]
+    assert.ok(cur.blend >= 0 && cur.blend <= 1, `blend at x=${x} (${cur.blend}) must be in [0, 1]`);
+
+    // weights must be non-negative and sum to 1.0
+    let weightSum = 0;
+    for (const id of BIOME_IDS) {
+      const w = cur.weights[id];
+      assert.ok(w >= -1e-9 && w <= 1 + 1e-9, `weight[${id}] at x=${x} out of range: ${w}`);
+      weightSum += w;
+      // Step-to-step weight change per 100 worldPx across a 6000 worldPx transition band:
+      // max derivative of quinticSmoothstep is 1.875 / 6000 * 100 = 0.03125
+      const deltaW = Math.abs(w - prevSample.weights[id]);
+      assert.ok(
+        deltaW <= 0.035,
+        `Biome weight[${id}] jumped discontinuously between x=${x - stepX} and x=${x} (delta=${deltaW.toFixed(4)})`
+      );
+    }
+    assert.ok(
+      Math.abs(weightSum - 1.0) < 1e-9,
+      `Biome weights at x=${x} must sum to 1.0 (got ${weightSum})`
+    );
+
+    // Blended parameters (floraDensity, rockDensity, faunaDensity, bioluminescenceBoost) must also vary smoothly without jumps
+    assert.ok(
+      Math.abs(cur.blendedParams.floraDensity - prevSample.blendedParams.floraDensity) < 0.04 &&
+        Math.abs(cur.blendedParams.rockDensity - prevSample.blendedParams.rockDensity) < 0.05 &&
+        Math.abs(cur.blendedParams.bioluminescenceBoost - prevSample.blendedParams.bioluminescenceBoost) < 0.03,
+      `Blended biome parameters jumped discontinuously at x=${x}`
+    );
+
+    prevSample = cur;
+  }
+
+  // Exact macro boundary x = 30000 must have equal 0.5 / 0.5 weights between macro 0 and macro 1
+  const atBoundary = getBiomeAt(30000, 1000, WorldConfig);
+  const b0 = getMacroBiomeForIndex(0, WorldConfig);
+  const b1 = getMacroBiomeForIndex(1, WorldConfig);
+  assert.ok(Math.abs(atBoundary.weights[b0] - 0.5) < 1e-9);
+  assert.ok(Math.abs(atBoundary.weights[b1] - 0.5) < 1e-9);
+  assert.ok(Math.abs(atBoundary.blend - 0.5) < 1e-9);
+
+  // 2. Verify all 5 Depth Bands (Epipelagic, Mesopelagic, Bathypelagic, Abyssopelagic, Hadal-like)
+  assert.equal(DEPTH_BAND_CONFIGS.length, 5);
+  assert.equal(getDepthBandAt(0), 'Epipelagic');
+  assert.equal(getDepthBandAt(1999.9), 'Epipelagic');
+  assert.equal(getDepthBandAt(2000), 'Mesopelagic');
+  assert.equal(getDepthBandAt(5999.9), 'Mesopelagic');
+  assert.equal(getDepthBandAt(6000), 'Bathypelagic');
+  assert.equal(getDepthBandAt(9999.9), 'Bathypelagic');
+  assert.equal(getDepthBandAt(10000), 'Abyssopelagic');
+  assert.equal(getDepthBandAt(15999.9), 'Abyssopelagic');
+  assert.equal(getDepthBandAt(16000), 'Hadal-like');
+  assert.equal(getDepthBandAt(20000), 'Hadal-like');
+
+  // 3. Verify getDepthVisualProfile(depth) continuity & monotonic optical trends across 0..20000
+  const surfaceProfile = biomeGenerator.getDepthVisualProfile(0);
+  const hadalProfile = biomeGenerator.getDepthVisualProfile(20000);
+  assert.equal(surfaceProfile.brightness, 1.0);
+  assert.equal(surfaceProfile.lightShaftIntensity, 1.0);
+  assert.equal(surfaceProfile.bioluminescenceRatio, 0.0);
+  assert.ok(hadalProfile.brightness <= 0.05);
+  assert.equal(hadalProfile.lightShaftIntensity, 0.0);
+  assert.ok(hadalProfile.bioluminescenceRatio >= 0.95);
+  assert.ok(surfaceProfile.visibilityDistance > hadalProfile.visibilityDistance);
+
+  let prevProf = getDepthVisualProfile(0, WorldConfig);
+  for (let d = 50; d <= 20000; d += 50) {
+    const curProf = getDepthVisualProfile(d, WorldConfig);
+    assert.ok(curProf.brightness <= prevProf.brightness + 1e-9, `Brightness must decrease monotonically at d=${d}`);
+    assert.ok(
+      curProf.lightShaftIntensity <= prevProf.lightShaftIntensity + 1e-9,
+      `Light shaft intensity must decrease monotonically at d=${d}`
+    );
+    assert.ok(
+      curProf.bioluminescenceRatio >= prevProf.bioluminescenceRatio - 1e-9,
+      `Bioluminescence ratio must increase monotonically at d=${d}`
+    );
+    assert.ok(
+      curProf.visibilityDistance <= prevProf.visibilityDistance + 1e-9,
+      `Visibility distance must decrease monotonically at d=${d}`
+    );
+    // Step-to-step continuity check (no jumps at 2000, 6000, 10000, 16000 band boundaries)
+    assert.ok(
+      Math.abs(curProf.brightness - prevProf.brightness) < 0.025 &&
+        Math.abs(curProf.lightShaftIntensity - prevProf.lightShaftIntensity) < 0.035 &&
+        Math.abs(curProf.bioluminescenceRatio - prevProf.bioluminescenceRatio) < 0.025,
+      `DepthVisualProfile jumped discontinuously at depth ${d}`
+    );
+    prevProf = curProf;
+  }
+});
+
+test('v1.0 Spec Stage D (#10): Ecology filtering (depth range, Biome whitelist, seabed distance, half-open Chunk bounds, and cross-Chunk minimum spacing)', () => {
+  // 1. Verify all 13 required Section 7 object types + 2 POI types are configured with complete metadata
+  const requiredTypes: readonly EcologyObjectType[] = [
+    'coral',
+    'rock',
+    'seagrass',
+    'fish_school',
+    'jellyfish',
+    'biolum_organism',
+    'shipwreck_debris',
+    'bubble_stream',
+    'plankton_mote',
+    'marine_snow',
+    'cave',
+    'treasure',
+    'landmark',
+    'shipwreck',
+    'rare_creature_nest',
+  ];
+  for (const t of requiredTypes) {
+    const cfg = ECOLOGY_OBJECT_CONFIGS[t];
+    assert.ok(cfg, `Missing ECOLOGY_OBJECT_CONFIGS entry for "${t}"`);
+    assert.equal(cfg.type, t);
+    assert.ok(cfg.allowedBiomes.length >= 1, `${t} must have at least 1 allowed Biome`);
+    assert.ok(cfg.minDepth >= 0 && cfg.maxDepth > cfg.minDepth && cfg.maxDepth <= WorldConfig.bounds.maxDepth);
+    assert.ok(cfg.spawnWeight > 0);
+    assert.ok(cfg.minSpacing >= WorldConfig.generation.minObjectSpacing);
+    assert.ok(cfg.assetKey.length > 0);
+  }
+
+  // 2. Scan a multi-macro, multi-depth grid of Chunks (covering shallow, midwater, and seabed Chunks)
+  const testChunkXList = [-11, -10, -1, 0, 1, 2, 9, 10, 11, 20];
+  let totalGeneratedEcologyCount = 0;
+  let totalFloraCount = 0;
+  let totalFaunaCount = 0;
+  let totalAmbientCount = 0;
+
+  for (const cx of testChunkXList) {
+    const midFloorY = getFloorDepthAt((cx + 0.5) * WorldConfig.chunk.width, WorldConfig);
+    const seabedChunkY = Math.floor(midFloorY / WorldConfig.chunk.height);
+    const chunkYList = Array.from(new Set([0, 2, 5, Math.max(0, seabedChunkY - 1), seabedChunkY]));
+
+    for (const cy of chunkYList) {
+      const chunk = generateChunk(cx, cy, WorldConfig);
+      const bounds = chunk.bounds;
+
+      for (const obj of chunk.ecologyObjects) {
+        totalGeneratedEcologyCount++;
+        const cfg = ECOLOGY_OBJECT_CONFIGS[obj.type as EcologyObjectType];
+        assert.ok(cfg, `Unknown ecology object type "${obj.type}"`);
+        if (cfg.subsystemKey === 'flora') totalFloraCount++;
+        if (cfg.subsystemKey === 'fauna') totalFaunaCount++;
+        if (cfg.subsystemKey === 'ambient') totalAmbientCount++;
+
+        // Rule A: Object must strictly lie inside its owning Chunk's half-open bounds [startX, endX) x [startY, endY)
+        assert.equal(obj.chunkX, cx);
+        assert.equal(obj.chunkY, cy);
+        assert.equal(
+          isPointInChunkBounds(obj.worldX, obj.worldY, bounds),
+          true,
+          `Object ${obj.id} at (${obj.worldX}, ${obj.worldY}) fell outside Chunk ${chunk.chunkId} bounds`
+        );
+
+        // Rule B: Object depth must satisfy [cfg.minDepth, cfg.maxDepth] and never fall below seabed floorY(x)
+        const floorY = getFloorDepthAt(obj.worldX, WorldConfig);
+        assert.ok(
+          obj.worldY >= cfg.minDepth && obj.worldY <= cfg.maxDepth,
+          `Object ${obj.type} at worldY=${obj.worldY} violated depth range [${cfg.minDepth}, ${cfg.maxDepth}]`
+        );
+        assert.ok(
+          obj.worldY <= floorY,
+          `Object ${obj.id} (${obj.type}) spawned below seabed: worldY=${obj.worldY} > floorY=${floorY}`
+        );
+
+        // Rule C: Object biomeId must match getBiomeAt(worldX, worldY).primaryBiome and be in cfg.allowedBiomes
+        const localBiome = getBiomeAt(obj.worldX, obj.worldY, WorldConfig);
+        assert.equal(obj.biomeId, localBiome.primaryBiome);
+        assert.ok(
+          cfg.allowedBiomes.includes(obj.biomeId as (typeof BIOME_IDS)[number]),
+          `Object ${obj.type} spawned in disallowed biome "${obj.biomeId}" (allowed: ${cfg.allowedBiomes.join(',')})`
+        );
+
+        // Rule D: Seabed placement constraint (floor_anchored vs near_floor vs water_column)
+        const distToFloor = floorY - obj.worldY;
+        if (cfg.seabedConstraint === 'floor_anchored') {
+          assert.ok(
+            distToFloor >= 0 && distToFloor <= cfg.maxDistanceToFloor,
+            `Floor-anchored ${obj.type} too far from seabed: distToFloor=${distToFloor} > ${cfg.maxDistanceToFloor}`
+          );
+        } else if (cfg.seabedConstraint === 'near_floor') {
+          assert.ok(
+            distToFloor >= 10 && distToFloor <= cfg.maxDistanceToFloor,
+            `Near-floor ${obj.type} out of floor offset band: distToFloor=${distToFloor}`
+          );
+        } else {
+          assert.ok(
+            distToFloor >= 120,
+            `Water-column ${obj.type} spawned too close to seabed: distToFloor=${distToFloor} < 120`
+          );
+        }
+      }
+    }
+  }
+
+  assert.ok(totalGeneratedEcologyCount >= 80, `Expected rich ecology generation, got ${totalGeneratedEcologyCount}`);
+  assert.ok(totalFloraCount >= 10, 'Expected seabed flora/rock objects to be generated');
+  assert.ok(totalFaunaCount >= 20, 'Expected water-column fauna spawners to be generated');
+  assert.ok(totalAmbientCount >= 20, 'Expected ambient particles/bubbles to be generated');
+
+  // 3. Verify intra-Chunk and cross-Chunk minimum spacing within each subsystem across adjacent Chunks
+  for (let cx = -2; cx <= 2; cx++) {
+    const floorY = getFloorDepthAt((cx + 0.5) * WorldConfig.chunk.width, WorldConfig);
+    const cy = Math.floor(floorY / WorldConfig.chunk.height);
+    const curChunk = generateChunk(cx, cy, WorldConfig);
+    const rightChunk = generateChunk(cx + 1, cy, WorldConfig);
+    const combined = [...curChunk.ecologyObjects, ...rightChunk.ecologyObjects];
+
+    for (let i = 0; i < combined.length; i++) {
+      for (let j = i + 1; j < combined.length; j++) {
+        const a = combined[i];
+        const b = combined[j];
+        const cfgA = ECOLOGY_OBJECT_CONFIGS[a.type as EcologyObjectType];
+        const cfgB = ECOLOGY_OBJECT_CONFIGS[b.type as EcologyObjectType];
+        if (cfgA.subsystemKey !== cfgB.subsystemKey) continue;
+        const reqSpacing = Math.max(
+          WorldConfig.generation.minObjectSpacing,
+          cfgA.minSpacing,
+          cfgB.minSpacing
+        );
+        const dist = Math.hypot(a.worldX - b.worldX, a.worldY - b.worldY);
+        assert.ok(
+          dist >= reqSpacing - 1e-4,
+          `Subsystem "${cfgA.subsystemKey}" spacing violation between ${a.id} and ${b.id}: dist=${dist.toFixed(2)} < ${reqSpacing}`
+        );
+      }
+    }
+  }
+});
+
+test('v1.0 Spec Stage D (#11): Object ID stability, 11-step deterministic pipeline, and order-independent Chunk regeneration', () => {
+  // 1. Generate a target 3x2 neighborhood in forward order vs reverse/shuffled order
+  const coords: Array<[number, number]> = [
+    [-2, 0],
+    [-1, 0],
+    [0, 0],
+    [0, 9],
+    [1, 9],
+    [2, 9],
+  ];
+
+  const forwardMap = new Map<string, ReturnType<typeof generateChunk>>();
+  for (const [cx, cy] of coords) {
+    forwardMap.set(`${cx}:${cy}`, chunkGenerator.generateChunk(cx, cy));
+  }
+
+  // Interleave with unrelated RNG calls and reverse coordinate order
+  for (let k = 0; k < 40; k++) {
+    createChunkRng(WorldConfig.worldSeed, WorldConfig.generatorVersion, k, k, 'fauna')();
+  }
+
+  const reversedCoords = [...coords].reverse();
+  for (const [cx, cy] of reversedCoords) {
+    const again = generateChunk(cx, cy, WorldConfig);
+    const baseline = forwardMap.get(`${cx}:${cy}`)!;
+    assert.deepEqual(
+      again.objects,
+      baseline.objects,
+      `Chunk ${cx}:${cy} objects must be 100% identical regardless of generation order`
+    );
+    assert.deepEqual(
+      again.pois,
+      baseline.pois,
+      `Chunk ${cx}:${cy} POIs must be 100% identical regardless of generation order`
+    );
+
+    // Every object ID within the Chunk must be unique and deterministically match createStableId
+    const seenIds = new Set<string>();
+    for (const obj of again.objects) {
+      assert.equal(seenIds.has(obj.id), false, `Duplicate object ID ${obj.id} in Chunk ${cx}:${cy}`);
+      seenIds.add(obj.id);
+      const expectedId = createStableId(
+        WorldConfig.worldSeed,
+        WorldConfig.generatorVersion,
+        obj.type,
+        obj.chunkX,
+        obj.chunkY,
+        obj.seedKey
+      );
+      assert.equal(obj.id, expectedId, `Object ID ${obj.id} did not match createStableId (${expectedId})`);
+    }
+  }
+});
+
+test('v1.0 Spec Stage D (#12): POI cross-Chunk uniqueness (max 1 POI/Chunk, single ownerChunkId, footprint non-overlap, and cross-Chunk overlappingPOIs reference)', () => {
+  // 1. Verify all 5 required first-edition POI types are configured
+  assert.deepEqual(POI_TYPES, [
+    'shipwreck',
+    'cave',
+    'treasure',
+    'rare_creature_nest',
+    'landmark',
+  ]);
+  for (const pt of POI_TYPES) {
+    const pCfg = POI_CONFIGS[pt];
+    assert.ok(pCfg.footprintRadius >= 200);
+    assert.ok(pCfg.minPOISpacing >= 1500);
+    assert.ok(pCfg.assetKey.length > 0);
+  }
+
+  // 2. Scan a wide horizontal & vertical range of Chunks: cx in [-30..30], cy in [0..13]
+  const allOwnedPois: GeneratedPOI[] = [];
+  const poiOwnerCountMap = new Map<string, number>();
+  let crossChunkOverlapReferences = 0;
+
+  for (let cx = -30; cx <= 30; cx++) {
+    for (let cy = 0; cy <= 13; cy++) {
+      const ownedPois = poiGenerator.generatePOIs(cx, cy);
+      // Max 1 POI per Chunk
+      assert.ok(
+        ownedPois.length <= 1,
+        `Chunk ${cx}:${cy} owned ${ownedPois.length} POIs (max allowed is 1)`
+      );
+
+      if (ownedPois.length === 1) {
+        const poi = ownedPois[0];
+        const bounds = getChunkBounds(cx, cy, WorldConfig);
+
+        // POI ownerChunkId must match this Chunk and center (worldX, worldY) must lie strictly inside [startX, endX) x [startY, endY)
+        assert.equal(poi.ownerChunkX, cx);
+        assert.equal(poi.ownerChunkY, cy);
+        assert.equal(poi.ownerChunkId, `${cx === 0 ? 0 : cx}:${cy === 0 ? 0 : cy}`);
+        assert.equal(
+          isPointInChunkBounds(poi.worldX, poi.worldY, bounds),
+          true,
+          `POI ${poi.id} center (${poi.worldX}, ${poi.worldY}) must lie inside owner Chunk ${poi.ownerChunkId}`
+        );
+
+        // Check Biome & Depth constraints
+        const pCfg = POI_CONFIGS[poi.type];
+        assert.ok(
+          poi.worldY >= pCfg.minDepth && poi.worldY <= pCfg.maxDepth,
+          `POI ${poi.id} (${poi.type}) depth ${poi.worldY} violated [${pCfg.minDepth}, ${pCfg.maxDepth}]`
+        );
+        assert.ok(
+          pCfg.allowedBiomes.includes(poi.biomeId as (typeof BIOME_IDS)[number]),
+          `POI ${poi.id} (${poi.type}) biome ${poi.biomeId} not in allowedBiomes`
+        );
+
+        poiOwnerCountMap.set(poi.id, (poiOwnerCountMap.get(poi.id) ?? 0) + 1);
+        allOwnedPois.push(poi);
+      }
+
+      // Check overlappingPOIs from adjacent Chunks
+      const overlapping = getOverlappingPOIsForChunk(cx, cy, WorldConfig);
+      for (const ov of overlapping) {
+        crossChunkOverlapReferences++;
+        assert.notEqual(
+          ov.ownerChunkId,
+          `${cx === 0 ? 0 : cx}:${cy === 0 ? 0 : cy}`,
+          'overlappingPOIs must only contain POIs owned by neighbor Chunks, never self-owned POIs'
+        );
+        // Verify the neighborChunk actually owns this exact POI with identical ID and coordinates
+        const ownerPois = generatePOIs(ov.ownerChunkX, ov.ownerChunkY, WorldConfig);
+        assert.equal(ownerPois.length, 1);
+        assert.deepEqual(ownerPois[0], ov);
+      }
+    }
+  }
+
+  assert.ok(allOwnedPois.length >= 12, `Expected multiple POIs across [-30..30], got ${allOwnedPois.length}`);
+  assert.ok(
+    crossChunkOverlapReferences >= 1,
+    'Expected at least one POI footprint near a Chunk border to be referenced in neighbor overlappingPOIs'
+  );
+
+  // 3. Every POI ID must be owned by EXACTLY ONE Chunk (never duplicated across Chunk borders)
+  for (const [poiId, count] of poiOwnerCountMap.entries()) {
+    assert.equal(count, 1, `POI ${poiId} was owned by ${count} Chunks (must be strictly 1)`);
+  }
+
+  // 4. Verify non-overlapping footprints and minimum POI spacing across all generated POIs
+  for (let i = 0; i < allOwnedPois.length; i++) {
+    for (let j = i + 1; j < allOwnedPois.length; j++) {
+      const a = allOwnedPois[i];
+      const b = allOwnedPois[j];
+      const dist = Math.hypot(a.worldX - b.worldX, a.worldY - b.worldY);
+      const minFootprintDist = a.footprintRadius + b.footprintRadius;
+      const reqPoiSpacing = Math.max(a.minPOISpacing, b.minPOISpacing);
+      assert.ok(
+        dist >= minFootprintDist,
+        `POI footprint overlap between ${a.id} and ${b.id}: dist=${dist.toFixed(1)} < ${minFootprintDist}`
+      );
+      assert.ok(
+        dist >= reqPoiSpacing,
+        `POI minimum spacing violation between ${a.id} and ${b.id}: dist=${dist.toFixed(1)} < ${reqPoiSpacing}`
+      );
+    }
+  }
+});
+
+test('v1.0 Spec Stage E (#13): ChunkLifecycleState legal transitions and rejection of illegal state jumps', () => {
+  const makeRecord = (initial: ChunkLifecycleState = 'unloaded'): ChunkLifecycleRecord => ({
+    chunkX: 2,
+    chunkY: 1,
+    chunkId: '2:1',
+    state: initial,
+    stateHistory: [initial],
+    data: null,
+    activeTaskId: null,
+    lastTouchedTick: 0,
+    generationDurationMs: 0,
+  });
+
+  // 1. Standard full lifecycle: unloaded -> queued -> generating -> ready -> active -> releasing -> unloaded
+  const rec = makeRecord('unloaded');
+  transitionChunkState(rec, 'queued');
+  assert.equal(rec.state, 'queued');
+  transitionChunkState(rec, 'generating');
+  assert.equal(rec.state, 'generating');
+  transitionChunkState(rec, 'ready');
+  assert.equal(rec.state, 'ready');
+  transitionChunkState(rec, 'active');
+  assert.equal(rec.state, 'active');
+  transitionChunkState(rec, 'releasing');
+  assert.equal(rec.state, 'releasing');
+  transitionChunkState(rec, 'unloaded');
+  assert.equal(rec.state, 'unloaded');
+
+  // 2. Legal short-circuit paths: queued -> unloaded (cancelled queue), ready -> releasing (evicted before activation), unloaded -> ready (LRU cache hit)
+  const recCancel = makeRecord('unloaded');
+  transitionChunkState(recCancel, 'queued');
+  transitionChunkState(recCancel, 'unloaded');
+  assert.equal(recCancel.state, 'unloaded');
+
+  const recReadyRelease = makeRecord('ready');
+  transitionChunkState(recReadyRelease, 'releasing');
+  transitionChunkState(recReadyRelease, 'unloaded');
+  assert.equal(recReadyRelease.state, 'unloaded');
+
+  const recCacheHit = makeRecord('unloaded');
+  transitionChunkState(recCacheHit, 'ready');
+  assert.equal(recCacheHit.state, 'ready');
+
+  // 3. Illegal state transitions must be rejected and throw explicit errors
+  const illegalPairs: Array<[ChunkLifecycleState, ChunkLifecycleState]> = [
+    ['unloaded', 'active'],
+    ['unloaded', 'generating'],
+    ['unloaded', 'releasing'],
+    ['queued', 'ready'],
+    ['queued', 'active'],
+    ['generating', 'active'],
+    ['generating', 'unloaded'],
+    ['active', 'unloaded'],
+    ['active', 'ready'],
+    ['releasing', 'active'],
+    ['releasing', 'ready'],
+  ];
+
+  for (const [fromState, toState] of illegalPairs) {
+    assert.equal(
+      isValidChunkStateTransition(fromState, toState),
+      false,
+      `Transition ${fromState} -> ${toState} must be invalid`
+    );
+    const badRec = makeRecord(fromState);
+    assert.throws(
+      () => transitionChunkState(badRec, toState),
+      /Invalid ChunkLifecycleState transition/,
+      `Expected transitionChunkState(${fromState} -> ${toState}) to throw`
+    );
+  }
+});
+
+test('v1.0 Spec Stage E (#14): Directional preload/retain window, vertical buffer constraint, and complete object pool reference sanitization on unload', () => {
+  const cameraRect = {
+    minWorldX: 0,
+    maxWorldX: 2800, // ChunkX = 0
+    minWorldY: 3100,
+    maxWorldY: 4400, // ChunkY = 2
+  };
+
+  // 1. Directional preload/retain checks:
+  // Moving right (vx > 5): preloadRight = 4, preloadLeft = 2
+  const winRight = getDesiredChunkWindow(cameraRect, 180, WorldConfig);
+  assert.equal(winRight.preloadRight, 4);
+  assert.equal(winRight.preloadLeft, 2);
+  assert.equal(winRight.minWindowChunkX, -2);
+  assert.equal(winRight.maxWindowChunkX, 4);
+
+  // Moving left (vx < -5): preloadLeft = 4, preloadRight = 2
+  const winLeft = getDesiredChunkWindow(cameraRect, -180, WorldConfig);
+  assert.equal(winLeft.preloadLeft, 4);
+  assert.equal(winLeft.preloadRight, 2);
+  assert.equal(winLeft.minWindowChunkX, -4);
+  assert.equal(winLeft.maxWindowChunkX, 2);
+
+  // Stationary (|vx| <= 5): symmetric 3 left, 3 right
+  const winIdle = getDesiredChunkWindow(cameraRect, 0, WorldConfig);
+  assert.equal(winIdle.preloadLeft, 3);
+  assert.equal(winIdle.preloadRight, 3);
+
+  // Vertical buffer: only visible row (2) ± 1 => [1..3], never loading full ocean column [0..13]
+  assert.equal(winRight.minWindowChunkY, 1);
+  assert.equal(winRight.maxWindowChunkY, 3);
+
+  // 2. Object pool release & unload sanitization (zero strong references to unloaded Chunk data)
+  const pool = new WorldObjectPool(300);
+  const persistence = new WorldPersistence(WorldConfig);
+  const mgr = new ChunkLifecycleManager(WorldConfig, pool, persistence);
+
+  // Update at X = 0..2800 so Chunk 0:2 becomes active and acquires pooled instances
+  mgr.updateForViewport(cameraRect, 120, { maxSyncGenerateCount: 16 });
+  assert.equal(mgr.getChunkState(0, 2), 'active');
+  const activeInstancesAtOrigin = [...pool.getActiveInstancesForChunk('0:2')];
+  assert.ok(activeInstancesAtOrigin.length > 0, 'Active Chunk 0:2 must acquire pooled instances');
+
+  // Attach dummy event listener and timer to verify cleanup on release
+  let listenerCleanedUp = false;
+  activeInstancesAtOrigin[0].eventListeners.push(() => {
+    listenerCleanedUp = true;
+  });
+  activeInstancesAtOrigin[0].timers.push(999);
+
+  // Now move camera far away to ChunkX = 30 (worldX = 90000..92800)
+  mgr.updateForViewport(
+    {
+      minWorldX: 90000,
+      maxWorldX: 92800,
+      minWorldY: 3100,
+      maxWorldY: 4400,
+    },
+    120,
+    { maxSyncGenerateCount: 16 }
+  );
+
+  // Chunk 0:2 is now outside the retain window and must be unloaded
+  assert.equal(mgr.getChunkState(0, 2), 'unloaded');
+  assert.equal(
+    pool.getActiveInstancesForChunk('0:2').length,
+    0,
+    'Unloaded Chunk 0:2 must have zero active instances'
+  );
+  assert.equal(listenerCleanedUp, true, 'Event listener cleanup callback must run on release');
+
+  // Every released instance returned to the pool must have null chunkId, null sourceDataRef, and reset state
+  for (const inst of activeInstancesAtOrigin) {
+    if (!inst.active) {
+      assert.equal(inst.chunkId, null, 'Released pooled instance must not retain chunkId');
+      assert.equal(
+        inst.sourceDataRef,
+        null,
+        'Released pooled instance must not retain strong reference to Chunk data'
+      );
+      assert.equal(inst.collisionEnabled, false);
+      assert.equal(inst.eventListeners.length, 0);
+      assert.equal(inst.timers.length, 0);
+    }
+  }
+});
+
+test('v1.0 Spec Stage E (#15) & Stage F: Bounded cache (<= 64), object pool (<= 300/type), queue (<= 32), active chunks (<= 10), and missing asset placeholder fallback', () => {
+  const pool = new WorldObjectPool(WorldConfig.performance.maxPooledObjectsPerType);
+  const persistence = new WorldPersistence(WorldConfig);
+  const mgr = new ChunkLifecycleManager(WorldConfig, pool, persistence);
+
+  // 1. Test Object Pool per-type upper bound (maxPooledObjectsPerType = 300)
+  const dummyObj = generateChunk(0, 0, WorldConfig).objects[0];
+  const acquired: ReturnType<typeof pool.acquire>[] = [];
+  for (let i = 0; i < 420; i++) {
+    acquired.push(pool.acquire('eco:kelp_patch', `test:${i}`, dummyObj));
+  }
+  for (const inst of acquired) {
+    pool.release(inst);
+  }
+  assert.equal(
+    pool.getPooledCountForType('eco:kelp_patch'),
+    WorldConfig.performance.maxPooledObjectsPerType,
+    'Pooled objects per type must never exceed maxPooledObjectsPerType (300)'
+  );
+  assert.equal(pool.getStats().totalDroppedOverflowCount, 120);
+
+  // 2. Test Queue (<= 32), Active Chunks (<= 10), and Cache (<= 64) across wide sweeps
+  for (let step = 0; step < 30; step++) {
+    const baseX = step * 9000;
+    mgr.updateForViewport(
+      {
+        minWorldX: baseX,
+        maxWorldX: baseX + 5500,
+        minWorldY: 1500,
+        maxWorldY: 4200,
+      },
+      220,
+      { maxSyncGenerateCount: 4 }
+    );
+    const stats = mgr.getStats();
+    assert.ok(
+      stats.activeChunkCount <= WorldConfig.chunk.maxActiveChunks,
+      `activeChunkCount (${stats.activeChunkCount}) exceeded maxActiveChunks (${WorldConfig.chunk.maxActiveChunks})`
+    );
+    assert.ok(
+      stats.cachedChunkCount <= WorldConfig.performance.maxCachedChunkRecords,
+      `cachedChunkCount (${stats.cachedChunkCount}) exceeded maxCachedChunkRecords (${WorldConfig.performance.maxCachedChunkRecords})`
+    );
+    assert.ok(
+      stats.queueLength <= WorldConfig.performance.maxQueueSize,
+      `queueLength (${stats.queueLength}) exceeded maxQueueSize (${WorldConfig.performance.maxQueueSize})`
+    );
+  }
+
+  // 3. Stage F: WorldAssetRegistry missing asset key fallback without crashing and 5-layer parallax factors
+  assert.equal(PARALLAX_LAYER_FACTORS.far_silhouette, 0.08);
+  assert.equal(PARALLAX_LAYER_FACTORS.mid_terrain, 0.18);
+  assert.equal(PARALLAX_LAYER_FACTORS.sub_mid_shadow, 0.35);
+  assert.equal(PARALLAX_LAYER_FACTORS.world_main, 1.0);
+  assert.equal(PARALLAX_LAYER_FACTORS.foreground_particles, 1.12);
+
+  const registry = new WorldAssetRegistry();
+  const known = registry.getAssetOrPlaceholder('poi_shipwreck_hull', 'poi');
+  assert.equal(known.isPlaceholder, false);
+  const missing = registry.getAssetOrPlaceholder('non_existent_custom_asset_xyz', 'flora');
+  assert.equal(missing.isPlaceholder, true);
+  assert.equal(registry.getPlaceholderFallbackCount(), 1);
+});
+
+test('v1.0 Spec Stage E (#16): Stale async generation task completing after camera moved away never transitions to active', () => {
+  const pool = new WorldObjectPool(300);
+  const persistence = new WorldPersistence(WorldConfig);
+  const mgr = new ChunkLifecycleManager(WorldConfig, pool, persistence);
+
+  // Camera starts at Chunk 0:1
+  mgr.updateForViewport(
+    { minWorldX: 100, maxWorldX: 2500, minWorldY: 1600, maxWorldY: 2800 },
+    0,
+    { maxSyncGenerateCount: 2 }
+  );
+
+  // Start an async generation task for Chunk (2, 1)
+  const taskId = mgr.startAsyncChunkTask(2, 1);
+  assert.equal(mgr.getChunkState(2, 1), 'generating');
+
+  // Before the async task finishes, the player teleports/moves far away to ChunkX = 50 (worldX = 150000)
+  mgr.updateForViewport(
+    { minWorldX: 150000, maxWorldX: 152500, minWorldY: 1600, maxWorldY: 2800 },
+    200,
+    { maxSyncGenerateCount: 4 }
+  );
+
+  // Now the async task for Chunk (2, 1) completes late!
+  const completion = mgr.completeAsyncChunkTask(taskId);
+  assert.equal(
+    completion.activated,
+    false,
+    'Stale async task for out-of-range Chunk (2, 1) must NOT be activated'
+  );
+  assert.equal(
+    completion.finalState,
+    'unloaded',
+    'Stale async task must transition generating -> ready -> releasing -> unloaded'
+  );
+  assert.equal(mgr.getChunkState(2, 1), 'unloaded');
+  assert.equal(
+    pool.getActiveInstancesForChunk('2:1').length,
+    0,
+    'Stale async task must not leak any active pooled instances'
+  );
+  assert.ok(mgr.getStaleTasksPreventedCount() >= 1);
+
+  // Verify the state history of (2, 1) went through generating -> ready -> releasing -> unloaded without 'active'
+  const rec = mgr.getChunkRecord(2, 1);
+  if (rec) {
+    assert.equal(rec.stateHistory.includes('active'), false);
+  }
+});
+
+test('v1.0 Spec Stage G (#17): Round-trip exploration reproduces static objects identically from Seed and restores modified POI states via WorldPersistence', () => {
+  const pool = new WorldObjectPool(300);
+  const persistence = new WorldPersistence(WorldConfig);
+  const mgr = new ChunkLifecycleManager(WorldConfig, pool, persistence);
+
+  // Find a Chunk that owns a POI so we can test both static reproduction and POI state persistence
+  let targetChunkX = 0;
+  let targetChunkY = 1;
+  let targetPoiId = '';
+  for (let cx = -15; cx <= 15 && !targetPoiId; cx++) {
+    for (let cy = 0; cy <= 8 && !targetPoiId; cy++) {
+      const c = generateChunk(cx, cy, WorldConfig);
+      if (c.pois.length > 0) {
+        targetChunkX = cx;
+        targetChunkY = cy;
+        targetPoiId = c.pois[0].id;
+      }
+    }
+  }
+  assert.ok(targetPoiId.length > 0, 'Must locate a Chunk with a generated POI');
+
+  const targetBounds = getChunkBounds(targetChunkX, targetChunkY, WorldConfig);
+  const targetCameraRect = {
+    minWorldX: targetBounds.startX + 100,
+    maxWorldX: targetBounds.endX - 100,
+    minWorldY: targetBounds.startY + 100,
+    maxWorldY: targetBounds.endY - 100,
+  };
+
+  // 1. First visit: activate target Chunk and record baseline static ecology objects
+  mgr.updateForViewport(targetCameraRect, 0, { maxSyncGenerateCount: 16 });
+  const firstVisitChunk = mgr
+    .getActiveChunks()
+    .find((c) => c.chunkX === targetChunkX && c.chunkY === targetChunkY);
+  assert.ok(firstVisitChunk, 'Target Chunk must be active on first visit');
+  assert.equal(firstVisitChunk.pois[0].poiState, 'unvisited');
+  assert.equal(firstVisitChunk.pois[0].state?.status, 'unvisited');
+  const firstVisitStaticObjects = JSON.parse(
+    JSON.stringify(firstVisitChunk.ecologyObjects)
+  );
+
+  // Player interacts with the POI and removes one dynamic object
+  const removedObjectId = firstVisitChunk.ecologyObjects[0]?.id;
+  persistence.setPOIState(targetPoiId, 'depleted', {
+    rewardClaimed: true,
+    remainingCooldown: 0,
+    updatedAt: 1700000000000,
+  });
+  if (removedObjectId) {
+    persistence.setObjectState(removedObjectId, {
+      removed: true,
+      triggered: true,
+      updatedAt: 1700000000000,
+    });
+  }
+
+  // Save incremental world state (must NOT serialize untouched static objects)
+  const savedPayload = persistence.save();
+  assert.equal(savedPayload.worldSeed, WorldConfig.worldSeed);
+  assert.equal(savedPayload.generatorVersion, WorldConfig.generatorVersion);
+  assert.equal(savedPayload.modifiedPOIs[targetPoiId]?.state, 'depleted');
+  assert.equal(savedPayload.modifiedPOIs[targetPoiId]?.rewardClaimed, true);
+
+  // 2. Move far away so target Chunk is completely unloaded AND evicted from LRU cache
+  for (let step = 1; step <= 25; step++) {
+    const farX = (targetChunkX + step * 10) * WorldConfig.chunk.width;
+    mgr.updateForViewport(
+      {
+        minWorldX: farX,
+        maxWorldX: farX + 2600,
+        minWorldY: 1500,
+        maxWorldY: 4200,
+      },
+      250,
+      { maxSyncGenerateCount: 8 }
+    );
+  }
+  assert.equal(mgr.getChunkState(targetChunkX, targetChunkY), 'unloaded');
+
+  // 3. Simulate reload from saved incremental data and return to target Chunk
+  const restoredPersistence = new WorldPersistence(WorldConfig);
+  restoredPersistence.load(savedPayload);
+  const restoredMgr = new ChunkLifecycleManager(WorldConfig, pool, restoredPersistence);
+
+  restoredMgr.updateForViewport(targetCameraRect, 0, { maxSyncGenerateCount: 16 });
+  const secondVisitChunk = restoredMgr
+    .getActiveChunks()
+    .find((c) => c.chunkX === targetChunkX && c.chunkY === targetChunkY);
+  assert.ok(secondVisitChunk, 'Target Chunk must be active on return visit');
+
+  // Modified POI must restore 'depleted' state
+  assert.equal(
+    secondVisitChunk.pois[0].poiState,
+    'depleted',
+    'Modified POI state must persist across unload and reload'
+  );
+  assert.equal(secondVisitChunk.pois[0].state?.status, 'depleted');
+
+  // Removed object must stay removed, while all other static objects match 100% identically
+  if (removedObjectId) {
+    assert.equal(
+      secondVisitChunk.ecologyObjects.some((o) => o.id === removedObjectId),
+      false,
+      'Removed dynamic object must remain removed after reload'
+    );
+  }
+  const expectedRemainingStatic = firstVisitStaticObjects.filter(
+    (o: { id: string }) => o.id !== removedObjectId
+  );
+  assert.deepEqual(
+    secondVisitChunk.ecologyObjects,
+    expectedRemainingStatic,
+    'All unmodified static ecology objects must be 100% identical on round-trip revisit'
+  );
+});
+
+test('v1.0 Spec Stage G (#18): Long-running exploration stress test (100+ Chunks) maintains bounded memory/pools and enforces 5-step performance degradation order', () => {
+  const pool = new WorldObjectPool(WorldConfig.performance.maxPooledObjectsPerType);
+  const persistence = new WorldPersistence(WorldConfig);
+  const degradation = new PerformanceDegradationController(
+    WorldConfig.performance.generationBudgetMsPerFrame
+  );
+  const mgr = new ChunkLifecycleManager(WorldConfig, pool, persistence, degradation);
+
+  // 1. Verify 5-step degradation order and critical system protection
+  assert.deepEqual(PERFORMANCE_DEGRADATION_ORDER, [
+    'distant_particles',
+    'distant_decorations',
+    'background_animations',
+    'distant_noncritical_fauna',
+    'distant_task_priority',
+  ]);
+  assert.equal(degradation.canDegradeCriticalSystem('current_view_terrain_collision'), false);
+  assert.equal(degradation.canDegradeCriticalSystem('nearby_critical_poi'), false);
+  assert.equal(degradation.canDegradeCriticalSystem('chunk_manager_stability'), false);
+
+  degradation.setDegradationStepForTest(2);
+  assert.deepEqual(degradation.getActiveDegradations(), [
+    'distant_particles',
+    'distant_decorations',
+  ]);
+  degradation.setDegradationStepForTest(0);
+
+  // 2. Simulate continuous long-distance exploration across 120 horizontal Chunks & varying depths
+  for (let i = 0; i < 120; i++) {
+    const worldX = i * WorldConfig.chunk.width * 0.85;
+    const worldY = 800 + Math.abs(Math.sin(i * 0.15)) * 14000;
+    const vx = i % 3 === 0 ? -160 : 210;
+
+    mgr.updateForViewport(
+      {
+        minWorldX: worldX,
+        maxWorldX: worldX + 2600,
+        minWorldY: worldY,
+        maxWorldY: Math.min(WorldConfig.bounds.maxDepth, worldY + 1400),
+      },
+      vx,
+      { maxSyncGenerateCount: 5 }
+    );
+
+    const mgrStats = mgr.getStats();
+    const poolStats = pool.getStats();
+
+    assert.ok(
+      mgrStats.activeChunkCount <= WorldConfig.chunk.maxActiveChunks,
+      `Step ${i}: activeChunkCount ${mgrStats.activeChunkCount} > ${WorldConfig.chunk.maxActiveChunks}`
+    );
+    assert.ok(
+      mgrStats.cachedChunkCount <= WorldConfig.performance.maxCachedChunkRecords,
+      `Step ${i}: cachedChunkCount ${mgrStats.cachedChunkCount} > ${WorldConfig.performance.maxCachedChunkRecords}`
+    );
+    assert.ok(
+      mgrStats.queueLength <= WorldConfig.performance.maxQueueSize,
+      `Step ${i}: queueLength ${mgrStats.queueLength} > ${WorldConfig.performance.maxQueueSize}`
+    );
+    // Tracked records must remain bounded (never accumulating all 120+ historical Chunks)
+    assert.ok(
+      mgrStats.trackedRecordCount <=
+        WorldConfig.performance.maxCachedChunkRecords + 36,
+      `Step ${i}: trackedRecordCount (${mgrStats.trackedRecordCount}) grew unboundedly`
+    );
+    assert.equal(
+      pool.getActiveChunkCountWithInstances(),
+      mgrStats.activeChunkCount,
+      `Step ${i}: pool active chunk count (${pool.getActiveChunkCountWithInstances()}) must match activeChunkCount (${mgrStats.activeChunkCount})`
+    );
+    assert.ok(
+      poolStats.totalPooledInstances <=
+        WorldConfig.performance.maxPooledObjectsPerType * 25,
+      `Step ${i}: totalPooledInstances (${poolStats.totalPooledInstances}) exceeded bound`
+    );
+  }
+});
+
+test('Rounded U/V-Folded Waves, Frequent Sandy Plains, Preload Chunk Stability, and Bounded Terrain Caches', () => {
+  // 1. Medium wave amplitude is upgraded to 3800m and evalRidgedTerrainWave produces smooth, full-range [-1, 1] U/V folds without sharp cusps
+  assert.equal(WorldConfig.terrain.mediumWaveAmplitude, 3800);
+  let minRidge = Infinity;
+  let maxRidge = -Infinity;
+  let maxSecondDerivativePerStep = 0;
+  const dx = 25;
+  for (let x = -30000; x <= 30000; x += dx) {
+    const y0 = evalRidgedTerrainWave(x - dx, 2100, 263, WorldConfig);
+    const y1 = evalRidgedTerrainWave(x, 2100, 263, WorldConfig);
+    const y2 = evalRidgedTerrainWave(x + dx, 2100, 263, WorldConfig);
+    minRidge = Math.min(minRidge, y1);
+    maxRidge = Math.max(maxRidge, y1);
+    const d2 = Math.abs(y2 - 2 * y1 + y0);
+    maxSecondDerivativePerStep = Math.max(maxSecondDerivativePerStep, d2);
+  }
+  assert.ok(minRidge >= -1.0 && minRidge <= -0.82, `minRidge (${minRidge}) should reach deep trough near -1`);
+  assert.ok(maxRidge <= 1.0 && maxRidge >= 0.85, `maxRidge (${maxRidge}) should reach full crest near +1`);
+  assert.ok(
+    maxSecondDerivativePerStep < 0.015,
+    `Second difference (${maxSecondDerivativePerStep}) must be smooth and rounded without sharp V-cusp spikes`
+  );
+
+  // 2. Frequent flat sandy plains (evalSandyPlainFactor) and gentle seabed segments (|slope| <= 0.22)
+  let plainSampleCount = 0;
+  let totalPlainSamples = 0;
+  let gentleSlopeStepCount = 0;
+  let totalSlopeSteps = 0;
+
+  for (let cx = -25; cx <= 25; cx++) {
+    const samples = getTerrainSamples(cx, WorldConfig);
+    for (let i = 0; i < samples.points.length - 1; i++) {
+      const pt = samples.points[i];
+      totalPlainSamples++;
+      if (evalSandyPlainFactor(pt.worldX, WorldConfig) >= 0.25) {
+        plainSampleCount++;
+      }
+      totalSlopeSteps++;
+      if (pt.absSlope <= 0.22) {
+        gentleSlopeStepCount++;
+      }
+    }
+  }
+
+  const plainCoverageRatio = plainSampleCount / totalPlainSamples;
+  const gentleSlopeRatio = gentleSlopeStepCount / totalSlopeSteps;
+  assert.ok(
+    plainCoverageRatio >= 0.30,
+    `Sandy plain envelope coverage (${(plainCoverageRatio * 100).toFixed(1)}%) must be >= 30%`
+  );
+  assert.ok(
+    gentleSlopeRatio >= 0.22,
+    `Gentle sandy plain seabed steps |slope|<=0.22 (${(gentleSlopeRatio * 100).toFixed(1)}%) must be >= 22%`
+  );
+
+  // 3. Preload Chunks (inRetain && !inActive) must not churn through ready -> releasing -> unloaded across 60 consecutive 60FPS frames
+  const pool = new WorldObjectPool(WorldConfig.performance.maxPooledObjectsPerType);
+  const persistence = new WorldPersistence(WorldConfig);
+  const mgr = new ChunkLifecycleManager(
+    WorldConfig,
+    pool,
+    persistence,
+    new PerformanceDegradationController(100)
+  );
+  const viewport = {
+    minWorldX: 0,
+    maxWorldX: 2400,
+    minWorldY: 400,
+    maxWorldY: 1400,
+  };
+  mgr.updateForViewport(viewport, 150, { maxSyncGenerateCount: 30 });
+  while (mgr.getQueueLength() > 0) {
+    mgr.updateForViewport(viewport, 150, { maxSyncGenerateCount: 30 });
+  }
+  const preloadRecord = mgr.getChunkRecord(4, 0);
+  assert.ok(preloadRecord, 'Forward preload Chunk 4:0 must exist in retain window');
+  const historyLenBefore = preloadRecord!.stateHistory.length;
+
+  for (let frame = 0; frame < 60; frame++) {
+    mgr.updateForViewport(viewport, 150, { maxSyncGenerateCount: 4 });
+    const recNow = mgr.getChunkRecord(4, 0);
+    assert.ok(recNow, 'Preload Chunk 4:0 must remain tracked');
+    assert.equal(
+      recNow!.stateHistory.length,
+      historyLenBefore,
+      'Preload Chunk 4:0 must not churn state transitions on every 60FPS frame'
+    );
+  }
+
+  // 4. Terrain caches remain strictly bounded even after sampling 300 Chunks (900,000m)
+  for (let cx = -150; cx < 150; cx++) {
+    getTerrainSamples(cx, WorldConfig);
+  }
+  const cacheStats = getTerrainCacheStats();
+  assert.ok(
+    cacheStats.blockCacheSize <= cacheStats.maxBlockCacheSize,
+    `blockCacheSize (${cacheStats.blockCacheSize}) must not exceed ${cacheStats.maxBlockCacheSize}`
+  );
+  assert.ok(
+    cacheStats.chunkSamplesCacheSize <= cacheStats.maxChunkSamplesCacheSize,
+    `chunkSamplesCacheSize (${cacheStats.chunkSamplesCacheSize}) must not exceed ${cacheStats.maxChunkSamplesCacheSize}`
+  );
+});
+
+test('Undulating Mountain Range Seabed (Zero Flat or Diagonal Straight Lines), Uphill Speed Normalization, and Multi-Peak Shallow Coral Atoll Bridges', () => {
+  // 1. Undulating Coral Mountain Range at Spawn (X ∈ [-500m, +500m]):
+  // Stays in shallow coral water [410m, 660m], TERRAIN_MAX_SLOPE is 1.65, and the contour is an undulating hill range (never a flat straight line!)
+  assert.equal(TERRAIN_MAX_SLOPE, 1.65);
+  let spawnPositiveSlopes = 0;
+  let spawnNegativeSlopes = 0;
+  for (let x = -500; x <= 500; x += 100) {
+    const fy = getFloorDepthAt(x, WorldConfig);
+    const sl = getTerrainSlopeAt(x, WorldConfig);
+    assert.ok(
+      fy >= 410 && fy <= 660,
+      `Spawn coral hills floorY(${x}) = ${fy} should lie in shallow coral zone [410, 660]`
+    );
+    if (sl > 0.04) spawnPositiveSlopes++;
+    if (sl < -0.04) spawnNegativeSlopes++;
+  }
+  assert.ok(
+    spawnPositiveSlopes >= 2 && spawnNegativeSlopes >= 2,
+    `Spawn coral hill range must undulate with both rising and falling slopes (pos=${spawnPositiveSlopes}, neg=${spawnNegativeSlopes})`
+  );
+
+  // 2. Zero Flat Horizontal Lines & Zero Sloped Diagonal Straight Lines across Chunks -3..3:
+  // Every pair of adjacent 100m steps must bend in slope (no constant-slope straight lines, whether flat or diagonal),
+  // and descending continental slopes (X ∈ [600m, 14000m]) must include true counter-peak climbs (slope < -0.08) as well as rounded crests/saddles.
+  for (let cx = -3; cx <= 3; cx++) {
+    const samples = getTerrainSamples(cx, WorldConfig).points;
+    for (let i = 0; i < samples.length - 1; i++) {
+      const segSlope = (samples[i + 1].floorY - samples[i].floorY) / (samples[i + 1].worldX - samples[i].worldX);
+      assert.ok(
+        Math.abs(segSlope) >= 0.035,
+        `Chunk ${cx} segment ${i} must not be a dead-flat horizontal line (got slope=${segSlope})`
+      );
+      if (i + 2 < samples.length) {
+        const nextSlope = (samples[i + 2].floorY - samples[i + 1].floorY) / (samples[i + 2].worldX - samples[i + 1].worldX);
+        assert.ok(
+          Math.abs(nextSlope - segSlope) >= 0.08,
+          `Chunk ${cx} adjacent segments ${i},${i + 1} must curve like undulating mountain ridges, never collinear straight lines (s0=${segSlope.toFixed(3)}, s1=${nextSlope.toFixed(3)})`
+        );
+      }
+    }
+  }
+
+  let benchStepsOnDescent = 0;
+  let counterPeakClimbsOnDescent = 0;
+  let inflectionSteps = 0;
+  let prevSlope = getTerrainSlopeAt(600, WorldConfig);
+  for (let x = 700; x <= 14000; x += 100) {
+    const sl = getTerrainSlopeAt(x, WorldConfig);
+    if (Math.abs(sl) <= 0.25) {
+      benchStepsOnDescent++;
+    }
+    if (sl < -0.08) {
+      counterPeakClimbsOnDescent++;
+    }
+    if (Math.abs(sl - prevSlope) >= 0.14 || sl * prevSlope <= 0) {
+      inflectionSteps++;
+    }
+    prevSlope = sl;
+  }
+  assert.ok(
+    benchStepsOnDescent >= 10,
+    `Descending mountain range must contain rounded crests and saddles (got ${benchStepsOnDescent})`
+  );
+  assert.ok(
+    counterPeakClimbsOnDescent >= 12,
+    `Descending mountain range must climb back up over secondary submarine peaks instead of dropping in a straight line (got ${counterPeakClimbsOnDescent} uphill steps)`
+  );
+  assert.ok(
+    inflectionSteps >= 60,
+    `Descending mountain range must continuously curve and undulate (got ${inflectionSteps} inflection steps)`
+  );
+
+  // 3. Uphill Speed Normalization (resolveSeabedKineticStep):
+  // Find a steep seabed segment (|slope| >= 0.65) and verify that swimming uphill along the seabed NEVER exceeds open-water swim speed!
+  let steepX = 1450;
+  for (let x = 800; x <= 12000; x += 100) {
+    if (Math.abs(getTerrainSlopeAt(x, WorldConfig)) >= 0.65) {
+      steepX = x;
+      break;
+    }
+  }
+  const slopeAtSteep = getTerrainSlopeAt(steepX, WorldConfig);
+  assert.ok(Math.abs(slopeAtSteep) >= 0.5, `Expected steep slope at x=${steepX}, got ${slopeAtSteep}`);
+
+  const swimSpeed = 320; // m/s
+  const simDt = 1 / 60;
+  const sharkRadius = 22;
+  // Swim uphill: if slope > 0 (depth increases to the right), uphill is moving left (vx = -swimSpeed)
+  const uphillVx = slopeAtSteep > 0 ? -swimSpeed : swimSpeed;
+  const startY = getEngineFloorDepthAt(steepX, WorldConfig) - sharkRadius;
+
+  const kineticStep = resolveSeabedKineticStep(
+    steepX,
+    startY,
+    uphillVx,
+    25, // pressing against the slope while swimming uphill
+    simDt,
+    sharkRadius,
+    WorldConfig
+  );
+  assert.equal(kineticStep.collided, true);
+  assert.ok(
+    kineticStep.effectiveSpeed2D <= swimSpeed * 0.93,
+    `Uphill 2D speed along terrain (${kineticStep.effectiveSpeed2D.toFixed(2)}) must NEVER exceed open-water swimSpeed (${swimSpeed})`
+  );
+
+  // 4. Dual-Layer Shallow Coral Reef Atoll Bridges (with undulating coral mountain ridges):
+  // Distant horizontal Chunks (both left X < 0 and right X > 0) have active shallow coral atolls (310m~560m) with attached coral reef outcrops,
+  // WHILE deep-water horizontal passage (e.g., Y = 900m, 4500m, 12000m) underneath those exact same X coordinates is 100% unobstructed!
+  for (const distantChunkX of [-12, -8, -4, -2, 2, 4, 8, 12]) {
+    const outcrops = getShallowCoralAtollOutcropsForChunk(distantChunkX, WorldConfig);
+    assert.ok(
+      outcrops.length >= 6,
+      `Distant ChunkX=${distantChunkX} must have rich shallow coral atoll outcrops (got ${outcrops.length})`
+    );
+    const coralOutcrops = outcrops.filter((o) => o.type === 'coral');
+    assert.ok(
+      coralOutcrops.length >= 2,
+      `Distant ChunkX=${distantChunkX} must contain composite coral reef mounds in shallow water`
+    );
+
+    const sampleOutcrop = coralOutcrops[0];
+    const atollSample = getShallowCoralAtollAt(sampleOutcrop.worldX, WorldConfig);
+    assert.equal(atollSample.active, true);
+    assert.ok(
+      atollSample.topFloorY >= 310 && atollSample.topFloorY <= 560,
+      `Atoll topFloorY (${atollSample.topFloorY}) must lie in the sunlit shallow coral zone [310, 560]`
+    );
+
+    const shallowHit = resolveSeabedCollision(
+      sampleOutcrop.worldX,
+      atollSample.topFloorY - 5,
+      20,
+      40,
+      WorldConfig
+    );
+    assert.equal(shallowHit.collided, true, 'Shallow shark touching atoll top must land on the reef mountain ridge');
+    assert.equal(shallowHit.onShallowAtoll, true);
+
+    const deepPass900 = resolveSeabedCollision(sampleOutcrop.worldX, 900, 20, 0, WorldConfig);
+    assert.equal(
+      deepPass900.collided,
+      false,
+      `Deep water passage at Y=900m underneath shallow atoll X=${sampleOutcrop.worldX} must be 100% unobstructed`
+    );
+
+    // 5. Bottom-to-Top Impenetrability of Shallow Seabed:
+    // Any entity approaching the shallow seabed from below (prevY > topFloorY + 4) MUST collide with the underside arch ceiling (bottomArchY + radius)
+    // and NEVER penetrate upward to the top surface (topFloorY - radius)!
+    const underCollision = resolveSeabedCollision(
+      sampleOutcrop.worldX,
+      atollSample.bottomArchY + 8,
+      sharkRadius,
+      -260,
+      WorldConfig,
+      atollSample.bottomArchY + 25
+    );
+    assert.equal(underCollision.collided, true);
+    assert.equal(underCollision.onShallowAtoll, true);
+    assert.equal(underCollision.hitAtollUnderside, true);
+    assert.ok(
+      underCollision.engineY >= atollSample.bottomArchY + sharkRadius - 1e-4,
+      `Underside collision at X=${sampleOutcrop.worldX} must clamp shark below bottomArchY + radius (${atollSample.bottomArchY + sharkRadius}), got ${underCollision.engineY}`
+    );
+    assert.ok(
+      underCollision.vy >= 0,
+      `Upward velocity into shallow seabed ceiling must be arrested/reflected downward (got vy=${underCollision.vy})`
+    );
+
+    // Simulate 60 consecutive frames of full upward & diagonal boost against the underside of the shallow seabed
+    let simX = sampleOutcrop.worldX;
+    let simY = atollSample.bottomArchY + sharkRadius + 6;
+    let simVx = 180;
+    let simVy = -620; // extreme upward boost
+    for (let frame = 0; frame < 60; frame++) {
+      const step = resolveSeabedKineticStep(
+        simX,
+        simY,
+        simVx,
+        -620, // player continuously holding UP boost
+        1 / 60,
+        sharkRadius,
+        WorldConfig
+      );
+      simX = step.engineX;
+      simY = step.engineY;
+      simVx = step.vx;
+      simVy = step.vy;
+      const curAtoll = getShallowCoralAtollAt(simX, WorldConfig);
+      if (curAtoll.active) {
+        assert.ok(
+          simY >= curAtoll.bottomArchY + sharkRadius - 1e-3,
+          `Frame ${frame}: Shark boosting upward from below must NEVER penetrate shallow seabed ceiling at X=${simX.toFixed(1)} (simY=${simY.toFixed(2)}, ceiling=${(curAtoll.bottomArchY + sharkRadius).toFixed(2)})`
+        );
+      }
+    }
+    void simVy;
+  }
+
+  // 6. Continuous Shallow Seabed with Receding Arched Downward Cave Openings:
+  // Across cell seam X = 3200m (and -3200m), the visual seabed rim (visualRimY) is C1 continuous with zero breaks,
+  // curves downward into a concave cave mouth (+110m ~ +160m deeper at the seam center than at the shoulders),
+  // and opens physical collision (active === false, isDiveOpening === true) inside the downward cave mouth!
+  for (const seamX of [-3200, 1600, 3200, 4800]) {
+    const leftShoulder = getShallowCoralAtollAt(seamX - 420, WorldConfig);
+    const centerCave = getShallowCoralAtollAt(seamX, WorldConfig);
+    const rightShoulder = getShallowCoralAtollAt(seamX + 420, WorldConfig);
+    const leftOfSeam = getShallowCoralAtollAt(seamX - 1, WorldConfig);
+    const rightOfSeam = getShallowCoralAtollAt(seamX + 1, WorldConfig);
+
+    assert.equal(leftShoulder.active, true, `Left shoulder at X=${seamX - 420} must be solid shallow seabed`);
+    assert.equal(rightShoulder.active, true, `Right shoulder at X=${seamX + 420} must be solid shallow seabed`);
+    assert.equal(centerCave.active, false, `Cave mouth center at X=${seamX} must be open for downward diving`);
+    assert.equal(centerCave.isDiveOpening, true, `Cave mouth center at X=${seamX} must be marked as dive opening`);
+
+    const rimContinuityDiff = Math.abs((leftOfSeam.visualRimY ?? 0) - (rightOfSeam.visualRimY ?? 0));
+    assert.ok(
+      rimContinuityDiff < 2.5,
+      `Visual seabed rim across seam X=${seamX} must be continuous (diff=${rimContinuityDiff.toFixed(3)})`
+    );
+
+    const shoulderAvgY = ((leftShoulder.visualRimY ?? leftShoulder.topFloorY) + (rightShoulder.visualRimY ?? rightShoulder.topFloorY)) * 0.5;
+    const caveDrop = (centerCave.visualRimY ?? centerCave.topFloorY) - shoulderAvgY;
+    assert.ok(
+      caveDrop >= 95,
+      `Downward cave opening at X=${seamX} must curve downward into a recessed arc (expected drop >= 95m, got ${caveDrop.toFixed(1)}m)`
+    );
+  }
+});
+
+
+
+
+

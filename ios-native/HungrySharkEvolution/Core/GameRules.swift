@@ -402,6 +402,240 @@ public enum GameRules {
         )
     }
 
+    public struct BiomePlaneTransitionMetrics: Sendable {
+        public let waterAlpha: Double
+        public let farAlpha: Double
+        public let midAlpha: Double
+        public let nearAlpha: Double
+        public let farWeight: Double
+        public let midWeight: Double
+        public let nearWeight: Double
+        public let farTransitionOffsetY: Double
+        public let midTransitionOffsetY: Double
+        public let nearTransitionOffsetY: Double
+    }
+
+    public struct ParallaxBiomeTransitionState: Sendable {
+        public let shallow: BiomePlaneTransitionMetrics
+        public let twilight: BiomePlaneTransitionMetrics
+        public let abyss: BiomePlaneTransitionMetrics
+        public let particleShallowWeight: Double
+        public let particleTwilightWeight: Double
+        public let particleAbyssWeight: Double
+    }
+
+    /// C2-continuous 5th-order Perlin smoothstep 6t^5 - 15t^4 + 10t^3 with zero 1st & 2nd derivatives at endpoints
+    public static func quinticSmoothstep(edge0: Double, edge1: Double, x: Double) -> Double {
+        guard x.isFinite else { return 0.0 }
+        let span = max(1e-6, edge1 - edge0)
+        let t = max(0.0, min(1.0, (x - edge0) / span))
+        return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+    }
+
+    private static func compensateUnderLayerAlpha(_ rawWeight: Double) -> Double {
+        if rawWeight <= 0.0001 { return 0.0 }
+        if rawWeight >= 0.9999 { return 1.0 }
+        return min(1.0, pow(rawWeight, 0.62))
+    }
+
+    /// Staggered per-plane C2-smooth biome transition state (1:1 parity with Web src/game/rules.ts)
+    public static func computeParallaxBiomeTransitionState(depthMeters: Double) -> ParallaxBiomeTransitionState {
+        let d = depthMeters.isFinite ? max(0.0, depthMeters) : 0.0
+
+        let t01Water = quinticSmoothstep(edge0: 280.0, edge1: 760.0, x: d)
+        let t01Far = quinticSmoothstep(edge0: 330.0, edge1: 740.0, x: d)
+        let t01Mid = quinticSmoothstep(edge0: 390.0, edge1: 720.0, x: d)
+        let t01Near = quinticSmoothstep(edge0: 440.0, edge1: 700.0, x: d)
+
+        let t12Water = quinticSmoothstep(edge0: 880.0, edge1: 1420.0, x: d)
+        let t12Far = quinticSmoothstep(edge0: 930.0, edge1: 1400.0, x: d)
+        let t12Mid = quinticSmoothstep(edge0: 990.0, edge1: 1380.0, x: d)
+        let t12Near = quinticSmoothstep(edge0: 1040.0, edge1: 1360.0, x: d)
+
+        let w0Far = 1.0 - t01Far
+        let w0Mid = 1.0 - t01Mid
+        let w0Near = 1.0 - t01Near
+
+        let w1Far = t01Far * (1.0 - t12Far)
+        let w1Mid = t01Mid * (1.0 - t12Mid)
+        let w1Near = t01Near * (1.0 - t12Near)
+
+        let alpha1Far = t12Far > 0.0001 ? t01Far * compensateUnderLayerAlpha(1.0 - t12Far) : t01Far
+        let alpha1Mid = t12Mid > 0.0001 ? t01Mid * compensateUnderLayerAlpha(1.0 - t12Mid) : t01Mid
+        let alpha1Near = t12Near > 0.0001 ? t01Near * compensateUnderLayerAlpha(1.0 - t12Near) : t01Near
+
+        let w2Far = t12Far
+        let w2Mid = t12Mid
+        let w2Near = t12Near
+
+        let p01 = quinticSmoothstep(edge0: 360.0, edge1: 680.0, x: d)
+        let p12 = quinticSmoothstep(edge0: 980.0, edge1: 1320.0, x: d)
+        let particleShallowWeight = 1.0 - p01
+        let particleTwilightWeight = p01 * (1.0 - p12)
+        let particleAbyssWeight = p12
+
+        return ParallaxBiomeTransitionState(
+            shallow: BiomePlaneTransitionMetrics(
+                waterAlpha: (1.0 - t01Water) * 0.92,
+                farAlpha: compensateUnderLayerAlpha(w0Far) * 0.94,
+                midAlpha: compensateUnderLayerAlpha(w0Mid),
+                nearAlpha: compensateUnderLayerAlpha(w0Near),
+                farWeight: w0Far,
+                midWeight: w0Mid,
+                nearWeight: w0Near,
+                farTransitionOffsetY: t01Far * 14.0,
+                midTransitionOffsetY: t01Mid * 24.0,
+                nearTransitionOffsetY: t01Near * 36.0
+            ),
+            twilight: BiomePlaneTransitionMetrics(
+                waterAlpha: t01Water * (1.0 - t12Water) * 0.46,
+                farAlpha: alpha1Far * 0.94,
+                midAlpha: alpha1Mid,
+                nearAlpha: alpha1Near,
+                farWeight: w1Far,
+                midWeight: w1Mid,
+                nearWeight: w1Near,
+                farTransitionOffsetY: (1.0 - t01Far) * 18.0 + t12Far * 14.0,
+                midTransitionOffsetY: (1.0 - t01Mid) * 32.0 + t12Mid * 24.0,
+                nearTransitionOffsetY: (1.0 - t01Near) * 48.0 + t12Near * 36.0
+            ),
+            abyss: BiomePlaneTransitionMetrics(
+                waterAlpha: t12Water * 0.52,
+                farAlpha: w2Far * 0.94,
+                midAlpha: w2Mid,
+                nearAlpha: w2Near,
+                farWeight: w2Far,
+                midWeight: w2Mid,
+                nearWeight: w2Near,
+                farTransitionOffsetY: (1.0 - t12Far) * 20.0,
+                midTransitionOffsetY: (1.0 - t12Mid) * 36.0,
+                nearTransitionOffsetY: (1.0 - t12Near) * 54.0
+            ),
+            particleShallowWeight: particleShallowWeight,
+            particleTwilightWeight: particleTwilightWeight,
+            particleAbyssWeight: particleAbyssWeight
+        )
+    }
+
+    // MARK: - Procedural Ocean World System (L0 Macro Zones + L1 Multi-Octave Terrain + L3 Environmental Probabilities)
+    public struct ProceduralTerrainModulation {
+        public let farRidgeOffsetPx: Double
+        public let midStratumOffsetPx: Double
+        public let nearSeabedOffsetPx: Double
+        public let reliefMultiplier: Double
+        public let seabedBiasPx: Double
+        public let schoolClusterProbability: Double
+    }
+
+    public static func hash1D(_ n: Int, salt: Int = 0) -> Double {
+        let seed: UInt32 = 20261110
+        let n32 = UInt32(bitPattern: Int32(truncatingIfNeeded: n))
+        let s32 = UInt32(bitPattern: Int32(truncatingIfNeeded: salt))
+        var x = (n32 &* 374761393) &+ ((seed ^ s32) &* 668265263)
+        x = (x ^ (x >> 13)) &* 1274126177
+        x = x ^ (x >> 16)
+        return Double(x) / 4294967296.0
+    }
+
+    public static func noise1D(_ x: Double, salt: Int = 0) -> Double {
+        let x0 = Int(floor(x))
+        let tx = x - Double(x0)
+        let u = tx * tx * tx * (tx * (tx * 6.0 - 15.0) + 10.0)
+        let v0 = hash1D(x0, salt: salt) * 2.0 - 1.0
+        let v1 = hash1D(x0 + 1, salt: salt) * 2.0 - 1.0
+        return v0 + (v1 - v0) * u
+    }
+
+    public static func getTerrainHeight(worldX: Double) -> Double {
+        return noise1D(worldX * 0.0005, salt: 11) * 500.0
+            + noise1D(worldX * 0.002, salt: 23) * 150.0
+            + noise1D(worldX * 0.008, salt: 37) * 30.0
+    }
+
+    public static func sampleColumnContourOffsetPx(worldX: Double, depthY: Double, layerKind: Int) -> Double {
+        let mod = sampleParallaxTerrainModulation(worldX: worldX, depthY: depthY)
+        let rawH = getTerrainHeight(worldX: worldX)
+        let ridgeWave = tanh(rawH / 320.0)
+        if layerKind == 0 {
+            // FAR
+            let farWave = noise1D(worldX * 0.0012 + 3.7, salt: 193) * 0.65 + ridgeWave * 0.35
+            return (-farWave * 38.0 * mod.reliefMultiplier) + max(0.0, mod.seabedBiasPx * 0.45)
+        } else if layerKind == 1 {
+            // MID
+            let midWave = noise1D(worldX * 0.0022 + 11.4, salt: 149) * 0.55 + ridgeWave * 0.45
+            return (-midWave * 46.0 * mod.reliefMultiplier) + mod.seabedBiasPx * 0.85
+        } else {
+            // NEAR
+            let detailWave = noise1D(worldX * 0.0045 + 5.2, salt: 37) * 14.0
+            return (-ridgeWave * 36.0 * mod.reliefMultiplier - detailWave) + mod.seabedBiasPx
+        }
+    }
+
+    public static func sampleParallaxTerrainModulation(worldX: Double, depthY: Double) -> ProceduralTerrainModulation {
+        let baseMacroSpan = 960.0
+        let warpedX = worldX + noise1D(worldX * 0.00035, salt: 307) * 240.0
+        let scaledCoord = warpedX / baseMacroSpan
+        let cellIdx = Int(floor(scaledCoord))
+        let cellFrac = scaledCoord - Double(cellIdx)
+
+        func presetForCell(_ cIdx: Int) -> (relief: Double, bias: Double, clusterProb: Double) {
+            let m = ((cIdx % 4) + 4) % 4
+            if depthY <= 520.0 {
+                switch m {
+                case 0: return (1.05, -6.0, 0.78)  // SHALLOW_CORAL_REEF
+                case 1: return (0.36, 26.0, 0.42)  // SANDY_OPEN_FLAT
+                case 2: return (1.42, -18.0, 0.85) // DENSE_REEF_PASSAGE
+                default: return (1.62, 12.0, 0.64) // SUBMARINE_CANYON_DROP
+                }
+            } else if depthY <= 1150.0 {
+                switch m {
+                case 0: return (1.62, 12.0, 0.64)
+                case 1: return (1.42, -18.0, 0.85)
+                case 2: return (1.18, -8.0, 0.82)  // BIOLUMINESCENT_GROVE
+                default: return (0.48, 22.0, 0.50) // ABYSSAL_PLAIN_EXPANSE
+                }
+            } else {
+                let m3 = ((cIdx % 3) + 3) % 3
+                switch m3 {
+                case 0: return (0.48, 22.0, 0.50)
+                case 1: return (1.18, -8.0, 0.82)
+                default: return (1.75, 18.0, 0.38) // HADAL_TRENCH_CHASM
+                }
+            }
+        }
+
+        let pA = presetForCell(cellIdx)
+        var pB = pA
+        var t = 0.0
+        if cellFrac < 0.28 {
+            pB = presetForCell(cellIdx - 1)
+            t = (1.0 - quinticSmoothstep(edge0: 0.0, edge1: 0.28, x: cellFrac)) * 0.5
+        } else if cellFrac > 0.72 {
+            pB = presetForCell(cellIdx + 1)
+            t = quinticSmoothstep(edge0: 0.72, edge1: 1.0, x: cellFrac) * 0.5
+        }
+
+        let relief = pA.relief * (1.0 - t) + pB.relief * t
+        let bias = pA.bias * (1.0 - t) + pB.bias * t
+        let clusterProb = pA.clusterProb * (1.0 - t) + pB.clusterProb * t
+
+        let rawH = getTerrainHeight(worldX: worldX)
+        let normRidge = tanh(rawH / 360.0)
+        let farOffset = max(0.0, (0.5 - 0.5 * normRidge) * 22.0 * relief)
+        let midOffset = max(0.0, (0.5 - 0.5 * noise1D(worldX * 0.0014, salt: 61)) * 30.0 * relief + max(0.0, bias * 0.55))
+        let nearOffset = max(0.0, (0.5 - 0.5 * normRidge) * 26.0 * relief + max(0.0, bias))
+
+        return ProceduralTerrainModulation(
+            farRidgeOffsetPx: farOffset,
+            midStratumOffsetPx: midOffset,
+            nearSeabedOffsetPx: nearOffset,
+            reliefMultiplier: relief,
+            seabedBiasPx: bias,
+            schoolClusterProbability: clusterProb
+        )
+    }
+
+
     /// Computes evolved shark stats for any of the 48 shark forms
     public static func computeEvolvedSharkStats(
         inRunLevel: Int,

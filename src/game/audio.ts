@@ -22,6 +22,27 @@ class SoundSystem {
     return this.muted;
   }
 
+  private connectAndSchedule(
+    ctx: AudioContext,
+    osc: OscillatorNode,
+    gain: GainNode,
+    startTime: number,
+    stopTime: number
+  ): void {
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        // Ignore already-disconnected errors
+      }
+    };
+    osc.start(startTime);
+    osc.stop(stopTime);
+  }
+
   /** Crisp devour crunch + bubble pop scaled to prey tier */
   public playBite(tier: number = 1): void {
     const ctx = this.getContext();
@@ -39,10 +60,7 @@ class SoundSystem {
     gain.gain.setValueAtTime(0.26, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.14);
+    this.connectAndSchedule(ctx, osc, gain, now, now + 0.14);
 
     // 2. Crisp bubble pop overtone
     const pop = ctx.createOscillator();
@@ -54,10 +72,7 @@ class SoundSystem {
     popGain.gain.setValueAtTime(0.16, now + 0.03);
     popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
 
-    pop.connect(popGain);
-    popGain.connect(ctx.destination);
-    pop.start(now + 0.03);
-    pop.stop(now + 0.13);
+    this.connectAndSchedule(ctx, pop, popGain, now + 0.03, now + 0.13);
   }
 
   /** Underwater boost bubble & turbine stream */
@@ -78,10 +93,7 @@ class SoundSystem {
     gain.gain.setValueAtTime(0.09, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.095);
+    this.connectAndSchedule(ctx, osc, gain, now, now + 0.095);
   }
 
   /** Sci-fi evolution harmonic chord arpeggio */
@@ -102,10 +114,7 @@ class SoundSystem {
       gain.gain.setValueAtTime(0.15, start);
       gain.gain.exponentialRampToValueAtTime(0.001, start + 0.4);
 
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(start);
-      osc.stop(start + 0.4);
+      this.connectAndSchedule(ctx, osc, gain, start, start + 0.4);
     });
   }
 
@@ -124,10 +133,7 @@ class SoundSystem {
     gain.gain.setValueAtTime(0.24, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.25);
+    this.connectAndSchedule(ctx, osc, gain, now, now + 0.25);
   }
 
   /** Gold coin & gene crystal pickup chime */
@@ -145,10 +151,7 @@ class SoundSystem {
     gain.gain.setValueAtTime(0.14, now);
     gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.16);
+    this.connectAndSchedule(ctx, osc, gain, now, now + 0.16);
   }
 
   /** iPhone Alarm Picker (UIPickerView) mechanical ratchet detent tick sound */
@@ -170,10 +173,7 @@ class SoundSystem {
     gain.gain.setValueAtTime(peakGain, now);
     gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.016);
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.017);
+    this.connectAndSchedule(ctx, osc, gain, now, now + 0.017);
   }
 }
 

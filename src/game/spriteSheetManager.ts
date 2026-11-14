@@ -501,9 +501,15 @@ export class SpriteSheetManager {
         const img3x = new Image();
         img3x.crossOrigin = 'anonymous';
         img3x.onload = () => {
-          const w = img3x.naturalWidth || img3x.width;
-          const h = img3x.naturalHeight || img3x.height;
-          if (w > 0 && h > 0) {
+          const srcW = img3x.naturalWidth || img3x.width;
+          const srcH = img3x.naturalHeight || img3x.height;
+          if (srcW > 0 && srcH > 0) {
+            // Cap individual @3x shark canvas to 420px width (still >2x Retina of max 180-220px on-screen shark draw size),
+            // reducing 48 uncompressed RGBA canvas backing stores + tinted frame copies by ~85% in GPU/RAM!
+            const MAX_SHARK_3X_W = 420;
+            const scale = Math.min(1, MAX_SHARK_3X_W / srcW);
+            const w = Math.max(1, Math.round(srcW * scale));
+            const h = Math.max(1, Math.round(srcH * scale));
             const c = document.createElement('canvas');
             c.width = w;
             c.height = h;
@@ -512,6 +518,11 @@ export class SpriteSheetManager {
               ctx.imageSmoothingEnabled = true;
               ctx.imageSmoothingQuality = 'high';
               ctx.drawImage(img3x, 0, 0, w, h);
+              const prevFrame = this.frames[key];
+              if (prevFrame && prevFrame !== c) {
+                prevFrame.width = 0;
+                prevFrame.height = 0;
+              }
               this.frames[key] = c;
               this.sharksGridFrames[idx] = c;
               this.shark3xLoadedKeys.add(key);
@@ -520,6 +531,8 @@ export class SpriteSheetManager {
               this.notifyListeners();
             }
           }
+          img3x.onload = null;
+          img3x.onerror = null;
           individualResolved++;
           if (individualResolved === totalSharks) {
             resolve();
@@ -723,6 +736,8 @@ export class SpriteSheetManager {
       this.frames[key] = frameCanvas;
       this.rawGridFrames.push(frameCanvas);
     }
+    sheetCanvas.width = 0;
+    sheetCanvas.height = 0;
   }
 
   private processAndSliceFish2Image(img: HTMLImageElement): void {
@@ -743,9 +758,15 @@ export class SpriteSheetManager {
       this.frames[key] = frameCanvas;
       this.fish2GridFrames.push(frameCanvas);
     }
+    sheetCanvas.width = 0;
+    sheetCanvas.height = 0;
   }
 
   private processAndSliceSharksImage(img: HTMLImageElement): void {
+    const orderedSharkKeys = Object.keys(SHARK_GRID_MAP) as SharkSpriteKey[];
+    if (this.shark3xLoadedKeys.size >= orderedSharkKeys.length) {
+      return;
+    }
     const srcW = img.naturalWidth || img.width;
     const srcH = img.naturalHeight || img.height;
     if (!srcW || !srcH) return;
@@ -771,7 +792,6 @@ export class SpriteSheetManager {
     const fullImgData = rawCtx.getImageData(0, 0, fullW, fullH);
     const fullData = fullImgData.data;
 
-    const orderedSharkKeys = Object.keys(SHARK_GRID_MAP) as SharkSpriteKey[];
     const pad = Math.max(4, Math.round((fullW / 1376) * 4));
 
     // Preallocate reusable BFS buffers sized for the largest cell to avoid 48x GC allocations
@@ -980,12 +1000,20 @@ export class SpriteSheetManager {
         }
       }
 
+      tempCell.width = 0;
+      tempCell.height = 0;
+
       // Do not overwrite if the @3x individual shark PNG has already loaded for this key
       if (!this.shark3xLoadedKeys.has(key)) {
         this.frames[key] = frameCanvas;
         this.sharksGridFrames[idx] = frameCanvas;
+      } else {
+        frameCanvas.width = 0;
+        frameCanvas.height = 0;
       }
     }
+    rawCanvas.width = 0;
+    rawCanvas.height = 0;
   }
 
   /**
@@ -1151,9 +1179,14 @@ export class SpriteSheetManager {
         fCtx.drawImage(tempCell, 0, 0, cellW, cellH, 0, 0, outSize, outSize);
       }
 
+      tempCell.width = 0;
+      tempCell.height = 0;
+
       this.frames[key] = frameCanvas;
       this.uiIconsGridFrames.push(frameCanvas);
     }
+    rawCanvas.width = 0;
+    rawCanvas.height = 0;
   }
 
   /**
@@ -1370,6 +1403,8 @@ export class SpriteSheetManager {
       if (fCtx) {
         fCtx.drawImage(tempCell, bx, by, bw, bh, 0, 0, bw, bh);
       }
+      tempCell.width = 0;
+      tempCell.height = 0;
 
       if (key === 'UI_PLATE_AVATAR_BAR' && hasPixels) {
         const croppedHollowCx = hollowFullCx - sx - bx;
@@ -1384,9 +1419,14 @@ export class SpriteSheetManager {
         };
       }
 
+      tempCell.width = 0;
+      tempCell.height = 0;
+
       this.frames[key] = frameCanvas;
       this.uiBannersGridFrames.push(frameCanvas);
     }
+    rawCanvas.width = 0;
+    rawCanvas.height = 0;
   }
 
   /**
@@ -1732,6 +1772,8 @@ export class SpriteSheetManager {
             }
             this.uiSettingIconFrames[key] = trimmedIcon;
           }
+          iconCanvas.width = 0;
+          iconCanvas.height = 0;
         }
       }
 
@@ -1785,7 +1827,10 @@ export class SpriteSheetManager {
               s5W,
               bh
             );
+            const oldCardCanvas = frameCanvas;
             frameCanvas = widened;
+            oldCardCanvas.width = 0;
+            oldCardCanvas.height = 0;
           }
         }
       }
@@ -1837,6 +1882,8 @@ export class SpriteSheetManager {
       this.frames[key] = frameCanvas;
       this.uiSettingsGridFrames.push(frameCanvas);
     }
+    rawCanvas.width = 0;
+    rawCanvas.height = 0;
   }
 
   public getFrame(key: SpriteFrameKey): HTMLCanvasElement | undefined {

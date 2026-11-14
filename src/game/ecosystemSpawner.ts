@@ -8,6 +8,7 @@ import { GAME_CONFIG, PreyTierConfig } from './config';
 import { PreyEntity } from './canvasRenderer';
 import { infiniteWorldManager } from './infiniteWorldManager';
 import { infiniteProgressionManager } from './infiniteProgressionManager';
+import { proceduralOceanWorld } from './worldGenerationSystem';
 
 export class EcosystemSpawner {
   /**
@@ -37,7 +38,8 @@ export class EcosystemSpawner {
   private nextUid: number = 1;
 
   /**
-   * 群居小鱼（SCHOOL_FLEE）轻量双鱼结伴生成锚点，避免单簇过多导致视野拥挤
+   * 聚集式生态群落锚点 (Poisson Disk Sampling + Cluster)：
+   * 围绕群落中心按 Poisson 最小间距约束生成伴游鱼，避免纯随机重叠
    */
   private schoolClusterAnchor: {
     config: PreyTierConfig;
@@ -47,6 +49,7 @@ export class EcosystemSpawner {
     vy: number;
     angle: number;
     remainingMates: number;
+    poissonPoints?: Array<{ x: number; y: number }>;
   } | null = null;
 
   constructor(
@@ -187,7 +190,7 @@ export class EcosystemSpawner {
 
   /**
    * 在鲨鱼视野外黄金狩猎环 (minSpawnRadius ~ spawnRadius) 生成猎物，
-   * 支持无限向下深渊、群居鱼成簇编队，并应用 Infinite Scaling
+   * 支持无限向下深渊、Poisson Disk 群居鱼成簇编队，并应用 Infinite Scaling
    */
   public spawnPreyOffScreen(
     activePreys: PreyEntity[],
@@ -208,21 +211,22 @@ export class EcosystemSpawner {
       this.schoolClusterAnchor = null;
     }
 
-    // 若当前存在未生成的同伴鱼群锚点，优先在领头鱼附近 (48~96px) 生成 1 条同种伴游鱼，形成自然双鱼结伴
+    // 若当前存在未生成的同伴鱼群锚点，从 Poisson Disk 采样点中取出与领头鱼保持最小距离 (`>= 56px`) 的伴游坐标
     // 重要防滚雪球机制：伴游鱼固定为普通个体 ('NONE')，严禁一簇鱼群同时刷出多条黄金变异鱼导致秒触发狂暴
     if (this.schoolClusterAnchor && this.schoolClusterAnchor.remainingMates > 0) {
       const anchor = this.schoolClusterAnchor;
       anchor.remainingMates -= 1;
+      const poissonPt = anchor.poissonPoints?.pop();
       if (anchor.remainingMates <= 0) {
         this.schoolClusterAnchor = null;
       }
 
-      const offsetX = (rng() - 0.5) * 96;
-      const offsetY = (rng() - 0.5) * 64;
-      const mateX = infiniteWorldManager.wrapEntityX(anchor.x + offsetX);
+      const rawMateX = poissonPt ? poissonPt.x : anchor.x + (rng() - 0.5) * 96;
+      const rawMateY = poissonPt ? poissonPt.y : anchor.y + (rng() - 0.5) * 64;
+      const mateX = infiniteWorldManager.wrapEntityX(rawMateX);
       const mateY = Math.max(
         Math.max(25, anchor.config.minDepth),
-        Math.min(anchor.config.maxDepth, anchor.y + offsetY)
+        Math.min(anchor.config.maxDepth, rawMateY)
       );
 
       const entity = this.pool.pop() ?? ({} as PreyEntity);
@@ -287,17 +291,37 @@ export class EcosystemSpawner {
     const vy = (rng() - 0.5) * 24;
     const headingAngle = moveDir > 0 ? 0 : Math.PI;
 
-    // 仅对单一个体的小型 Tier 1 鱼种以 28% 概率建立 1 条伴游鱼编队（双鱼结伴，避免成团扎堆）
+    // 结合宏观区域场 (`BiomeManager.evaluateMacroZone`) 的聚集度与 Poisson Disk Sampling 生成成簇群落伴游鱼
+    const macroEval = proceduralOceanWorld.biomeManager.evaluateMacroZone(
+      spawnX,
+      spawnY
+    );
     const isMultiFishSprite =
       chosenTier.id === 'gene_jelly' ||
       chosenTier.id === 'neon_tetra_school' ||
       chosenTier.id === 'silver_barracuda';
+    const clusterTriggerProb = 0.28 * (0.75 + macroEval.schoolClusterProbability * 0.45);
     if (
       chosenTier.tier === 1 &&
       !isMultiFishSprite &&
       !chosenTier.isHazard &&
-      rng() < 0.28
+      rng() < clusterTriggerProb
     ) {
+      const poissonSamples =
+        proceduralOceanWorld.ecologyGenerator.samplePoissonDiskInCluster(
+          {
+            id: `prey_cluster_${this.nextUid}`,
+            center: { x: spawnX, y: spawnY },
+            radius: 92,
+            type: 'coral_reef',
+            density: 0.75,
+            seed: Math.floor(rng() * 0x7fffffff) + this.nextUid,
+            biome: macroEval.primaryBiome,
+            preferredPreyArchetype: 'REEF_SWARM',
+          },
+          56,
+          2
+        );
       this.schoolClusterAnchor = {
         config: chosenTier,
         x: spawnX,
@@ -306,6 +330,7 @@ export class EcosystemSpawner {
         vy,
         angle: headingAngle,
         remainingMates: 1,
+        poissonPoints: poissonSamples.map((pt) => ({ x: pt.x, y: pt.y })),
       };
     }
 

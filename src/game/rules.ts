@@ -224,6 +224,168 @@ export function getParallaxLayerGrowthScales(
   };
 }
 
+export interface BiomePlaneTransitionMetrics {
+  /** Compensated opacity [0..1] for Layer 0 Water backdrop / veil */
+  waterAlpha: number;
+  /** Compensated opacity [0..1] for Layer 1 Far horizon */
+  farAlpha: number;
+  /** Compensated opacity [0..1] for Layer 2 Mid cliffs */
+  midAlpha: number;
+  /** Compensated opacity [0..1] for Layer 3 Near seabed */
+  nearAlpha: number;
+  /** Raw uncompensated weight [0..1] for Far (used for underwater atmospheric fog tint & emergence) */
+  farWeight: number;
+  /** Raw uncompensated weight [0..1] for Mid */
+  midWeight: number;
+  /** Raw uncompensated weight [0..1] for Near */
+  nearWeight: number;
+  /** Vertical spatial emergence/subduction offset (px >= 0, positive = shifted down into seabed) for Far */
+  farTransitionOffsetY: number;
+  /** Vertical spatial emergence/subduction offset (px >= 0, positive = shifted down into seabed) for Mid */
+  midTransitionOffsetY: number;
+  /** Vertical spatial emergence/subduction offset (px >= 0, positive = shifted down into seabed) for Near */
+  nearTransitionOffsetY: number;
+}
+
+export interface ParallaxBiomeTransitionState {
+  shallow: BiomePlaneTransitionMetrics;
+  twilight: BiomePlaneTransitionMetrics;
+  abyss: BiomePlaneTransitionMetrics;
+  /** Continuous [0..1] particle & ambient school blending weights (always sum to 1.0) */
+  particleShallowWeight: number;
+  particleTwilightWeight: number;
+  particleAbyssWeight: number;
+}
+
+/**
+ * C2-continuous 5th-order Perlin smoothstep `6t^5 - 15t^4 + 10t^3` with zero 1st and 2nd derivatives at both endpoints.
+ * Eliminates the visual "start/stop snap" of linear depth crossfades.
+ */
+export function quinticSmoothstep(
+  edge0: number,
+  edge1: number,
+  x: number
+): number {
+  if (!Number.isFinite(x)) return 0;
+  const span = Math.max(1e-6, edge1 - edge0);
+  const t = Math.max(0, Math.min(1, (x - edge0) / span));
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+/**
+ * Porter-Duff `source-over` under-layer holdout compensation:
+ * Prevents the 25% mid-transition transparency dip (`1 - (1 - 0.5)*(1 - 0.5) = 0.75`) when crossfading two terrain layers,
+ * while preserving C1 zero-derivative smoothness at `w -> 0` (`3 * 0.62 = 1.86 > 1`).
+ */
+function compensateUnderLayerAlpha(rawWeight: number): number {
+  if (rawWeight <= 0.0001) return 0;
+  if (rawWeight >= 0.9999) return 1;
+  return Math.min(1, Math.pow(rawWeight, 0.62));
+}
+
+/**
+ * Computes staggered per-plane C2-smooth biome transition metrics across all 3 depth zones (Shallow -> Twilight -> Abyss):
+ * 1. Staggered Optical Lead (`Water` leads -> `Far` horizon -> `Mid` cliffs -> `Near` seabed completes):
+ *    Distant horizon silhouettes begin emerging through the deep haze long before the immediate foreground seabed switches,
+ *    preventing the entire screen from dissolving like a flat 2D wallpaper slide.
+ * 2. Vertical Spatial Emergence & Subduction (`*TransitionOffsetY >= 0`):
+ *    Incoming deeper biomes rise smoothly upward from below the bottom border as the shark dives down, while outgoing upper biomes
+ *    gently subduct downward into the floor (never lifting any bottom edge above `viewH`).
+ * 3. Continuous Particle & Ambient Weights (`particleShallowWeight + particleTwilightWeight + particleAbyssWeight === 1`):
+ *    Eliminates single-frame particle color/direction snaps at 520m and 1150m.
+ */
+export function computeParallaxBiomeTransitionState(
+  depthMeters: number
+): ParallaxBiomeTransitionState {
+  const d = Number.isFinite(depthMeters) ? Math.max(0, depthMeters) : 0;
+
+  // Boundary 1: Shallow Reef (0~520m) <-> Twilight Canyon (520~1150m) staggered by optical plane
+  const t01Water = quinticSmoothstep(280, 760, d);
+  const t01Far = quinticSmoothstep(330, 740, d);
+  const t01Mid = quinticSmoothstep(390, 720, d);
+  const t01Near = quinticSmoothstep(440, 700, d);
+
+  // Boundary 2: Twilight Canyon (520~1150m) <-> Abyssal Trench (1150m+) staggered by optical plane
+  const t12Water = quinticSmoothstep(880, 1420, d);
+  const t12Far = quinticSmoothstep(930, 1400, d);
+  const t12Mid = quinticSmoothstep(990, 1380, d);
+  const t12Near = quinticSmoothstep(1040, 1360, d);
+
+  // Biome 0: Sunlit Shallow Reef (under-layer during Shallow->Twilight transition)
+  const w0Far = 1 - t01Far;
+  const w0Mid = 1 - t01Mid;
+  const w0Near = 1 - t01Near;
+
+  // Biome 1: Twilight Sunken Ruins (over-layer during Shallow->Twilight, under-layer during Twilight->Abyss)
+  const w1Far = t01Far * (1 - t12Far);
+  const w1Mid = t01Mid * (1 - t12Mid);
+  const w1Near = t01Near * (1 - t12Near);
+
+  const alpha1Far =
+    t12Far > 0.0001 ? t01Far * compensateUnderLayerAlpha(1 - t12Far) : t01Far;
+  const alpha1Mid =
+    t12Mid > 0.0001 ? t01Mid * compensateUnderLayerAlpha(1 - t12Mid) : t01Mid;
+  const alpha1Near =
+    t12Near > 0.0001
+      ? t01Near * compensateUnderLayerAlpha(1 - t12Near)
+      : t01Near;
+
+  // Biome 2: Abyssal Volcanic Trench (over-layer during Twilight->Abyss transition)
+  const w2Far = t12Far;
+  const w2Mid = t12Mid;
+  const w2Near = t12Near;
+
+  // Continuous particle & ambient school blending weights
+  const p01 = quinticSmoothstep(360, 680, d);
+  const p12 = quinticSmoothstep(980, 1320, d);
+  const particleShallowWeight = 1 - p01;
+  const particleTwilightWeight = p01 * (1 - p12);
+  const particleAbyssWeight = p12;
+
+  return {
+    shallow: {
+      waterAlpha: (1 - t01Water) * 0.92,
+      farAlpha: compensateUnderLayerAlpha(w0Far) * 0.94,
+      midAlpha: compensateUnderLayerAlpha(w0Mid),
+      nearAlpha: compensateUnderLayerAlpha(w0Near),
+      farWeight: w0Far,
+      midWeight: w0Mid,
+      nearWeight: w0Near,
+      farTransitionOffsetY: t01Far * 14,
+      midTransitionOffsetY: t01Mid * 24,
+      nearTransitionOffsetY: t01Near * 36,
+    },
+    twilight: {
+      waterAlpha: t01Water * (1 - t12Water) * 0.46,
+      farAlpha: alpha1Far * 0.94,
+      midAlpha: alpha1Mid,
+      nearAlpha: alpha1Near,
+      farWeight: w1Far,
+      midWeight: w1Mid,
+      nearWeight: w1Near,
+      farTransitionOffsetY: (1 - t01Far) * 18 + t12Far * 14,
+      midTransitionOffsetY: (1 - t01Mid) * 32 + t12Mid * 24,
+      nearTransitionOffsetY: (1 - t01Near) * 48 + t12Near * 36,
+    },
+    abyss: {
+      waterAlpha: t12Water * 0.52,
+      farAlpha: w2Far * 0.94,
+      midAlpha: w2Mid,
+      nearAlpha: w2Near,
+      farWeight: w2Far,
+      midWeight: w2Mid,
+      nearWeight: w2Near,
+      farTransitionOffsetY: (1 - t12Far) * 20,
+      midTransitionOffsetY: (1 - t12Mid) * 36,
+      nearTransitionOffsetY: (1 - t12Near) * 54,
+    },
+    particleShallowWeight,
+    particleTwilightWeight,
+    particleAbyssWeight,
+  };
+}
+
+
 
 export function computeSharkStats(
   level: number,

@@ -1,4 +1,15 @@
-import { getParallaxLayerGrowthScales } from './rules';
+import {
+  computeParallaxBiomeTransitionState,
+  getParallaxLayerGrowthScales,
+  quinticSmoothstep,
+} from './rules';
+import {
+  WorldConfig,
+  createChunkRng,
+  getDepthVisualProfile,
+  meterDepthToWorldY,
+  proceduralOceanWorld,
+} from './worldGenerationSystem';
 
 export interface AmbientBubble {
   x: number;
@@ -630,7 +641,12 @@ function processTerrainLayerToSeamlessStrip(
     cCtx.drawImage(rawCanvas, 0, minY, w, cropH, 0, 0, w, cropH);
   }
 
-  return makeHorizontallySeamlessCanvas(cropped, isPanoramicStrip ? 0.10 : 0.14);
+  const seamless = makeHorizontallySeamlessCanvas(cropped, isPanoramicStrip ? 0.10 : 0.14);
+  rawCanvas.width = 0;
+  rawCanvas.height = 0;
+  cropped.width = 0;
+  cropped.height = 0;
+  return seamless;
 }
 
 /**
@@ -716,11 +732,17 @@ function processShallowWaterCanopyToSeamlessStrip(
   }
 
   ctx.putImageData(imgData, 0, 0);
-  return makeHorizontallySeamlessCanvas(raw, 0.10);
+  const seamless = makeHorizontallySeamlessCanvas(raw, 0.10);
+  raw.width = 0;
+  raw.height = 0;
+  return seamless;
 }
 
 /**
- * Processes an AI-generated Layer 0 Water Backdrop into a compact 512x512 horizontally-seamless tileable canvas.
+ * Processes an AI-generated Layer 0 Water Backdrop into a horizontally-seamless tileable canvas.
+ * For deep-water backdrops (`twilight.water` & `abyss.water`), applies a soft vertical cosine alpha envelope
+ * at the top and bottom so they act as delicate volumetric light/ember veils over the continuous
+ * `sampleBathymetricWaterColor` gradient rather than opaque full-screen wallpaper swaps.
  */
 function processWaterLayerToSeamlessTile(img: HTMLImageElement): HTMLCanvasElement {
   const srcW = img.naturalWidth || img.width || 1024;
@@ -736,11 +758,30 @@ function processWaterLayerToSeamlessTile(img: HTMLImageElement): HTMLCanvasEleme
   const raw = document.createElement('canvas');
   raw.width = w;
   raw.height = h;
-  const ctx = raw.getContext('2d');
+  const ctx = raw.getContext('2d', { willReadFrequently: true });
   if (ctx) {
     ctx.drawImage(img, 0, 0, w, h);
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const data = imgData.data;
+    for (let y = 0; y < h; y++) {
+      const v = y / Math.max(1, h - 1);
+      // Soft vertical atmospheric envelope: preserves upper-mid light shafts while feathering the bottom 38% into the water column
+      const topEnv = v < 0.08 ? 0.65 + 0.35 * Math.sin((v / 0.08) * Math.PI * 0.5) : 1.0;
+      const botEnv =
+        v <= 0.62
+          ? 1.0
+          : 0.16 + 0.84 * Math.pow(Math.cos(((v - 0.62) / 0.38) * Math.PI * 0.5), 1.5);
+      const rowAlpha = Math.round(topEnv * botEnv * 255);
+      for (let x = 0; x < w; x++) {
+        data[(y * w + x) * 4 + 3] = rowAlpha;
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
   }
-  return makeHorizontallySeamlessCanvas(raw, isWidescreenWater ? 0.12 : 0.16);
+  const seamless = makeHorizontallySeamlessCanvas(raw, isWidescreenWater ? 0.12 : 0.16);
+  raw.width = 0;
+  raw.height = 0;
+  return seamless;
 }
 
 /**
@@ -883,6 +924,8 @@ function sliceAmbientSpriteSheet(
       if (tCtx) {
         tCtx.drawImage(cellCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
       }
+      cellCanvas.width = 0;
+      cellCanvas.height = 0;
       result[kind] = trimmed;
     } else {
       result[kind] = cellCanvas;
@@ -1012,8 +1055,17 @@ export class ParallaxBackground {
   private bubbles: AmbientBubble[] = [];
   private schools: AmbientBackgroundSchool[] = [];
   private smoothedRelativePreyScale: number = 1.0;
+  private smoothedDepthRefY: number = -1;
+  private readonly ambientRng: () => number;
 
   constructor() {
+    this.ambientRng = createChunkRng(
+      WorldConfig.worldSeed,
+      WorldConfig.generatorVersion,
+      0,
+      0,
+      'ambient'
+    );
     const kinds: AmbientBubble['kind'][] = [
       'BUBBLE',
       'MARINE_SNOW',
@@ -1022,12 +1074,12 @@ export class ParallaxBackground {
     ];
     for (let i = 0; i < 40; i++) {
       this.bubbles.push({
-        x: Math.random() * 2400,
-        y: Math.random() * 1400,
-        r: 1.8 + Math.random() * 4.4,
-        speedY: 14 + Math.random() * 26,
-        wobblePhase: Math.random() * Math.PI * 2,
-        alpha: 0.18 + Math.random() * 0.34,
+        x: this.ambientRng() * 2400,
+        y: this.ambientRng() * 1400,
+        r: 1.8 + this.ambientRng() * 4.4,
+        speedY: 14 + this.ambientRng() * 26,
+        wobblePhase: this.ambientRng() * Math.PI * 2,
+        alpha: 0.18 + this.ambientRng() * 0.34,
         kind: kinds[i % kinds.length],
       });
     }
@@ -1157,42 +1209,9 @@ export class ParallaxBackground {
       img.src = src;
     };
 
-    // 1. Shallow Zone (0m ~ 520m — highPriority = true since player starts here!)
+    // 1. Shallow Zone Water Canopy (0m ~ 520m — original Far/Mid/Near PNG strips removed)
     loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.water, true, (img) => {
       this.biomePlanes[0].water = processWaterLayerToSeamlessTile(img);
-    });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.far, true, (img) => {
-      this.biomePlanes[0].far = processTerrainLayerToSeamlessStrip(img, {
-        cropBottomRatio: 0.915,
-        clearArtifactRectRatio: [0, 0.78, 0.14, 1.0],
-        roundTopLeftSlicedPeak: true,
-        punchUpperInteriorWhiteHoles: true,
-        maxHoleYRatio: 0.86,
-        groundBottomColumns: true,
-        groundBottomBandRatio: 0.24,
-        trimTopPaddingPx: 2,
-      });
-    });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.mid, true, (img) => {
-      this.biomePlanes[0].mid = processTerrainLayerToSeamlessStrip(img, {
-        cropBottomRatio: 0.935,
-        punchUpperInteriorWhiteHoles: true,
-        maxHoleYRatio: 0.82,
-        groundBottomColumns: true,
-        groundBottomBandRatio: 0.12,
-        trimTopPaddingPx: 2,
-      });
-    });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.shallow.near, true, (img) => {
-      const processed = processTerrainLayerToSeamlessStrip(img, {
-        punchUpperInteriorWhiteHoles: true,
-        maxHoleYRatio: 0.48,
-        groundBottomColumns: true,
-        groundBottomBandRatio: 0.18,
-        trimTopPaddingPx: 2,
-      });
-      this.biomePlanes[0].near = processed;
-      this.layers[0] = processed;
     });
 
     // 2. Ambient Marine Sprite Sheet (4x2 grid)
@@ -1200,54 +1219,14 @@ export class ParallaxBackground {
       this.ambientSprites = sliceAmbientSpriteSheet(img);
     });
 
-    // 3. Twilight Zone (520m ~ 1150m — 1916x821 widescreen RGBA layers)
+    // 3. Twilight Zone Water Backdrop (520m ~ 1150m — original Far/Mid/Near PNG strips removed)
     loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.water, false, (img) => {
       this.biomePlanes[1].water = processWaterLayerToSeamlessTile(img);
     });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.far, false, (img) => {
-      this.biomePlanes[1].far = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 4,
-      });
-    });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.mid, false, (img) => {
-      this.biomePlanes[1].mid = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 4,
-      });
-    });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.twilight.near, false, (img) => {
-      const processed = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 4,
-      });
-      this.biomePlanes[1].near = processed;
-      this.layers[1] = processed;
-    });
 
-    // 4. Abyss Zone (1150m+ — 1916x821 widescreen volcanic & hydrothermal layers)
+    // 4. Abyss Zone Water Backdrop (1150m+ — original Far/Mid/Near PNG strips removed)
     loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.water, false, (img) => {
       this.biomePlanes[2].water = processWaterLayerToSeamlessTile(img);
-    });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.far, false, (img) => {
-      this.biomePlanes[2].far = processTerrainLayerToSeamlessStrip(img, {
-        trimTopPaddingPx: 4,
-      });
-    });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.mid, false, (img) => {
-      this.biomePlanes[2].mid = processTerrainLayerToSeamlessStrip(img, {
-        unmixHydrothermalSmokeSky: true,
-        groundBottomColumns: true,
-        groundBottomBandRatio: 0.14,
-        trimTopPaddingPx: 4,
-      });
-    });
-    loadImg(OCEAN_LAYER_ASSET_PATHS.abyss.near, false, (img) => {
-      const processed = processTerrainLayerToSeamlessStrip(img, {
-        unmixHydrothermalSmokeSky: true,
-        groundBottomColumns: true,
-        groundBottomBandRatio: 0.14,
-        trimTopPaddingPx: 4,
-      });
-      this.biomePlanes[2].near = processed;
-      this.layers[2] = processed;
     });
   }
 
@@ -1328,7 +1307,8 @@ export class ParallaxBackground {
   }
 
   /**
-   * Draws a single transparent parallax terrain plane seamlessly tiled across X,
+   * Draws a single transparent parallax terrain plane seamlessly tiled across X
+   * with column-sliced continuous L1 terrain contour warping (`sampleColumnContourOffsetPx`),
    * preserving natural artwork proportions, coupling vertical offset to camera depth,
    * and scaling by `layerScale` (`nearScale < midScale < farScale`) around the viewport center
    * with zero horizontal phase jump when the shark levels up or evolves.
@@ -1346,7 +1326,9 @@ export class ParallaxBackground {
     minHeightPx: number = 180,
     maxHeightPx: number = 460,
     maxSkirtExtendPx?: number,
-    layerScale: number = 1.0
+    layerScale: number = 1.0,
+    depthRefY: number = 260,
+    layerKind: 'FAR' | 'MID' | 'NEAR' = 'NEAR'
   ): void {
     if (alpha <= 0.01 || !plane || plane.width <= 0 || plane.height <= 0) return;
 
@@ -1364,9 +1346,9 @@ export class ParallaxBackground {
     );
     const baseTileW = Math.max(256, Math.round(baseTargetH * aspect));
     const tileW = Math.max(148, Math.round(targetH * aspect));
-    const drawY = viewH - targetH + verticalOffsetPx;
+    const baseDrawY = viewH - targetH + verticalOffsetPx;
 
-    if (drawY >= viewH + 8) {
+    if (baseDrawY >= viewH + 72) {
       ctx.restore();
       return;
     }
@@ -1375,29 +1357,49 @@ export class ParallaxBackground {
     const centerAnchorX = viewW * 0.5 - normPhase * tileW;
     const startX = (((centerAnchorX % tileW) + tileW) % tileW) - tileW;
 
+    // Column-sliced continuous L1 terrain contour warping:
+    // Each vertical slice samples the global world coordinate `colWorldX` so adjacent tiles & Chunks
+    // bend organically into submarine ridges, flat sandy plains, and steep canyon walls with zero seam!
+    const sliceColumns = 32;
+    const srcSliceW = plane.width / sliceColumns;
+    const dstSliceW = tileW / sliceColumns;
+    const worldScaleFactor = Math.max(0.08, parallaxXFactor * 2.4);
+
     for (let x = startX; x < viewW; x += tileW) {
-      const dx = Math.floor(x);
-      ctx.drawImage(plane, dx, drawY, tileW + 1, targetH);
-      // Extend bottom-most row downward if vertical parallax lifted the strip above viewH
-      if (drawY + targetH < viewH) {
-        const rawGap = viewH - (drawY + targetH) + 2;
-        const skirtH =
-          maxSkirtExtendPx !== undefined
-            ? Math.min(rawGap, maxSkirtExtendPx)
-            : rawGap;
-        if (skirtH > 0) {
-          ctx.drawImage(
-            plane,
-            0,
-            plane.height - 2,
-            plane.width,
-            2,
-            dx,
-            drawY + targetH - 1,
-            tileW + 1,
-            skirtH
-          );
-        }
+      for (let col = 0; col < sliceColumns; col++) {
+        const dx = Math.floor(x + col * dstSliceW);
+        const nextDx = Math.floor(x + (col + 1) * dstSliceW);
+        const drawSliceW = Math.max(1, nextDx - dx);
+        if (dx + drawSliceW < 0 || dx > viewW) continue;
+
+        const sliceCenterX = dx + drawSliceW * 0.5;
+        const colWorldX =
+          cameraX + (sliceCenterX - viewW * 0.5) / Math.max(0.35, layerScale) / worldScaleFactor;
+        const contourDy =
+          proceduralOceanWorld.terrainGenerator.sampleColumnContourOffsetPx(
+            colWorldX,
+            depthRefY,
+            layerKind
+          ) * layerScale;
+        const drawY = Math.round(baseDrawY + contourDy);
+        // When contourDy < 0 (ridge uplift), stretch colTargetH downward so the bottom edge remains solidly anchored at viewH with zero barcode seam
+        const ridgeStretchH = contourDy < 0 ? Math.ceil(-contourDy) + 4 : 0;
+        const colTargetH = targetH + ridgeStretchH;
+
+        const sx = Math.max(0, Math.floor(col * srcSliceW));
+        const sw = Math.max(1, Math.min(plane.width - sx, Math.ceil(srcSliceW)));
+
+        ctx.drawImage(
+          plane,
+          sx,
+          0,
+          sw,
+          plane.height,
+          dx,
+          drawY,
+          drawSliceW,
+          colTargetH
+        );
       }
     }
 
@@ -1479,32 +1481,18 @@ export class ParallaxBackground {
     dt: number,
     screenSurfaceY: number,
     ambientScale: number = 1.0,
-    nearScale: number = 1.0
+    nearScale: number = 1.0,
+    shallowSchoolWeight: number = 1.0,
+    twilightSchoolWeight: number = 0.0
   ): void {
-    if (sharkY > 1280) return;
+    if (shallowSchoolWeight <= 0.01 && twilightSchoolWeight <= 0.01) return;
 
     ctx.save();
     const wrapW = viewW + 420;
 
     for (const sc of this.schools) {
-      const inZone =
-        sc.zone === 0
-          ? sharkY < 620
-          : sharkY > 420 && sharkY < 1260;
-      if (!inZone) continue;
-
-      const zoneFade =
-        sc.zone === 0
-          ? sharkY < 440
-            ? 1
-            : Math.max(0, 1 - (sharkY - 440) / 180)
-          : sharkY < 580
-          ? (sharkY - 420) / 160
-          : sharkY > 1060
-          ? Math.max(0, 1 - (sharkY - 1060) / 200)
-          : 1;
-
-      if (zoneFade <= 0.02) continue;
+      const zoneFade = sc.zone === 0 ? shallowSchoolWeight : twilightSchoolWeight;
+      if (zoneFade <= 0.015) continue;
 
       sc.x += sc.speedX * sc.dir * dt;
       sc.phase += dt * 2.4;
@@ -1521,7 +1509,7 @@ export class ParallaxBackground {
       if (distBelowSurface <= 0) continue;
       const surfaceFade = Math.min(1, distBelowSurface / 56);
       const effectiveFade = zoneFade * surfaceFade;
-      if (effectiveFade <= 0.02) continue;
+      if (effectiveFade <= 0.015) continue;
 
       const sprite = this.ambientSprites[sc.spriteKind];
       if (sprite && sprite.width > 0 && sprite.height > 0) {
@@ -1582,8 +1570,8 @@ export class ParallaxBackground {
 
   /**
    * Renders the complete 5-layer depth-continuous AI-illustrated ocean environment,
-   * dynamically shrinking Far (`0.868x`), Mid (`0.730x`), Ambient (`0.670x`), and Near (`0.580x`)
-   * planes in optical depth proportion as the shark grows (`relativePreyScale`: 1.00 -> 0.40).
+   * using staggered C2 quintic per-plane transitions, vertical spatial emergence/subduction,
+   * strict Far -> Mid -> Near cross-biome depth ordering, and continuous 3-biome particle blending.
    */
   public render(
     ctx: CanvasRenderingContext2D,
@@ -1619,29 +1607,43 @@ export class ParallaxBackground {
     );
 
     const effZoom = Math.max(0.35, renderZoom);
-    const depthRefY = Math.max(0, sharkY);
+    const rawDepthY = Math.max(0, sharkY);
+    if (
+      this.smoothedDepthRefY < 0 ||
+      dt <= 0 ||
+      Math.abs(rawDepthY - this.smoothedDepthRefY) > 650
+    ) {
+      this.smoothedDepthRefY = rawDepthY;
+    } else {
+      this.smoothedDepthRefY +=
+        (rawDepthY - this.smoothedDepthRefY) * Math.min(1, dt * 5.8);
+    }
+    const depthRefY = this.smoothedDepthRefY;
+    const transition = computeParallaxBiomeTransitionState(depthRefY);
+
     const topWorldY = Math.max(0, cameraY - (viewH * 0.5) / effZoom);
     const midWorldY = Math.max(0, cameraY);
     const botWorldY = Math.max(0, cameraY + (viewH * 0.5) / effZoom);
+    const topWaterSample = sampleBathymetricWaterColor(topWorldY);
+    const midWaterSample = sampleBathymetricWaterColor(midWorldY);
+    const botWaterSample = sampleBathymetricWaterColor(botWorldY);
 
     // ==================== 1. CONTINUOUS WORLD-SPACE WATER COLUMN ====================
     // 1A. Continuous Bathymetric Water Column Base Gradient across full viewport
     {
       const waterGrad = ctx.createLinearGradient(0, 0, 0, viewH);
-      waterGrad.addColorStop(0, sampleBathymetricWaterColor(topWorldY).css);
-      waterGrad.addColorStop(0.5, sampleBathymetricWaterColor(midWorldY).css);
-      waterGrad.addColorStop(1, sampleBathymetricWaterColor(botWorldY).css);
+      waterGrad.addColorStop(0, topWaterSample.css);
+      waterGrad.addColorStop(0.5, midWaterSample.css);
+      waterGrad.addColorStop(1, botWaterSample.css);
       ctx.fillStyle = waterGrad;
       ctx.fillRect(0, 0, viewW, viewH);
     }
 
-    // 1B. Layer 0 Painted Water Backdrop (`bg_{zone}_0_water`) blended seamlessly across depth zones
+    // 1B. Layer 0 Painted Water Backdrop (`bg_{zone}_0_water`) blended with C2 quintic weights
     if (this.biomePlanes.length === 3) {
       const [shallow, twilight, abyssal] = this.biomePlanes;
 
-      if (depthRefY < 680 && shallow.water) {
-        const wAlpha0 =
-          depthRefY < 440 ? 0.94 : Math.max(0, (1 - (depthRefY - 440) / 240) * 0.94);
+      if (transition.shallow.waterAlpha > 0.01 && shallow.water) {
         this.drawSeamlessWaterBackdrop(
           ctx,
           shallow.water,
@@ -1649,18 +1651,12 @@ export class ParallaxBackground {
           depthRefY,
           viewW,
           viewH,
-          wAlpha0,
+          transition.shallow.waterAlpha,
           bgScales.waterScale
         );
       }
 
-      if (depthRefY > 420 && depthRefY < 1320 && twilight.water) {
-        let wAlpha1 = 0.88;
-        if (depthRefY < 660) {
-          wAlpha1 = ((depthRefY - 420) / 240) * 0.88;
-        } else if (depthRefY > 1060) {
-          wAlpha1 = (1 - (depthRefY - 1060) / 260) * 0.88;
-        }
+      if (transition.twilight.waterAlpha > 0.01 && twilight.water) {
         this.drawSeamlessWaterBackdrop(
           ctx,
           twilight.water,
@@ -1668,14 +1664,12 @@ export class ParallaxBackground {
           depthRefY,
           viewW,
           viewH,
-          wAlpha1,
+          transition.twilight.waterAlpha,
           bgScales.waterScale
         );
       }
 
-      if (depthRefY > 1040 && abyssal.water) {
-        const wAlpha2 =
-          depthRefY < 1300 ? ((depthRefY - 1040) / 260) * 0.92 : 0.92;
+      if (transition.abyss.waterAlpha > 0.01 && abyssal.water) {
         this.drawSeamlessWaterBackdrop(
           ctx,
           abyssal.water,
@@ -1683,14 +1677,19 @@ export class ParallaxBackground {
           depthRefY,
           viewW,
           viewH,
-          wAlpha2,
+          transition.abyss.waterAlpha,
           bgScales.waterScale
         );
       }
     }
 
-    // ==================== 2. SUBTLE VOLUMETRIC GOD RAYS ====================
-    const rayVisibility = Math.max(0, 1 - depthRefY / 1050);
+    // ==================== 2. UNIFIED DEPTH VISUAL PROFILE + VOLUMETRIC GOD RAYS ====================
+    // 直接采样轻量纯函数 getDepthVisualProfile，避免每帧调用旧版 proceduralOceanWorld.stepExploration 引发跨深度带 Chunk 缓存反复清空重建！
+    const depthVisualProfile = getDepthVisualProfile(
+      meterDepthToWorldY(depthRefY),
+      WorldConfig
+    );
+    const rayVisibility = depthVisualProfile.lightShaftIntensity;
     if (rayVisibility > 0.02) {
       ctx.save();
       const tSec = nowMs * 0.00035;
@@ -1720,327 +1719,50 @@ export class ParallaxBackground {
       ctx.restore();
     }
 
-    // ==================== 3. LAYER 1 (FAR) -> AMBIENT SPRITES -> LAYER 2 (MID) -> LAYER 3 (NEAR) ====================
-    if (this.biomePlanes.length === 3) {
-      const [shallow, twilight, abyssal] = this.biomePlanes;
-      const shallowOffsets = this.computeBiomeVerticalOffsets(
-        depthRefY,
-        680,
-        bgScales.nearScale
-      );
-      const twilightOffsets = this.computeBiomeVerticalOffsets(
-        depthRefY,
-        1340,
-        bgScales.nearScale
-      );
-      const abyssOffsets = this.computeBiomeVerticalOffsets(
-        depthRefY,
-        2100,
-        bgScales.nearScale
-      );
+    // ==================== 3. DISTANT AMBIENT MARINE SCHOOLS & JELLYFISH (ORIGINAL FAR/MID/NEAR PNG PLANES REMOVED) ====================
+    this.drawDistantAmbientSchools(
+      ctx,
+      cameraX,
+      depthRefY,
+      viewW,
+      viewH,
+      nowMs,
+      dt,
+      0,
+      bgScales.ambientScale,
+      bgScales.nearScale,
+      transition.particleShallowWeight,
+      transition.particleTwilightWeight
+    );
 
-      // Proportional reference height for the panoramic strips across all 3 biomes
-      const panoRefH = Math.min(viewH, Math.max(360, viewW * 0.65));
-
-      // Shallow (1916x267, 1916x178, 1916x175, 1916x201)
-      const shallowNearH = Math.max(82, Math.min(260, Math.round(panoRefH * 0.25)));
-      const shallowMidH = Math.max(72, Math.min(230, Math.round(panoRefH * 0.22)));
-      const shallowFarH = Math.max(76, Math.min(240, Math.round(panoRefH * 0.232)));
-      const shallowMidElevation = Math.round(
-        shallowNearH * bgScales.nearScale * 0.22
-      );
-      const shallowFarElevation = Math.round(
-        shallowNearH * bgScales.nearScale * 0.42
-      );
-
-      // Twilight (1916x821 widescreen RGBA strips: cropped ratios 50.7%, 51.6%, 43.4%)
-      const twilightNearH = Math.max(105, Math.min(280, Math.round(panoRefH * 0.30)));
-      const twilightMidH = Math.max(130, Math.min(340, Math.round(panoRefH * 0.37)));
-      const twilightFarH = Math.max(150, Math.min(390, Math.round(panoRefH * 0.42)));
-      const twilightMidElevation = Math.round(
-        twilightNearH * bgScales.nearScale * 0.16
-      );
-      const twilightFarElevation = Math.round(
-        twilightNearH * bgScales.nearScale * 0.34
-      );
-
-      // Abyss (1916x821 widescreen volcanic & hydrothermal strips: far=49.7%, mid=90.8% w/ tall smoke, near=79.7% w/ tall smoke)
-      const abyssNearH = Math.max(165, Math.min(440, Math.round(panoRefH * 0.50)));
-      const abyssMidH = Math.max(195, Math.min(510, Math.round(panoRefH * 0.58)));
-      const abyssFarH = Math.max(150, Math.min(390, Math.round(panoRefH * 0.42)));
-      const abyssMidElevation = Math.round(
-        abyssNearH * bgScales.nearScale * 0.08
-      );
-      const abyssFarElevation = Math.round(
-        abyssNearH * bgScales.nearScale * 0.24
-      );
-
-      // Biome 0 Far: Sunlit Coral Reef (0m ~ 680m)
-      if (depthRefY < 700) {
-        const alpha0 =
-          depthRefY < 460 ? 1 : Math.max(0, 1 - (depthRefY - 460) / 220);
-
-        // Layer 1: Far Seamount Arches (0.025x horizontal — nearly stationary distant horizon, shrinks least: 0.868x)
-        this.drawParallaxPlane(
-          ctx,
-          shallow.far,
-          cameraX,
-          viewW,
-          viewH,
-          0.025,
-          shallowOffsets.farY - shallowFarElevation,
-          alpha0 * 0.94,
-          shallowFarH / Math.max(1, viewH),
-          shallowFarH,
-          shallowFarH,
-          0,
-          bgScales.farScale
-        );
-      }
-
-      // Biome 1 Far: Twilight Sunken Atlantean Temple (440m ~ 1340m)
-      if (depthRefY > 440 && depthRefY < 1340) {
-        let alpha1 = 1;
-        if (depthRefY < 660) {
-          alpha1 = (depthRefY - 440) / 220;
-        } else if (depthRefY > 1080) {
-          alpha1 = 1 - (depthRefY - 1080) / 260;
-        }
-
-        this.drawParallaxPlane(
-          ctx,
-          twilight.far,
-          cameraX,
-          viewW,
-          viewH,
-          0.025,
-          twilightOffsets.farY - twilightFarElevation,
-          alpha1 * 0.94,
-          twilightFarH / Math.max(1, viewH),
-          twilightFarH,
-          twilightFarH,
-          0,
-          bgScales.farScale
-        );
-      }
-
-      // Biome 2 Far: Abyssal Volcanic Mountain Ridge & Magma Valleys (1060m+)
-      if (depthRefY > 1060) {
-        const alpha2 =
-          depthRefY < 1320 ? (depthRefY - 1060) / 260 : 1;
-
-        this.drawParallaxPlane(
-          ctx,
-          abyssal.far,
-          cameraX,
-          viewW,
-          viewH,
-          0.025,
-          abyssOffsets.farY - abyssFarElevation,
-          alpha2 * 0.94,
-          abyssFarH / Math.max(1, viewH),
-          abyssFarH,
-          abyssFarH,
-          0,
-          bgScales.farScale
-        );
-      }
-
-      // Ambient Marine Schools & Jellyfish (0.16x horizontal, scaled by ambientScale: 1.00 -> 0.67x)
-      this.drawDistantAmbientSchools(
-        ctx,
-        cameraX,
-        depthRefY,
-        viewW,
-        viewH,
-        nowMs,
-        dt,
-        0,
-        bgScales.ambientScale,
-        bgScales.nearScale
-      );
-
-      // Biome 0 Mid & Near
-      if (depthRefY < 700) {
-        const alpha0 =
-          depthRefY < 460 ? 1 : Math.max(0, 1 - (depthRefY - 460) / 220);
-
-        // Layer 2: Midground Coral Reef Terrace (0.18x horizontal, shrinks moderately: 1.00 -> 0.73x)
-        this.drawParallaxPlane(
-          ctx,
-          shallow.mid,
-          cameraX,
-          viewW,
-          viewH,
-          0.18,
-          shallowOffsets.midY - shallowMidElevation,
-          alpha0,
-          shallowMidH / Math.max(1, viewH),
-          shallowMidH,
-          shallowMidH,
-          0,
-          bgScales.midScale
-        );
-        // Layer 3: Foreground Sandbank, Kelp & Rusty Anchor (0.38x horizontal, shrinks most: 1.00 -> 0.58x)
-        this.drawParallaxPlane(
-          ctx,
-          shallow.near,
-          cameraX,
-          viewW,
-          viewH,
-          0.38,
-          shallowOffsets.nearY,
-          alpha0,
-          shallowNearH / Math.max(1, viewH),
-          shallowNearH,
-          shallowNearH,
-          undefined,
-          bgScales.nearScale
-        );
-        // Layer 4: Rising Bubble Streams locked to Near seabed (0.38x horizontal, scaled by nearScale)
-        this.drawAnimatedSeabedSprites(
-          ctx,
-          cameraX,
-          viewW,
-          viewH,
-          nowMs,
-          shallowOffsets.nearY,
-          alpha0,
-          'SHALLOW',
-          bgScales.nearScale
-        );
-      }
-
-      // Biome 1 Mid & Near: Twilight Whale Ribcage, Crinoid Sea Lilies & Sunken Amphorae
-      if (depthRefY > 440 && depthRefY < 1340) {
-        let alpha1 = 1;
-        if (depthRefY < 660) {
-          alpha1 = (depthRefY - 440) / 220;
-        } else if (depthRefY > 1080) {
-          alpha1 = 1 - (depthRefY - 1080) / 260;
-        }
-
-        this.drawParallaxPlane(
-          ctx,
-          twilight.mid,
-          cameraX,
-          viewW,
-          viewH,
-          0.18,
-          twilightOffsets.midY - twilightMidElevation,
-          alpha1,
-          twilightMidH / Math.max(1, viewH),
-          twilightMidH,
-          twilightMidH,
-          0,
-          bgScales.midScale
-        );
-        this.drawParallaxPlane(
-          ctx,
-          twilight.near,
-          cameraX,
-          viewW,
-          viewH,
-          0.38,
-          twilightOffsets.nearY,
-          alpha1,
-          twilightNearH / Math.max(1, viewH),
-          twilightNearH,
-          twilightNearH,
-          undefined,
-          bgScales.nearScale
-        );
-        this.drawAnimatedSeabedSprites(
-          ctx,
-          cameraX,
-          viewW,
-          viewH,
-          nowMs,
-          twilightOffsets.nearY,
-          alpha1,
-          'TWILIGHT',
-          bgScales.nearScale
-        );
-      }
-
-      // Biome 2 Mid & Near: Abyssal Black Smokers, Giant Tube Worms & Cracked Lava Crust
-      if (depthRefY > 1060) {
-        const alpha2 =
-          depthRefY < 1320 ? (depthRefY - 1060) / 260 : 1;
-
-        this.drawParallaxPlane(
-          ctx,
-          abyssal.mid,
-          cameraX,
-          viewW,
-          viewH,
-          0.18,
-          abyssOffsets.midY - abyssMidElevation,
-          alpha2,
-          abyssMidH / Math.max(1, viewH),
-          abyssMidH,
-          abyssMidH,
-          0,
-          bgScales.midScale
-        );
-        this.drawParallaxPlane(
-          ctx,
-          abyssal.near,
-          cameraX,
-          viewW,
-          viewH,
-          0.38,
-          abyssOffsets.nearY,
-          alpha2,
-          abyssNearH / Math.max(1, viewH),
-          abyssNearH,
-          abyssNearH,
-          undefined,
-          bgScales.nearScale
-        );
-      }
-    }
-
-    // ==================== 4. 3-MODE DEPTH-REACTIVE ECOLOGICAL PARTICLES ====================
+    // ==================== 4. CONTINUOUS 3-BIOME BLENDED ECOLOGICAL PARTICLES (ZERO 520m / 1150m SNAP) ====================
     ctx.save();
-    const isAbyss = depthRefY > 1150;
-    const isTwilight = depthRefY >= 520 && depthRefY <= 1150;
+    const wS = transition.particleShallowWeight;
+    const wT = transition.particleTwilightWeight;
+    const wA = transition.particleAbyssWeight;
     const pScale = bgScales.particleScale;
     for (const b of this.bubbles) {
-      const verticalDir = isTwilight && b.kind === 'MARINE_SNOW' ? 0.35 : -1;
+      const twilightVertDir = b.kind === 'MARINE_SNOW' ? 0.35 : -1;
+      const verticalDir = -1 * (wS + wA) + twilightVertDir * wT;
       b.y += verticalDir * b.speedY * dt;
       b.wobblePhase += dt * 2.1;
 
       if (b.y < -20) {
         b.y = viewH + 18;
-        b.x = Math.random() * viewW;
+        b.x = this.ambientRng() * viewW;
       } else if (b.y > viewH + 24) {
         b.y = 10;
-        b.x = Math.random() * viewW;
+        b.x = this.ambientRng() * viewW;
       }
 
       const screenX =
         (((b.x - cameraX * 0.55 * pScale + Math.sin(b.wobblePhase) * 11 * pScale) % viewW) +
           viewW) %
         viewW;
-      const effR = b.r * pScale;
+      const effR = b.r * pScale * (wS * 1.0 + wT * 0.66 + wA * 0.74);
 
-      if (isAbyss) {
-        const pulse = 0.65 + Math.sin(b.wobblePhase * 1.8) * 0.35;
-        ctx.globalAlpha = b.alpha * pulse;
-        ctx.fillStyle = b.kind === 'BIO_SPORE' ? '#c084fc' : '#fb923c';
-        ctx.beginPath();
-        ctx.arc(screenX, b.y, effR * 0.72, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (isTwilight) {
-        const pulse = 0.55 + Math.sin(b.wobblePhase * 1.5) * 0.45;
-        ctx.globalAlpha = b.alpha * pulse;
-        ctx.fillStyle = b.kind === 'BIO_SPORE' ? '#22d3ee' : '#94a3b8';
-        ctx.beginPath();
-        ctx.arc(screenX, b.y, effR * 0.62, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        ctx.globalAlpha = b.alpha;
+      if (wS > 0.01) {
+        ctx.globalAlpha = b.alpha * wS;
         ctx.strokeStyle = '#bae6fd';
         ctx.fillStyle = 'rgba(186, 230, 253, 0.16)';
         ctx.lineWidth = 1.15;
@@ -2051,24 +1773,48 @@ export class ParallaxBackground {
 
         ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
         ctx.beginPath();
-        ctx.arc(screenX - effR * 0.32, b.y - effR * 0.32, effR * 0.24, 0, Math.PI * 2);
+        ctx.arc(
+          screenX - effR * 0.32,
+          b.y - effR * 0.32,
+          effR * 0.24,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+
+      if (wT > 0.01) {
+        const pulse = 0.55 + Math.sin(b.wobblePhase * 1.5) * 0.45;
+        ctx.globalAlpha = b.alpha * pulse * wT;
+        ctx.fillStyle = b.kind === 'BIO_SPORE' ? '#22d3ee' : '#94a3b8';
+        ctx.beginPath();
+        ctx.arc(screenX, b.y, effR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (wA > 0.01) {
+        const pulse = 0.65 + Math.sin(b.wobblePhase * 1.8) * 0.35;
+        ctx.globalAlpha = b.alpha * pulse * wA;
+        ctx.fillStyle = b.kind === 'BIO_SPORE' ? '#c084fc' : '#fb923c';
+        ctx.beginPath();
+        ctx.arc(screenX, b.y, effR, 0, Math.PI * 2);
         ctx.fill();
       }
     }
     ctx.restore();
 
-    // ==================== 5. PRE-BAKED DEPTH PRESSURE VIGNETTE & HYDROTHERMAL MAGMA UNDERGLOW ====================
-    if (depthRefY > 520) {
+    // ==================== 5. C2-SMOOTH DEPTH PRESSURE VIGNETTE & HYDROTHERMAL MAGMA UNDERGLOW ====================
+    if (depthRefY > 420) {
       ctx.save();
-      const depthPressure = Math.min(1, (depthRefY - 520) / 1100);
+      const depthPressure = quinticSmoothstep(420, 1620, depthRefY);
       const vigCanvas = this.getOrCreateVignetteCanvas();
-      if (vigCanvas && depthPressure > 0.02) {
+      if (vigCanvas && depthPressure > 0.01) {
         ctx.globalAlpha = depthPressure * 0.48;
         ctx.drawImage(vigCanvas, 0, 0, viewW, viewH);
       }
 
-      if (depthRefY > 1150) {
-        const magmaFactor = Math.min(1, (depthRefY - 1150) / 450);
+      if (depthRefY > 1020) {
+        const magmaFactor = quinticSmoothstep(1020, 1520, depthRefY);
         const pulse = 0.78 + Math.sin(nowMs * 0.0028) * 0.22;
         ctx.globalAlpha = magmaFactor * 0.18 * pulse;
         const lavaGrad = ctx.createLinearGradient(0, viewH * 0.68, 0, viewH);

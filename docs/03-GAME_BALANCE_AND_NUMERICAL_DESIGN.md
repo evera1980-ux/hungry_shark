@@ -139,6 +139,20 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
   | **远景山脉/遗迹 (Far)** | `farScale` | **`0.22`** | `1.000x` | `0.930x` | **`0.868x`** | **-13.2%** |
   | **海面焦散光幕 (Water)** | `waterScale` | **`0.15`** | `1.000x` | `0.952x` | **`0.910x`** | **-9.0%** |
 
+### 3.6 跨深度带景深错峰 $C^2$ 五次曲线与空间涌现过渡算法 (`computeParallaxBiomeTransitionState`)
+- **设计原理**：为彻底消除下潜跨越 `520m`（阳光浅海 $\to$ 暮光深海）与 `1150m`（暮光深海 $\to$ 午夜深渊）时背景图“全层同步硬切/原地死板叠化”的突兀感，`src/game/rules.ts` 中的 `computeParallaxBiomeTransitionState(depthMeters)` 采用 **$C^2$ 五次平滑阶跃函数 + 光学景深平面错峰区间 + Porter-Duff 底层 Alpha 补偿 + 垂直空间涌现/沉降位移**：
+  1. **$C^2$ 连续五次平滑阶跃 (`quinticSmoothstep(edge0, edge1, x)`)**：
+     $$S_5(t) = 6t^5 - 15t^4 + 10t^3,\quad t = \text{clamp}\left(\frac{x - \text{edge}_0}{\text{edge}_1 - \text{edge}_0},\; 0,\; 1\right)$$
+     保证在进入与离开过渡带的边界处一阶导数 $S_5'(0)=S_5'(1)=0$、二阶导数 $S_5''(0)=S_5''(1)=0$，消除线性插值的斜率折角。
+  2. **光学景深错峰深度区间（远景先行浮现 $\to$ 中景跟进 $\to$ 近景海床收尾）**：
+     | 生态带交界 | 水幕层 (`Water`) | 远景层 (`Far`) | 中景层 (`Mid`) | 近景海床 (`Near`) |
+     | :--- | :---: | :---: | :---: | :---: |
+     | **浅海 $\leftrightarrow$ 暮光 (`520m`)** | `290m ~ 770m` (`480m` 宽) | `320m ~ 730m` (`410m` 宽) | `390m ~ 720m` (`330m` 宽) | `445m ~ 705m` (`260m` 宽) |
+     | **暮光 $\leftrightarrow$ 深渊 (`1150m`)** | `880m ~ 1420m` (`540m` 宽) | `920m ~ 1380m` (`460m` 宽) | `995m ~ 1355m` (`360m` 宽) | `1055m ~ 1335m` (`280m` 宽) |
+  3. **Porter-Duff 底层覆盖补偿 (`compensateUnderLayerAlpha`)**：当两个半透明图层各自以 $0.5$ Alpha 叠加时，合成不透明度仅为 $1 - (1-0.5)^2 = 0.75$（造成过渡中段画面变暗漏底）。对被覆盖的旧生态带施加幂次包络补偿 $\alpha_{\text{under}} = \min(1, w^{0.62})$，使中段合成覆盖率维持在 $\sim 90\%+$。
+  4. **非负垂直空间涌现与沉降位移 (`*TransitionOffsetY >= 0`)**：
+     - 下潜时，新生态带从视口底边下方随进度向上升起（`OffsetY = (1 - t_in) * Span`），而旧生态带随进度向视口底边下方沉降（`OffsetY = (1 - w_out) * Span * 0.72`），其中 `Span` 按远/中/近景递增（`Far: 18~20px`、`Mid: 32~36px`、`Near: 48~54px`），且恒有 `OffsetY >= 0` 确保图层底边绝不脱离视口下沿。
+
 ---
 
 ## 4. 48 阶鲨鱼本体进化矩阵与三重门禁系统
@@ -204,12 +218,12 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 ---
 
-## 6. 海洋深度生态分布规则（3 大深度带 × 32 种生物）
+## 6. 海洋深度生态分布规则（3 大生态带 + 5 大《v1.0 规范》深度带 × 32 种生物，最大深度 `20000m`）
 
-### 6.1 三大海洋垂直生态带 (`GAME_CONFIG.zones`)
-1. **阳光珊瑚浅海 (`sunlit`，`0m ~ 520m`)**：明亮蔚蓝，透射动态丁达尔阳光束，栖息 `T1 ~ T3` 珊瑚礁热带鱼群。
-2. **暮光温跃层 (`twilight`，`520m ~ 1150m`)**：靛蓝幽暗，栖息 `T3 ~ T5` 中大型远洋洄游鱼类、海龟、蝠鲼与大白鲨。
-3. **午夜深渊海沟 (`abyss`，`1150m ~ 2400m+`)**：紫黑深渊，布满发光水母、深海安康鱼、大王乌贼、深海巨型水雷以及 `T7 ~ T8` 史前巨齿鲨、邓氏鱼、深渊沧龙与利维坦。
+### 6.1 海洋垂直生态带 (`GAME_CONFIG.zones` & `DEPTH_BAND_CONFIGS`)
+1. **阳光珊瑚浅海 (`sunlit`，`0m ~ 520m`，对应规范 `Epipelagic 0~2000m` 上层)**：明亮蔚蓝，透射动态丁达尔阳光束，栖息 `T1 ~ T3` 珊瑚礁热带鱼群。
+2. **暮光温跃层 (`twilight`，`520m ~ 1150m`，过渡至规范 `Mesopelagic 2000~6000m`)**：靛蓝幽暗，栖息 `T3 ~ T5` 中大型远洋洄游鱼类、海龟、蝠鲼与大白鲨。
+3. **午夜与超深渊海沟 (`abyss`，`1150m ~ 20000m`，涵盖规范 `Bathypelagic 6000~10000m` / `Abyssopelagic 10000~16000m` / `Hadal-like 16000~20000m`)**：紫黑超深渊，海床最深可达 `19800m`（世界深度上限 `20000m`），布满发光灯笼鱼（`T3`）、深海巨型水雷（`T3`）、秘鲁巨型赤鱿（`T4`）、深渊水滴鱼（`T5`）、核废料变异粘液（`T6`）以及 `T7 ~ T8` 史前巨齿鲨、邓氏鱼、深渊沧龙与利维坦（所有深渊代表物种 `maxDepth: 99999`，确保下潜至 `20000m` 全程具备完整 `T3 ~ T8` 生态链）。
 
 ### 6.2 85% 原生栖息地刷怪保护（严禁浅水鱼进深渊 / 深海鱼进浅滩）
 在 `src/game/ecosystemSpawner.ts` 与 `src/App.tsx` 的 `createPreyEntity()` 中强制执行：
@@ -252,6 +266,8 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-12 | **世界海洋深度上限扩展至 `20000m`（`1m = 1 worldPx`）并补齐 `T3 ~ T6` 超深海原生鱼种覆盖（`maxDepth: 99999`）**：将 `WorldConfig.bounds.maxDepth` 统一为 `20000m`（海床深度范围 `[420m, 19800m]`），并将 `cyber_mine`（`T3`）、`glowing_lanternfish`（`T3`）、`giant_humboldt_squid`（`T4`）、`trench_blobfish`（`T5`）、`radioactive_slime_hazard`（`T6`）的栖息深度上限设为 `99999`，与原本即为 `maxDepth: 99999` 的 `T7 ~ T8` 深渊巨兽共同构成直达 `20000m` 海沟底部的完整食物链 | `src/game/config.ts`, `src/game/worldGenerationSystem.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
+| 2026-11-10 | **新增第 3.6 节“跨深度带景深错峰 $C^2$ 五次曲线与空间涌现过渡算法 (`computeParallaxBiomeTransitionState`)”**：在 `src/game/rules.ts` 中新增 `quinticSmoothstep`（$6t^5 - 15t^4 + 10t^3$）、`compensateUnderLayerAlpha` 与 `computeParallaxBiomeTransitionState(depthMeters)`，实现 `Water -> Far -> Mid -> Near` 按光学景深距离错峰过渡、非负垂直空间涌现/沉降位移（`OffsetY >= 0`）与三生态带连续粒子权重插值 | `src/game/rules.ts`, `src/game/parallaxBackground.ts`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-09 | 为 `SharkFormConfig`（`src/game/sharkEvolutionConfig.ts`）新增 `sprite3xUrl`（`/assets/sharks_3x/shark_form_00@3x.png` .. `shark_form_47@3x.png`）与 `getShark3xImageUrl()` 辅助函数，使全部 48 阶鲨鱼配置具备独立 `@3x` 超分单图资源映射 | `src/game/sharkEvolutionConfig.ts`, `scripts/build-sharks-3x.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-06 | **全平台（Web + iOS 原生）游动速度下调 50%（冲刺速度对齐原常态移速）**：`GAME_CONFIG.world.baseSharkSpeed` 由 `280` 下调为 `140`（配合 `boostSpeedMultiplier: 2.0`，按住冲刺时 `boostSpeed = 280` 恰好等于原版常态速度，常态巡游速度 `140` 与全部 33 种猎物 `baseSpeed` 同步按 `0.5x` 等比下调），使深海巡游与冲刺爆发节奏更具层次感 | `src/game/config.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-05 | **新增第 3.5 节“鲨鱼成长驱动的远/中/近景光学分级缩小公式 (`getParallaxLayerGrowthScales`)”**：按景深距离权重（`近景 0.70 > 远景鱼群 0.55 > 中景 0.45 > 远景 0.22 > 海面水幕 0.15`）将 `relativePreyScale`（`1.00 -> 0.40`）映射为各背景视差层的动态缩放比（满阶时近景 `0.58x`、中景 `0.73x`、远景 `0.868x`），使鲨鱼长大时近处海床铁锚/珊瑚明显变小并自然显露更开阔的中远景深海奇观 | `src/game/rules.ts`, `src/game/parallaxBackground.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/02-DESIGN_SPEC.md` |

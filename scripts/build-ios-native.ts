@@ -699,6 +699,240 @@ public enum GameRules {
         )
     }
 
+    public struct BiomePlaneTransitionMetrics: Sendable {
+        public let waterAlpha: Double
+        public let farAlpha: Double
+        public let midAlpha: Double
+        public let nearAlpha: Double
+        public let farWeight: Double
+        public let midWeight: Double
+        public let nearWeight: Double
+        public let farTransitionOffsetY: Double
+        public let midTransitionOffsetY: Double
+        public let nearTransitionOffsetY: Double
+    }
+
+    public struct ParallaxBiomeTransitionState: Sendable {
+        public let shallow: BiomePlaneTransitionMetrics
+        public let twilight: BiomePlaneTransitionMetrics
+        public let abyss: BiomePlaneTransitionMetrics
+        public let particleShallowWeight: Double
+        public let particleTwilightWeight: Double
+        public let particleAbyssWeight: Double
+    }
+
+    /// C2-continuous 5th-order Perlin smoothstep 6t^5 - 15t^4 + 10t^3 with zero 1st & 2nd derivatives at endpoints
+    public static func quinticSmoothstep(edge0: Double, edge1: Double, x: Double) -> Double {
+        guard x.isFinite else { return 0.0 }
+        let span = max(1e-6, edge1 - edge0)
+        let t = max(0.0, min(1.0, (x - edge0) / span))
+        return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+    }
+
+    private static func compensateUnderLayerAlpha(_ rawWeight: Double) -> Double {
+        if rawWeight <= 0.0001 { return 0.0 }
+        if rawWeight >= 0.9999 { return 1.0 }
+        return min(1.0, pow(rawWeight, 0.62))
+    }
+
+    /// Staggered per-plane C2-smooth biome transition state (1:1 parity with Web src/game/rules.ts)
+    public static func computeParallaxBiomeTransitionState(depthMeters: Double) -> ParallaxBiomeTransitionState {
+        let d = depthMeters.isFinite ? max(0.0, depthMeters) : 0.0
+
+        let t01Water = quinticSmoothstep(edge0: 280.0, edge1: 760.0, x: d)
+        let t01Far = quinticSmoothstep(edge0: 330.0, edge1: 740.0, x: d)
+        let t01Mid = quinticSmoothstep(edge0: 390.0, edge1: 720.0, x: d)
+        let t01Near = quinticSmoothstep(edge0: 440.0, edge1: 700.0, x: d)
+
+        let t12Water = quinticSmoothstep(edge0: 880.0, edge1: 1420.0, x: d)
+        let t12Far = quinticSmoothstep(edge0: 930.0, edge1: 1400.0, x: d)
+        let t12Mid = quinticSmoothstep(edge0: 990.0, edge1: 1380.0, x: d)
+        let t12Near = quinticSmoothstep(edge0: 1040.0, edge1: 1360.0, x: d)
+
+        let w0Far = 1.0 - t01Far
+        let w0Mid = 1.0 - t01Mid
+        let w0Near = 1.0 - t01Near
+
+        let w1Far = t01Far * (1.0 - t12Far)
+        let w1Mid = t01Mid * (1.0 - t12Mid)
+        let w1Near = t01Near * (1.0 - t12Near)
+
+        let alpha1Far = t12Far > 0.0001 ? t01Far * compensateUnderLayerAlpha(1.0 - t12Far) : t01Far
+        let alpha1Mid = t12Mid > 0.0001 ? t01Mid * compensateUnderLayerAlpha(1.0 - t12Mid) : t01Mid
+        let alpha1Near = t12Near > 0.0001 ? t01Near * compensateUnderLayerAlpha(1.0 - t12Near) : t01Near
+
+        let w2Far = t12Far
+        let w2Mid = t12Mid
+        let w2Near = t12Near
+
+        let p01 = quinticSmoothstep(edge0: 360.0, edge1: 680.0, x: d)
+        let p12 = quinticSmoothstep(edge0: 980.0, edge1: 1320.0, x: d)
+        let particleShallowWeight = 1.0 - p01
+        let particleTwilightWeight = p01 * (1.0 - p12)
+        let particleAbyssWeight = p12
+
+        return ParallaxBiomeTransitionState(
+            shallow: BiomePlaneTransitionMetrics(
+                waterAlpha: (1.0 - t01Water) * 0.92,
+                farAlpha: compensateUnderLayerAlpha(w0Far) * 0.94,
+                midAlpha: compensateUnderLayerAlpha(w0Mid),
+                nearAlpha: compensateUnderLayerAlpha(w0Near),
+                farWeight: w0Far,
+                midWeight: w0Mid,
+                nearWeight: w0Near,
+                farTransitionOffsetY: t01Far * 14.0,
+                midTransitionOffsetY: t01Mid * 24.0,
+                nearTransitionOffsetY: t01Near * 36.0
+            ),
+            twilight: BiomePlaneTransitionMetrics(
+                waterAlpha: t01Water * (1.0 - t12Water) * 0.46,
+                farAlpha: alpha1Far * 0.94,
+                midAlpha: alpha1Mid,
+                nearAlpha: alpha1Near,
+                farWeight: w1Far,
+                midWeight: w1Mid,
+                nearWeight: w1Near,
+                farTransitionOffsetY: (1.0 - t01Far) * 18.0 + t12Far * 14.0,
+                midTransitionOffsetY: (1.0 - t01Mid) * 32.0 + t12Mid * 24.0,
+                nearTransitionOffsetY: (1.0 - t01Near) * 48.0 + t12Near * 36.0
+            ),
+            abyss: BiomePlaneTransitionMetrics(
+                waterAlpha: t12Water * 0.52,
+                farAlpha: w2Far * 0.94,
+                midAlpha: w2Mid,
+                nearAlpha: w2Near,
+                farWeight: w2Far,
+                midWeight: w2Mid,
+                nearWeight: w2Near,
+                farTransitionOffsetY: (1.0 - t12Far) * 20.0,
+                midTransitionOffsetY: (1.0 - t12Mid) * 36.0,
+                nearTransitionOffsetY: (1.0 - t12Near) * 54.0
+            ),
+            particleShallowWeight: particleShallowWeight,
+            particleTwilightWeight: particleTwilightWeight,
+            particleAbyssWeight: particleAbyssWeight
+        )
+    }
+
+    // MARK: - Procedural Ocean World System (L0 Macro Zones + L1 Multi-Octave Terrain + L3 Environmental Probabilities)
+    public struct ProceduralTerrainModulation {
+        public let farRidgeOffsetPx: Double
+        public let midStratumOffsetPx: Double
+        public let nearSeabedOffsetPx: Double
+        public let reliefMultiplier: Double
+        public let seabedBiasPx: Double
+        public let schoolClusterProbability: Double
+    }
+
+    public static func hash1D(_ n: Int, salt: Int = 0) -> Double {
+        let seed: UInt32 = 20261110
+        let n32 = UInt32(bitPattern: Int32(truncatingIfNeeded: n))
+        let s32 = UInt32(bitPattern: Int32(truncatingIfNeeded: salt))
+        var x = (n32 &* 374761393) &+ ((seed ^ s32) &* 668265263)
+        x = (x ^ (x >> 13)) &* 1274126177
+        x = x ^ (x >> 16)
+        return Double(x) / 4294967296.0
+    }
+
+    public static func noise1D(_ x: Double, salt: Int = 0) -> Double {
+        let x0 = Int(floor(x))
+        let tx = x - Double(x0)
+        let u = tx * tx * tx * (tx * (tx * 6.0 - 15.0) + 10.0)
+        let v0 = hash1D(x0, salt: salt) * 2.0 - 1.0
+        let v1 = hash1D(x0 + 1, salt: salt) * 2.0 - 1.0
+        return v0 + (v1 - v0) * u
+    }
+
+    public static func getTerrainHeight(worldX: Double) -> Double {
+        return noise1D(worldX * 0.0005, salt: 11) * 500.0
+            + noise1D(worldX * 0.002, salt: 23) * 150.0
+            + noise1D(worldX * 0.008, salt: 37) * 30.0
+    }
+
+    public static func sampleColumnContourOffsetPx(worldX: Double, depthY: Double, layerKind: Int) -> Double {
+        let mod = sampleParallaxTerrainModulation(worldX: worldX, depthY: depthY)
+        let rawH = getTerrainHeight(worldX: worldX)
+        let ridgeWave = tanh(rawH / 320.0)
+        if layerKind == 0 {
+            // FAR
+            let farWave = noise1D(worldX * 0.0012 + 3.7, salt: 193) * 0.65 + ridgeWave * 0.35
+            return (-farWave * 38.0 * mod.reliefMultiplier) + max(0.0, mod.seabedBiasPx * 0.45)
+        } else if layerKind == 1 {
+            // MID
+            let midWave = noise1D(worldX * 0.0022 + 11.4, salt: 149) * 0.55 + ridgeWave * 0.45
+            return (-midWave * 46.0 * mod.reliefMultiplier) + mod.seabedBiasPx * 0.85
+        } else {
+            // NEAR
+            let detailWave = noise1D(worldX * 0.0045 + 5.2, salt: 37) * 14.0
+            return (-ridgeWave * 36.0 * mod.reliefMultiplier - detailWave) + mod.seabedBiasPx
+        }
+    }
+
+    public static func sampleParallaxTerrainModulation(worldX: Double, depthY: Double) -> ProceduralTerrainModulation {
+        let baseMacroSpan = 960.0
+        let warpedX = worldX + noise1D(worldX * 0.00035, salt: 307) * 240.0
+        let scaledCoord = warpedX / baseMacroSpan
+        let cellIdx = Int(floor(scaledCoord))
+        let cellFrac = scaledCoord - Double(cellIdx)
+
+        func presetForCell(_ cIdx: Int) -> (relief: Double, bias: Double, clusterProb: Double) {
+            let m = ((cIdx % 4) + 4) % 4
+            if depthY <= 520.0 {
+                switch m {
+                case 0: return (1.05, -6.0, 0.78)  // SHALLOW_CORAL_REEF
+                case 1: return (0.36, 26.0, 0.42)  // SANDY_OPEN_FLAT
+                case 2: return (1.42, -18.0, 0.85) // DENSE_REEF_PASSAGE
+                default: return (1.62, 12.0, 0.64) // SUBMARINE_CANYON_DROP
+                }
+            } else if depthY <= 1150.0 {
+                switch m {
+                case 0: return (1.62, 12.0, 0.64)
+                case 1: return (1.42, -18.0, 0.85)
+                case 2: return (1.18, -8.0, 0.82)  // BIOLUMINESCENT_GROVE
+                default: return (0.48, 22.0, 0.50) // ABYSSAL_PLAIN_EXPANSE
+                }
+            } else {
+                let m3 = ((cIdx % 3) + 3) % 3
+                switch m3 {
+                case 0: return (0.48, 22.0, 0.50)
+                case 1: return (1.18, -8.0, 0.82)
+                default: return (1.75, 18.0, 0.38) // HADAL_TRENCH_CHASM
+                }
+            }
+        }
+
+        let pA = presetForCell(cellIdx)
+        var pB = pA
+        var t = 0.0
+        if cellFrac < 0.28 {
+            pB = presetForCell(cellIdx - 1)
+            t = (1.0 - quinticSmoothstep(edge0: 0.0, edge1: 0.28, x: cellFrac)) * 0.5
+        } else if cellFrac > 0.72 {
+            pB = presetForCell(cellIdx + 1)
+            t = quinticSmoothstep(edge0: 0.72, edge1: 1.0, x: cellFrac) * 0.5
+        }
+
+        let relief = pA.relief * (1.0 - t) + pB.relief * t
+        let bias = pA.bias * (1.0 - t) + pB.bias * t
+        let clusterProb = pA.clusterProb * (1.0 - t) + pB.clusterProb * t
+
+        let rawH = getTerrainHeight(worldX: worldX)
+        let normRidge = tanh(rawH / 360.0)
+        let farOffset = max(0.0, (0.5 - 0.5 * normRidge) * 22.0 * relief)
+        let midOffset = max(0.0, (0.5 - 0.5 * noise1D(worldX * 0.0014, salt: 61)) * 30.0 * relief + max(0.0, bias * 0.55))
+        let nearOffset = max(0.0, (0.5 - 0.5 * normRidge) * 26.0 * relief + max(0.0, bias))
+
+        return ProceduralTerrainModulation(
+            farRidgeOffsetPx: farOffset,
+            midStratumOffsetPx: midOffset,
+            nearSeabedOffsetPx: nearOffset,
+            reliefMultiplier: relief,
+            seabedBiasPx: bias,
+            schoolClusterProbability: clusterProb
+        )
+    }
+
+
     /// Computes evolved shark stats for any of the 48 shark forms
     public static func computeEvolvedSharkStats(
         inRunLevel: Int,
@@ -2270,6 +2504,23 @@ public final class SpriteAtlasManager: ObservableObject {
                     }
                 }
             }
+        } else {
+            // Soft vertical atmospheric envelope for deep-water backdrops (bg_twilight_0 & bg_abyss_0)
+            // so they act as delicate volumetric light/ember veils rather than opaque full-screen wallpaper swaps
+            for y in 0..<h {
+                let v = Double(y) / Double(max(1, h - 1))
+                let topEnv = v < 0.08 ? (0.65 + 0.35 * sin((v / 0.08) * .pi * 0.5)) : 1.0
+                let botEnv = v <= 0.62 ? 1.0 : (0.16 + 0.84 * pow(cos(((v - 0.62) / 0.38) * .pi * 0.5), 1.5))
+                let envAlpha = topEnv * botEnv
+                let rowOff = y * w
+                for x in 0..<w {
+                    let idx = (rowOff + x) * 4
+                    rgba[idx] = UInt8(max(0.0, min(255.0, (Double(rgba[idx]) * envAlpha).rounded())))
+                    rgba[idx + 1] = UInt8(max(0.0, min(255.0, (Double(rgba[idx + 1]) * envAlpha).rounded())))
+                    rgba[idx + 2] = UInt8(max(0.0, min(255.0, (Double(rgba[idx + 2]) * envAlpha).rounded())))
+                    rgba[idx + 3] = UInt8(max(0.0, min(255.0, (Double(rgba[idx + 3]) * envAlpha).rounded())))
+                }
+            }
         }
 
         return makeHorizontallySeamlessImage(rgba: rgba, width: w, height: h, seamRatio: isShallowCanopy ? 0.10 : 0.14)
@@ -2284,6 +2535,8 @@ public final class SpriteAtlasManager: ObservableObject {
         let isShallowFar = assetName.contains("shallow_1_far")
         let isShallowMid = assetName.contains("shallow_2_mid")
         let isShallowNear = assetName.contains("shallow_3_near")
+        let unmixHydrothermalSmoke = assetName.contains("abyss_2") || assetName.contains("abyss_3")
+
 
         let cropBottomRatio: Double = isShallowFar ? 0.915 : (isShallowMid ? 0.935 : 1.0)
         // Also trim 1% off left/right raw edges if there is any thin border artifact
@@ -2419,6 +2672,98 @@ public final class SpriteAtlasManager: ObservableObject {
                 rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
             }
         }
+
+        // 3B. Unmix soft grey/black hydrothermal smoke plumes painted over #FFFFFF sky on bg_abyss_2 & bg_abyss_3
+        // while 100% preserving red-and-white tube worms in the lower volcanic bed (1:1 parity with Web parallaxBackground.ts)
+        if unmixHydrothermalSmoke {
+            let smokeMaxY = Int(Double(h) * 0.64)
+            var smokeVisited = [UInt8](repeating: 0, count: w * h)
+            var sHead = 0
+            var sTail = 0
+
+            func isSmokeMistCandidate(_ i: Int, _ y: Int) -> Bool {
+                if y >= smokeMaxY { return false }
+                let p = i * 4
+                let r = Int(rgba[p])
+                let g = Int(rgba[p + 1])
+                let b = Int(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, max(g, b))
+                return minC >= 78 && (maxC - minC) <= 32
+            }
+
+            for y in 0..<min(h, smokeMaxY) {
+                let rowOff = y * w
+                for x in 0..<w {
+                    let i = rowOff + x
+                    if visited[i] != 0 {
+                        smokeVisited[i] = 1
+                        queue[sTail] = i
+                        sTail += 1
+                    }
+                }
+            }
+
+            while sHead < sTail {
+                let curr = queue[sHead]
+                sHead += 1
+                let cx = curr % w
+                let cy = (curr - cx) / w
+                let neighbors = [
+                    cx > 0 ? curr - 1 : -1,
+                    cx + 1 < w ? curr + 1 : -1,
+                    cy > 0 ? curr - w : -1,
+                    cy + 1 < smokeMaxY ? curr + w : -1
+                ]
+                for n in neighbors where n >= 0 && smokeVisited[n] == 0 {
+                    let ny = n / w
+                    if isSmokeMistCandidate(n, ny) {
+                        smokeVisited[n] = 1
+                        queue[sTail] = n
+                        sTail += 1
+                    }
+                }
+            }
+
+            let fadeStartY = Double(h) * 0.52
+            let fadeSpan = max(1.0, Double(smokeMaxY) - fadeStartY)
+            for y in 0..<min(h, smokeMaxY) {
+                let vertFade = Double(y) < fadeStartY ? 1.0 : max(0.0, (Double(smokeMaxY) - Double(y)) / fadeSpan)
+                let rowOff = y * w
+                for x in 0..<w {
+                    let i = rowOff + x
+                    if smokeVisited[i] == 0 || visited[i] != 0 { continue }
+                    let p = i * 4
+                    let r = Double(rgba[p])
+                    let g = Double(rgba[p + 1])
+                    let b = Double(rgba[p + 2])
+                    let minC = min(r, min(g, b))
+                    if minC >= 212.0 {
+                        visited[i] = 1
+                        rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
+                    } else {
+                        let rawSmokeAlpha = max(0.0, min(1.0, (212.0 - minC) / (212.0 - 78.0)))
+                        let smokeAlpha = pow(rawSmokeAlpha, 1.2) * 0.92
+                        let effAlpha = (1.0 - vertFade) + vertFade * smokeAlpha
+                        let outA = Double(rgba[p + 3]) * effAlpha
+                        if outA < 8.0 {
+                            visited[i] = 1
+                            rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
+                        } else {
+                            let targetR = r * (1.0 - vertFade) + 22.0 * vertFade
+                            let targetG = g * (1.0 - vertFade) + 24.0 * vertFade
+                            let targetB = b * (1.0 - vertFade) + 28.0 * vertFade
+                            let aNorm = outA / 255.0
+                            rgba[p] = UInt8(max(0.0, min(255.0, (targetR * aNorm).rounded())))
+                            rgba[p + 1] = UInt8(max(0.0, min(255.0, (targetG * aNorm).rounded())))
+                            rgba[p + 2] = UInt8(max(0.0, min(255.0, (targetB * aNorm).rounded())))
+                            rgba[p + 3] = UInt8(max(0.0, min(255.0, outA.rounded())))
+                        }
+                    }
+                }
+            }
+        }
+
 
         // 4. Despill & feather 2px boundary halo around removed sky/background
         if h > 2 && w > 2 {
@@ -3334,6 +3679,7 @@ public final class OceanGameScene: SKScene {
     private var cameraX: Double = 0
     private var cameraY: Double = 220
     private var smoothedRelativePreyScale: Double = 1.0
+    private var smoothedDepthRefY: Double = -1.0
     private var lastUpdateTime: TimeInterval = 0
     private var survivalAccumulator: Double = 0
     private var lastTrackedGameState: String = ""
@@ -3477,6 +3823,10 @@ public final class OceanGameScene: SKScene {
     }
 
     private let bubbleContainer = SKNode()
+    private let midProceduralTerrainNode = SKShapeNode()
+    private let nearProceduralTerrainNode = SKShapeNode()
+    private var proceduralStructurePool: [SKShapeNode] = []
+    private var proceduralPropPool: [SKShapeNode] = []
     private var parallaxTilePool: [SKSpriteNode] = []
     private var activeParallaxTileCount: Int = 0
     private var ambientBubbles: [AmbientOceanBubble] = []
@@ -3502,6 +3852,42 @@ public final class OceanGameScene: SKScene {
         addChild(bubbleContainer)
         addChild(worldContainer)
         addChild(fxContainer)
+
+        midProceduralTerrainNode.zPosition = 3.6
+        midProceduralTerrainNode.lineWidth = 2.0
+        parallaxContainer.addChild(midProceduralTerrainNode)
+
+        nearProceduralTerrainNode.zPosition = 4.6
+        nearProceduralTerrainNode.lineWidth = 2.4
+        parallaxContainer.addChild(nearProceduralTerrainNode)
+
+        if proceduralStructurePool.isEmpty {
+            for _ in 0..<8 {
+                let sNode = SKShapeNode()
+                sNode.zPosition = 3.7
+                sNode.isHidden = true
+                parallaxContainer.addChild(sNode)
+                proceduralStructurePool.append(sNode)
+            }
+        } else {
+            for sNode in proceduralStructurePool where sNode.parent == nil {
+                parallaxContainer.addChild(sNode)
+            }
+        }
+
+        if proceduralPropPool.isEmpty {
+            for _ in 0..<28 {
+                let pNode = SKShapeNode()
+                pNode.zPosition = 4.7
+                pNode.isHidden = true
+                parallaxContainer.addChild(pNode)
+                proceduralPropPool.append(pNode)
+            }
+        } else {
+            for pNode in proceduralPropPool where pNode.parent == nil {
+                parallaxContainer.addChild(pNode)
+            }
+        }
 
         if parallaxTilePool.isEmpty {
             for _ in 0..<32 {
@@ -3689,8 +4075,16 @@ public final class OceanGameScene: SKScene {
         }
         let bgScales = GameRules.getParallaxLayerGrowthScales(relativePreyScale: smoothedRelativePreyScale)
 
-        renderParallaxBackground(viewW: viewW, viewH: viewH, bgScales: bgScales)
-        stepAndRenderAmbientBubbles(viewW: viewW, viewH: viewH, bgScales: bgScales, dt: dt)
+        let rawDepthY = max(0.0, sharkY)
+        if smoothedDepthRefY < 0.0 || abs(rawDepthY - smoothedDepthRefY) > 650.0 {
+            smoothedDepthRefY = rawDepthY
+        } else {
+            smoothedDepthRefY += (rawDepthY - smoothedDepthRefY) * min(1.0, dt * 5.8)
+        }
+        let transition = GameRules.computeParallaxBiomeTransitionState(depthMeters: smoothedDepthRefY)
+
+        renderParallaxBackground(viewW: viewW, viewH: viewH, bgScales: bgScales, transition: transition)
+        stepAndRenderAmbientBubbles(viewW: viewW, viewH: viewH, bgScales: bgScales, transition: transition, dt: dt)
         stepAndRenderPreys(viewW: viewW, viewH: viewH, stats: stats, dt: dt, currentTime: currentTime)
         stepAndRenderDevourFX(viewW: viewW, viewH: viewH, stats: stats, dt: dt)
         renderPlayerShark(viewW: viewW, viewH: viewH, stats: stats)
@@ -3942,16 +4336,23 @@ public final class OceanGameScene: SKScene {
         }
     }
 
-    private func stepAndRenderAmbientBubbles(viewW: Double, viewH: Double, bgScales: ParallaxLayerGrowthScales, dt: Double) {
+    private func stepAndRenderAmbientBubbles(
+        viewW: Double,
+        viewH: Double,
+        bgScales: ParallaxLayerGrowthScales,
+        transition: GameRules.ParallaxBiomeTransitionState,
+        dt: Double
+    ) {
         initAmbientBubblesIfNeeded(viewW: viewW, viewH: viewH)
-        let depthRefY = max(0.0, sharkY)
-        let isAbyss = depthRefY > 1150.0
-        let isTwilight = depthRefY >= 520.0 && depthRefY <= 1150.0
+        let wS = transition.particleShallowWeight
+        let wT = transition.particleTwilightWeight
+        let wA = transition.particleAbyssWeight
         let pScale = bgScales.particleScale
 
         for b in ambientBubbles {
             // In SpriteKit Y=0 is bottom and Y=viewH is top, so rising bubbles increase Y (+1.0)
-            let vertDir: Double = (isTwilight && b.kindIndex == 1) ? -0.35 : 1.0
+            let twilightVertDir: Double = (b.kindIndex == 1) ? -0.35 : 1.0
+            let vertDir: Double = 1.0 * (wS + wA) + twilightVertDir * wT
             b.y += vertDir * b.speedY * dt
             b.wobblePhase += dt * 2.1
 
@@ -3967,41 +4368,52 @@ public final class OceanGameScene: SKScene {
             let screenX = ((rawX.truncatingRemainder(dividingBy: viewW)) + viewW).truncatingRemainder(dividingBy: viewW)
             b.ringNode.position = CGPoint(x: screenX, y: b.y)
 
-            if isAbyss {
-                let pulse = 0.65 + 0.35 * sin(b.wobblePhase * 1.8)
-                b.ringNode.setScale(CGFloat(pScale * 0.78))
-                b.ringNode.alpha = CGFloat(b.baseAlpha * pulse)
-                let col = (b.kindIndex == 2)
-                    ? UIColor(red: 192/255, green: 132/255, blue: 252/255, alpha: 1.0)
-                    : UIColor(red: 251/255, green: 146/255, blue: 60/255, alpha: 1.0)
-                b.ringNode.fillColor = col
-                b.ringNode.strokeColor = .clear
-                b.highlightNode.isHidden = true
-            } else if isTwilight {
-                let pulse = 0.55 + 0.45 * sin(b.wobblePhase * 1.5)
-                b.ringNode.setScale(CGFloat(pScale * 0.72))
-                b.ringNode.alpha = CGFloat(b.baseAlpha * pulse)
-                let col = (b.kindIndex == 2)
-                    ? UIColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 1.0)
-                    : UIColor(red: 148/255, green: 163/255, blue: 184/255, alpha: 0.85)
-                b.ringNode.fillColor = col
-                b.ringNode.strokeColor = .clear
-                b.highlightNode.isHidden = true
-            } else {
-                b.ringNode.setScale(CGFloat(pScale))
-                b.ringNode.alpha = CGFloat(b.baseAlpha)
-                b.ringNode.fillColor = UIColor(red: 186/255, green: 230/255, blue: 253/255, alpha: 0.18)
-                b.ringNode.strokeColor = UIColor(red: 186/255, green: 230/255, blue: 253/255, alpha: 0.90)
-                b.highlightNode.isHidden = false
-            }
+            let effScale = pScale * (wS * 1.0 + wT * 0.72 + wA * 0.78)
+            b.ringNode.setScale(CGFloat(effScale))
+
+            let pulseT = 0.55 + 0.45 * sin(b.wobblePhase * 1.5)
+            let pulseA = 0.65 + 0.35 * sin(b.wobblePhase * 1.8)
+            let effPulse = wS * 1.0 + wT * pulseT + wA * pulseA
+            b.ringNode.alpha = CGFloat(b.baseAlpha * effPulse)
+
+            // Smoothly blend bubble RGB & stroke across Shallow -> Twilight -> Abyss (zero 1-frame snap at 520m / 1150m!)
+            let twR: Double = (b.kindIndex == 2) ? (34.0 / 255.0) : (148.0 / 255.0)
+            let twG: Double = (b.kindIndex == 2) ? (211.0 / 255.0) : (163.0 / 255.0)
+            let twB: Double = (b.kindIndex == 2) ? (238.0 / 255.0) : (184.0 / 255.0)
+
+            let abR: Double = (b.kindIndex == 2) ? (192.0 / 255.0) : (251.0 / 255.0)
+            let abG: Double = (b.kindIndex == 2) ? (132.0 / 255.0) : (146.0 / 255.0)
+            let abB: Double = (b.kindIndex == 2) ? (252.0 / 255.0) : (60.0 / 255.0)
+
+            let shR: Double = 186.0 / 255.0
+            let shG: Double = 230.0 / 255.0
+            let shB: Double = 253.0 / 255.0
+
+            let fillR = shR * wS + twR * wT + abR * wA
+            let fillG = shG * wS + twG * wT + abG * wA
+            let fillB = shB * wS + twB * wT + abB * wA
+            let fillA = 0.18 * wS + 0.90 * (wT + wA)
+
+            b.ringNode.fillColor = UIColor(red: CGFloat(fillR), green: CGFloat(fillG), blue: CGFloat(fillB), alpha: CGFloat(fillA))
+            b.ringNode.strokeColor = wS > 0.02
+                ? UIColor(red: CGFloat(shR), green: CGFloat(shG), blue: CGFloat(shB), alpha: CGFloat(0.90 * wS))
+                : .clear
+            b.highlightNode.isHidden = wS <= 0.03
+            b.highlightNode.alpha = CGFloat(0.72 * wS)
         }
     }
 
     // MARK: - Continuous Cross-Depth Multi-Biome Parallax Background (1:1 Parity with Web parallaxBackground.ts)
-    private func renderParallaxBackground(viewW: Double, viewH: Double, bgScales: ParallaxLayerGrowthScales) {
-        let depthRefY = max(0.0, sharkY)
+    private func renderParallaxBackground(
+        viewW: Double,
+        viewH: Double,
+        bgScales: ParallaxLayerGrowthScales,
+        transition: GameRules.ParallaxBiomeTransitionState
+    ) {
+        let depthRefY = max(0.0, smoothedDepthRefY >= 0.0 ? smoothedDepthRefY : sharkY)
         let rgb = GameRules.sampleBathymetricWaterRGB(depthMeters: cameraY)
-        waterBgNode.color = UIColor(red: CGFloat(rgb.x), green: CGFloat(rgb.y), blue: CGFloat(rgb.z), alpha: 1.0)
+        let ambientWaterColor = UIColor(red: CGFloat(rgb.x), green: CGFloat(rgb.y), blue: CGFloat(rgb.z), alpha: 1.0)
+        waterBgNode.color = ambientWaterColor
         waterBgNode.size = CGSize(width: viewW, height: viewH)
         waterBgNode.position = CGPoint(x: viewW * 0.5, y: viewH * 0.5)
 
@@ -4013,11 +4425,10 @@ public final class OceanGameScene: SKScene {
             "bg_abyss": ("bg_abyss_0_1bbf506a", "bg_abyss_1_75e4a628", "bg_abyss_2_6ce66695", "bg_abyss_3_a4986280")
         ]
 
-        // 1. Layer 0 Water Backdrops blended smoothly across depth zones (zero horizontal or vertical seam lines!)
-        if depthRefY < 680.0,
+        // 1. Layer 0 Water Backdrops blended with C2 quintic weights & soft vertical envelope
+        if transition.shallow.waterAlpha > 0.01,
            let names0 = assetMap["bg_shallow"],
            let water0 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names0.water, isWaterCanopy: true) {
-            let wAlpha0 = depthRefY < 440.0 ? 0.92 : max(0.0, (1.0 - (depthRefY - 440.0) / 240.0) * 0.92)
             let refH = min(viewH, max(360.0, viewW * 0.65))
             let baseCanopyH = max(96.0, min(220.0, refH * 0.32))
             let canopyH = baseCanopyH * bgScales.waterScale
@@ -4031,20 +4442,16 @@ public final class OceanGameScene: SKScene {
                 parallaxXFactor: 0.012,
                 phaseOffset: 0.50,
                 viewW: viewW,
-                alpha: wAlpha0,
-                zPos: 1.0
+                alpha: transition.shallow.waterAlpha,
+                zPos: 1.0,
+                fogColor: ambientWaterColor,
+                fogBlendFactor: 0.0
             )
         }
 
-        if depthRefY > 420.0 && depthRefY < 1320.0,
+        if transition.twilight.waterAlpha > 0.01,
            let names1 = assetMap["bg_twilight"],
            let water1 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names1.water, isWaterCanopy: true) {
-            var wAlpha1 = 0.88
-            if depthRefY < 660.0 {
-                wAlpha1 = ((depthRefY - 420.0) / 240.0) * 0.88
-            } else if depthRefY > 1060.0 {
-                wAlpha1 = (1.0 - (depthRefY - 1060.0) / 260.0) * 0.88
-            }
             addTiledStrip(
                 texture: water1,
                 baseTargetH: viewH + 24.0,
@@ -4053,15 +4460,16 @@ public final class OceanGameScene: SKScene {
                 parallaxXFactor: 0.025,
                 phaseOffset: 0.50,
                 viewW: viewW,
-                alpha: max(0.0, min(0.88, wAlpha1)),
-                zPos: 1.1
+                alpha: transition.twilight.waterAlpha,
+                zPos: 1.1,
+                fogColor: ambientWaterColor,
+                fogBlendFactor: 0.18
             )
         }
 
-        if depthRefY > 1040.0,
+        if transition.abyss.waterAlpha > 0.01,
            let names2 = assetMap["bg_abyss"],
            let water2 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names2.water, isWaterCanopy: true) {
-            let wAlpha2 = depthRefY < 1300.0 ? ((depthRefY - 1040.0) / 260.0) * 0.92 : 0.92
             addTiledStrip(
                 texture: water2,
                 baseTargetH: viewH + 24.0,
@@ -4070,61 +4478,67 @@ public final class OceanGameScene: SKScene {
                 parallaxXFactor: 0.025,
                 phaseOffset: 0.50,
                 viewW: viewW,
-                alpha: max(0.0, min(0.92, wAlpha2)),
-                zPos: 1.2
+                alpha: transition.abyss.waterAlpha,
+                zPos: 1.2,
+                fogColor: ambientWaterColor,
+                fogBlendFactor: 0.16
             )
         }
 
-        // 2. Layers 1, 2, 3 (Far, Mid, Near Terrain) with continuous cross-depth alpha transitions
-        if depthRefY < 700.0, let names0 = assetMap["bg_shallow"] {
-            let alpha0 = depthRefY < 460.0 ? 1.0 : max(0.0, 1.0 - (depthRefY - 460.0) / 220.0)
+        // 2. Layers 1, 2, 3 (Far, Mid, Near) with strict Optical Plane Z-Ordering across Biomes
+        //    (All Far z=2.1..2.3 -> All Mid z=3.1..3.3 -> All Near z=4.1..4.3)
+        if let names0 = assetMap["bg_shallow"] {
             renderBiomeTerrainPlanes(
                 zonePrefix: "bg_shallow",
                 names: names0,
                 biomeFloorY: 680.0,
                 depthRefY: depthRefY,
-                alpha: alpha0,
+                metrics: transition.shallow,
                 viewW: viewW,
                 viewH: viewH,
                 bgScales: bgScales,
-                zBase: 2.0
+                biomeZOffset: 0.1,
+                ambientWaterColor: ambientWaterColor
             )
         }
 
-        if depthRefY > 440.0 && depthRefY < 1340.0, let names1 = assetMap["bg_twilight"] {
-            var alpha1 = 1.0
-            if depthRefY < 660.0 {
-                alpha1 = (depthRefY - 440.0) / 220.0
-            } else if depthRefY > 1080.0 {
-                alpha1 = 1.0 - (depthRefY - 1080.0) / 260.0
-            }
+        if let names1 = assetMap["bg_twilight"] {
             renderBiomeTerrainPlanes(
                 zonePrefix: "bg_twilight",
                 names: names1,
                 biomeFloorY: 1340.0,
                 depthRefY: depthRefY,
-                alpha: max(0.0, min(1.0, alpha1)),
+                metrics: transition.twilight,
                 viewW: viewW,
                 viewH: viewH,
                 bgScales: bgScales,
-                zBase: 3.0
+                biomeZOffset: 0.2,
+                ambientWaterColor: ambientWaterColor
             )
         }
 
-        if depthRefY > 1060.0, let names2 = assetMap["bg_abyss"] {
-            let alpha2 = depthRefY < 1320.0 ? (depthRefY - 1060.0) / 260.0 : 1.0
+        if let names2 = assetMap["bg_abyss"] {
             renderBiomeTerrainPlanes(
                 zonePrefix: "bg_abyss",
                 names: names2,
                 biomeFloorY: 2100.0,
                 depthRefY: depthRefY,
-                alpha: max(0.0, min(1.0, alpha2)),
+                metrics: transition.abyss,
                 viewW: viewW,
                 viewH: viewH,
                 bgScales: bgScales,
-                zBase: 4.0
+                biomeZOffset: 0.3,
+                ambientWaterColor: ambientWaterColor
             )
         }
+
+        // 3. Render L1 Continuous Mid/Near Terrain Contours, L2 Structures & L3 Poisson-Clustered Seabed Props
+        renderProceduralOceanWorldOverlay(
+            viewW: viewW,
+            viewH: viewH,
+            depthRefY: depthRefY,
+            bgScales: bgScales
+        )
 
         // Hide any unused pooled tile nodes without removing them from the scene graph
         if activeParallaxTileCount < parallaxTilePool.count {
@@ -4134,27 +4548,199 @@ public final class OceanGameScene: SKScene {
         }
     }
 
+    private func renderProceduralOceanWorldOverlay(
+        viewW: Double,
+        viewH: Double,
+        depthRefY: Double,
+        bgScales: ParallaxLayerGrowthScales
+    ) {
+        let effScale = max(0.45, bgScales.nearScale)
+        let isAbyss = depthRefY > 1100.0
+        let isTwilight = depthRefY > 520.0 && !isAbyss
+        let panoRefH = min(viewH, max(360.0, viewW * 0.65))
+        let nearTargetH = max(88.0, panoRefH * (isAbyss ? 0.38 : isTwilight ? 0.30 : 0.25)) * effScale
+        let crestHeightFromBottom = max(36.0 * effScale, nearTargetH * 0.54)
+
+        // 3A. L1 Midground Continuous Ridge & Canyon Contour Polygon (SpriteKit Y=0 is bottom of screen)
+        let midPath = CGMutablePath()
+        midPath.move(to: CGPoint(x: -8.0, y: -16.0))
+        let midParallax = 0.28
+        let midWorldCenter = (cameraX * midParallax) / effScale
+        let midStep = 24.0
+        var sx = -8.0
+        while sx <= viewW + midStep {
+            let wx = midWorldCenter + (sx - viewW * 0.5) / effScale
+            let dy = -GameRules.sampleColumnContourOffsetPx(worldX: wx, depthY: depthRefY, layerKind: 1) * 0.65 * effScale
+            let sy = crestHeightFromBottom + 20.0 * effScale + dy
+            midPath.addLine(to: CGPoint(x: sx, y: sy))
+            sx += midStep
+        }
+        midPath.addLine(to: CGPoint(x: viewW + 16.0, y: -16.0))
+        midPath.closeSubpath()
+        midProceduralTerrainNode.path = midPath
+        midProceduralTerrainNode.fillColor = isAbyss
+            ? UIColor(red: 24/255, green: 18/255, blue: 58/255, alpha: 0.66)
+            : isTwilight
+            ? UIColor(red: 14/255, green: 34/255, blue: 74/255, alpha: 0.58)
+            : UIColor(red: 12/255, green: 92/255, blue: 136/255, alpha: 0.50)
+        midProceduralTerrainNode.strokeColor = isAbyss
+            ? UIColor(red: 249/255, green: 115/255, blue: 22/255, alpha: 0.36)
+            : UIColor(red: 125/255, green: 211/255, blue: 252/255, alpha: 0.42)
+
+        // 3B. L2 Landform Structures (Voronoi cells: Reef Archways, Caves, Sand Dunes, Canyon Pillars, Hydrothermal Mounds)
+        let structSpan = 340.0
+        let halfWorldSpan = (viewW * 0.72) / effScale
+        let minVisWX = midWorldCenter - halfWorldSpan
+        let maxVisWX = midWorldCenter + halfWorldSpan
+        let firstStructCell = Int(floor(minVisWX / structSpan))
+        let lastStructCell = Int(ceil(maxVisWX / structSpan))
+        var activeStructIdx = 0
+
+        for cellIdx in firstStructCell...lastStructCell {
+            if activeStructIdx >= proceduralStructurePool.count { break }
+            let jitter = (GameRules.hash1D(cellIdx, salt: 503) - 0.5) * 0.56
+            let centerX = (Double(cellIdx) + 0.5 + jitter) * structSpan
+            let screenX = viewW * 0.5 + (centerX - midWorldCenter) * effScale
+            let sw = (200.0 + GameRules.hash1D(cellIdx, salt: 601) * 180.0) * effScale * 0.72
+            if screenX + sw < -40.0 || screenX - sw > viewW + 40.0 { continue }
+
+            let sh = (110.0 + GameRules.hash1D(cellIdx, salt: 619) * 85.0) * effScale * 0.76
+            let contourDy = -GameRules.sampleColumnContourOffsetPx(worldX: centerX, depthY: depthRefY, layerKind: 1) * 0.55 * effScale
+            let baseY = max(12.0, crestHeightFromBottom + contourDy - 10.0 * effScale)
+
+            let sNode = proceduralStructurePool[activeStructIdx]
+            activeStructIdx += 1
+            sNode.isHidden = false
+            sNode.position = CGPoint(x: screenX, y: baseY)
+
+            let p = CGMutablePath()
+            p.move(to: CGPoint(x: -sw * 0.52, y: -24.0))
+            p.addQuadCurve(to: CGPoint(x: 0, y: sh), control: CGPoint(x: -sw * 0.32, y: sh * 1.04))
+            p.addQuadCurve(to: CGPoint(x: sw * 0.52, y: -24.0), control: CGPoint(x: sw * 0.32, y: sh * 1.04))
+            p.closeSubpath()
+
+            sNode.path = p
+            sNode.fillColor = isAbyss
+                ? UIColor(red: 36/255, green: 24/255, blue: 78/255, alpha: 0.82)
+                : isTwilight
+                ? UIColor(red: 22/255, green: 44/255, blue: 98/255, alpha: 0.78)
+                : UIColor(red: 14/255, green: 106/255, blue: 142/255, alpha: 0.74)
+            sNode.strokeColor = isAbyss
+                ? UIColor(red: 251/255, green: 146/255, blue: 60/255, alpha: 0.48)
+                : UIColor(red: 125/255, green: 211/255, blue: 252/255, alpha: 0.52)
+            sNode.lineWidth = 2.2
+        }
+        for i in activeStructIdx..<proceduralStructurePool.count {
+            proceduralStructurePool[i].isHidden = true
+        }
+
+        // 3C. L1 Foreground Continuous Seabed Contour Polygon
+        let nearParallax = 0.38
+        let nearWorldCenter = (cameraX * nearParallax) / effScale
+        let nearPath = CGMutablePath()
+        nearPath.move(to: CGPoint(x: -8.0, y: -16.0))
+        sx = -8.0
+        while sx <= viewW + 20.0 {
+            let wx = nearWorldCenter + (sx - viewW * 0.5) / effScale
+            let dy = -GameRules.sampleColumnContourOffsetPx(worldX: wx, depthY: depthRefY, layerKind: 2) * 0.68 * effScale
+            let sy = crestHeightFromBottom + dy
+            nearPath.addLine(to: CGPoint(x: sx, y: sy))
+            sx += 20.0
+        }
+        nearPath.addLine(to: CGPoint(x: viewW + 16.0, y: -16.0))
+        nearPath.closeSubpath()
+        nearProceduralTerrainNode.path = nearPath
+        nearProceduralTerrainNode.fillColor = isAbyss
+            ? UIColor(red: 42/255, green: 16/255, blue: 42/255, alpha: 0.48)
+            : isTwilight
+            ? UIColor(red: 12/255, green: 46/255, blue: 88/255, alpha: 0.42)
+            : UIColor(red: 218/255, green: 158/255, blue: 52/255, alpha: 0.38)
+        nearProceduralTerrainNode.strokeColor = isAbyss
+            ? UIColor(red: 251/255, green: 146/255, blue: 60/255, alpha: 0.62)
+            : isTwilight
+            ? UIColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 0.58)
+            : UIColor(red: 254/255, green: 240/255, blue: 138/255, alpha: 0.66)
+
+        // 3D. L3 Poisson-Clustered Seabed Flora & Coral Props
+        let clusterSpan = 260.0
+        let firstCluster = Int(floor((nearWorldCenter - halfWorldSpan) / clusterSpan))
+        let lastCluster = Int(ceil((nearWorldCenter + halfWorldSpan) / clusterSpan))
+        var activePropIdx = 0
+
+        for cIdx in firstCluster...lastCluster {
+            let cCenter = (Double(cIdx) + 0.5) * clusterSpan
+            for pIdx in 0..<3 {
+                if activePropIdx >= proceduralPropPool.count { break }
+                let offset = (Double(pIdx) - 1.0) * 58.0 + (GameRules.hash1D(cIdx * 7 + pIdx, salt: 701) - 0.5) * 26.0
+                let propWX = cCenter + offset
+                let screenX = viewW * 0.5 + (propWX - nearWorldCenter) * effScale
+                if screenX < -30.0 || screenX > viewW + 30.0 { continue }
+
+                let dy = -GameRules.sampleColumnContourOffsetPx(worldX: propWX, depthY: depthRefY, layerKind: 2) * 0.68 * effScale
+                let propY = crestHeightFromBottom + dy - 4.0 * effScale
+                let pNode = proceduralPropPool[activePropIdx]
+                activePropIdx += 1
+                pNode.isHidden = false
+                pNode.position = CGPoint(x: screenX, y: propY)
+
+                let sway = sin(lastUpdateTime * 2.1 + Double(cIdx + pIdx)) * 8.0 * effScale
+                let propH = (38.0 + GameRules.hash1D(cIdx * 13 + pIdx, salt: 733) * 44.0) * effScale
+                let path = CGMutablePath()
+                path.move(to: CGPoint(x: 0, y: -4.0))
+                path.addQuadCurve(to: CGPoint(x: sway, y: propH), control: CGPoint(x: sway * 0.45, y: propH * 0.5))
+                path.move(to: CGPoint(x: -7.0 * effScale, y: -4.0))
+                path.addQuadCurve(to: CGPoint(x: -12.0 * effScale + sway * 0.7, y: propH * 0.78), control: CGPoint(x: -8.0 * effScale, y: propH * 0.4))
+                path.move(to: CGPoint(x: 7.0 * effScale, y: -4.0))
+                path.addQuadCurve(to: CGPoint(x: 12.0 * effScale + sway * 0.7, y: propH * 0.82), control: CGPoint(x: 8.0 * effScale, y: propH * 0.4))
+                pNode.path = path
+                pNode.fillColor = .clear
+                pNode.lineWidth = CGFloat(3.4 * effScale)
+                if isAbyss {
+                    pNode.strokeColor = (pIdx % 2 == 0)
+                        ? UIColor(red: 251/255, green: 146/255, blue: 60/255, alpha: 0.88)
+                        : UIColor(red: 192/255, green: 132/255, blue: 252/255, alpha: 0.88)
+                } else if isTwilight {
+                    pNode.strokeColor = (pIdx % 2 == 0)
+                        ? UIColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 0.88)
+                        : UIColor(red: 129/255, green: 140/255, blue: 248/255, alpha: 0.88)
+                } else {
+                    pNode.strokeColor = (cIdx + pIdx) % 2 == 0
+                        ? UIColor(red: 251/255, green: 113/255, blue: 133/255, alpha: 0.88)
+                        : UIColor(red: 52/255, green: 211/255, blue: 153/255, alpha: 0.88)
+                }
+            }
+        }
+        for i in activePropIdx..<proceduralPropPool.count {
+            proceduralPropPool[i].isHidden = true
+        }
+    }
+
     private func renderBiomeTerrainPlanes(
         zonePrefix: String,
         names: (water: String, far: String, mid: String, near: String),
         biomeFloorY: Double,
         depthRefY: Double,
-        alpha: Double,
+        metrics: GameRules.BiomePlaneTransitionMetrics,
         viewW: Double,
         viewH: Double,
         bgScales: ParallaxLayerGrowthScales,
-        zBase: CGFloat
+        biomeZOffset: CGFloat,
+        ambientWaterColor: UIColor
     ) {
-        if alpha <= 0.01 { return }
+        if metrics.farAlpha <= 0.01 && metrics.midAlpha <= 0.01 && metrics.nearAlpha <= 0.01 { return }
         let u = tanh(max(0.0, biomeFloorY - depthRefY) / 480.0)
+        let procMod = GameRules.sampleParallaxTerrainModulation(worldX: cameraX, depthY: depthRefY)
         let panoRefH = min(viewH, max(360.0, viewW * 0.65))
-        let baseNearH = max(88.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.25 : zonePrefix == "bg_twilight" ? 0.30 : 0.48))
-        let baseMidH = max(78.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.22 : zonePrefix == "bg_twilight" ? 0.37 : 0.54))
-        let baseFarH = max(82.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.232 : 0.42))
+        let baseNearH = max(88.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.25 : zonePrefix == "bg_twilight" ? 0.30 : 0.38))
+        let baseMidH = max(78.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.22 : zonePrefix == "bg_twilight" ? 0.35 : 0.45))
+        let baseFarH = max(82.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.232 : 0.39))
 
-        if let farTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.far) {
+        // Layer 1 Far (z = 2.0 + biomeZOffset): Distant silhouettes veiled in underwater atmospheric scattering + L1 ridge contour
+        if metrics.farAlpha > 0.01, let farTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.far) {
             let farH = baseFarH * bgScales.farScale
-            let farBottomY = min(0.0, (baseNearH * 0.32 - (-20.0 + 2.5 * u)) * bgScales.nearScale - farH * 0.12)
+            let baseFarY = (baseNearH * 0.32 - (-20.0 + 2.5 * u)) * bgScales.nearScale - farH * 0.12
+            let farBottomY = min(0.0, baseFarY - (metrics.farTransitionOffsetY + procMod.farRidgeOffsetPx * 0.65) * bgScales.nearScale)
+            let farFog = min(0.76, 0.22 + (1.0 - metrics.farWeight) * 0.52)
             addTiledStrip(
                 texture: farTex,
                 baseTargetH: baseFarH,
@@ -4163,14 +4749,19 @@ public final class OceanGameScene: SKScene {
                 parallaxXFactor: 0.025,
                 phaseOffset: 0.37,
                 viewW: viewW,
-                alpha: alpha * 0.94,
-                zPos: zBase + 0.1
+                alpha: metrics.farAlpha,
+                zPos: 2.0 + biomeZOffset,
+                fogColor: ambientWaterColor,
+                fogBlendFactor: farFog
             )
         }
 
-        if let midTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.mid) {
+        // Layer 2 Mid (z = 3.0 + biomeZOffset): Strictly behind all Near planes across all biomes!
+        if metrics.midAlpha > 0.01, let midTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.mid) {
             let midH = baseMidH * bgScales.midScale
-            let midBottomY = min(0.0, (baseNearH * 0.16 - (-10.0 + 14.0 * u)) * bgScales.nearScale - midH * 0.08)
+            let baseMidY = (baseNearH * 0.16 - (-10.0 + 14.0 * u)) * bgScales.nearScale - midH * 0.08
+            let midBottomY = min(0.0, baseMidY - (metrics.midTransitionOffsetY + procMod.midStratumOffsetPx * 0.75) * bgScales.nearScale)
+            let midFog = min(0.64, 0.08 + (1.0 - metrics.midWeight) * 0.48)
             addTiledStrip(
                 texture: midTex,
                 baseTargetH: baseMidH,
@@ -4179,14 +4770,18 @@ public final class OceanGameScene: SKScene {
                 parallaxXFactor: 0.18,
                 phaseOffset: 0.63,
                 viewW: viewW,
-                alpha: alpha,
-                zPos: zBase + 0.2
+                alpha: metrics.midAlpha,
+                zPos: 3.0 + biomeZOffset,
+                fogColor: ambientWaterColor,
+                fogBlendFactor: midFog
             )
         }
 
-        if let nearTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.near) {
+        // Layer 3 Near (z = 4.0 + biomeZOffset): Immediate foreground seabed always occludes Mid & Far!
+        if metrics.nearAlpha > 0.01, let nearTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.near) {
             let nearH = baseNearH * bgScales.nearScale
-            let nearBottomY = -28.0 * u * bgScales.nearScale
+            let nearBottomY = (-28.0 * u - metrics.nearTransitionOffsetY - procMod.nearSeabedOffsetPx) * bgScales.nearScale
+            let nearFog = min(0.52, (1.0 - metrics.nearWeight) * 0.42)
             addTiledStrip(
                 texture: nearTex,
                 baseTargetH: baseNearH,
@@ -4195,8 +4790,10 @@ public final class OceanGameScene: SKScene {
                 parallaxXFactor: 0.38,
                 phaseOffset: 0.21,
                 viewW: viewW,
-                alpha: alpha,
-                zPos: zBase + 0.3
+                alpha: metrics.nearAlpha,
+                zPos: 4.0 + biomeZOffset,
+                fogColor: ambientWaterColor,
+                fogBlendFactor: nearFog
             )
         }
     }
@@ -4225,7 +4822,9 @@ public final class OceanGameScene: SKScene {
         phaseOffset: Double = 0.50,
         viewW: Double,
         alpha: Double,
-        zPos: CGFloat
+        zPos: CGFloat,
+        fogColor: UIColor = .clear,
+        fogBlendFactor: Double = 0.0
     ) {
         let texSize = texture.size()
         guard texSize.height > 0 && alpha > 0.004 else { return }
@@ -4251,6 +4850,8 @@ public final class OceanGameScene: SKScene {
             node.position = CGPoint(x: x0, y: alignedY)
             node.alpha = CGFloat(alpha)
             node.zPosition = zPos
+            node.color = fogColor
+            node.colorBlendFactor = CGFloat(max(0.0, min(0.85, fogBlendFactor)))
             startX += tileW
         }
     }

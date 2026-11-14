@@ -64,6 +64,19 @@ import {
 import { downloadStandaloneSingleFileHtml } from './game/singleFileExporter';
 import { spriteSheetManager } from './game/spriteSheetManager';
 import { parallaxBackground } from './game/parallaxBackground';
+import {
+  engineXToWorldX,
+  getWorldDebugEnabled,
+  meterDepthToWorldY,
+  renderPhysicalSeabed,
+  resolveSeabedCollision,
+  resolveSeabedKineticStep,
+  setWorldDebugEnabled,
+  worldChunkLifecycleManager,
+  worldDebug,
+  worldPersistence,
+  worldRenderer,
+} from './game/worldGenerationSystem';
 import { infiniteWorldManager } from './game/infiniteWorldManager';
 import { ecosystemSpawner } from './game/ecosystemSpawner';
 import { infiniteProgressionManager } from './game/infiniteProgressionManager';
@@ -205,6 +218,9 @@ export default function App() {
   );
   const [liveActivePreyCount, setLiveActivePreyCount] = useState<number>(
     () => ecosystemSpawner.maxActivePreys
+  );
+  const [debugWorldGrid, setDebugWorldGrid] = useState<boolean>(() =>
+    getWorldDebugEnabled()
   );
 
   // 3-Step Hands-On Onboarding Tutorial State
@@ -2038,8 +2054,20 @@ export default function App() {
           shark.vy += (Math.sin(shark.angle) * targetSpeed - shark.vy) * Math.min(1, simDt * 7);
         }
 
-        shark.x += shark.vx * simDt;
-        shark.y += shark.vy * simDt;
+        // 阶段 B：1.0x 世界层连续海床与浅海镂空珊瑚环礁拱台切向等速物理碰撞解算
+        // 严格将沿斜坡上坡/下坡的位移投影至海床单位切向量 T = (1, slope)/sqrt(1 + slope^2)，彻底消除顺地形上坡游动时的速度异常放大！
+        const sharkStep = resolveSeabedKineticStep(
+          shark.x,
+          shark.y,
+          shark.vx,
+          shark.vy,
+          simDt,
+          22 * shark.stats.scale
+        );
+        shark.x = sharkStep.engineX;
+        shark.y = sharkStep.engineY;
+        shark.vx = sharkStep.vx;
+        shark.vy = sharkStep.vy;
 
         // 模块 A：无限世界与动态边界控制器 (InfiniteWorldManager)
         infiniteWorldManager.update(dt, shark, sim.camera);
@@ -2338,10 +2366,12 @@ export default function App() {
             prey.y += Math.sin(pullAngle) * 165 * simDt;
           }
 
+          const prevPreyX = prey.x;
+          const prevPreyY = prey.y;
           prey.x = infiniteWorldManager.wrapEntityX(prey.x + prey.vx * simDt);
           prey.y += prey.vy * simDt;
 
-          // Strictly keep every fish within its natural biological depth habitat [minDepth, maxDepth]
+          // Strictly keep every fish within its natural biological depth habitat [minDepth, maxDepth] and above physical seabed
           const minHabitatY = Math.max(25, prey.config.minDepth);
           const maxHabitatY = prey.config.maxDepth;
           if (prey.y < minHabitatY) {
@@ -2350,6 +2380,21 @@ export default function App() {
           } else if (prey.y > maxHabitatY) {
             prey.y = maxHabitatY;
             prey.vy = -Math.abs(prey.vy) * 0.65;
+          }
+          const preySeabedCollision = resolveSeabedCollision(
+            prey.x,
+            prey.y,
+            renderedPreyRadius,
+            prey.vy,
+            undefined,
+            prevPreyY
+          );
+          if (preySeabedCollision.collided) {
+            prey.x = infiniteWorldManager.wrapEntityX(
+              prevPreyX + prey.vx * simDt * preySeabedCollision.tangentScale
+            );
+            prey.y = preySeabedCollision.engineY;
+            prey.vy = preySeabedCollision.vy;
           }
 
           // Check collision with Shark Mouth / Front-Body
@@ -3076,6 +3121,42 @@ export default function App() {
         }
       }
 
+      // 阶段 B：渲染 1.0x 世界层连续可碰撞海床（与 resolveSeabedCollision / getFloorDepthAt 严格同源）
+      renderPhysicalSeabed(ctx, {
+        cameraEngineX: sim.camera.x,
+        cameraEngineY: sim.camera.y,
+        viewW,
+        viewH,
+        renderZoom,
+      });
+
+      // 阶段 E/F/G：更新 2D Chunk 生命周期窗口（方向性预加载 + 帧预算 2ms + Active 上限 10）并渲染 1.0x 世界层激活态 POI 与海床生态物
+      worldPersistence.setPlayerPosition(
+        engineXToWorldX(shark.x),
+        meterDepthToWorldY(shark.y)
+      );
+      const { activeChunks } = worldChunkLifecycleManager.updateForViewport(
+        {
+          minWorldX: engineXToWorldX(minX),
+          maxWorldX: engineXToWorldX(maxX),
+          minWorldY: meterDepthToWorldY(minY),
+          maxWorldY: meterDepthToWorldY(maxY),
+        },
+        shark.vx
+      );
+      worldRenderer.renderActiveChunkEntities(
+        ctx,
+        {
+          cameraEngineX: sim.camera.x,
+          cameraEngineY: sim.camera.y,
+          viewW,
+          viewH,
+          renderZoom,
+          nowMs: now,
+        },
+        activeChunks
+      );
+
       // Render 3D Spinning Gold Coins & Faceted DNA Crystals using sliced UI Icon Atlas sprites
       const coinSprite = spriteSheetManager.getUiIconFrame('UI_ICON_COIN');
       const geneSprite = spriteSheetManager.getUiIconFrame('UI_ICON_GENE');
@@ -3226,6 +3307,22 @@ export default function App() {
       }
 
       ctx.restore();
+
+      // Render Stage-A WorldDebug 2D Chunk Bounds Overlay when enabled (default false in production)
+      if (worldDebug.isEnabled()) {
+        ctx.save();
+        ctx.scale(scaleX, scaleY);
+        worldDebug.drawChunkBounds(ctx, {
+          cameraEngineX: sim.camera.x,
+          cameraEngineY: sim.camera.y,
+          playerEngineX: shark.x,
+          playerEngineY: shark.y,
+          viewW,
+          viewH,
+          renderZoom,
+        });
+        ctx.restore();
+      }
 
       // Render Screen-Space Off-Screen Radar Indicators (P1-2: 🎯 Bounty / ★ Golden / ⚠️ Apex Predator)
       if (gameStateRef.current === 'playing') {
@@ -3489,10 +3586,18 @@ export default function App() {
     setDebugPreySizeMult(clamped);
   }, []);
 
-  // Reset both Debug Controllers to default values (20 fish, 0.80x prey size)
+  const handleToggleWorldDebugGrid = useCallback(() => {
+    const next = !getWorldDebugEnabled();
+    setWorldDebugEnabled(next);
+    setDebugWorldGrid(next);
+  }, []);
+
+  // Reset all Debug Controllers to default values (20 fish, 0.80x prey size, WorldDebug off)
   const handleResetDebugParams = useCallback(() => {
     handleDebugMaxPreysChange(20);
     handleDebugPreySizeChange(0.8);
+    setWorldDebugEnabled(false);
+    setDebugWorldGrid(false);
   }, [handleDebugMaxPreysChange, handleDebugPreySizeChange]);
 
   const titleSharkForm = getSharkFormById(metaSave.selectedSharkId);
@@ -3680,6 +3785,33 @@ export default function App() {
                   +0.1
                 </button>
               </div>
+            </div>
+
+            {/* Regulator 3: Stage-A 2D Chunk Bounds & Coordinate Debug Overlay */}
+            <div className="mt-3 pt-2.5 border-t border-white/10 flex items-center justify-between">
+              <span className="text-[11px] font-display font-bold text-slate-200">
+                {lang === 'zh'
+                  ? '3. 2D Chunk 网格调试'
+                  : '3. 2D Chunk Grid Debug'}
+              </span>
+              <button
+                type="button"
+                data-testid="debug-world-grid-btn"
+                {...bindMultiTouchButton(handleToggleWorldDebugGrid)}
+                className={`px-2.5 py-0.5 rounded-lg font-mono-num font-bold text-[11px] cursor-pointer ${
+                  debugWorldGrid
+                    ? 'bg-cyan-500 text-slate-950'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                }`}
+              >
+                {debugWorldGrid
+                  ? lang === 'zh'
+                    ? '已开启 (ON)'
+                    : 'ON'
+                  : lang === 'zh'
+                  ? '已关闭 (OFF)'
+                  : 'OFF'}
+              </button>
             </div>
           </motion.aside>
         )}
