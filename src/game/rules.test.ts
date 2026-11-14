@@ -1259,6 +1259,8 @@ import {
   getTerrainSamples,
   getEngineFloorDepthAt,
   sampleSeabedAnchorAt,
+  SEABED_TERRACE_TIERS,
+  getSeabedTerraceAt,
   getShallowCoralAtollAt,
   getShallowCoralAtollOutcropsForChunk,
   resolveSeabedCollision,
@@ -2916,6 +2918,120 @@ test('Undulating Mountain Range Seabed (Zero Flat or Diagonal Straight Lines), U
     assert.ok(
       caveDrop >= 95,
       `Downward cave opening at X=${seamX} must curve downward into a recessed arc (expected drop >= 95m, got ${caveDrop.toFixed(1)}m)`
+    );
+  }
+
+  // 7. Full-Depth 9-Tier Non-Uniformly Spaced Continuous Seabed Terraces (SEABED_TERRACE_TIERS, tierIndex = 0..8):
+  // Verify that vertical spacing (both center-to-center deltaY and clear-water corridor height) strictly increases with depth,
+  // and that every mid-layer and deep-abyss tier (1..8) provides continuous seabed reference points, staggered downward cave openings,
+  // two-sided collision, and unobstructed inter-tier horizontal swimming corridors!
+  assert.equal(SEABED_TERRACE_TIERS.length, 9);
+
+  let prevDeltaY = 0;
+  let prevCorridorGap = 0;
+  for (let i = 0; i < SEABED_TERRACE_TIERS.length - 1; i++) {
+    const cur = SEABED_TERRACE_TIERS[i];
+    const next = SEABED_TERRACE_TIERS[i + 1];
+    const deltaY = next.baseRidgeY - cur.baseRidgeY;
+    const corridorGap = next.minRidgeY - cur.archMaxDepthY;
+    assert.ok(
+      deltaY > prevDeltaY,
+      `Vertical spacing deltaY between Tier ${i} and Tier ${i + 1} (${deltaY}m) must strictly increase with depth (prev=${prevDeltaY}m)`
+    );
+    assert.ok(
+      corridorGap > prevCorridorGap && corridorGap >= 380,
+      `Clear corridor height between Tier ${i} and Tier ${i + 1} (${corridorGap}m) must strictly increase with depth (prev=${prevCorridorGap}m)`
+    );
+    prevDeltaY = deltaY;
+    prevCorridorGap = corridorGap;
+  }
+
+  // Directly underneath Tier 0's downward cave opening at X = 3200m, Tier 1 (~1220m) has a solid seabed reference point!
+  const tier1UnderTier0Cave = getSeabedTerraceAt(3200, 1, WorldConfig);
+  assert.equal(
+    tier1UnderTier0Cave.active,
+    true,
+    'Tier 1 mid-layer seabed directly underneath Tier 0 cave opening (X=3200m) must be solid so diving sharks have a clear terrain reference point'
+  );
+
+  for (let tIdx = 1; tIdx < SEABED_TERRACE_TIERS.length; tIdx++) {
+    const tierSpec = SEABED_TERRACE_TIERS[tIdx];
+    // Find a cell index where the main ocean trench floor is deeper than this tier's graftEndMainY
+    let chosenCellIdx = 4;
+    for (let candidateIdx = 2; candidateIdx <= 60; candidateIdx++) {
+      const testSeamX = candidateIdx * tierSpec.cellWidth + tierSpec.seamPhaseOffsetX;
+      const testSolidX = testSeamX + tierSpec.cellWidth * 0.5;
+      if (
+        getFloorDepthAt(testSeamX, WorldConfig) > tierSpec.graftEndMainY + 120 &&
+        getFloorDepthAt(testSolidX, WorldConfig) > tierSpec.graftEndMainY + 120
+      ) {
+        chosenCellIdx = candidateIdx;
+        break;
+      }
+    }
+    const seamX = chosenCellIdx * tierSpec.cellWidth + tierSpec.seamPhaseOffsetX;
+    const solidX = seamX + tierSpec.cellWidth * 0.5;
+
+    const solidSample = getSeabedTerraceAt(solidX, tIdx, WorldConfig);
+    const caveSample = getSeabedTerraceAt(seamX, tIdx, WorldConfig);
+
+    assert.equal(
+      solidSample.active,
+      true,
+      `Seabed Tier ${tIdx} must be active at solid X=${solidX} (mainFloorY=${getFloorDepthAt(solidX, WorldConfig).toFixed(0)})`
+    );
+    assert.equal(
+      caveSample.active,
+      false,
+      `Seabed Tier ${tIdx} must open for diving at cave seam X=${seamX}`
+    );
+    assert.equal(
+      caveSample.isDiveOpening,
+      true,
+      `Seabed Tier ${tIdx} cave center at X=${seamX} must be marked as isDiveOpening`
+    );
+
+    // Top-surface landing collision on this seabed tier
+    const midTopCol = resolveSeabedCollision(
+      solidX,
+      solidSample.topFloorY - 6,
+      sharkRadius,
+      45,
+      WorldConfig,
+      solidSample.topFloorY - sharkRadius - 12
+    );
+    assert.equal(midTopCol.collided, true, `Shark must land on top of Seabed Tier ${tIdx}`);
+    assert.equal(midTopCol.terraceTierIndex, tIdx);
+    assert.equal(midTopCol.hitAtollUnderside, false);
+
+    // Underside ceiling anti-penetration collision on this seabed tier
+    const midUnderCol = resolveSeabedCollision(
+      solidX,
+      solidSample.bottomArchY + 6,
+      sharkRadius,
+      -240,
+      WorldConfig,
+      solidSample.bottomArchY + sharkRadius + 18
+    );
+    assert.equal(midUnderCol.collided, true, `Shark boosting upward from below Seabed Tier ${tIdx} must hit arch ceiling`);
+    assert.equal(midUnderCol.terraceTierIndex, tIdx);
+    assert.equal(midUnderCol.hitAtollUnderside, true);
+  }
+
+  // Verify open horizontal swimming corridors between consecutive tiers (900m, 1800m, 2900m, 4500m, 6200m, 8500m, 12000m, 15000m) are 100% unobstructed
+  for (const corridorY of [900, 1800, 2900, 4500, 6200, 8500, 12000, 15000]) {
+    let deepTestX = 9600;
+    for (let tx = 8000; tx <= 80000; tx += 1500) {
+      if (getFloorDepthAt(tx, WorldConfig) > corridorY + 500) {
+        deepTestX = tx;
+        break;
+      }
+    }
+    const corridorCol = resolveSeabedCollision(deepTestX, corridorY, sharkRadius, 0, WorldConfig);
+    assert.equal(
+      corridorCol.collided,
+      false,
+      `Inter-tier horizontal corridor at Y=${corridorY}m (X=${deepTestX}m) must be 100% unobstructed`
     );
   }
 });
