@@ -17,6 +17,7 @@ targets:
       - path: HungrySharkEvolution
         excludes:
           - "Resources/Assets/*.png"
+          - "Resources/Assets/*.jpg"
       - path: HungrySharkEvolution/Resources/Assets
         type: folder
         buildPhase: resources

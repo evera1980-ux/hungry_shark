@@ -262,23 +262,23 @@ public final class SpriteAtlasManager: ObservableObject {
                 }
             }
 
-            // Slice 4 Seamless Seabed Surface Strips & 4 Seamless Subsurface Bedrock Strata from world_seabed_strips_1794473245165
+            // Load 4 Standalone High-Res Realistic Transparent Seabed PNGs (no multi-row sprite sheet slicing)
             var localSeabedStrips: [String: SKTexture] = [:]
             var localSeabedSubStrata: [String: SKTexture] = [:]
-            if let seabedSheet = Self.loadBundledImage(named: "world_seabed_strips_1794473245165") {
-                let stripDefs: [(id: String, y0: Double, y1: Double)] = [
-                    ("coral_reef", 0.0, 0.25),
-                    ("rocky_shelf", 0.25, 0.50),
-                    ("underwater_canyon", 0.50, 0.75),
-                    ("deep_abyss", 0.75, 1.00)
-                ]
-                for def in stripDefs {
-                    if let stripImg = Self.sliceSeabedStrip(from: seabedSheet, y0Ratio: def.y0, y1Ratio: def.y1) {
+            let standaloneSeabedDefs: [(id: String, assetName: String)] = [
+                ("coral_reef", "seabed_strip_coral_reef"),
+                ("rocky_shelf", "seabed_strip_rocky_shelf"),
+                ("underwater_canyon", "seabed_strip_underwater_canyon"),
+                ("deep_abyss", "seabed_strip_deep_abyss")
+            ]
+            for def in standaloneSeabedDefs {
+                if let standaloneImg = Self.loadBundledImage(named: def.assetName) {
+                    if let stripImg = Self.sliceSeabedStrip(from: standaloneImg, y0Ratio: 0.0, y1Ratio: 1.0) {
                         let tex = SKTexture(image: stripImg)
                         tex.filteringMode = .linear
                         localSeabedStrips[def.id] = tex
                     }
-                    if let subImg = Self.sliceSeabedSubStratum(from: seabedSheet, stripId: def.id, y0Ratio: def.y0, y1Ratio: def.y1) {
+                    if let subImg = Self.sliceSeabedSubStratum(from: standaloneImg, stripId: def.id, y0Ratio: 0.0, y1Ratio: 1.0) {
                         let subTex = SKTexture(image: subImg)
                         subTex.filteringMode = .linear
                         localSeabedSubStrata[def.id] = subTex

@@ -6864,8 +6864,19 @@ export interface WorldAssetDescriptor {
   isPlaceholder: boolean;
 }
 
+export const WORLD_SEABED_STRIP_URLS = {
+  coral_reef: '/assets/aistudio/seabed_strip_coral_reef.png',
+  rocky_shelf: '/assets/aistudio/seabed_strip_rocky_shelf.png',
+  underwater_canyon: '/assets/aistudio/seabed_strip_underwater_canyon.png',
+  deep_abyss: '/assets/aistudio/seabed_strip_deep_abyss.png',
+} as const;
+
 export const WORLD_ATLAS_ASSET_URLS = {
-  seabedStrips: '/assets/aistudio/world_seabed_strips_1794473245165.jpg',
+  seabedStrips: WORLD_SEABED_STRIP_URLS.coral_reef,
+  seabedStripCoralReef: WORLD_SEABED_STRIP_URLS.coral_reef,
+  seabedStripRockyShelf: WORLD_SEABED_STRIP_URLS.rocky_shelf,
+  seabedStripUnderwaterCanyon: WORLD_SEABED_STRIP_URLS.underwater_canyon,
+  seabedStripDeepAbyss: WORLD_SEABED_STRIP_URLS.deep_abyss,
   poisAtlas: '/assets/aistudio/world_pois_atlas_1794473250443.jpg',
   ecologyAtlas: '/assets/aistudio/world_ecology_atlas_1794473252524.jpg',
 } as const;
@@ -7040,181 +7051,106 @@ function sliceAndCleanWorldSpriteRegion(
 }
 
 /**
- * 裁切单条海床表层岩壳纹理、抠除上下白底、执行逐列平滑基线对齐（消除原图自带的大幅波谷透底与波峰下方死黑空洞）、
- * 底部余弦柔化羽化并制作 14% 余弦水平无缝循环条带
+ * 从独立的 2048x1152 写实透明背景海床 PNG 直接构建高分辨率（1240px 宽）无缝海床表层轮廓条带
+ * （无需再对单张四合一合集图做多行切图）
  */
-function sliceAndMakeSeamlessSeabedStrip(
-  sourceImg: HTMLImageElement,
-  y0Norm: number,
-  y1Norm: number
+function prepareStandaloneSeabedSurfaceCanvas(
+  sourceImg: HTMLImageElement
 ): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
   const natW = sourceImg.naturalWidth || sourceImg.width;
   const natH = sourceImg.naturalHeight || sourceImg.height;
   if (natW <= 0 || natH <= 0) return null;
 
-  const sx = Math.floor(natW * 0.028);
-  const sw = Math.floor(natW * 0.944);
-  const sy = Math.floor(natH * y0Norm);
-  const sh = Math.max(1, Math.floor(natH * (y1Norm - y0Norm)));
-
-  const w = 720;
-  const h = 160;
+  const w = 960;
+  const h = 540;
   const work = document.createElement('canvas');
   work.width = w;
   work.height = h;
   const ctx = work.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
-  ctx.drawImage(sourceImg, sx, sy, sw, sh, 0, 0, w, h);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceImg, 0, 0, natW, natH, 0, 0, w, h);
 
   const imgData = ctx.getImageData(0, 0, w, h);
   const data = imgData.data;
 
-  // 1. 逐列抠除顶部与底部纯白留白并记录每列顶部首个非透明像素高度 rawTopY[x]
-  const rawTopY = new Int32Array(w);
-  for (let x = 0; x < w; x++) {
-    let topFound = Math.floor(h * 0.35);
-    for (let y = 0; y < h; y++) {
-      const p = (y * w + x) * 4;
-      const r = data[p];
-      const g = data[p + 1];
-      const b = data[p + 2];
-      const minC = Math.min(r, g, b);
-      const maxC = Math.max(r, g, b);
-      if (minC >= 225 && maxC - minC <= 26) {
-        data[p + 3] = 0;
-      } else {
-        if (minC > 180) {
-          const cleanAlpha = Math.max(0.15, Math.min(1, (245 - minC) / 110));
-          data[p + 3] = Math.round(255 * cleanAlpha);
-        }
-        topFound = y;
+  // 定位整张透明背景海床图的最高非透明轮廓线 minTopY
+  let minTopY = Math.floor(h * 0.24);
+  for (let y = 0; y < h; y++) {
+    let found = false;
+    for (let x = 0; x < w; x += 4) {
+      if (data[(y * w + x) * 4 + 3] > 32) {
+        found = true;
         break;
       }
     }
-    rawTopY[x] = topFound;
-
-    for (let y = h - 1; y >= 0; y--) {
-      const p = (y * w + x) * 4;
-      const r = data[p];
-      const g = data[p + 1];
-      const b = data[p + 2];
-      const minC = Math.min(r, g, b);
-      const maxC = Math.max(r, g, b);
-      if (minC >= 225 && maxC - minC <= 26) {
-        data[p + 3] = 0;
-      } else {
-        break;
-      }
+    if (found) {
+      minTopY = Math.max(0, y - 4);
+      break;
     }
   }
 
-  // 2. 计算水平大尺度平滑基线 smoothTopY[x]（窗口半径 32px），将原图自带的巨幅波浪拉直对齐，
-  //    同时 100% 保留珊瑚枝尖、贝壳与岩角的局部自然起伏轮廓！
-  const smoothTopY = new Float32Array(w);
-  const smoothRadius = 32;
-  let minSmoothTop = h;
-  for (let x = 0; x < w; x++) {
-    let sum = 0;
-    let count = 0;
-    for (let dx = -smoothRadius; dx <= smoothRadius; dx++) {
-      const nx = ((x + dx) % w + w) % w;
-      sum += rawTopY[nx];
-      count++;
-    }
-    const avg = sum / count;
-    smoothTopY[x] = avg;
-    if (avg < minSmoothTop) minSmoothTop = avg;
-  }
-
-  // 裁切掉底部悬挑黑洞区域，仅保留饱满的表层珊瑚/沙滩/受光砂岩唇口（coral_reef 取 104px，其余取 116px）
-  const isCoralStrip = y0Norm < 0.12;
-  const cropH = isCoralStrip ? 104 : 116;
-  const alignedData = new Uint8ClampedArray(w * cropH * 4);
-
-  for (let x = 0; x < w; x++) {
-    const colShift = Math.round((smoothTopY[x] - minSmoothTop) * 0.88);
-    const baseSrcY = Math.max(0, Math.floor(minSmoothTop) - 2 + colShift);
-    for (let y = 0; y < cropH; y++) {
-      const syCol = Math.min(h - 1, baseSrcY + y);
-      const srcIdx = (syCol * w + x) * 4;
-      const dstIdx = (y * w + x) * 4;
-      alignedData[dstIdx] = data[srcIdx];
-      alignedData[dstIdx + 1] = data[srcIdx + 1];
-      alignedData[dstIdx + 2] = data[srcIdx + 2];
-      alignedData[dstIdx + 3] = data[srcIdx + 3];
-    }
-  }
-
-  // 3. 14% 余弦水平无缝混合 + 底部 34% 余弦 Alpha 柔化羽化 + 下半部暗穴消融
-  const overlap = Math.max(16, Math.floor(w * 0.14));
+  // 保留从顶部写实珊瑚/藤壶/化石/硫磺晶簇到下方岩唇的完整高清表层带（高度 200px）
+  const outH = Math.min(200, h - minTopY);
+  const overlap = Math.max(32, Math.floor(w * 0.12));
   const outW = w - overlap;
+
   const outCanvas = document.createElement('canvas');
   outCanvas.width = outW;
-  outCanvas.height = cropH;
+  outCanvas.height = outH;
   const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
-  if (!outCtx) return work;
+  if (!outCtx) {
+    work.width = 0;
+    work.height = 0;
+    return null;
+  }
 
-  const outImg = outCtx.createImageData(outW, cropH);
+  const outImg = outCtx.createImageData(outW, outH);
   const oData = outImg.data;
-  const bottomFeatherStart = Math.floor(cropH * 0.64);
-  const shadowDissolveStart = Math.floor(cropH * 0.50);
+  const bottomFeatherStart = Math.floor(outH * 0.64);
 
-  for (let y = 0; y < cropH; y++) {
+  for (let y = 0; y < outH; y++) {
+    const sy = Math.min(h - 1, minTopY + y);
     let bottomFade = 1.0;
     if (y >= bottomFeatherStart) {
-      const ft = (y - bottomFeatherStart) / Math.max(1, cropH - 1 - bottomFeatherStart);
+      const ft = (y - bottomFeatherStart) / Math.max(1, outH - 1 - bottomFeatherStart);
       bottomFade = 0.5 * (1 + Math.cos(Math.PI * Math.min(1, ft)));
     }
-    const shadowCheckWeight =
-      y >= shadowDissolveStart
-        ? Math.min(1, (y - shadowDissolveStart) / Math.max(1, cropH * 0.28))
-        : 0;
 
     for (let x = 0; x < outW; x++) {
       const dstIdx = (y * outW + x) * 4;
-      let r: number;
-      let g: number;
-      let b: number;
-      let a: number;
       if (x < overlap) {
         const t = x / overlap;
         const wA = 0.5 - 0.5 * Math.cos(Math.PI * t);
         const wB = 1 - wA;
-        const idxA = (y * w + x) * 4;
-        const idxB = (y * w + (x + outW)) * 4;
-        r = Math.round(alignedData[idxA] * wA + alignedData[idxB] * wB);
-        g = Math.round(alignedData[idxA + 1] * wA + alignedData[idxB + 1] * wB);
-        b = Math.round(alignedData[idxA + 2] * wA + alignedData[idxB + 2] * wB);
-        a = alignedData[idxA + 3] * wA + alignedData[idxB + 3] * wB;
-      } else {
-        const idxA = (y * w + x) * 4;
-        r = alignedData[idxA];
-        g = alignedData[idxA + 1];
-        b = alignedData[idxA + 2];
-        a = alignedData[idxA + 3];
-      }
-
-      // 将表层底部残余深暗阴影像素柔化提亮为暖褐砂岩色并渐隐，彻底杜绝黑色空洞
-      let shadowFade = 1.0;
-      if (shadowCheckWeight > 0 && isCoralStrip) {
-        const luma = r * 0.299 + g * 0.587 + b * 0.114;
-        if (luma < 92) {
-          const lift = (92 - luma) * 0.55 * shadowCheckWeight;
-          r = Math.min(255, Math.round(r + lift * 1.35));
-          g = Math.min(255, Math.round(g + lift * 0.82));
-          b = Math.min(255, Math.round(b + lift * 0.45));
-          const rawShadowAlpha = Math.pow(Math.max(0, (luma - 18) / 74), 1.35);
-          shadowFade = 1 - shadowCheckWeight * (1 - rawShadowAlpha);
+        const idxA = (sy * w + x) * 4;
+        const idxB = (sy * w + (x + outW)) * 4;
+        const aA = data[idxA + 3] / 255;
+        const aB = data[idxB + 3] / 255;
+        const outA = aA * wA + aB * wB;
+        if (outA <= 0.005) {
+          oData[dstIdx] = 0;
+          oData[dstIdx + 1] = 0;
+          oData[dstIdx + 2] = 0;
+          oData[dstIdx + 3] = 0;
+        } else {
+          oData[dstIdx] = Math.round((data[idxA] * aA * wA + data[idxB] * aB * wB) / outA);
+          oData[dstIdx + 1] = Math.round((data[idxA + 1] * aA * wA + data[idxB + 1] * aB * wB) / outA);
+          oData[dstIdx + 2] = Math.round((data[idxA + 2] * aA * wA + data[idxB + 2] * aB * wB) / outA);
+          oData[dstIdx + 3] = Math.round(outA * 255 * bottomFade);
         }
+      } else {
+        const idxA = (sy * w + x) * 4;
+        oData[dstIdx] = data[idxA];
+        oData[dstIdx + 1] = data[idxA + 1];
+        oData[dstIdx + 2] = data[idxA + 2];
+        oData[dstIdx + 3] = Math.round(data[idxA + 3] * bottomFade);
       }
-
-      oData[dstIdx] = r;
-      oData[dstIdx + 1] = g;
-      oData[dstIdx + 2] = b;
-      oData[dstIdx + 3] = Math.round(a * bottomFade * shadowFade);
     }
   }
+
   outCtx.putImageData(outImg, 0, 0);
   work.width = 0;
   work.height = 0;
@@ -7222,190 +7158,42 @@ function sliceAndMakeSeamlessSeabedStrip(
 }
 
 /**
- * 构建海床「表层以下」专属无缝层状岩壁与基岩断面条带 (`subsurfaceStratumCanvases`)：
- * 1) 采用 Strip 2 中下部最均匀饱满的手绘阶梯状沉积岩板 (0.348..0.478) 作为全宽度无空洞基底（避免 Strip 1 拱形黑洞阴影导致局部发黑空洞）；
- * 2) 针对各生态区融合双相位交错阶梯岩层与纵向断层裂隙/发光青脉/火山熔岩纹路，并精确校准为暖金赭石砂岩、大陆架青灰页岩、深海峡谷靛蓝青脉岩与极深渊熔岩黑曜石；
- * 3) 水平方向做 14% 余弦无缝循环，垂直方向在顶部 20% 与底部 24% 做余弦羽化融合，使多层地下岩层纵向无限叠铺时完全无缝连接！
+ * 从独立的 2048x1152 写实透明背景海床 PNG 直接构建高分辨率「表层以下」无缝地质基岩条带
+ * （直接取每张独立写实海床图下半部真实的石灰岩/页岩/发光青脉玄武岩/熔岩裂隙岩壁）
  */
-function sliceAndMakeSubsurfaceBedrockStrip(
-  sourceImg: HTMLImageElement,
-  biomeMode: 'coral_reef' | 'rocky_shelf' | 'underwater_canyon' | 'deep_abyss'
+function prepareStandaloneSeabedSubsurfaceCanvas(
+  sourceImg: HTMLImageElement
 ): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
   const natW = sourceImg.naturalWidth || sourceImg.width;
   const natH = sourceImg.naturalHeight || sourceImg.height;
   if (natW <= 0 || natH <= 0) return null;
 
-  const sx = Math.floor(natW * 0.028);
-  const sw = Math.floor(natW * 0.944);
-  const w = 720;
-  const h = 168;
+  const w = 960;
+  const h = 240;
+  const sy0 = Math.floor(natH * 0.48);
+  const sh = Math.max(1, Math.floor(natH * 0.40));
 
-  // 提取 Strip 2 中下部最丰富的纯手绘阶梯状岩石层理 (yNorm = 0.350 .. 0.476，全宽度均匀饱满、零黑洞阴影)
-  const strataWork = document.createElement('canvas');
-  strataWork.width = w;
-  strataWork.height = h;
-  const strataCtx = strataWork.getContext('2d', { willReadFrequently: true });
-  if (!strataCtx) return null;
-  strataCtx.drawImage(
-    sourceImg,
-    sx,
-    Math.floor(natH * 0.350),
-    sw,
-    Math.max(1, Math.floor(natH * (0.476 - 0.350))),
-    0,
-    0,
-    w,
-    h
-  );
-  const strataData = strataCtx.getImageData(0, 0, w, h).data;
+  const work = document.createElement('canvas');
+  work.width = w;
+  work.height = h;
+  const ctx = work.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sourceImg, 0, sy0, natW, sh, 0, 0, w, h);
 
-  // 提取目标生态区对应的纵向裂隙岩壁区域（coral_reef 采用 Strip 3 的高对比度纵向断层岩壁 0.60..0.72 重着色为暖砂岩，彻底避开 Strip 1 的拱形黑影！）
-  let biomeY0 = 0.600;
-  let biomeY1 = 0.722;
-  if (biomeMode === 'rocky_shelf') {
-    biomeY0 = 0.355;
-    biomeY1 = 0.482;
-  } else if (biomeMode === 'underwater_canyon') {
-    biomeY0 = 0.588;
-    biomeY1 = 0.726;
-  } else if (biomeMode === 'deep_abyss') {
-    biomeY0 = 0.828;
-    biomeY1 = 0.978;
-  }
-
-  const cliffWork = document.createElement('canvas');
-  cliffWork.width = w;
-  cliffWork.height = h;
-  const cliffCtx = cliffWork.getContext('2d', { willReadFrequently: true });
-  if (!cliffCtx) {
-    strataWork.width = 0;
-    strataWork.height = 0;
-    return null;
-  }
-  cliffCtx.drawImage(
-    sourceImg,
-    sx,
-    Math.floor(natH * biomeY0),
-    sw,
-    Math.max(1, Math.floor(natH * (biomeY1 - biomeY0))),
-    0,
-    0,
-    w,
-    h
-  );
-  const cliffData = cliffCtx.getImageData(0, 0, w, h).data;
-
-  // 合成并校准表层以下岩石层理像素（双相位交错阶梯岩层 + 纵向断层裂隙）
-  const combined = new Uint8ClampedArray(w * h * 4);
-  const strataShiftA = Math.floor(w * 0.29);
-  const strataShiftB = Math.floor(w * 0.67);
-
-  for (let y = 0; y < h; y++) {
-    const vNorm = y / Math.max(1, h - 1);
-    const yFlip = h - 1 - y;
-    for (let x = 0; x < w; x++) {
-      const p = (y * w + x) * 4;
-      const sxA = (x + strataShiftA) % w;
-      const sxB = (w - 1 - ((x + strataShiftB) % w));
-      const psA = (y * w + sxA) * 4;
-      const psB = (yFlip * w + sxB) * 4;
-
-      // 主阶梯岩板明度与副阶梯岩板明度
-      const lumaA =
-        (strataData[psA] * 0.299 + strataData[psA + 1] * 0.587 + strataData[psA + 2] * 0.114) / 255;
-      const lumaB =
-        (strataData[psB] * 0.299 + strataData[psB + 1] * 0.587 + strataData[psB + 2] * 0.114) / 255;
-
-      // 提亮暗部死黑并拉开岩块受光面与裂缝的立体对比度
-      const liftedA = Math.pow(Math.max(0.10, Math.min(1, lumaA)), 0.72);
-      const liftedB = Math.pow(Math.max(0.10, Math.min(1, lumaB)), 0.78);
-      const compositeStrata = liftedA * 0.68 + liftedB * 0.32;
-
-      const cr = cliffData[p];
-      const cg = cliffData[p + 1];
-      const cb = cliffData[p + 2];
-      const cliffLuma = (cr * 0.299 + cg * 0.587 + cb * 0.114) / 255;
-
-      let outR = cr;
-      let outG = cg;
-      let outB = cb;
-
-      if (biomeMode === 'coral_reef') {
-        // 将 Strip 2 的双交错阶梯岩板与 Strip 3 的纵向岩柱断层统一重映射为温暖明亮的阳光赭石砂岩/礁灰岩色阶 (#df9148 -> #9e5b28 -> #542d14)
-        const rockFacet = compositeStrata * 0.74 + Math.pow(Math.max(0.12, cliffLuma), 0.75) * 0.26;
-        // 增强岩石块面高光与岩缝深褐对比（S 曲线对比度增强）
-        const contrasted = Math.max(0, Math.min(1, 0.5 + (rockFacet - 0.46) * 1.38));
-
-        outR = Math.round(58 + contrasted * 168);
-        outG = Math.round(34 + contrasted * 104);
-        outB = Math.round(18 + contrasted * 54);
-      } else if (biomeMode === 'rocky_shelf') {
-        // 大陆架层状青灰岩板：强化岩层台阶高光与深缝立体感
-        const slateR = 26 + compositeStrata * 104;
-        const slateG = 36 + compositeStrata * 128;
-        const slateB = 48 + compositeStrata * 144;
-        outR = Math.round(cr * 0.48 + slateR * 0.52);
-        outG = Math.round(cg * 0.48 + slateG * 0.52);
-        outB = Math.round(cb * 0.48 + slateB * 0.52);
-      } else if (biomeMode === 'underwater_canyon') {
-        // 深海峡谷：保留青色发光矿脉 (cb > cr * 1.4 && cg > cr * 1.3)，同时注入阶梯状深蓝岩层体块
-        const isCyanVein = cb > 95 && cg > 80 && cb > cr * 1.35;
-        const canyonStrataR = 18 + compositeStrata * 58;
-        const canyonStrataG = 26 + compositeStrata * 82;
-        const canyonStrataB = 48 + compositeStrata * 124;
-        const blendStrata = isCyanVein ? 0.15 : 0.46;
-        outR = Math.round(cr * (1 - blendStrata) + canyonStrataR * blendStrata);
-        outG = Math.round(cg * (1 - blendStrata) + canyonStrataG * blendStrata);
-        outB = Math.round(cb * (1 - blendStrata) + canyonStrataB * blendStrata);
-      } else {
-        // 极深渊火山玄武岩：保留橙红熔岩裂隙 (cr > cg * 1.45 && cr > 70)，同时提亮死黑玄武岩块面并叠加层状黑曜石岩架
-        const isMagmaVein = cr > 68 && cr > cg * 1.4 && cr > cb * 1.6;
-        const basaltStrataR = 24 + compositeStrata * 74;
-        const basaltStrataG = 20 + compositeStrata * 56;
-        const basaltStrataB = 20 + compositeStrata * 52;
-        const blendStrata = isMagmaVein ? 0.14 : 0.50;
-        outR = Math.round(cr * (1 - blendStrata) + basaltStrataR * blendStrata);
-        outG = Math.round(cg * (1 - blendStrata) + basaltStrataG * blendStrata);
-        outB = Math.round(cb * (1 - blendStrata) + basaltStrataB * blendStrata);
-      }
-
-      // 注入自然的横向沉积岩层分界暗缝与受光岩檐（在 vNorm ≈ 0.36 与 0.68 处），增强多层地质断面真实感
-      const wave1 = 0.36 + 0.035 * Math.sin((x / w) * Math.PI * 4 + 0.7);
-      const wave2 = 0.68 + 0.035 * Math.cos((x / w) * Math.PI * 6 - 0.4);
-      const d1 = Math.abs(vNorm - wave1);
-      const d2 = Math.abs(vNorm - wave2);
-      if (d1 < 0.045) {
-        const seamFactor = vNorm < wave1 ? 0.74 + 0.26 * (d1 / 0.045) : 1.12 - 0.12 * (d1 / 0.045);
-        outR = Math.round(outR * seamFactor);
-        outG = Math.round(outG * seamFactor);
-        outB = Math.round(outB * seamFactor);
-      } else if (d2 < 0.045) {
-        const seamFactor = vNorm < wave2 ? 0.76 + 0.24 * (d2 / 0.045) : 1.10 - 0.10 * (d2 / 0.045);
-        outR = Math.round(outR * seamFactor);
-        outG = Math.round(outG * seamFactor);
-        outB = Math.round(outB * seamFactor);
-      }
-
-      combined[p] = Math.max(0, Math.min(255, outR));
-      combined[p + 1] = Math.max(0, Math.min(255, outG));
-      combined[p + 2] = Math.max(0, Math.min(255, outB));
-      combined[p + 3] = 255;
-    }
-  }
-
-  // 14% 余弦水平无缝混合 + 顶部 20% 与底部 24% 余弦 Alpha 柔化羽化
-  const overlap = Math.max(16, Math.floor(w * 0.14));
+  const srcData = ctx.getImageData(0, 0, w, h).data;
+  const overlap = Math.max(32, Math.floor(w * 0.12));
   const outW = w - overlap;
+
   const outCanvas = document.createElement('canvas');
   outCanvas.width = outW;
   outCanvas.height = h;
   const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
   if (!outCtx) {
-    strataWork.width = 0;
-    strataWork.height = 0;
-    cliffWork.width = 0;
-    cliffWork.height = 0;
+    work.width = 0;
+    work.height = 0;
     return null;
   }
 
@@ -7432,25 +7220,23 @@ function sliceAndMakeSubsurfaceBedrockStrip(
         const wB = 1 - wA;
         const idxA = (y * w + x) * 4;
         const idxB = (y * w + (x + outW)) * 4;
-        oData[dstIdx] = Math.round(combined[idxA] * wA + combined[idxB] * wB);
-        oData[dstIdx + 1] = Math.round(combined[idxA + 1] * wA + combined[idxB + 1] * wB);
-        oData[dstIdx + 2] = Math.round(combined[idxA + 2] * wA + combined[idxB + 2] * wB);
+        oData[dstIdx] = Math.round(srcData[idxA] * wA + srcData[idxB] * wB);
+        oData[dstIdx + 1] = Math.round(srcData[idxA + 1] * wA + srcData[idxB + 1] * wB);
+        oData[dstIdx + 2] = Math.round(srcData[idxA + 2] * wA + srcData[idxB + 2] * wB);
         oData[dstIdx + 3] = Math.round(255 * vAlpha);
       } else {
         const idxA = (y * w + x) * 4;
-        oData[dstIdx] = combined[idxA];
-        oData[dstIdx + 1] = combined[idxA + 1];
-        oData[dstIdx + 2] = combined[idxA + 2];
+        oData[dstIdx] = srcData[idxA];
+        oData[dstIdx + 1] = srcData[idxA + 1];
+        oData[dstIdx + 2] = srcData[idxA + 2];
         oData[dstIdx + 3] = Math.round(255 * vAlpha);
       }
     }
   }
 
   outCtx.putImageData(outImg, 0, 0);
-  strataWork.width = 0;
-  strataWork.height = 0;
-  cliffWork.width = 0;
-  cliffWork.height = 0;
+  work.width = 0;
+  work.height = 0;
   return outCanvas;
 }
 
@@ -7517,8 +7303,8 @@ export class WorldAssetRegistry {
   }
 
   /**
-   * 在浏览器环境下懒加载并自动裁切 3 张新背景美术图集：
-   * 1) world_seabed_strips (4 条宏观生态海床表层岩壳 + 4 条表层以下无缝层状基岩纹理)
+   * 在浏览器环境下懒加载背景美术资产：
+   * 1) 4 张独立高分辨率写实透明背景海床 PNG (`seabed_strip_coral_reef.png` 等，无切图)
    * 2) world_pois_atlas (5x2 共 10 种大型地标 POI)
    * 3) world_ecology_atlas (4x4 共 16 种珊瑚/岩石/海藻/残骸/热液喷口)
    */
@@ -7529,37 +7315,38 @@ export class WorldAssetRegistry {
     }
     this.atlasesLoadingTriggered = true;
 
-    // 1. 加载 4 条海床表层岩壳纹理合集 + 构建表层以下专属无缝层状基岩纹理
-    const seabedImg = new Image();
-    seabedImg.crossOrigin = 'anonymous';
-    seabedImg.onload = () => {
-      const stripCoral = sliceAndMakeSeamlessSeabedStrip(seabedImg, 0.01, 0.245);
-      const stripRocky = sliceAndMakeSeamlessSeabedStrip(seabedImg, 0.255, 0.49);
-      const stripCanyon = sliceAndMakeSeamlessSeabedStrip(seabedImg, 0.50, 0.735);
-      const stripAbyss = sliceAndMakeSeamlessSeabedStrip(seabedImg, 0.745, 0.99);
+    // 1. 直接加载 4 张独立的高分辨率写实透明背景海床 PNG（不切图）
+    const seabedEntries: Array<{
+      biome: 'coral_reef' | 'rocky_shelf' | 'underwater_canyon' | 'deep_abyss';
+      url: string;
+    }> = [
+      { biome: 'coral_reef', url: WORLD_SEABED_STRIP_URLS.coral_reef },
+      { biome: 'rocky_shelf', url: WORLD_SEABED_STRIP_URLS.rocky_shelf },
+      { biome: 'underwater_canyon', url: WORLD_SEABED_STRIP_URLS.underwater_canyon },
+      { biome: 'deep_abyss', url: WORLD_SEABED_STRIP_URLS.deep_abyss },
+    ];
 
-      if (stripCoral) this.seabedStripCanvases.set('coral_reef', stripCoral);
-      if (stripRocky) {
-        this.seabedStripCanvases.set('rocky_shelf', stripRocky);
-        this.seabedStripCanvases.set('open_ocean', stripRocky);
-      }
-      if (stripCanyon) this.seabedStripCanvases.set('underwater_canyon', stripCanyon);
-      if (stripAbyss) this.seabedStripCanvases.set('deep_abyss', stripAbyss);
-
-      const subCoral = sliceAndMakeSubsurfaceBedrockStrip(seabedImg, 'coral_reef');
-      const subRocky = sliceAndMakeSubsurfaceBedrockStrip(seabedImg, 'rocky_shelf');
-      const subCanyon = sliceAndMakeSubsurfaceBedrockStrip(seabedImg, 'underwater_canyon');
-      const subAbyss = sliceAndMakeSubsurfaceBedrockStrip(seabedImg, 'deep_abyss');
-
-      if (subCoral) this.seabedSubStratumCanvases.set('coral_reef', subCoral);
-      if (subRocky) {
-        this.seabedSubStratumCanvases.set('rocky_shelf', subRocky);
-        this.seabedSubStratumCanvases.set('open_ocean', subRocky);
-      }
-      if (subCanyon) this.seabedSubStratumCanvases.set('underwater_canyon', subCanyon);
-      if (subAbyss) this.seabedSubStratumCanvases.set('deep_abyss', subAbyss);
-    };
-    seabedImg.src = WORLD_ATLAS_ASSET_URLS.seabedStrips;
+    for (const entry of seabedEntries) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const stripCanvas = prepareStandaloneSeabedSurfaceCanvas(img);
+        if (stripCanvas) {
+          this.seabedStripCanvases.set(entry.biome, stripCanvas);
+          if (entry.biome === 'rocky_shelf') {
+            this.seabedStripCanvases.set('open_ocean', stripCanvas);
+          }
+        }
+        const subCanvas = prepareStandaloneSeabedSubsurfaceCanvas(img);
+        if (subCanvas) {
+          this.seabedSubStratumCanvases.set(entry.biome, subCanvas);
+          if (entry.biome === 'rocky_shelf') {
+            this.seabedSubStratumCanvases.set('open_ocean', subCanvas);
+          }
+        }
+      };
+      img.src = entry.url;
+    }
 
     // 2. 加载 5x2 大型地标 POI 图集
     const poiImg = new Image();
