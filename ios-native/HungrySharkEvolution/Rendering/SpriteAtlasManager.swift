@@ -293,10 +293,23 @@ public final class SpriteAtlasManager: ObservableObject {
                 self.loadingProgress = max(self.loadingProgress, 0.85)
             }
 
-            // Slice 16 Ecology Sprites (world_ecology_atlas_1794473252524) & 10 POI Sprites (world_pois_atlas_1794473250443)
+            // Load 4 Standalone High-Res (@3x) Realistic Transparent Ecology PNGs (no 4x4 sprite sheet slicing) & 10 POI Sprites
             var localEcologyTex: [String: SKTexture] = [:]
-            if let ecoSheet = Self.loadBundledImage(named: "world_ecology_atlas_1794473252524") {
-                localEcologyTex = Self.sliceWorldEcologyAtlas(from: ecoSheet)
+            let standaloneEcologyDefs: [(prefix: String, assetName: String)] = [
+                ("coral", "ecology_coral_reef_cluster"),
+                ("rock", "ecology_rocky_outcrop"),
+                ("kelp", "ecology_kelp_forest_cluster"),
+                ("vent", "ecology_abyssal_vent_debris")
+            ]
+            for def in standaloneEcologyDefs {
+                if let ecoImg = Self.loadBundledImage(named: def.assetName) {
+                    let tex = SKTexture(image: ecoImg)
+                    tex.filteringMode = .linear
+                    localEcologyTex[def.prefix] = tex
+                    for idx in 1...4 {
+                        localEcologyTex["\(def.prefix)_\(idx)"] = tex
+                    }
+                }
             }
             var localPoiTex: [String: SKTexture] = [:]
             if let poiSheet = Self.loadBundledImage(named: "world_pois_atlas_1794473250443") {

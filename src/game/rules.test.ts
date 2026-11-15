@@ -3034,9 +3034,86 @@ test('Undulating Mountain Range Seabed (Zero Flat or Diagonal Straight Lines), U
       `Inter-tier horizontal corridor at Y=${corridorY}m (X=${deepTestX}m) must be 100% unobstructed`
     );
   }
+
+  // 8. Cave Opening Downward Diagonal Slope Speed Conservation (Zero Speed Stacking):
+  // Moving horizontally along either the cave opening's downward underside wall (bottomArchY)
+  // or its downward/upward top rim slope (topFloorY) across 90 consecutive frames must NEVER
+  // stack 2D displacement speed or compound cross-frame velocity (effectiveSpeed2D <= targetSpeed).
+  const caveWallRightSample = getShallowCoralAtollAt(3200 + 310, WorldConfig);
+  assert.ok(
+    (caveWallRightSample.bottomSlope ?? 0) > 0.65,
+    `Right cave opening wall at X=3510m (absDist=310m in [232, 397]) must include wall-drop derivative in bottomSlope (got ${caveWallRightSample.bottomSlope})`
+  );
+
+  // 8A: Horizontal movement into & along the right cave opening's downward diagonal underside wall
+  {
+    const targetSpeed = 240;
+    const dt = 1 / 60;
+    let x = 3200 + 245;
+    const startSample = getShallowCoralAtollAt(x, WorldConfig);
+    let y = startSample.bottomArchY + sharkRadius + 1;
+    let vx = targetSpeed;
+    let vy = 0;
+
+    for (let frame = 0; frame < 90; frame++) {
+      // Simulate App.tsx horizontal joystick steering (angle = 0)
+      vx += (targetSpeed - vx) * Math.min(1, dt * 7);
+      vy += (0 - vy) * Math.min(1, dt * 7);
+      const preMag = Math.hypot(vx, vy);
+      if (preMag > targetSpeed) {
+        vx *= targetSpeed / preMag;
+        vy *= targetSpeed / preMag;
+      }
+
+      const step = resolveSeabedKineticStep(x, y, vx, vy, dt, sharkRadius, WorldConfig);
+      assert.ok(
+        step.effectiveSpeed2D <= targetSpeed * 1.001,
+        `Cave underside wall frame ${frame} at X=${x.toFixed(1)}: effectiveSpeed2D (${step.effectiveSpeed2D.toFixed(2)}) must NEVER exceed targetSpeed (${targetSpeed})`
+      );
+      const postMag = Math.hypot(step.vx, step.vy);
+      assert.ok(
+        postMag <= targetSpeed * 1.001,
+        `Cave underside wall frame ${frame}: output velocity magnitude (${postMag.toFixed(2)}) must NEVER exceed targetSpeed (${targetSpeed})`
+      );
+      x = step.engineX;
+      y = step.engineY;
+      vx = step.vx;
+      vy = step.vy;
+    }
+  }
+
+  // 8B: Horizontal & diagonal movement along the cave opening's top rim slope (visualRimY)
+  {
+    const targetSpeed = 240;
+    const dt = 1 / 60;
+    let x = 3200 + 250; // Near right cave lip where topFloorY slopes upward away from cave center
+    const startSample = getShallowCoralAtollAt(x, WorldConfig);
+    let y = startSample.topFloorY - sharkRadius + 2;
+    let vx = targetSpeed * Math.cos(0.32);
+    let vy = -targetSpeed * Math.sin(0.32);
+
+    for (let frame = 0; frame < 90; frame++) {
+      // Simulate player holding horizontal movement along the cave opening slope
+      const desiredVx = targetSpeed;
+      const desiredVy = 0;
+      vx += (desiredVx - vx) * Math.min(1, dt * 7);
+      vy += (desiredVy - vy) * Math.min(1, dt * 7);
+      const preMag = Math.hypot(vx, vy);
+      if (preMag > targetSpeed) {
+        vx *= targetSpeed / preMag;
+        vy *= targetSpeed / preMag;
+      }
+
+      const step = resolveSeabedKineticStep(x, y, vx, vy, dt, sharkRadius, WorldConfig);
+      assert.ok(
+        step.effectiveSpeed2D <= targetSpeed * 1.001,
+        `Cave top rim slope frame ${frame} at X=${x.toFixed(1)}: effectiveSpeed2D (${step.effectiveSpeed2D.toFixed(2)}) must NEVER exceed targetSpeed (${targetSpeed})`
+      );
+      x = step.engineX;
+      y = step.engineY;
+      vx = step.vx;
+      vy = step.vy;
+    }
+  }
 });
-
-
-
-
 

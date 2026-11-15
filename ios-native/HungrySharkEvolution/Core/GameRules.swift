@@ -667,22 +667,26 @@ public enum GameRules {
         let relief = (noise1D(worldX * 0.0022, salt: 419 + saltBase) * 38.0
             + noise1D(worldX * 0.0068, salt: 431 + saltBase) * 14.0) * spec.reliefAmp
         let baseTopY = spec.baseDepth + relief
-        let slope = ((noise1D((worldX + 8.0) * 0.0022, salt: 419 + saltBase)
+        let baseSlope = ((noise1D((worldX + 8.0) * 0.0022, salt: 419 + saltBase)
             - noise1D((worldX - 8.0) * 0.0022, salt: 419 + saltBase)) * 38.0 * spec.reliefAmp) / 16.0
+        let gapSign: Double = cellPhase >= 0.5 ? 1.0 : -1.0
+        let dDistDx: Double = (2.0 / spec.period) * gapSign
 
         // Inside the downward cave opening (shark can swim freely up & down through this portal!)
         if distFromGapCenter < spec.openDuty {
             let normCave = distFromGapCenter / spec.openDuty // 0 at center of opening, 1 at rim lip
             let caveArch = cos(normCave * .pi * 0.5)
             let dropOffset = spec.dropAmplitude + (1.0 - normCave * normCave) * (spec.dropAmplitude * 0.54)
+            let dDropDx = -2.0 * normCave * (spec.dropAmplitude * 0.54) * (dDistDx / max(0.01, spec.openDuty))
             let caveFloorY = min(mainFloor - 24.0, baseTopY + dropOffset)
+            let caveSlope = max(-2.4, min(2.4, baseSlope + dDropDx))
             return SeabedTerraceSample(
                 isPresent: false,
                 topY: caveFloorY,
                 bottomArchY: min(mainFloor, caveFloorY + spec.thicknessBase * 0.92),
                 edgeFactor: 0.0,
                 caveFactor: caveArch,
-                slope: slope,
+                slope: caveSlope,
                 tierIndex: spec.tierIndex,
                 stripId: spec.stripId
             )
@@ -691,8 +695,13 @@ public enum GameRules {
         let rampSpan = 0.17
         let edgeFactor = min(1.0, (distFromGapCenter - spec.openDuty) / rampSpan)
         let smoothEdge = edgeFactor * edgeFactor * (3.0 - 2.0 * edgeFactor)
+        let dSmoothEdgeDx = edgeFactor < 1.0
+            ? (6.0 * edgeFactor * (1.0 - edgeFactor)) * (dDistDx / rampSpan)
+            : 0.0
         let rimDrop = (1.0 - smoothEdge) * spec.dropAmplitude
+        let dRimDropDx = -dSmoothEdgeDx * spec.dropAmplitude
         let topY = min(mainFloor - 36.0, baseTopY + rimDrop)
+        let slope = max(-2.4, min(2.4, baseSlope + dRimDropDx))
 
         let archThickness = spec.thicknessBase + smoothEdge * (spec.thicknessBase * 0.44)
             + noise1D(worldX * 0.0038, salt: 443 + saltBase) * (28.0 * spec.reliefAmp)
@@ -918,7 +927,7 @@ public enum GameRules {
         public let slope: Double
     }
 
-    /// Full 2D Kinetic Seabed Step with Sub-Stepping (prevents tunneling through steep walls or terrace undersides)
+    /// Full 2D Kinetic Seabed Step with Sub-Stepping & Tangent Arc-Length Conservation (prevents tunneling and eliminates speed stacking along cave opening downward slopes)
     public static func resolveSeabedKineticStep(
         prevX: Double,
         prevY: Double,
@@ -933,6 +942,10 @@ public enum GameRules {
         let totalDy = nextY - prevY
         let dist = hypot(totalDx, totalDy)
         let steps = max(1, min(6, Int(ceil(dist / max(8.0, entityRadius * 0.45)))))
+        let stepDx = totalDx / Double(steps)
+        let stepDy = totalDy / Double(steps)
+        let maxSubstepDist = dist / Double(steps)
+        let intendedSpeed = hypot(vx, vy)
 
         var curX = prevX
         var curY = prevY
@@ -943,11 +956,11 @@ public enum GameRules {
         var lastFloorY = getFloorDepthAt(worldX: nextX)
         var lastSlope = 0.0
 
-        for s in 1...steps {
+        for _ in 1...steps {
             let stepPrevX = curX
             let stepPrevY = curY
-            let targetX = prevX + (totalDx * Double(s)) / Double(steps)
-            let targetY = curY + totalDy / Double(steps)
+            let targetX = stepPrevX + stepDx
+            let targetY = stepPrevY + stepDy
 
             let col = resolveSeabedCollision(
                 worldX: targetX,
@@ -960,6 +973,7 @@ public enum GameRules {
 
             lastFloorY = col.floorY
             lastSlope = col.slope
+            let tangentScale = 1.0 / sqrt(1.0 + col.slope * col.slope)
 
             if col.hitAtollUnderside {
                 hitAtollUnderside = true
@@ -974,25 +988,83 @@ public enum GameRules {
                 if !prevColAtOldX.hitAtollUnderside && !prevColAtOldX.hitSeabed && abs(stepPrevY - col.y) > entityRadius * 0.42 {
                     curX = stepPrevX
                     curVx = 0.0
-                    curY = max(stepPrevY, prevColAtOldX.y)
+                    curY = max(stepPrevY, min(prevColAtOldX.y, stepPrevY + maxSubstepDist))
                 } else {
-                    curX = targetX
-                    curY = col.y
-                    curVy = col.vy
+                    let projectedX = stepPrevX + stepDx * tangentScale * 0.92
+                    let secondCol = resolveSeabedCollision(
+                        worldX: projectedX,
+                        worldY: targetY,
+                        vy: curVy,
+                        entityRadius: entityRadius,
+                        clearancePadding: clearancePadding,
+                        prevWorldY: stepPrevY
+                    )
+                    var nextStepX = projectedX
+                    var nextStepY = secondCol.hitAtollUnderside ? secondCol.y : col.y
+                    let actualSubDist = hypot(nextStepX - stepPrevX, nextStepY - stepPrevY)
+                    if actualSubDist > maxSubstepDist && actualSubDist > 1e-6 && maxSubstepDist > 1e-6 {
+                        let shrink = maxSubstepDist / actualSubDist
+                        nextStepX = stepPrevX + (nextStepX - stepPrevX) * shrink
+                        let clampedCol = resolveSeabedCollision(
+                            worldX: nextStepX,
+                            worldY: stepPrevY + (nextStepY - stepPrevY) * shrink,
+                            vy: curVy,
+                            entityRadius: entityRadius,
+                            clearancePadding: clearancePadding,
+                            prevWorldY: stepPrevY
+                        )
+                        nextStepY = clampedCol.hitAtollUnderside ? clampedCol.y : (stepPrevY + (nextStepY - stepPrevY) * shrink)
+                    }
+                    curX = nextStepX
+                    curY = nextStepY
+                    curVx = vx * tangentScale * 0.92
+                    curVy = vy < 0.0 ? 0.0 : vy * tangentScale * 0.92
                 }
             } else if col.hitSeabed {
                 hitSeabed = true
-                curX = targetX
-                curY = col.y
-                curVy = col.vy
-                if abs(col.slope) > 0.45 && curVx * col.slope < 0.0 {
-                    let damp = max(0.35, 1.0 - (abs(col.slope) - 0.45) * 0.35)
-                    curVx *= damp
+                let isUphill = stepDx * col.slope < -1e-5
+                let scaleFactor = isUphill ? tangentScale * 0.90 : tangentScale * 0.95
+                let projectedX = stepPrevX + stepDx * scaleFactor
+                let secondCol = resolveSeabedCollision(
+                    worldX: projectedX,
+                    worldY: targetY,
+                    vy: curVy,
+                    entityRadius: entityRadius,
+                    clearancePadding: clearancePadding,
+                    prevWorldY: stepPrevY
+                )
+                var nextStepX = projectedX
+                var nextStepY = secondCol.hitSeabed ? secondCol.y : col.y
+                let maxAllowed = maxSubstepDist * (isUphill ? 0.92 : 1.0)
+                let actualSubDist = hypot(nextStepX - stepPrevX, nextStepY - stepPrevY)
+                if actualSubDist > maxAllowed && actualSubDist > 1e-6 && maxAllowed > 1e-6 {
+                    let shrink = maxAllowed / actualSubDist
+                    nextStepX = stepPrevX + (nextStepX - stepPrevX) * shrink
+                    let clampedCol = resolveSeabedCollision(
+                        worldX: nextStepX,
+                        worldY: stepPrevY + (nextStepY - stepPrevY) * shrink,
+                        vy: curVy,
+                        entityRadius: entityRadius,
+                        clearancePadding: clearancePadding,
+                        prevWorldY: stepPrevY
+                    )
+                    nextStepY = clampedCol.hitSeabed ? clampedCol.y : (stepPrevY + (nextStepY - stepPrevY) * shrink)
                 }
+                curX = nextStepX
+                curY = nextStepY
+                curVx = vx * scaleFactor
+                curVy = vy > 0.0 ? 0.0 : vy * scaleFactor
             } else {
                 curX = targetX
                 curY = col.y
             }
+        }
+
+        let outSpeed = hypot(curVx, curVy)
+        if outSpeed > intendedSpeed && outSpeed > 1e-6 {
+            let s = intendedSpeed / outSpeed
+            curVx *= s
+            curVy *= s
         }
 
         return SeabedKineticStepResult(

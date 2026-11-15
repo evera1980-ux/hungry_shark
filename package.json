@@ -12,6 +12,7 @@
     "build:sharks3x": "tsx scripts/build-sharks-3x.ts",
     "redraw:sharks:nanobanana": "tsx scripts/build-sharks-3x.ts --nanobanana",
     "build:seabed": "tsx scripts/build-seabed-strips.ts",
+    "build:ecology": "tsx scripts/build-ecology-sprites.ts",
     "build:ios": "tsx scripts/build-ios-native.ts"
   },
   "dependencies": {

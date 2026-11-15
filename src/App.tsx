@@ -2052,10 +2052,16 @@ export default function App() {
         } else {
           shark.vx += (Math.cos(shark.angle) * targetSpeed - shark.vx) * Math.min(1, simDt * 7);
           shark.vy += (Math.sin(shark.angle) * targetSpeed - shark.vy) * Math.min(1, simDt * 7);
+          const preStepSpeed = Math.hypot(shark.vx, shark.vy);
+          if (preStepSpeed > targetSpeed && preStepSpeed > 1e-6) {
+            const clampScale = targetSpeed / preStepSpeed;
+            shark.vx *= clampScale;
+            shark.vy *= clampScale;
+          }
         }
 
         // 阶段 B：1.0x 世界层连续海床与浅海镂空珊瑚环礁拱台切向等速物理碰撞解算
-        // 严格将沿斜坡上坡/下坡的位移投影至海床单位切向量 T = (1, slope)/sqrt(1 + slope^2)，彻底消除顺地形上坡游动时的速度异常放大！
+        // 严格将沿斜坡上坡/下坡及洞口向下斜线水平移动的位移投影至单位切向量并守恒二维步长，彻底消除顺地形/沿洞口斜线移动的速度叠加！
         const sharkStep = resolveSeabedKineticStep(
           shark.x,
           shark.y,
@@ -2068,6 +2074,14 @@ export default function App() {
         shark.y = sharkStep.engineY;
         shark.vx = sharkStep.vx;
         shark.vy = sharkStep.vy;
+        if (targetSpeed > 0) {
+          const postStepSpeed = Math.hypot(shark.vx, shark.vy);
+          if (postStepSpeed > targetSpeed && postStepSpeed > 1e-6) {
+            const clampScale = targetSpeed / postStepSpeed;
+            shark.vx *= clampScale;
+            shark.vy *= clampScale;
+          }
+        }
 
         // 模块 A：无限世界与动态边界控制器 (InfiniteWorldManager)
         infiniteWorldManager.update(dt, shark, sim.camera);

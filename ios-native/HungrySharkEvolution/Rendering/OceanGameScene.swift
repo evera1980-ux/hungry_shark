@@ -2007,30 +2007,21 @@ public final class OceanGameScene: SKScene {
 
         func layersForOutcrop(_ outcrop: GameRules.SeabedOutcropPlacement) -> [CoralLayerSpec] {
             let v = max(1, min(4, outcrop.variant + 1))
-            let vNext = (v % 4) + 1
-            let vPrev = ((v + 1) % 4) + 1
             let flipMain = outcrop.seed > 0.5
 
             switch outcrop.type {
             case .CORAL_MOUND:
                 return [
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(v)",      dxRatio: 0.0,   dyRatio: 0.04,  scaleW: 1.16, scaleH: 0.76, flipX: flipMain,  zOff: 0.01),
-                    CoralLayerSpec(isPoi: false, spriteId: "coral_\(vNext)", dxRatio: -0.26, dyRatio: -0.04, scaleW: 0.72, scaleH: 0.78, flipX: !flipMain, zOff: 0.02),
-                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(vPrev)",  dxRatio: 0.24,  dyRatio: -0.06, scaleW: 0.58, scaleH: 1.05, flipX: flipMain,  zOff: 0.03),
-                    CoralLayerSpec(isPoi: false, spriteId: "coral_\(v)",     dxRatio: 0.02,  dyRatio: -0.10, scaleW: 0.96, scaleH: 0.98, flipX: flipMain,  zOff: 0.04)
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(v)",  dxRatio: -0.28, dyRatio: 0.02,  scaleW: 0.62, scaleH: 0.68, flipX: !flipMain, zOff: 0.01),
+                    CoralLayerSpec(isPoi: false, spriteId: "coral_\(v)", dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.08, scaleH: 1.08, flipX: flipMain,  zOff: 0.03)
                 ]
             case .KELP_CLUSTER:
                 return [
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(vPrev)",  dxRatio: 0.0,   dyRatio: 0.05,  scaleW: 1.08, scaleH: 0.56, flipX: !flipMain, zOff: 0.01),
-                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(vNext)",  dxRatio: -0.22, dyRatio: -0.02, scaleW: 0.76, scaleH: 0.88, flipX: !flipMain, zOff: 0.02),
-                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(v)",      dxRatio: 0.04,  dyRatio: -0.05, scaleW: 0.96, scaleH: 1.06, flipX: flipMain,  zOff: 0.03),
-                    CoralLayerSpec(isPoi: false, spriteId: "coral_\(v)",     dxRatio: 0.18,  dyRatio: 0.01,  scaleW: 0.64, scaleH: 0.52, flipX: flipMain,  zOff: 0.04)
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(v)",  dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.06, scaleH: 1.12, flipX: flipMain,  zOff: 0.02)
                 ]
             case .ROCK_SPIRE:
                 var list: [CoralLayerSpec] = [
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(vNext)",  dxRatio: -0.20, dyRatio: 0.03,  scaleW: 0.82, scaleH: 0.74, flipX: !flipMain, zOff: 0.01),
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(v)",      dxRatio: 0.04,  dyRatio: -0.02, scaleW: 1.04, scaleH: 1.04, flipX: flipMain,  zOff: 0.02),
-                    CoralLayerSpec(isPoi: false, spriteId: "coral_\(vPrev)", dxRatio: 0.22,  dyRatio: 0.02,  scaleW: 0.68, scaleH: 0.66, flipX: flipMain,  zOff: 0.03)
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(v)",  dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.08, scaleH: 1.08, flipX: flipMain,  zOff: 0.02)
                 ]
                 if outcrop.seed > 0.78 {
                     let poiIds = ["shipwreck_1", "statue_1", "arch_1", "skeleton_1"]
@@ -2040,9 +2031,7 @@ public final class OceanGameScene: SKScene {
                 return list
             case .ABYSSAL_CHIMNEY:
                 return [
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(v)",      dxRatio: 0.0,   dyRatio: 0.04,  scaleW: 1.18, scaleH: 0.68, flipX: !flipMain, zOff: 0.01),
-                    CoralLayerSpec(isPoi: false, spriteId: "vent_\(vNext)",  dxRatio: -0.22, dyRatio: -0.02, scaleW: 0.74, scaleH: 0.84, flipX: !flipMain, zOff: 0.02),
-                    CoralLayerSpec(isPoi: false, spriteId: "vent_\(v)",      dxRatio: 0.06,  dyRatio: -0.06, scaleW: 0.96, scaleH: 1.08, flipX: flipMain,  zOff: 0.03)
+                    CoralLayerSpec(isPoi: false, spriteId: "vent_\(v)",  dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.08, scaleH: 1.12, flipX: flipMain,  zOff: 0.02)
                 ]
             }
         }

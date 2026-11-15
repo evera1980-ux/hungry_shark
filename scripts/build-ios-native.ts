@@ -964,22 +964,26 @@ public enum GameRules {
         let relief = (noise1D(worldX * 0.0022, salt: 419 + saltBase) * 38.0
             + noise1D(worldX * 0.0068, salt: 431 + saltBase) * 14.0) * spec.reliefAmp
         let baseTopY = spec.baseDepth + relief
-        let slope = ((noise1D((worldX + 8.0) * 0.0022, salt: 419 + saltBase)
+        let baseSlope = ((noise1D((worldX + 8.0) * 0.0022, salt: 419 + saltBase)
             - noise1D((worldX - 8.0) * 0.0022, salt: 419 + saltBase)) * 38.0 * spec.reliefAmp) / 16.0
+        let gapSign: Double = cellPhase >= 0.5 ? 1.0 : -1.0
+        let dDistDx: Double = (2.0 / spec.period) * gapSign
 
         // Inside the downward cave opening (shark can swim freely up & down through this portal!)
         if distFromGapCenter < spec.openDuty {
             let normCave = distFromGapCenter / spec.openDuty // 0 at center of opening, 1 at rim lip
             let caveArch = cos(normCave * .pi * 0.5)
             let dropOffset = spec.dropAmplitude + (1.0 - normCave * normCave) * (spec.dropAmplitude * 0.54)
+            let dDropDx = -2.0 * normCave * (spec.dropAmplitude * 0.54) * (dDistDx / max(0.01, spec.openDuty))
             let caveFloorY = min(mainFloor - 24.0, baseTopY + dropOffset)
+            let caveSlope = max(-2.4, min(2.4, baseSlope + dDropDx))
             return SeabedTerraceSample(
                 isPresent: false,
                 topY: caveFloorY,
                 bottomArchY: min(mainFloor, caveFloorY + spec.thicknessBase * 0.92),
                 edgeFactor: 0.0,
                 caveFactor: caveArch,
-                slope: slope,
+                slope: caveSlope,
                 tierIndex: spec.tierIndex,
                 stripId: spec.stripId
             )
@@ -988,8 +992,13 @@ public enum GameRules {
         let rampSpan = 0.17
         let edgeFactor = min(1.0, (distFromGapCenter - spec.openDuty) / rampSpan)
         let smoothEdge = edgeFactor * edgeFactor * (3.0 - 2.0 * edgeFactor)
+        let dSmoothEdgeDx = edgeFactor < 1.0
+            ? (6.0 * edgeFactor * (1.0 - edgeFactor)) * (dDistDx / rampSpan)
+            : 0.0
         let rimDrop = (1.0 - smoothEdge) * spec.dropAmplitude
+        let dRimDropDx = -dSmoothEdgeDx * spec.dropAmplitude
         let topY = min(mainFloor - 36.0, baseTopY + rimDrop)
+        let slope = max(-2.4, min(2.4, baseSlope + dRimDropDx))
 
         let archThickness = spec.thicknessBase + smoothEdge * (spec.thicknessBase * 0.44)
             + noise1D(worldX * 0.0038, salt: 443 + saltBase) * (28.0 * spec.reliefAmp)
@@ -1215,7 +1224,7 @@ public enum GameRules {
         public let slope: Double
     }
 
-    /// Full 2D Kinetic Seabed Step with Sub-Stepping (prevents tunneling through steep walls or terrace undersides)
+    /// Full 2D Kinetic Seabed Step with Sub-Stepping & Tangent Arc-Length Conservation (prevents tunneling and eliminates speed stacking along cave opening downward slopes)
     public static func resolveSeabedKineticStep(
         prevX: Double,
         prevY: Double,
@@ -1230,6 +1239,10 @@ public enum GameRules {
         let totalDy = nextY - prevY
         let dist = hypot(totalDx, totalDy)
         let steps = max(1, min(6, Int(ceil(dist / max(8.0, entityRadius * 0.45)))))
+        let stepDx = totalDx / Double(steps)
+        let stepDy = totalDy / Double(steps)
+        let maxSubstepDist = dist / Double(steps)
+        let intendedSpeed = hypot(vx, vy)
 
         var curX = prevX
         var curY = prevY
@@ -1240,11 +1253,11 @@ public enum GameRules {
         var lastFloorY = getFloorDepthAt(worldX: nextX)
         var lastSlope = 0.0
 
-        for s in 1...steps {
+        for _ in 1...steps {
             let stepPrevX = curX
             let stepPrevY = curY
-            let targetX = prevX + (totalDx * Double(s)) / Double(steps)
-            let targetY = curY + totalDy / Double(steps)
+            let targetX = stepPrevX + stepDx
+            let targetY = stepPrevY + stepDy
 
             let col = resolveSeabedCollision(
                 worldX: targetX,
@@ -1257,6 +1270,7 @@ public enum GameRules {
 
             lastFloorY = col.floorY
             lastSlope = col.slope
+            let tangentScale = 1.0 / sqrt(1.0 + col.slope * col.slope)
 
             if col.hitAtollUnderside {
                 hitAtollUnderside = true
@@ -1271,25 +1285,83 @@ public enum GameRules {
                 if !prevColAtOldX.hitAtollUnderside && !prevColAtOldX.hitSeabed && abs(stepPrevY - col.y) > entityRadius * 0.42 {
                     curX = stepPrevX
                     curVx = 0.0
-                    curY = max(stepPrevY, prevColAtOldX.y)
+                    curY = max(stepPrevY, min(prevColAtOldX.y, stepPrevY + maxSubstepDist))
                 } else {
-                    curX = targetX
-                    curY = col.y
-                    curVy = col.vy
+                    let projectedX = stepPrevX + stepDx * tangentScale * 0.92
+                    let secondCol = resolveSeabedCollision(
+                        worldX: projectedX,
+                        worldY: targetY,
+                        vy: curVy,
+                        entityRadius: entityRadius,
+                        clearancePadding: clearancePadding,
+                        prevWorldY: stepPrevY
+                    )
+                    var nextStepX = projectedX
+                    var nextStepY = secondCol.hitAtollUnderside ? secondCol.y : col.y
+                    let actualSubDist = hypot(nextStepX - stepPrevX, nextStepY - stepPrevY)
+                    if actualSubDist > maxSubstepDist && actualSubDist > 1e-6 && maxSubstepDist > 1e-6 {
+                        let shrink = maxSubstepDist / actualSubDist
+                        nextStepX = stepPrevX + (nextStepX - stepPrevX) * shrink
+                        let clampedCol = resolveSeabedCollision(
+                            worldX: nextStepX,
+                            worldY: stepPrevY + (nextStepY - stepPrevY) * shrink,
+                            vy: curVy,
+                            entityRadius: entityRadius,
+                            clearancePadding: clearancePadding,
+                            prevWorldY: stepPrevY
+                        )
+                        nextStepY = clampedCol.hitAtollUnderside ? clampedCol.y : (stepPrevY + (nextStepY - stepPrevY) * shrink)
+                    }
+                    curX = nextStepX
+                    curY = nextStepY
+                    curVx = vx * tangentScale * 0.92
+                    curVy = vy < 0.0 ? 0.0 : vy * tangentScale * 0.92
                 }
             } else if col.hitSeabed {
                 hitSeabed = true
-                curX = targetX
-                curY = col.y
-                curVy = col.vy
-                if abs(col.slope) > 0.45 && curVx * col.slope < 0.0 {
-                    let damp = max(0.35, 1.0 - (abs(col.slope) - 0.45) * 0.35)
-                    curVx *= damp
+                let isUphill = stepDx * col.slope < -1e-5
+                let scaleFactor = isUphill ? tangentScale * 0.90 : tangentScale * 0.95
+                let projectedX = stepPrevX + stepDx * scaleFactor
+                let secondCol = resolveSeabedCollision(
+                    worldX: projectedX,
+                    worldY: targetY,
+                    vy: curVy,
+                    entityRadius: entityRadius,
+                    clearancePadding: clearancePadding,
+                    prevWorldY: stepPrevY
+                )
+                var nextStepX = projectedX
+                var nextStepY = secondCol.hitSeabed ? secondCol.y : col.y
+                let maxAllowed = maxSubstepDist * (isUphill ? 0.92 : 1.0)
+                let actualSubDist = hypot(nextStepX - stepPrevX, nextStepY - stepPrevY)
+                if actualSubDist > maxAllowed && actualSubDist > 1e-6 && maxAllowed > 1e-6 {
+                    let shrink = maxAllowed / actualSubDist
+                    nextStepX = stepPrevX + (nextStepX - stepPrevX) * shrink
+                    let clampedCol = resolveSeabedCollision(
+                        worldX: nextStepX,
+                        worldY: stepPrevY + (nextStepY - stepPrevY) * shrink,
+                        vy: curVy,
+                        entityRadius: entityRadius,
+                        clearancePadding: clearancePadding,
+                        prevWorldY: stepPrevY
+                    )
+                    nextStepY = clampedCol.hitSeabed ? clampedCol.y : (stepPrevY + (nextStepY - stepPrevY) * shrink)
                 }
+                curX = nextStepX
+                curY = nextStepY
+                curVx = vx * scaleFactor
+                curVy = vy > 0.0 ? 0.0 : vy * scaleFactor
             } else {
                 curX = targetX
                 curY = col.y
             }
+        }
+
+        let outSpeed = hypot(curVx, curVy)
+        if outSpeed > intendedSpeed && outSpeed > 1e-6 {
+            let s = intendedSpeed / outSpeed
+            curVx *= s
+            curVy *= s
         }
 
         return SeabedKineticStepResult(
@@ -1793,10 +1865,23 @@ public final class SpriteAtlasManager: ObservableObject {
                 self.loadingProgress = max(self.loadingProgress, 0.85)
             }
 
-            // Slice 16 Ecology Sprites (world_ecology_atlas_1794473252524) & 10 POI Sprites (world_pois_atlas_1794473250443)
+            // Load 4 Standalone High-Res (@3x) Realistic Transparent Ecology PNGs (no 4x4 sprite sheet slicing) & 10 POI Sprites
             var localEcologyTex: [String: SKTexture] = [:]
-            if let ecoSheet = Self.loadBundledImage(named: "world_ecology_atlas_1794473252524") {
-                localEcologyTex = Self.sliceWorldEcologyAtlas(from: ecoSheet)
+            let standaloneEcologyDefs: [(prefix: String, assetName: String)] = [
+                ("coral", "ecology_coral_reef_cluster"),
+                ("rock", "ecology_rocky_outcrop"),
+                ("kelp", "ecology_kelp_forest_cluster"),
+                ("vent", "ecology_abyssal_vent_debris")
+            ]
+            for def in standaloneEcologyDefs {
+                if let ecoImg = Self.loadBundledImage(named: def.assetName) {
+                    let tex = SKTexture(image: ecoImg)
+                    tex.filteringMode = .linear
+                    localEcologyTex[def.prefix] = tex
+                    for idx in 1...4 {
+                        localEcologyTex["\\(def.prefix)_\\(idx)"] = tex
+                    }
+                }
             }
             var localPoiTex: [String: SKTexture] = [:]
             if let poiSheet = Self.loadBundledImage(named: "world_pois_atlas_1794473250443") {
@@ -5723,30 +5808,21 @@ public final class OceanGameScene: SKScene {
 
         func layersForOutcrop(_ outcrop: GameRules.SeabedOutcropPlacement) -> [CoralLayerSpec] {
             let v = max(1, min(4, outcrop.variant + 1))
-            let vNext = (v % 4) + 1
-            let vPrev = ((v + 1) % 4) + 1
             let flipMain = outcrop.seed > 0.5
 
             switch outcrop.type {
             case .CORAL_MOUND:
                 return [
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(v)",      dxRatio: 0.0,   dyRatio: 0.04,  scaleW: 1.16, scaleH: 0.76, flipX: flipMain,  zOff: 0.01),
-                    CoralLayerSpec(isPoi: false, spriteId: "coral_\\(vNext)", dxRatio: -0.26, dyRatio: -0.04, scaleW: 0.72, scaleH: 0.78, flipX: !flipMain, zOff: 0.02),
-                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\\(vPrev)",  dxRatio: 0.24,  dyRatio: -0.06, scaleW: 0.58, scaleH: 1.05, flipX: flipMain,  zOff: 0.03),
-                    CoralLayerSpec(isPoi: false, spriteId: "coral_\\(v)",     dxRatio: 0.02,  dyRatio: -0.10, scaleW: 0.96, scaleH: 0.98, flipX: flipMain,  zOff: 0.04)
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\\(v)",  dxRatio: -0.28, dyRatio: 0.02,  scaleW: 0.62, scaleH: 0.68, flipX: !flipMain, zOff: 0.01),
+                    CoralLayerSpec(isPoi: false, spriteId: "coral_\\(v)", dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.08, scaleH: 1.08, flipX: flipMain,  zOff: 0.03)
                 ]
             case .KELP_CLUSTER:
                 return [
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(vPrev)",  dxRatio: 0.0,   dyRatio: 0.05,  scaleW: 1.08, scaleH: 0.56, flipX: !flipMain, zOff: 0.01),
-                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\\(vNext)",  dxRatio: -0.22, dyRatio: -0.02, scaleW: 0.76, scaleH: 0.88, flipX: !flipMain, zOff: 0.02),
-                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\\(v)",      dxRatio: 0.04,  dyRatio: -0.05, scaleW: 0.96, scaleH: 1.06, flipX: flipMain,  zOff: 0.03),
-                    CoralLayerSpec(isPoi: false, spriteId: "coral_\\(v)",     dxRatio: 0.18,  dyRatio: 0.01,  scaleW: 0.64, scaleH: 0.52, flipX: flipMain,  zOff: 0.04)
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\\(v)",  dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.06, scaleH: 1.12, flipX: flipMain,  zOff: 0.02)
                 ]
             case .ROCK_SPIRE:
                 var list: [CoralLayerSpec] = [
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(vNext)",  dxRatio: -0.20, dyRatio: 0.03,  scaleW: 0.82, scaleH: 0.74, flipX: !flipMain, zOff: 0.01),
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(v)",      dxRatio: 0.04,  dyRatio: -0.02, scaleW: 1.04, scaleH: 1.04, flipX: flipMain,  zOff: 0.02),
-                    CoralLayerSpec(isPoi: false, spriteId: "coral_\\(vPrev)", dxRatio: 0.22,  dyRatio: 0.02,  scaleW: 0.68, scaleH: 0.66, flipX: flipMain,  zOff: 0.03)
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(v)",  dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.08, scaleH: 1.08, flipX: flipMain,  zOff: 0.02)
                 ]
                 if outcrop.seed > 0.78 {
                     let poiIds = ["shipwreck_1", "statue_1", "arch_1", "skeleton_1"]
@@ -5756,9 +5832,7 @@ public final class OceanGameScene: SKScene {
                 return list
             case .ABYSSAL_CHIMNEY:
                 return [
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(v)",      dxRatio: 0.0,   dyRatio: 0.04,  scaleW: 1.18, scaleH: 0.68, flipX: !flipMain, zOff: 0.01),
-                    CoralLayerSpec(isPoi: false, spriteId: "vent_\\(vNext)",  dxRatio: -0.22, dyRatio: -0.02, scaleW: 0.74, scaleH: 0.84, flipX: !flipMain, zOff: 0.02),
-                    CoralLayerSpec(isPoi: false, spriteId: "vent_\\(v)",      dxRatio: 0.06,  dyRatio: -0.06, scaleW: 0.96, scaleH: 1.08, flipX: flipMain,  zOff: 0.03)
+                    CoralLayerSpec(isPoi: false, spriteId: "vent_\\(v)",  dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.08, scaleH: 1.12, flipX: flipMain,  zOff: 0.02)
                 ]
             }
         }
