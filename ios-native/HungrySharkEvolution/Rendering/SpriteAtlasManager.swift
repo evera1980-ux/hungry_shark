@@ -33,6 +33,11 @@ public final class SpriteAtlasManager: ObservableObject {
     private var uiSettingImages: [String: UIImage] = [:]
     private var uiSettingIconImages: [String: UIImage] = [:]
     private var oceanLayerTextures: [String: SKTexture] = [:]
+    private var seabedStripTextures: [String: SKTexture] = [:]
+    private var seabedSubStratumTextures: [String: SKTexture] = [:]
+    private var ecologySpriteTextures: [String: SKTexture] = [:]
+    private var poiSpriteTextures: [String: SKTexture] = [:]
+    private var cavePortalShadowTex: SKTexture?
 
     private var cachedLoadingBg: UIImage?
     private var cachedLoadingLogo: UIImage?
@@ -146,7 +151,7 @@ public final class SpriteAtlasManager: ObservableObject {
                 self.loadingStageEn = "Spawning Marine Ecosystem..."
             }
 
-            // Stage 2 (0.38 -> 0.56): Slice 33 Prey Species (fish_24bdaa5a.png & fish2_fc857cfa.png)
+            // Stage 2 (0.38 -> 0.56): Load @3x Prey PNGs first, fallback to slicing fish_24bdaa5a.png & fish2_fc857cfa.png
             var localPreyUI: [String: UIImage] = [:]
             var localPreyTex: [String: SKTexture] = [:]
             let primarySheet = Self.loadBundledImage(named: "fish_24bdaa5a")
@@ -156,17 +161,26 @@ public final class SpriteAtlasManager: ObservableObject {
 
             for (idx, prey) in allPreys.enumerated() {
                 if localPreyTex[prey.spriteKey] != nil { continue }
-                let srcImg = prey.sheetName == "fish2_fc857cfa" ? fish2Sheet : primarySheet
-                if let img = srcImg,
-                   let sliced = Self.sliceAndKeyNormalizedCell(
-                       from: img,
-                       bounds: prey.normalizedBounds,
-                       preserveInteriorWhite: false
-                   ) {
-                    localPreyUI[prey.spriteKey] = sliced
-                    let tex = SKTexture(image: sliced)
+                if let raw3x = Self.loadBundledImage(named: "prey_\(prey.id)@3x") ?? Self.loadBundledImage(named: "prey_\(prey.id)"),
+                   let cg3x = raw3x.cgImage {
+                    let img3x = UIImage(cgImage: cg3x, scale: 3.0, orientation: .up)
+                    localPreyUI[prey.spriteKey] = img3x
+                    let tex = SKTexture(image: img3x)
                     tex.filteringMode = .linear
                     localPreyTex[prey.spriteKey] = tex
+                } else {
+                    let srcImg = prey.sheetName == "fish2_fc857cfa" ? fish2Sheet : primarySheet
+                    if let img = srcImg,
+                       let sliced = Self.sliceAndKeyNormalizedCell(
+                           from: img,
+                           bounds: prey.normalizedBounds,
+                           preserveInteriorWhite: false
+                       ) {
+                        localPreyUI[prey.spriteKey] = sliced
+                        let tex = SKTexture(image: sliced)
+                        tex.filteringMode = .linear
+                        localPreyTex[prey.spriteKey] = tex
+                    }
                 }
                 if idx % 8 == 7 || idx == totalPreys - 1 {
                     let prog = 0.38 + (Double(idx + 1) / Double(totalPreys)) * 0.18
@@ -222,44 +236,80 @@ public final class SpriteAtlasManager: ObservableObject {
                 self.uiSettingImages = settingResult.images
                 self.uiSettingIconImages = settingResult.icons
                 self.loadingProgress = 0.72
-                self.loadingStageZh = "正在构建无缝深海视差洋流..."
-                self.loadingStageEn = "Building Seamless Ocean Biomes..."
+                self.loadingStageZh = "正在构建 9 阶深海海床与珊瑚地貌..."
+                self.loadingStageEn = "Building 9-Tier Seabed & Coral Reefs..."
             }
 
-            // Stage 4 (0.72 -> 0.94): Process all 12 Multi-Biome Ocean Parallax Layers
-            let oceanLayers: [(name: String, isWater: Bool)] = [
-                ("bg_shallow_0_water_0e65cb68", true),
-                ("bg_shallow_1_far_8898229a", false),
-                ("bg_shallow_2_mid_b4e0d30a", false),
-                ("bg_shallow_3_near_96e92ee1", false),
-                ("bg_twilight_0_17bcb84c", true),
-                ("bg_twilight_1_04f5d35f", false),
-                ("bg_twilight_2_fd5a1b33", false),
-                ("bg_twilight_3_6e0dd7c1", false),
-                ("bg_abyss_0_1bbf506a", true),
-                ("bg_abyss_1_75e4a628", false),
-                ("bg_abyss_2_6ce66695", false),
-                ("bg_abyss_3_a4986280", false)
+            // Stage 4 (0.72 -> 0.94): Process Water Canopies + World Seabed Strips + Subsurface Bedrock Strata + Ecology & POI Atlases
+            let waterCanopies: [String] = [
+                "bg_shallow_0_water_0e65cb68",
+                "bg_twilight_0_17bcb84c",
+                "bg_abyss_0_1bbf506a"
             ]
             var localOceanTex: [String: SKTexture] = [:]
-            for (idx, layer) in oceanLayers.enumerated() {
-                if let rawImg = Self.loadBundledImage(named: layer.name) {
-                    let processed: UIImage
-                    if layer.isWater {
-                        processed = Self.processWaterLayerToSeamlessTile(rawImg, assetName: layer.name) ?? rawImg
-                    } else {
-                        processed = Self.processTerrainLayerToSeamlessStrip(rawImg, assetName: layer.name) ?? rawImg
-                    }
+            for (idx, waterName) in waterCanopies.enumerated() {
+                if let rawImg = Self.loadBundledImage(named: waterName) {
+                    let processed = Self.processWaterLayerToSeamlessTile(rawImg, assetName: waterName) ?? rawImg
                     let tex = SKTexture(image: processed)
                     tex.filteringMode = .linear
-                    localOceanTex[layer.name] = tex
+                    localOceanTex[waterName] = tex
                 }
-                let prog = 0.72 + (Double(idx + 1) / Double(oceanLayers.count)) * 0.22
+                let prog = 0.72 + (Double(idx + 1) / Double(waterCanopies.count)) * 0.06
                 let partialOcean = localOceanTex
                 await MainActor.run {
                     self.oceanLayerTextures = partialOcean
                     self.loadingProgress = max(self.loadingProgress, prog)
                 }
+            }
+
+            // Slice 4 Seamless Seabed Surface Strips & 4 Seamless Subsurface Bedrock Strata from world_seabed_strips_1794473245165
+            var localSeabedStrips: [String: SKTexture] = [:]
+            var localSeabedSubStrata: [String: SKTexture] = [:]
+            if let seabedSheet = Self.loadBundledImage(named: "world_seabed_strips_1794473245165") {
+                let stripDefs: [(id: String, y0: Double, y1: Double)] = [
+                    ("coral_reef", 0.0, 0.25),
+                    ("rocky_shelf", 0.25, 0.50),
+                    ("underwater_canyon", 0.50, 0.75),
+                    ("deep_abyss", 0.75, 1.00)
+                ]
+                for def in stripDefs {
+                    if let stripImg = Self.sliceSeabedStrip(from: seabedSheet, y0Ratio: def.y0, y1Ratio: def.y1) {
+                        let tex = SKTexture(image: stripImg)
+                        tex.filteringMode = .linear
+                        localSeabedStrips[def.id] = tex
+                    }
+                    if let subImg = Self.sliceSeabedSubStratum(from: seabedSheet, stripId: def.id, y0Ratio: def.y0, y1Ratio: def.y1) {
+                        let subTex = SKTexture(image: subImg)
+                        subTex.filteringMode = .linear
+                        localSeabedSubStrata[def.id] = subTex
+                    }
+                }
+            }
+            let committedStrips = localSeabedStrips
+            let committedSubStrata = localSeabedSubStrata
+            await MainActor.run {
+                self.seabedStripTextures = committedStrips
+                self.seabedSubStratumTextures = committedSubStrata
+                self.loadingProgress = max(self.loadingProgress, 0.85)
+            }
+
+            // Slice 16 Ecology Sprites (world_ecology_atlas_1794473252524) & 10 POI Sprites (world_pois_atlas_1794473250443)
+            var localEcologyTex: [String: SKTexture] = [:]
+            if let ecoSheet = Self.loadBundledImage(named: "world_ecology_atlas_1794473252524") {
+                localEcologyTex = Self.sliceWorldEcologyAtlas(from: ecoSheet)
+            }
+            var localPoiTex: [String: SKTexture] = [:]
+            if let poiSheet = Self.loadBundledImage(named: "world_pois_atlas_1794473250443") {
+                localPoiTex = Self.sliceWorldPoisAtlas(from: poiSheet)
+            }
+            let portalShadow = Self.makeCavePortalShadowTexture()
+            let committedEco = localEcologyTex
+            let committedPoi = localPoiTex
+            await MainActor.run {
+                self.ecologySpriteTextures = committedEco
+                self.poiSpriteTextures = committedPoi
+                self.cavePortalShadowTex = portalShadow
+                self.loadingProgress = max(self.loadingProgress, 0.94)
             }
 
             // Stage 5 (0.94 -> 1.00): Metal GPU Texture Preload & Smooth Fade-Out
@@ -271,6 +321,10 @@ public final class SpriteAtlasManager: ObservableObject {
                 let allGpuTextures = Array(self.sharkTextures.values)
                     + Array(self.preyTextures.values)
                     + Array(self.oceanLayerTextures.values)
+                    + Array(self.seabedStripTextures.values)
+                    + Array(self.seabedSubStratumTextures.values)
+                    + Array(self.ecologySpriteTextures.values)
+                    + Array(self.poiSpriteTextures.values)
 
                 SKTexture.preload(allGpuTextures) {
                     Task { @MainActor in
@@ -354,40 +408,75 @@ public final class SpriteAtlasManager: ObservableObject {
         return oceanLayerTextures[assetName]
     }
 
+    public func seabedStripTexture(for stripId: String) -> SKTexture? {
+        return seabedStripTextures[stripId] ?? seabedStripTextures["coral_reef"]
+    }
+
+    public func seabedSubStratumTexture(for stripId: String) -> SKTexture? {
+        return seabedSubStratumTextures[stripId] ?? seabedSubStratumTextures["coral_reef"]
+    }
+
+    public func ecologySpriteTexture(for id: String) -> SKTexture? {
+        return ecologySpriteTextures[id]
+    }
+
+    public func poiSpriteTexture(for id: String) -> SKTexture? {
+        return poiSpriteTextures[id]
+    }
+
+    public func cavePortalShadowTexture() -> SKTexture? {
+        if let tex = cavePortalShadowTex { return tex }
+        let tex = Self.makeCavePortalShadowTexture()
+        cavePortalShadowTex = tex
+        return tex
+    }
+
     nonisolated private static func loadBundledImage(named name: String) -> UIImage? {
-        let cleanBase = name.hasSuffix(".png") ? String(name.dropLast(4)) : name
+        var cleanBase = name
+        if cleanBase.hasSuffix(".png") {
+            cleanBase = String(cleanBase.dropLast(4))
+        } else if cleanBase.hasSuffix(".jpg") {
+            cleanBase = String(cleanBase.dropLast(4))
+        } else if cleanBase.hasSuffix(".jpeg") {
+            cleanBase = String(cleanBase.dropLast(5))
+        }
+        let exts = ["png", "jpg", "jpeg"]
         let roots: [URL] = [Bundle.main.resourceURL, Bundle.main.bundleURL].compactMap { $0 }
         for root in roots {
-            let candidates = [
-                root.appendingPathComponent("Assets/\(cleanBase).png"),
-                root.appendingPathComponent("Assets/\(cleanBase)@3x.png"),
-                root.appendingPathComponent("Resources/Assets/\(cleanBase).png"),
-                root.appendingPathComponent("Resources/Assets/\(cleanBase)@3x.png"),
-                root.appendingPathComponent("\(cleanBase).png"),
-                root.appendingPathComponent("\(cleanBase)@3x.png")
-            ]
-            for url in candidates {
-                if FileManager.default.fileExists(atPath: url.path),
-                   let img = UIImage(contentsOfFile: url.path) {
-                    return img
+            for ext in exts {
+                let candidates = [
+                    root.appendingPathComponent("Assets/\(cleanBase).\(ext)"),
+                    root.appendingPathComponent("Assets/\(cleanBase)@3x.\(ext)"),
+                    root.appendingPathComponent("Resources/Assets/\(cleanBase).\(ext)"),
+                    root.appendingPathComponent("Resources/Assets/\(cleanBase)@3x.\(ext)"),
+                    root.appendingPathComponent("\(cleanBase).\(ext)"),
+                    root.appendingPathComponent("\(cleanBase)@3x.\(ext)")
+                ]
+                for url in candidates {
+                    if FileManager.default.fileExists(atPath: url.path),
+                       let img = UIImage(contentsOfFile: url.path) {
+                        return img
+                    }
                 }
             }
         }
-        if let path = Bundle.main.path(forResource: cleanBase, ofType: "png"),
-           let img = UIImage(contentsOfFile: path) {
-            return img
-        }
-        if let path = Bundle.main.path(forResource: cleanBase, ofType: "png", inDirectory: "Assets"),
-           let img = UIImage(contentsOfFile: path) {
-            return img
-        }
-        if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: "png"),
-           let img = UIImage(contentsOfFile: path) {
-            return img
-        }
-        if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: "png", inDirectory: "Assets"),
-           let img = UIImage(contentsOfFile: path) {
-            return img
+        for ext in exts {
+            if let path = Bundle.main.path(forResource: cleanBase, ofType: ext),
+               let img = UIImage(contentsOfFile: path) {
+                return img
+            }
+            if let path = Bundle.main.path(forResource: cleanBase, ofType: ext, inDirectory: "Assets"),
+               let img = UIImage(contentsOfFile: path) {
+                return img
+            }
+            if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: ext),
+               let img = UIImage(contentsOfFile: path) {
+                return img
+            }
+            if let path = Bundle.main.path(forResource: "\(cleanBase)@3x", ofType: ext, inDirectory: "Assets"),
+               let img = UIImage(contentsOfFile: path) {
+                return img
+            }
         }
         if let img = UIImage(named: cleanBase) { return img }
         return nil
@@ -1747,5 +1836,377 @@ public final class SpriteAtlasManager: ObservableObject {
             height: cropH,
             seamRatio: isPanoramic ? 0.10 : 0.14
         )
+    }
+
+    /// Slices one of the 4 horizontal seabed surface bands from world_seabed_strips_1794473245165.jpg,
+    /// removes the top #FFFFFF background via top-edge BFS flood-fill, grounds the base, and cross-fades horizontally.
+    nonisolated private static func sliceSeabedStrip(from image: UIImage, y0Ratio: Double, y1Ratio: Double) -> UIImage? {
+        guard let cgImg = image.cgImage else { return nil }
+        let fullW = cgImg.width
+        let fullH = cgImg.height
+        let sy = max(0, Int((Double(fullH) * y0Ratio).rounded()))
+        let ey = min(fullH, Int((Double(fullH) * y1Ratio).rounded()))
+        let rawH = max(32, ey - sy)
+        let padX = max(2, Int((Double(fullW) * 0.008).rounded()))
+        let rawW = max(64, fullW - padX * 2)
+
+        guard let croppedCG = cgImg.cropping(to: CGRect(x: padX, y: sy, width: rawW, height: rawH)) else {
+            return nil
+        }
+
+        let w = rawW
+        let h = rawH
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        var visited = [UInt8](repeating: 0, count: w * h)
+        var queue = [Int](repeating: 0, count: w * h)
+        var qHead = 0
+        var qTail = 0
+
+        func isBg(_ i: Int) -> Bool {
+            let p = i * 4
+            let r = Int(rgba[p])
+            let g = Int(rgba[p + 1])
+            let b = Int(rgba[p + 2])
+            let minC = min(r, min(g, b))
+            let maxC = max(r, max(g, b))
+            return minC >= 205 && (maxC - minC) <= 42
+        }
+
+        func push(_ x: Int, _ y: Int) {
+            if x < 0 || x >= w || y < 0 || y >= Int(Double(h) * 0.82) { return }
+            let i = y * w + x
+            if visited[i] != 0 || !isBg(i) { return }
+            visited[i] = 1
+            queue[qTail] = i
+            qTail += 1
+        }
+
+        for x in 0..<w {
+            push(x, 0)
+            push(x, 1)
+        }
+        for y in 0..<Int(Double(h) * 0.45) {
+            push(0, y)
+            push(w - 1, y)
+        }
+
+        while qHead < qTail {
+            let curr = queue[qHead]
+            qHead += 1
+            let cx = curr % w
+            let cy = (curr - cx) / w
+            if cx > 0 { push(cx - 1, cy) }
+            if cx + 1 < w { push(cx + 1, cy) }
+            if cy > 0 { push(cx, cy - 1) }
+            if cy + 1 < h { push(cx, cy + 1) }
+        }
+
+        for i in 0..<(w * h) where visited[i] != 0 {
+            let p = i * 4
+            rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
+        }
+
+        // Feather top silhouette edge (2px despill)
+        if h > 2 && w > 2 {
+            for y in 1..<(h - 1) {
+                let rowOff = y * w
+                for x in 1..<(w - 1) {
+                    let i = rowOff + x
+                    if visited[i] != 0 { continue }
+                    let hasTrans = visited[i - 1] != 0 || visited[i + 1] != 0 || visited[i - w] != 0 || visited[i + w] != 0
+                    if hasTrans {
+                        let p = i * 4
+                        let r = Double(rgba[p])
+                        let g = Double(rgba[p + 1])
+                        let b = Double(rgba[p + 2])
+                        let minC = min(r, min(g, b))
+                        if minC > 165.0 {
+                            let keep = max(0.0, min(1.0, (235.0 - minC) / 70.0))
+                            rgba[p] = UInt8((r * 0.72 * keep).rounded())
+                            rgba[p + 1] = UInt8((g * 0.76 * keep).rounded())
+                            rgba[p + 2] = UInt8((b * 0.82 * keep).rounded())
+                            rgba[p + 3] = UInt8((Double(rgba[p + 3]) * keep).rounded())
+                        }
+                    }
+                }
+            }
+        }
+
+        // Ground lower 42% of each column so seabed base is 100% solid
+        let minSearchY = max(4, Int(Double(h) * 0.58))
+        for x in 0..<w {
+            var lastSolidY = -1
+            for y in stride(from: h - 1, through: minSearchY, by: -1) {
+                let p = (y * w + x) * 4
+                let r = Int(rgba[p]), g = Int(rgba[p + 1]), b = Int(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, max(g, b))
+                if rgba[p + 3] > 200 && !(minC >= 205 && (maxC - minC) <= 40) {
+                    lastSolidY = y
+                    break
+                }
+            }
+            if lastSolidY >= minSearchY && lastSolidY < h - 1 {
+                let srcY = max(0, lastSolidY - 2)
+                let sp = (srcY * w + x) * 4
+                let sr = rgba[sp], sg = rgba[sp + 1], sb = rgba[sp + 2]
+                for y in lastSolidY..<h {
+                    let dp = (y * w + x) * 4
+                    rgba[dp] = sr; rgba[dp + 1] = sg; rgba[dp + 2] = sb; rgba[dp + 3] = 255
+                }
+            }
+        }
+
+        var minY = h - 1
+        var maxY = 0
+        for y in 0..<h {
+            var opaqueCount = 0
+            let rowOff = y * w
+            for x in stride(from: 0, to: w, by: 2) {
+                if rgba[(rowOff + x) * 4 + 3] > 32 {
+                    opaqueCount += 1
+                }
+            }
+            if opaqueCount >= 6 {
+                if y < minY { minY = y }
+                if y > maxY { maxY = y }
+            }
+        }
+        if maxY <= minY + 16 {
+            minY = 0; maxY = h - 1
+        } else {
+            minY = max(0, minY - 2)
+            maxY = min(h - 1, max(minY + 24, maxY - 2))
+        }
+
+        let cropH = maxY - minY + 1
+        var croppedRgba = [UInt8](repeating: 0, count: w * cropH * 4)
+        for y in 0..<cropH {
+            let srcOff = (minY + y) * w * 4
+            let dstOff = y * w * 4
+            for byteIdx in 0..<(w * 4) {
+                croppedRgba[dstOff + byteIdx] = rgba[srcOff + byteIdx]
+            }
+        }
+
+        return makeHorizontallySeamlessImage(rgba: croppedRgba, width: w, height: cropH, seamRatio: 0.14)
+    }
+
+    /// Builds a 100% opaque, horizontally & vertically seamless subsurface bedrock stratum tile
+    /// from the lower 58% of each seabed band in world_seabed_strips_1794473245165.jpg (1:1 parity with Web sliceSeabedSubStratum).
+    nonisolated private static func sliceSeabedSubStratum(
+        from image: UIImage,
+        stripId: String,
+        y0Ratio: Double,
+        y1Ratio: Double
+    ) -> UIImage? {
+        guard let cgImg = image.cgImage else { return nil }
+        let fullW = cgImg.width
+        let fullH = cgImg.height
+        let bandSpan = y1Ratio - y0Ratio
+        let subY0 = y0Ratio + bandSpan * 0.42
+        let subY1 = y1Ratio - bandSpan * 0.02
+        let sy = max(0, Int((Double(fullH) * subY0).rounded()))
+        let ey = min(fullH, Int((Double(fullH) * subY1).rounded()))
+        let rawH = max(32, ey - sy)
+        let padX = max(2, Int((Double(fullW) * 0.01).rounded()))
+        let rawW = max(64, fullW - padX * 2)
+
+        guard let croppedCG = cgImg.cropping(to: CGRect(x: padX, y: sy, width: rawW, height: rawH)) else {
+            return nil
+        }
+
+        let w = rawW
+        let h = rawH
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        let fallbackRGB: (Double, Double, Double)
+        switch stripId {
+        case "coral_reef": fallbackRGB = (42.0, 36.0, 48.0)
+        case "rocky_shelf": fallbackRGB = (28.0, 38.0, 54.0)
+        case "underwater_canyon": fallbackRGB = (34.0, 26.0, 44.0)
+        default: fallbackRGB = (18.0, 16.0, 28.0)
+        }
+
+        for x in 0..<w {
+            var validR = fallbackRGB.0
+            var validG = fallbackRGB.1
+            var validB = fallbackRGB.2
+            for y in stride(from: h - 1, through: 0, by: -1) {
+                let p = (y * w + x) * 4
+                let r = Double(rgba[p]), g = Double(rgba[p + 1]), b = Double(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, min(g, b))
+                if rgba[p + 3] > 210 && !(minC >= 185.0 && (maxC - minC) <= 45.0) {
+                    validR = r * 0.72
+                    validG = g * 0.74
+                    validB = b * 0.78
+                    break
+                }
+            }
+
+            for y in 0..<h {
+                let p = (y * w + x) * 4
+                var r = Double(rgba[p]), g = Double(rgba[p + 1]), b = Double(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, max(g, b))
+                if rgba[p + 3] < 220 || (minC >= 180.0 && (maxC - minC) <= 48.0) {
+                    r = validR
+                    g = validG
+                    b = validB
+                } else {
+                    validR = r * 0.85 + validR * 0.15
+                    validG = g * 0.85 + validG * 0.15
+                    validB = b * 0.85 + validB * 0.15
+                }
+
+                let vRatio = Double(y) / Double(max(1, h - 1))
+                let strataWave = sin(vRatio * .pi * 6.0 + Double(x) * 0.035) * 0.06
+                    + cos(vRatio * .pi * 14.0 - Double(x) * 0.02) * 0.035
+                let depthShade = 0.86 - vRatio * 0.24 + strataWave
+
+                rgba[p] = UInt8(max(6.0, min(255.0, (r * depthShade).rounded())))
+                rgba[p + 1] = UInt8(max(6.0, min(255.0, (g * depthShade).rounded())))
+                rgba[p + 2] = UInt8(max(8.0, min(255.0, (b * depthShade).rounded())))
+                rgba[p + 3] = 255
+            }
+        }
+
+        // Cross-fade top and bottom 16% rows so vertical strata stack seamlessly
+        let vOverlap = max(4, Int((Double(h) * 0.16).rounded()))
+        for y in 0..<vOverlap {
+            let t = (Double(y) + 0.5) / Double(vOverlap)
+            let wTop = 0.5 - 0.5 * cos(.pi * t)
+            let wBot = 1.0 - wTop
+            let botY = h - vOverlap + y
+            for x in 0..<w {
+                let pTop = (y * w + x) * 4
+                let pBot = (botY * w + x) * 4
+                let rMix = UInt8(max(0.0, min(255.0, (Double(rgba[pTop]) * wTop + Double(rgba[pBot]) * wBot).rounded())))
+                let gMix = UInt8(max(0.0, min(255.0, (Double(rgba[pTop + 1]) * wTop + Double(rgba[pBot + 1]) * wBot).rounded())))
+                let bMix = UInt8(max(0.0, min(255.0, (Double(rgba[pTop + 2]) * wTop + Double(rgba[pBot + 2]) * wBot).rounded())))
+                rgba[pTop] = rMix; rgba[pTop + 1] = gMix; rgba[pTop + 2] = bMix
+            }
+        }
+
+        return makeHorizontallySeamlessImage(rgba: rgba, width: w, height: h, seamRatio: 0.16)
+    }
+
+    /// Slices the 4x4 World Ecology Atlas (world_ecology_atlas_1794473252524.jpg) into 16 transparent SKTextures
+    nonisolated private static func sliceWorldEcologyAtlas(from image: UIImage) -> [String: SKTexture] {
+        var out: [String: SKTexture] = [:]
+        let rows: [[String]] = [
+            ["kelp_1", "kelp_2", "kelp_3", "kelp_4"],
+            ["coral_1", "coral_2", "coral_3", "coral_4"],
+            ["rock_1", "rock_2", "rock_3", "rock_4"],
+            ["vent_1", "vent_2", "vent_3", "vent_4"]
+        ]
+        for r in 0..<4 {
+            for c in 0..<4 {
+                let id = rows[r][c]
+                let bounds = SIMD4<Double>(
+                    Double(c) * 0.25 + 0.015,
+                    Double(r) * 0.25 + 0.015,
+                    0.22,
+                    0.22
+                )
+                if let uiImg = sliceAndKeyNormalizedCell(from: image, bounds: bounds, preserveInteriorWhite: false) {
+                    let tex = SKTexture(image: uiImg)
+                    tex.filteringMode = .linear
+                    out[id] = tex
+                }
+            }
+        }
+        return out
+    }
+
+    /// Slices the 10 Landmark POIs from world_pois_atlas_1794473250443.jpg into transparent SKTextures
+    nonisolated private static func sliceWorldPoisAtlas(from image: UIImage) -> [String: SKTexture] {
+        var out: [String: SKTexture] = [:]
+        let defs: [(id: String, bounds: SIMD4<Double>)] = [
+            ("shipwreck_1", SIMD4(0.02, 0.02, 0.46, 0.22)),
+            ("shipwreck_2", SIMD4(0.52, 0.02, 0.46, 0.22)),
+            ("statue_1", SIMD4(0.02, 0.27, 0.46, 0.21)),
+            ("statue_2", SIMD4(0.52, 0.27, 0.46, 0.21)),
+            ("arch_1", SIMD4(0.02, 0.52, 0.46, 0.21)),
+            ("arch_2", SIMD4(0.52, 0.52, 0.46, 0.21)),
+            ("skeleton_1", SIMD4(0.02, 0.77, 0.30, 0.21)),
+            ("skeleton_2", SIMD4(0.35, 0.77, 0.30, 0.21)),
+            ("mine_1", SIMD4(0.68, 0.77, 0.14, 0.21)),
+            ("mine_2", SIMD4(0.84, 0.77, 0.14, 0.21))
+        ]
+        for def in defs {
+            if let uiImg = sliceAndKeyNormalizedCell(from: image, bounds: def.bounds, preserveInteriorWhite: false) {
+                let tex = SKTexture(image: uiImg)
+                tex.filteringMode = .linear
+                out[def.id] = tex
+            }
+        }
+        return out
+    }
+
+    /// Generates a soft radial abyssal portal shadow texture for downward-curved cave openings
+    nonisolated private static func makeCavePortalShadowTexture() -> SKTexture? {
+        let size = 128
+        var rgba = [UInt8](repeating: 0, count: size * size * 4)
+        let center = Double(size - 1) * 0.5
+        let maxR = Double(size) * 0.5
+        for y in 0..<size {
+            for x in 0..<size {
+                let dx = Double(x) - center
+                let dy = Double(y) - center
+                let r = min(1.0, hypot(dx, dy) / maxR)
+                let alpha = pow(1.0 - r * r, 1.8) * 0.76
+                let idx = (y * size + x) * 4
+                let rCol = 4.0 * alpha
+                let gCol = 16.0 * alpha
+                let bCol = 36.0 * alpha
+                rgba[idx] = UInt8(max(0.0, min(255.0, rCol.rounded())))
+                rgba[idx + 1] = UInt8(max(0.0, min(255.0, gCol.rounded())))
+                rgba[idx + 2] = UInt8(max(0.0, min(255.0, bCol.rounded())))
+                rgba[idx + 3] = UInt8(max(0.0, min(255.0, (alpha * 255.0).rounded())))
+            }
+        }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: size,
+            height: size,
+            bitsPerComponent: 8,
+            bytesPerRow: size * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ), let cgImg = ctx.makeImage() else { return nil }
+        let tex = SKTexture(cgImage: cgImg)
+        tex.filteringMode = .linear
+        return tex
     }
 }

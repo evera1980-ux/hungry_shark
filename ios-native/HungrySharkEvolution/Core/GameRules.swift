@@ -517,7 +517,7 @@ public enum GameRules {
         )
     }
 
-    // MARK: - Procedural Ocean World System (L0 Macro Zones + L1 Multi-Octave Terrain + L3 Environmental Probabilities)
+    // MARK: - Procedural Ocean World & 9-Tier Continuous Seabed System (1:1 Parity with src/game/worldGenerationSystem.ts)
     public struct ProceduralTerrainModulation {
         public let farRidgeOffsetPx: Double
         public let midStratumOffsetPx: Double
@@ -546,95 +546,477 @@ public enum GameRules {
         return v0 + (v1 - v0) * u
     }
 
-    public static func getTerrainHeight(worldX: Double) -> Double {
-        return noise1D(worldX * 0.0005, salt: 11) * 500.0
-            + noise1D(worldX * 0.002, salt: 23) * 150.0
-            + noise1D(worldX * 0.008, salt: 37) * 30.0
+    /// Continuous 1.0x world-space seafloor mountain & trench profile (matches Web TerrainGenerator.getFloorDepthAt)
+    public static func getFloorDepthAt(worldX x: Double) -> Double {
+        let macroWave = sin(x * 0.00016 + 0.35) * 0.55 + cos(x * 0.000075 - 0.8) * 0.45
+        let baseShelf = 1120.0 + (macroWave * 0.5 + 0.5) * 5200.0
+        let mountainRidge = noise1D(x * 0.00038, salt: 11) * 1450.0
+        let canyonCarve = noise1D(x * 0.0011, salt: 23) * 480.0
+        let reefBumps = noise1D(x * 0.0032, salt: 37) * 95.0
+
+        let trenchSignal = noise1D(x * 0.00019 + 4.2, salt: 71)
+        let trenchFactor = max(0.0, (trenchSignal - 0.38) / 0.62)
+        let trenchDrop = trenchFactor * trenchFactor * 5500.0
+
+        let spawnDist = abs(x - 100.0)
+        let spawnFlatten = max(0.0, 1.0 - spawnDist / 900.0)
+        let rawDepth = baseShelf + mountainRidge + canyonCarve + reefBumps + trenchDrop
+        let flattened = rawDepth * (1.0 - spawnFlatten * 0.65) + 740.0 * (spawnFlatten * 0.65)
+
+        return max(520.0, min(18500.0, flattened))
     }
 
-    public static func sampleColumnContourOffsetPx(worldX: Double, depthY: Double, layerKind: Int) -> Double {
-        let mod = sampleParallaxTerrainModulation(worldX: worldX, depthY: depthY)
-        let rawH = getTerrainHeight(worldX: worldX)
-        let ridgeWave = tanh(rawH / 320.0)
-        if layerKind == 0 {
-            // FAR
-            let farWave = noise1D(worldX * 0.0012 + 3.7, salt: 193) * 0.65 + ridgeWave * 0.35
-            return (-farWave * 38.0 * mod.reliefMultiplier) + max(0.0, mod.seabedBiasPx * 0.45)
-        } else if layerKind == 1 {
-            // MID
-            let midWave = noise1D(worldX * 0.0022 + 11.4, salt: 149) * 0.55 + ridgeWave * 0.45
-            return (-midWave * 46.0 * mod.reliefMultiplier) + mod.seabedBiasPx * 0.85
-        } else {
-            // NEAR
-            let detailWave = noise1D(worldX * 0.0045 + 5.2, salt: 37) * 14.0
-            return (-ridgeWave * 36.0 * mod.reliefMultiplier - detailWave) + mod.seabedBiasPx
+    public static func getTerrainSlopeAt(worldX x: Double) -> Double {
+        let d1 = getFloorDepthAt(worldX: x - 8.0)
+        let d2 = getFloorDepthAt(worldX: x + 8.0)
+        return (d2 - d1) / 16.0
+    }
+
+    public struct SeabedTerraceTierSpec {
+        public let tierIndex: Int
+        public let baseDepth: Double
+        public let period: Double
+        public let phaseShift: Double
+        public let openDuty: Double
+        public let stripId: String
+        public let reliefAmp: Double
+        public let dropAmplitude: Double
+        public let thicknessBase: Double
+        public let clearanceFromMainFloor: Double
+    }
+
+    /// 9-Tier Non-Uniformly Spaced Multi-Depth Seabed Terraces (414m -> 16,900m, 1:1 parity with Web SEABED_TERRACE_TIERS)
+    public static let seabedTerraceTiers: [SeabedTerraceTierSpec] = [
+        // Tier 0 (~414m, spacing baseline): Shallow sunlit coral seabed
+        SeabedTerraceTierSpec(
+            tierIndex: 0, baseDepth: 414.0, period: 1680.0, phaseShift: 0.0, openDuty: 0.24,
+            stripId: "coral_reef", reliefAmp: 1.0, dropAmplitude: 175.0, thicknessBase: 195.0, clearanceFromMainFloor: 130.0
+        ),
+        // Tier 1 (~820m, gap +406m): Upper twilight rocky coral shelf
+        SeabedTerraceTierSpec(
+            tierIndex: 1, baseDepth: 820.0, period: 1960.0, phaseShift: 740.0, openDuty: 0.28,
+            stripId: "rocky_shelf", reliefAmp: 1.32, dropAmplitude: 215.0, thicknessBase: 225.0, clearanceFromMainFloor: 165.0
+        ),
+        // Tier 2 (~1380m, gap +560m): Lower twilight canyon terrace
+        SeabedTerraceTierSpec(
+            tierIndex: 2, baseDepth: 1380.0, period: 2240.0, phaseShift: 1420.0, openDuty: 0.30,
+            stripId: "underwater_canyon", reliefAmp: 1.62, dropAmplitude: 255.0, thicknessBase: 250.0, clearanceFromMainFloor: 190.0
+        ),
+        // Tier 3 (~2180m, gap +800m): Midnight canyon terrace
+        SeabedTerraceTierSpec(
+            tierIndex: 3, baseDepth: 2180.0, period: 2560.0, phaseShift: 520.0, openDuty: 0.31,
+            stripId: "underwater_canyon", reliefAmp: 1.85, dropAmplitude: 295.0, thicknessBase: 275.0, clearanceFromMainFloor: 215.0
+        ),
+        // Tier 4 (~3350m, gap +1170m): Upper abyssal basalt shelf
+        SeabedTerraceTierSpec(
+            tierIndex: 4, baseDepth: 3350.0, period: 2920.0, phaseShift: 1680.0, openDuty: 0.33,
+            stripId: "deep_abyss", reliefAmp: 2.10, dropAmplitude: 340.0, thicknessBase: 300.0, clearanceFromMainFloor: 240.0
+        ),
+        // Tier 5 (~5050m, gap +1700m): Mid-abyssal volcanic terrace
+        SeabedTerraceTierSpec(
+            tierIndex: 5, baseDepth: 5050.0, period: 3320.0, phaseShift: 910.0, openDuty: 0.34,
+            stripId: "deep_abyss", reliefAmp: 2.35, dropAmplitude: 390.0, thicknessBase: 330.0, clearanceFromMainFloor: 265.0
+        ),
+        // Tier 6 (~7500m, gap +2450m): Deep abyssal trench ledge
+        SeabedTerraceTierSpec(
+            tierIndex: 6, baseDepth: 7500.0, period: 3760.0, phaseShift: 2190.0, openDuty: 0.36,
+            stripId: "deep_abyss", reliefAmp: 2.65, dropAmplitude: 450.0, thicknessBase: 360.0, clearanceFromMainFloor: 290.0
+        ),
+        // Tier 7 (~11200m, gap +3700m): Upper Hadal fault terrace
+        SeabedTerraceTierSpec(
+            tierIndex: 7, baseDepth: 11200.0, period: 4280.0, phaseShift: 1270.0, openDuty: 0.38,
+            stripId: "deep_abyss", reliefAmp: 3.00, dropAmplitude: 520.0, thicknessBase: 395.0, clearanceFromMainFloor: 320.0
+        ),
+        // Tier 8 (~16900m, gap +5700m): Deep Hadal abyssal core ledge
+        SeabedTerraceTierSpec(
+            tierIndex: 8, baseDepth: 16900.0, period: 4880.0, phaseShift: 2840.0, openDuty: 0.40,
+            stripId: "deep_abyss", reliefAmp: 3.40, dropAmplitude: 600.0, thicknessBase: 430.0, clearanceFromMainFloor: 350.0
+        )
+    ]
+
+    public struct SeabedTerraceSample {
+        public let isPresent: Bool
+        public let topY: Double
+        public let bottomArchY: Double
+        public let edgeFactor: Double
+        public let caveFactor: Double
+        public let slope: Double
+        public let tierIndex: Int
+        public let stripId: String
+    }
+
+    /// Samples any of the 9 continuous seabed terraces (tierIndex = 0..8).
+    /// Where isPresent == false (and main floor is deep enough), caveFactor (0 -> 1) describes the downward-curved cave opening!
+    public static func getSeabedTerraceAt(worldX: Double, tierIndex: Int = 0) -> SeabedTerraceSample {
+        let clampedTier = max(0, min(seabedTerraceTiers.count - 1, tierIndex))
+        let spec = seabedTerraceTiers[clampedTier]
+        let mainFloor = getFloorDepthAt(worldX: worldX)
+        if mainFloor < spec.baseDepth + spec.clearanceFromMainFloor {
+            return SeabedTerraceSample(
+                isPresent: false, topY: mainFloor, bottomArchY: mainFloor,
+                edgeFactor: 0.0, caveFactor: 0.0, slope: 0.0,
+                tierIndex: spec.tierIndex, stripId: spec.stripId
+            )
         }
+
+        let saltBase = spec.tierIndex * 131
+        let warpedX = worldX + spec.phaseShift + noise1D(worldX * 0.00055, salt: 401 + saltBase) * 260.0
+        let cellPhase = ((warpedX.truncatingRemainder(dividingBy: spec.period)) + spec.period).truncatingRemainder(dividingBy: spec.period) / spec.period
+        let distFromGapCenter = abs(cellPhase - 0.5) * 2.0 // 0 at cave center, 1 at plateau center
+
+        let relief = (noise1D(worldX * 0.0022, salt: 419 + saltBase) * 38.0
+            + noise1D(worldX * 0.0068, salt: 431 + saltBase) * 14.0) * spec.reliefAmp
+        let baseTopY = spec.baseDepth + relief
+        let slope = ((noise1D((worldX + 8.0) * 0.0022, salt: 419 + saltBase)
+            - noise1D((worldX - 8.0) * 0.0022, salt: 419 + saltBase)) * 38.0 * spec.reliefAmp) / 16.0
+
+        // Inside the downward cave opening (shark can swim freely up & down through this portal!)
+        if distFromGapCenter < spec.openDuty {
+            let normCave = distFromGapCenter / spec.openDuty // 0 at center of opening, 1 at rim lip
+            let caveArch = cos(normCave * .pi * 0.5)
+            let dropOffset = spec.dropAmplitude + (1.0 - normCave * normCave) * (spec.dropAmplitude * 0.54)
+            let caveFloorY = min(mainFloor - 24.0, baseTopY + dropOffset)
+            return SeabedTerraceSample(
+                isPresent: false,
+                topY: caveFloorY,
+                bottomArchY: min(mainFloor, caveFloorY + spec.thicknessBase * 0.92),
+                edgeFactor: 0.0,
+                caveFactor: caveArch,
+                slope: slope,
+                tierIndex: spec.tierIndex,
+                stripId: spec.stripId
+            )
+        }
+
+        let rampSpan = 0.17
+        let edgeFactor = min(1.0, (distFromGapCenter - spec.openDuty) / rampSpan)
+        let smoothEdge = edgeFactor * edgeFactor * (3.0 - 2.0 * edgeFactor)
+        let rimDrop = (1.0 - smoothEdge) * spec.dropAmplitude
+        let topY = min(mainFloor - 36.0, baseTopY + rimDrop)
+
+        let archThickness = spec.thicknessBase + smoothEdge * (spec.thicknessBase * 0.44)
+            + noise1D(worldX * 0.0038, salt: 443 + saltBase) * (28.0 * spec.reliefAmp)
+        let bottomArchY = min(mainFloor, topY + archThickness)
+
+        return SeabedTerraceSample(
+            isPresent: true,
+            topY: topY,
+            bottomArchY: bottomArchY,
+            edgeFactor: smoothEdge,
+            caveFactor: 0.0,
+            slope: slope,
+            tierIndex: spec.tierIndex,
+            stripId: spec.stripId
+        )
     }
 
-    public static func sampleParallaxTerrainModulation(worldX: Double, depthY: Double) -> ProceduralTerrainModulation {
-        let baseMacroSpan = 960.0
-        let warpedX = worldX + noise1D(worldX * 0.00035, salt: 307) * 240.0
-        let scaledCoord = warpedX / baseMacroSpan
-        let cellIdx = Int(floor(scaledCoord))
-        let cellFrac = scaledCoord - Double(cellIdx)
+    public static func getShallowCoralAtollAt(worldX: Double) -> SeabedTerraceSample {
+        return getSeabedTerraceAt(worldX: worldX, tierIndex: 0)
+    }
 
-        func presetForCell(_ cIdx: Int) -> (relief: Double, bias: Double, clusterProb: Double) {
-            let m = ((cIdx % 4) + 4) % 4
-            if depthY <= 520.0 {
-                switch m {
-                case 0: return (1.05, -6.0, 0.78)  // SHALLOW_CORAL_REEF
-                case 1: return (0.36, 26.0, 0.42)  // SANDY_OPEN_FLAT
-                case 2: return (1.42, -18.0, 0.85) // DENSE_REEF_PASSAGE
-                default: return (1.62, 12.0, 0.64) // SUBMARINE_CANYON_DROP
-                }
-            } else if depthY <= 1150.0 {
-                switch m {
-                case 0: return (1.62, 12.0, 0.64)
-                case 1: return (1.42, -18.0, 0.85)
-                case 2: return (1.18, -8.0, 0.82)  // BIOLUMINESCENT_GROVE
-                default: return (0.48, 22.0, 0.50) // ABYSSAL_PLAIN_EXPANSE
-                }
+    public enum SeabedOutcropType: String {
+        case CORAL_MOUND
+        case ROCK_SPIRE
+        case KELP_CLUSTER
+        case ABYSSAL_CHIMNEY
+    }
+
+    public struct SeabedOutcropPlacement {
+        public let worldX: Double
+        public let baseY: Double
+        public let width: Double
+        public let height: Double
+        public let type: SeabedOutcropType
+        public let variant: Int
+        public let seed: Double
+    }
+
+    /// Generates deterministic seabed outcrops along both the main seafloor AND all 9 seabed terraces
+    public static func getSeabedOutcropsForChunk(chunkIndex: Int, chunkWidth: Double = 600.0) -> [SeabedOutcropPlacement] {
+        var placements: [SeabedOutcropPlacement] = []
+        let chunkStartX = Double(chunkIndex) * chunkWidth
+
+        // 1. Main seafloor outcrops
+        let count = 2 + Int(floor(hash1D(chunkIndex, salt: 811) * 2.0)) // 2 or 3 per chunk
+        let slotSpan = chunkWidth / Double(count)
+
+        for i in 0..<count {
+            let h1 = hash1D(chunkIndex * 7 + i, salt: 823)
+            let h2 = hash1D(chunkIndex * 13 + i, salt: 829)
+            let h3 = hash1D(chunkIndex * 19 + i, salt: 839)
+            let worldX = chunkStartX + (Double(i) + 0.18 + h1 * 0.64) * slotSpan
+            let baseY = getFloorDepthAt(worldX: worldX)
+
+            let type: SeabedOutcropType
+            if baseY < 620.0 {
+                type = h2 < 0.68 ? .CORAL_MOUND : .KELP_CLUSTER
+            } else if baseY < 1350.0 {
+                type = h2 < 0.45 ? .CORAL_MOUND : (h2 < 0.78 ? .ROCK_SPIRE : .KELP_CLUSTER)
             } else {
-                let m3 = ((cIdx % 3) + 3) % 3
-                switch m3 {
-                case 0: return (0.48, 22.0, 0.50)
-                case 1: return (1.18, -8.0, 0.82)
-                default: return (1.75, 18.0, 0.38) // HADAL_TRENCH_CHASM
+                type = h2 < 0.58 ? .ROCK_SPIRE : .ABYSSAL_CHIMNEY
+            }
+
+            let width: Double
+            let height: Double
+            switch type {
+            case .CORAL_MOUND:
+                width = 115.0 + h2 * 105.0
+                height = 75.0 + h3 * 70.0
+            case .KELP_CLUSTER:
+                width = 90.0 + h2 * 70.0
+                height = 130.0 + h3 * 110.0
+            default:
+                width = 110.0 + h2 * 95.0
+                height = 95.0 + h3 * 95.0
+            }
+
+            placements.append(SeabedOutcropPlacement(
+                worldX: worldX, baseY: baseY, width: width, height: height,
+                type: type, variant: Int(floor(h3 * 4.0)), seed: h1
+            ))
+        }
+
+        // 2. Multi-Tier Seabed Terrace Outcrops across all 9 tiers (tierIndex = 0..8)
+        let terraceSlotCount = 2
+        let terraceSlotSpan = chunkWidth / Double(terraceSlotCount)
+        for tierIdx in 0..<seabedTerraceTiers.count {
+            let saltOffset = tierIdx * 197
+            for i in 0..<terraceSlotCount {
+                let h1 = hash1D(chunkIndex * 11 + i, salt: 911 + saltOffset)
+                if tierIdx >= 4 && h1 < 0.28 { continue }
+                let h2 = hash1D(chunkIndex * 17 + i, salt: 919 + saltOffset)
+                let h3 = hash1D(chunkIndex * 23 + i, salt: 929 + saltOffset)
+                let worldX = chunkStartX + (Double(i) + 0.16 + h1 * 0.68) * terraceSlotSpan
+                let terrace = getSeabedTerraceAt(worldX: worldX, tierIndex: tierIdx)
+                if terrace.isPresent && terrace.edgeFactor > 0.35 {
+                    let type: SeabedOutcropType
+                    if tierIdx == 0 {
+                        type = h2 < 0.74 ? .CORAL_MOUND : .KELP_CLUSTER
+                    } else if tierIdx == 1 {
+                        type = h2 < 0.50 ? .CORAL_MOUND : (h2 < 0.80 ? .ROCK_SPIRE : .KELP_CLUSTER)
+                    } else if tierIdx <= 3 {
+                        type = h2 < 0.30 ? .CORAL_MOUND : .ROCK_SPIRE
+                    } else {
+                        type = h2 < 0.56 ? .ROCK_SPIRE : .ABYSSAL_CHIMNEY
+                    }
+
+                    let sizeScale = 1.0 + Double(tierIdx) * 0.08
+                    let width: Double
+                    let height: Double
+                    switch type {
+                    case .CORAL_MOUND:
+                        width = (120.0 + h2 * 105.0) * sizeScale
+                        height = (78.0 + h3 * 68.0) * sizeScale
+                    case .KELP_CLUSTER:
+                        width = 88.0 + h2 * 64.0
+                        height = 115.0 + h3 * 92.0
+                    default:
+                        width = (112.0 + h2 * 96.0) * sizeScale
+                        height = (90.0 + h3 * 88.0) * sizeScale
+                    }
+
+                    placements.append(SeabedOutcropPlacement(
+                        worldX: worldX, baseY: terrace.topY, width: width, height: height,
+                        type: type, variant: Int(floor(h3 * 4.0)), seed: h1
+                    ))
                 }
             }
         }
 
-        let pA = presetForCell(cellIdx)
-        var pB = pA
-        var t = 0.0
-        if cellFrac < 0.28 {
-            pB = presetForCell(cellIdx - 1)
-            t = (1.0 - quinticSmoothstep(edge0: 0.0, edge1: 0.28, x: cellFrac)) * 0.5
-        } else if cellFrac > 0.72 {
-            pB = presetForCell(cellIdx + 1)
-            t = quinticSmoothstep(edge0: 0.72, edge1: 1.0, x: cellFrac) * 0.5
+        return placements
+    }
+
+    public struct SeabedCollisionResult {
+        public let y: Double
+        public let vy: Double
+        public let hitSeabed: Bool
+        public let hitAtollUnderside: Bool
+        public let floorY: Double
+        public let slope: Double
+    }
+
+    /// Physical Seabed Two-Way Collision Solver (Prevents swimming through the main seafloor or any of the 9 seabed terraces from above OR below!)
+    public static func resolveSeabedCollision(
+        worldX: Double,
+        worldY: Double,
+        vy: Double,
+        entityRadius: Double,
+        clearancePadding: Double = 6.0,
+        prevWorldY: Double? = nil
+    ) -> SeabedCollisionResult {
+        let mainFloorY = getFloorDepthAt(worldX: worldX)
+        let mainSlope = getTerrainSlopeAt(worldX: worldX)
+        let refPrevY = prevWorldY ?? (worldY - vy * 0.016)
+        let clearance = entityRadius + clearancePadding
+
+        // 1. Check all 9 seabed terraces (both landing on top AND bumping head against underside!)
+        for tierIdx in 0..<seabedTerraceTiers.count {
+            let terrace = getSeabedTerraceAt(worldX: worldX, tierIndex: tierIdx)
+            guard terrace.isPresent && terrace.edgeFactor > 0.2 else { continue }
+            let terraceTopMaxY = terrace.topY - clearance
+            let terraceUndersideMinY = terrace.bottomArchY + clearance * 0.88
+            let slabMidY = (terrace.topY + terrace.bottomArchY) * 0.5
+
+            // Case 1A: Approaching or resting on TOP of this terrace from above
+            if refPrevY <= slabMidY && worldY <= slabMidY + entityRadius * 0.6 {
+                if worldY > terraceTopMaxY {
+                    return SeabedCollisionResult(
+                        y: terraceTopMaxY,
+                        vy: min(0.0, vy * -0.15),
+                        hitSeabed: true,
+                        hitAtollUnderside: false,
+                        floorY: terrace.topY,
+                        slope: terrace.slope
+                    )
+                }
+                return SeabedCollisionResult(
+                    y: worldY, vy: vy, hitSeabed: false, hitAtollUnderside: false,
+                    floorY: terrace.topY, slope: terrace.slope
+                )
+            }
+
+            // Case 1B: Swimming UPWARD from below this terrace -> block upward penetration through the bedrock!
+            if refPrevY > slabMidY && worldY < terraceUndersideMinY {
+                return SeabedCollisionResult(
+                    y: terraceUndersideMinY,
+                    vy: max(0.0, vy * -0.2),
+                    hitSeabed: false,
+                    hitAtollUnderside: true,
+                    floorY: mainFloorY,
+                    slope: terrace.slope
+                )
+            }
         }
 
-        let relief = pA.relief * (1.0 - t) + pB.relief * t
-        let bias = pA.bias * (1.0 - t) + pB.bias * t
-        let clusterProb = pA.clusterProb * (1.0 - t) + pB.clusterProb * t
+        // 2. Main continuous seafloor collision
+        let maxAllowedY = mainFloorY - clearance
+        if worldY > maxAllowedY {
+            return SeabedCollisionResult(
+                y: maxAllowedY,
+                vy: min(0.0, vy * -0.15),
+                hitSeabed: true,
+                hitAtollUnderside: false,
+                floorY: mainFloorY,
+                slope: mainSlope
+            )
+        }
 
-        let rawH = getTerrainHeight(worldX: worldX)
-        let normRidge = tanh(rawH / 360.0)
-        let farOffset = max(0.0, (0.5 - 0.5 * normRidge) * 22.0 * relief)
-        let midOffset = max(0.0, (0.5 - 0.5 * noise1D(worldX * 0.0014, salt: 61)) * 30.0 * relief + max(0.0, bias * 0.55))
-        let nearOffset = max(0.0, (0.5 - 0.5 * normRidge) * 26.0 * relief + max(0.0, bias))
-
-        return ProceduralTerrainModulation(
-            farRidgeOffsetPx: farOffset,
-            midStratumOffsetPx: midOffset,
-            nearSeabedOffsetPx: nearOffset,
-            reliefMultiplier: relief,
-            seabedBiasPx: bias,
-            schoolClusterProbability: clusterProb
+        return SeabedCollisionResult(
+            y: worldY, vy: vy, hitSeabed: false, hitAtollUnderside: false,
+            floorY: mainFloorY, slope: mainSlope
         )
     }
 
+    public struct SeabedKineticStepResult {
+        public let x: Double
+        public let y: Double
+        public let vx: Double
+        public let vy: Double
+        public let hitSeabed: Bool
+        public let hitAtollUnderside: Bool
+        public let floorY: Double
+        public let slope: Double
+    }
+
+    /// Full 2D Kinetic Seabed Step with Sub-Stepping (prevents tunneling through steep walls or terrace undersides)
+    public static func resolveSeabedKineticStep(
+        prevX: Double,
+        prevY: Double,
+        nextX: Double,
+        nextY: Double,
+        vx: Double,
+        vy: Double,
+        entityRadius: Double,
+        clearancePadding: Double = 6.0
+    ) -> SeabedKineticStepResult {
+        let totalDx = nextX - prevX
+        let totalDy = nextY - prevY
+        let dist = hypot(totalDx, totalDy)
+        let steps = max(1, min(6, Int(ceil(dist / max(8.0, entityRadius * 0.45)))))
+
+        var curX = prevX
+        var curY = prevY
+        var curVx = vx
+        var curVy = vy
+        var hitSeabed = false
+        var hitAtollUnderside = false
+        var lastFloorY = getFloorDepthAt(worldX: nextX)
+        var lastSlope = 0.0
+
+        for s in 1...steps {
+            let stepPrevX = curX
+            let stepPrevY = curY
+            let targetX = prevX + (totalDx * Double(s)) / Double(steps)
+            let targetY = curY + totalDy / Double(steps)
+
+            let col = resolveSeabedCollision(
+                worldX: targetX,
+                worldY: targetY,
+                vy: curVy,
+                entityRadius: entityRadius,
+                clearancePadding: clearancePadding,
+                prevWorldY: stepPrevY
+            )
+
+            lastFloorY = col.floorY
+            lastSlope = col.slope
+
+            if col.hitAtollUnderside {
+                hitAtollUnderside = true
+                let prevColAtOldX = resolveSeabedCollision(
+                    worldX: stepPrevX,
+                    worldY: stepPrevY,
+                    vy: curVy,
+                    entityRadius: entityRadius,
+                    clearancePadding: clearancePadding,
+                    prevWorldY: stepPrevY
+                )
+                if !prevColAtOldX.hitAtollUnderside && !prevColAtOldX.hitSeabed && abs(stepPrevY - col.y) > entityRadius * 0.42 {
+                    curX = stepPrevX
+                    curVx = 0.0
+                    curY = max(stepPrevY, prevColAtOldX.y)
+                } else {
+                    curX = targetX
+                    curY = col.y
+                    curVy = col.vy
+                }
+            } else if col.hitSeabed {
+                hitSeabed = true
+                curX = targetX
+                curY = col.y
+                curVy = col.vy
+                if abs(col.slope) > 0.45 && curVx * col.slope < 0.0 {
+                    let damp = max(0.35, 1.0 - (abs(col.slope) - 0.45) * 0.35)
+                    curVx *= damp
+                }
+            } else {
+                curX = targetX
+                curY = col.y
+            }
+        }
+
+        return SeabedKineticStepResult(
+            x: curX,
+            y: curY,
+            vx: curVx,
+            vy: curVy,
+            hitSeabed: hitSeabed,
+            hitAtollUnderside: hitAtollUnderside,
+            floorY: lastFloorY,
+            slope: lastSlope
+        )
+    }
+
+    public static func sampleParallaxTerrainModulation(worldX: Double, depthY: Double) -> ProceduralTerrainModulation {
+        return ProceduralTerrainModulation(
+            farRidgeOffsetPx: 0.0,
+            midStratumOffsetPx: 0.0,
+            nearSeabedOffsetPx: 0.0,
+            reliefMultiplier: 1.0,
+            seabedBiasPx: 0.0,
+            schoolClusterProbability: 0.72
+        )
+    }
 
     /// Computes evolved shark stats for any of the 48 shark forms
     public static func computeEvolvedSharkStats(
@@ -775,7 +1157,7 @@ public enum GameRules {
         return .DAMAGE
     }
 
-    /// Continuous bathymetric water color interpolation across 0m ~ 2200m+
+    /// Continuous bathymetric water color interpolation across 0m ~ 20,000m (1:1 parity with Web parallaxBackground.ts)
     public static func sampleBathymetricWaterRGB(depthMeters: Double) -> SIMD3<Double> {
         let stops: [(depth: Double, r: Double, g: Double, b: Double)] = [
             (-220, 56, 189, 248),
@@ -786,8 +1168,11 @@ public enum GameRules {
             (520, 18, 68, 138),
             (780, 17, 38, 92),
             (1150, 10, 18, 48),
-            (1480, 9, 8, 26),
-            (1950, 24, 8, 14)
+            (1800, 9, 8, 28),
+            (3200, 14, 7, 24),
+            (6500, 18, 6, 18),
+            (12000, 22, 5, 12),
+            (20000, 10, 2, 8)
         ]
         if depthMeters <= stops[0].depth {
             return SIMD3(stops[0].r / 255.0, stops[0].g / 255.0, stops[0].b / 255.0)

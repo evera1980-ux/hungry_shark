@@ -814,7 +814,7 @@ public enum GameRules {
         )
     }
 
-    // MARK: - Procedural Ocean World System (L0 Macro Zones + L1 Multi-Octave Terrain + L3 Environmental Probabilities)
+    // MARK: - Procedural Ocean World & 9-Tier Continuous Seabed System (1:1 Parity with src/game/worldGenerationSystem.ts)
     public struct ProceduralTerrainModulation {
         public let farRidgeOffsetPx: Double
         public let midStratumOffsetPx: Double
@@ -843,95 +843,477 @@ public enum GameRules {
         return v0 + (v1 - v0) * u
     }
 
-    public static func getTerrainHeight(worldX: Double) -> Double {
-        return noise1D(worldX * 0.0005, salt: 11) * 500.0
-            + noise1D(worldX * 0.002, salt: 23) * 150.0
-            + noise1D(worldX * 0.008, salt: 37) * 30.0
+    /// Continuous 1.0x world-space seafloor mountain & trench profile (matches Web TerrainGenerator.getFloorDepthAt)
+    public static func getFloorDepthAt(worldX x: Double) -> Double {
+        let macroWave = sin(x * 0.00016 + 0.35) * 0.55 + cos(x * 0.000075 - 0.8) * 0.45
+        let baseShelf = 1120.0 + (macroWave * 0.5 + 0.5) * 5200.0
+        let mountainRidge = noise1D(x * 0.00038, salt: 11) * 1450.0
+        let canyonCarve = noise1D(x * 0.0011, salt: 23) * 480.0
+        let reefBumps = noise1D(x * 0.0032, salt: 37) * 95.0
+
+        let trenchSignal = noise1D(x * 0.00019 + 4.2, salt: 71)
+        let trenchFactor = max(0.0, (trenchSignal - 0.38) / 0.62)
+        let trenchDrop = trenchFactor * trenchFactor * 5500.0
+
+        let spawnDist = abs(x - 100.0)
+        let spawnFlatten = max(0.0, 1.0 - spawnDist / 900.0)
+        let rawDepth = baseShelf + mountainRidge + canyonCarve + reefBumps + trenchDrop
+        let flattened = rawDepth * (1.0 - spawnFlatten * 0.65) + 740.0 * (spawnFlatten * 0.65)
+
+        return max(520.0, min(18500.0, flattened))
     }
 
-    public static func sampleColumnContourOffsetPx(worldX: Double, depthY: Double, layerKind: Int) -> Double {
-        let mod = sampleParallaxTerrainModulation(worldX: worldX, depthY: depthY)
-        let rawH = getTerrainHeight(worldX: worldX)
-        let ridgeWave = tanh(rawH / 320.0)
-        if layerKind == 0 {
-            // FAR
-            let farWave = noise1D(worldX * 0.0012 + 3.7, salt: 193) * 0.65 + ridgeWave * 0.35
-            return (-farWave * 38.0 * mod.reliefMultiplier) + max(0.0, mod.seabedBiasPx * 0.45)
-        } else if layerKind == 1 {
-            // MID
-            let midWave = noise1D(worldX * 0.0022 + 11.4, salt: 149) * 0.55 + ridgeWave * 0.45
-            return (-midWave * 46.0 * mod.reliefMultiplier) + mod.seabedBiasPx * 0.85
-        } else {
-            // NEAR
-            let detailWave = noise1D(worldX * 0.0045 + 5.2, salt: 37) * 14.0
-            return (-ridgeWave * 36.0 * mod.reliefMultiplier - detailWave) + mod.seabedBiasPx
+    public static func getTerrainSlopeAt(worldX x: Double) -> Double {
+        let d1 = getFloorDepthAt(worldX: x - 8.0)
+        let d2 = getFloorDepthAt(worldX: x + 8.0)
+        return (d2 - d1) / 16.0
+    }
+
+    public struct SeabedTerraceTierSpec {
+        public let tierIndex: Int
+        public let baseDepth: Double
+        public let period: Double
+        public let phaseShift: Double
+        public let openDuty: Double
+        public let stripId: String
+        public let reliefAmp: Double
+        public let dropAmplitude: Double
+        public let thicknessBase: Double
+        public let clearanceFromMainFloor: Double
+    }
+
+    /// 9-Tier Non-Uniformly Spaced Multi-Depth Seabed Terraces (414m -> 16,900m, 1:1 parity with Web SEABED_TERRACE_TIERS)
+    public static let seabedTerraceTiers: [SeabedTerraceTierSpec] = [
+        // Tier 0 (~414m, spacing baseline): Shallow sunlit coral seabed
+        SeabedTerraceTierSpec(
+            tierIndex: 0, baseDepth: 414.0, period: 1680.0, phaseShift: 0.0, openDuty: 0.24,
+            stripId: "coral_reef", reliefAmp: 1.0, dropAmplitude: 175.0, thicknessBase: 195.0, clearanceFromMainFloor: 130.0
+        ),
+        // Tier 1 (~820m, gap +406m): Upper twilight rocky coral shelf
+        SeabedTerraceTierSpec(
+            tierIndex: 1, baseDepth: 820.0, period: 1960.0, phaseShift: 740.0, openDuty: 0.28,
+            stripId: "rocky_shelf", reliefAmp: 1.32, dropAmplitude: 215.0, thicknessBase: 225.0, clearanceFromMainFloor: 165.0
+        ),
+        // Tier 2 (~1380m, gap +560m): Lower twilight canyon terrace
+        SeabedTerraceTierSpec(
+            tierIndex: 2, baseDepth: 1380.0, period: 2240.0, phaseShift: 1420.0, openDuty: 0.30,
+            stripId: "underwater_canyon", reliefAmp: 1.62, dropAmplitude: 255.0, thicknessBase: 250.0, clearanceFromMainFloor: 190.0
+        ),
+        // Tier 3 (~2180m, gap +800m): Midnight canyon terrace
+        SeabedTerraceTierSpec(
+            tierIndex: 3, baseDepth: 2180.0, period: 2560.0, phaseShift: 520.0, openDuty: 0.31,
+            stripId: "underwater_canyon", reliefAmp: 1.85, dropAmplitude: 295.0, thicknessBase: 275.0, clearanceFromMainFloor: 215.0
+        ),
+        // Tier 4 (~3350m, gap +1170m): Upper abyssal basalt shelf
+        SeabedTerraceTierSpec(
+            tierIndex: 4, baseDepth: 3350.0, period: 2920.0, phaseShift: 1680.0, openDuty: 0.33,
+            stripId: "deep_abyss", reliefAmp: 2.10, dropAmplitude: 340.0, thicknessBase: 300.0, clearanceFromMainFloor: 240.0
+        ),
+        // Tier 5 (~5050m, gap +1700m): Mid-abyssal volcanic terrace
+        SeabedTerraceTierSpec(
+            tierIndex: 5, baseDepth: 5050.0, period: 3320.0, phaseShift: 910.0, openDuty: 0.34,
+            stripId: "deep_abyss", reliefAmp: 2.35, dropAmplitude: 390.0, thicknessBase: 330.0, clearanceFromMainFloor: 265.0
+        ),
+        // Tier 6 (~7500m, gap +2450m): Deep abyssal trench ledge
+        SeabedTerraceTierSpec(
+            tierIndex: 6, baseDepth: 7500.0, period: 3760.0, phaseShift: 2190.0, openDuty: 0.36,
+            stripId: "deep_abyss", reliefAmp: 2.65, dropAmplitude: 450.0, thicknessBase: 360.0, clearanceFromMainFloor: 290.0
+        ),
+        // Tier 7 (~11200m, gap +3700m): Upper Hadal fault terrace
+        SeabedTerraceTierSpec(
+            tierIndex: 7, baseDepth: 11200.0, period: 4280.0, phaseShift: 1270.0, openDuty: 0.38,
+            stripId: "deep_abyss", reliefAmp: 3.00, dropAmplitude: 520.0, thicknessBase: 395.0, clearanceFromMainFloor: 320.0
+        ),
+        // Tier 8 (~16900m, gap +5700m): Deep Hadal abyssal core ledge
+        SeabedTerraceTierSpec(
+            tierIndex: 8, baseDepth: 16900.0, period: 4880.0, phaseShift: 2840.0, openDuty: 0.40,
+            stripId: "deep_abyss", reliefAmp: 3.40, dropAmplitude: 600.0, thicknessBase: 430.0, clearanceFromMainFloor: 350.0
+        )
+    ]
+
+    public struct SeabedTerraceSample {
+        public let isPresent: Bool
+        public let topY: Double
+        public let bottomArchY: Double
+        public let edgeFactor: Double
+        public let caveFactor: Double
+        public let slope: Double
+        public let tierIndex: Int
+        public let stripId: String
+    }
+
+    /// Samples any of the 9 continuous seabed terraces (tierIndex = 0..8).
+    /// Where isPresent == false (and main floor is deep enough), caveFactor (0 -> 1) describes the downward-curved cave opening!
+    public static func getSeabedTerraceAt(worldX: Double, tierIndex: Int = 0) -> SeabedTerraceSample {
+        let clampedTier = max(0, min(seabedTerraceTiers.count - 1, tierIndex))
+        let spec = seabedTerraceTiers[clampedTier]
+        let mainFloor = getFloorDepthAt(worldX: worldX)
+        if mainFloor < spec.baseDepth + spec.clearanceFromMainFloor {
+            return SeabedTerraceSample(
+                isPresent: false, topY: mainFloor, bottomArchY: mainFloor,
+                edgeFactor: 0.0, caveFactor: 0.0, slope: 0.0,
+                tierIndex: spec.tierIndex, stripId: spec.stripId
+            )
         }
+
+        let saltBase = spec.tierIndex * 131
+        let warpedX = worldX + spec.phaseShift + noise1D(worldX * 0.00055, salt: 401 + saltBase) * 260.0
+        let cellPhase = ((warpedX.truncatingRemainder(dividingBy: spec.period)) + spec.period).truncatingRemainder(dividingBy: spec.period) / spec.period
+        let distFromGapCenter = abs(cellPhase - 0.5) * 2.0 // 0 at cave center, 1 at plateau center
+
+        let relief = (noise1D(worldX * 0.0022, salt: 419 + saltBase) * 38.0
+            + noise1D(worldX * 0.0068, salt: 431 + saltBase) * 14.0) * spec.reliefAmp
+        let baseTopY = spec.baseDepth + relief
+        let slope = ((noise1D((worldX + 8.0) * 0.0022, salt: 419 + saltBase)
+            - noise1D((worldX - 8.0) * 0.0022, salt: 419 + saltBase)) * 38.0 * spec.reliefAmp) / 16.0
+
+        // Inside the downward cave opening (shark can swim freely up & down through this portal!)
+        if distFromGapCenter < spec.openDuty {
+            let normCave = distFromGapCenter / spec.openDuty // 0 at center of opening, 1 at rim lip
+            let caveArch = cos(normCave * .pi * 0.5)
+            let dropOffset = spec.dropAmplitude + (1.0 - normCave * normCave) * (spec.dropAmplitude * 0.54)
+            let caveFloorY = min(mainFloor - 24.0, baseTopY + dropOffset)
+            return SeabedTerraceSample(
+                isPresent: false,
+                topY: caveFloorY,
+                bottomArchY: min(mainFloor, caveFloorY + spec.thicknessBase * 0.92),
+                edgeFactor: 0.0,
+                caveFactor: caveArch,
+                slope: slope,
+                tierIndex: spec.tierIndex,
+                stripId: spec.stripId
+            )
+        }
+
+        let rampSpan = 0.17
+        let edgeFactor = min(1.0, (distFromGapCenter - spec.openDuty) / rampSpan)
+        let smoothEdge = edgeFactor * edgeFactor * (3.0 - 2.0 * edgeFactor)
+        let rimDrop = (1.0 - smoothEdge) * spec.dropAmplitude
+        let topY = min(mainFloor - 36.0, baseTopY + rimDrop)
+
+        let archThickness = spec.thicknessBase + smoothEdge * (spec.thicknessBase * 0.44)
+            + noise1D(worldX * 0.0038, salt: 443 + saltBase) * (28.0 * spec.reliefAmp)
+        let bottomArchY = min(mainFloor, topY + archThickness)
+
+        return SeabedTerraceSample(
+            isPresent: true,
+            topY: topY,
+            bottomArchY: bottomArchY,
+            edgeFactor: smoothEdge,
+            caveFactor: 0.0,
+            slope: slope,
+            tierIndex: spec.tierIndex,
+            stripId: spec.stripId
+        )
     }
 
-    public static func sampleParallaxTerrainModulation(worldX: Double, depthY: Double) -> ProceduralTerrainModulation {
-        let baseMacroSpan = 960.0
-        let warpedX = worldX + noise1D(worldX * 0.00035, salt: 307) * 240.0
-        let scaledCoord = warpedX / baseMacroSpan
-        let cellIdx = Int(floor(scaledCoord))
-        let cellFrac = scaledCoord - Double(cellIdx)
+    public static func getShallowCoralAtollAt(worldX: Double) -> SeabedTerraceSample {
+        return getSeabedTerraceAt(worldX: worldX, tierIndex: 0)
+    }
 
-        func presetForCell(_ cIdx: Int) -> (relief: Double, bias: Double, clusterProb: Double) {
-            let m = ((cIdx % 4) + 4) % 4
-            if depthY <= 520.0 {
-                switch m {
-                case 0: return (1.05, -6.0, 0.78)  // SHALLOW_CORAL_REEF
-                case 1: return (0.36, 26.0, 0.42)  // SANDY_OPEN_FLAT
-                case 2: return (1.42, -18.0, 0.85) // DENSE_REEF_PASSAGE
-                default: return (1.62, 12.0, 0.64) // SUBMARINE_CANYON_DROP
-                }
-            } else if depthY <= 1150.0 {
-                switch m {
-                case 0: return (1.62, 12.0, 0.64)
-                case 1: return (1.42, -18.0, 0.85)
-                case 2: return (1.18, -8.0, 0.82)  // BIOLUMINESCENT_GROVE
-                default: return (0.48, 22.0, 0.50) // ABYSSAL_PLAIN_EXPANSE
-                }
+    public enum SeabedOutcropType: String {
+        case CORAL_MOUND
+        case ROCK_SPIRE
+        case KELP_CLUSTER
+        case ABYSSAL_CHIMNEY
+    }
+
+    public struct SeabedOutcropPlacement {
+        public let worldX: Double
+        public let baseY: Double
+        public let width: Double
+        public let height: Double
+        public let type: SeabedOutcropType
+        public let variant: Int
+        public let seed: Double
+    }
+
+    /// Generates deterministic seabed outcrops along both the main seafloor AND all 9 seabed terraces
+    public static func getSeabedOutcropsForChunk(chunkIndex: Int, chunkWidth: Double = 600.0) -> [SeabedOutcropPlacement] {
+        var placements: [SeabedOutcropPlacement] = []
+        let chunkStartX = Double(chunkIndex) * chunkWidth
+
+        // 1. Main seafloor outcrops
+        let count = 2 + Int(floor(hash1D(chunkIndex, salt: 811) * 2.0)) // 2 or 3 per chunk
+        let slotSpan = chunkWidth / Double(count)
+
+        for i in 0..<count {
+            let h1 = hash1D(chunkIndex * 7 + i, salt: 823)
+            let h2 = hash1D(chunkIndex * 13 + i, salt: 829)
+            let h3 = hash1D(chunkIndex * 19 + i, salt: 839)
+            let worldX = chunkStartX + (Double(i) + 0.18 + h1 * 0.64) * slotSpan
+            let baseY = getFloorDepthAt(worldX: worldX)
+
+            let type: SeabedOutcropType
+            if baseY < 620.0 {
+                type = h2 < 0.68 ? .CORAL_MOUND : .KELP_CLUSTER
+            } else if baseY < 1350.0 {
+                type = h2 < 0.45 ? .CORAL_MOUND : (h2 < 0.78 ? .ROCK_SPIRE : .KELP_CLUSTER)
             } else {
-                let m3 = ((cIdx % 3) + 3) % 3
-                switch m3 {
-                case 0: return (0.48, 22.0, 0.50)
-                case 1: return (1.18, -8.0, 0.82)
-                default: return (1.75, 18.0, 0.38) // HADAL_TRENCH_CHASM
+                type = h2 < 0.58 ? .ROCK_SPIRE : .ABYSSAL_CHIMNEY
+            }
+
+            let width: Double
+            let height: Double
+            switch type {
+            case .CORAL_MOUND:
+                width = 115.0 + h2 * 105.0
+                height = 75.0 + h3 * 70.0
+            case .KELP_CLUSTER:
+                width = 90.0 + h2 * 70.0
+                height = 130.0 + h3 * 110.0
+            default:
+                width = 110.0 + h2 * 95.0
+                height = 95.0 + h3 * 95.0
+            }
+
+            placements.append(SeabedOutcropPlacement(
+                worldX: worldX, baseY: baseY, width: width, height: height,
+                type: type, variant: Int(floor(h3 * 4.0)), seed: h1
+            ))
+        }
+
+        // 2. Multi-Tier Seabed Terrace Outcrops across all 9 tiers (tierIndex = 0..8)
+        let terraceSlotCount = 2
+        let terraceSlotSpan = chunkWidth / Double(terraceSlotCount)
+        for tierIdx in 0..<seabedTerraceTiers.count {
+            let saltOffset = tierIdx * 197
+            for i in 0..<terraceSlotCount {
+                let h1 = hash1D(chunkIndex * 11 + i, salt: 911 + saltOffset)
+                if tierIdx >= 4 && h1 < 0.28 { continue }
+                let h2 = hash1D(chunkIndex * 17 + i, salt: 919 + saltOffset)
+                let h3 = hash1D(chunkIndex * 23 + i, salt: 929 + saltOffset)
+                let worldX = chunkStartX + (Double(i) + 0.16 + h1 * 0.68) * terraceSlotSpan
+                let terrace = getSeabedTerraceAt(worldX: worldX, tierIndex: tierIdx)
+                if terrace.isPresent && terrace.edgeFactor > 0.35 {
+                    let type: SeabedOutcropType
+                    if tierIdx == 0 {
+                        type = h2 < 0.74 ? .CORAL_MOUND : .KELP_CLUSTER
+                    } else if tierIdx == 1 {
+                        type = h2 < 0.50 ? .CORAL_MOUND : (h2 < 0.80 ? .ROCK_SPIRE : .KELP_CLUSTER)
+                    } else if tierIdx <= 3 {
+                        type = h2 < 0.30 ? .CORAL_MOUND : .ROCK_SPIRE
+                    } else {
+                        type = h2 < 0.56 ? .ROCK_SPIRE : .ABYSSAL_CHIMNEY
+                    }
+
+                    let sizeScale = 1.0 + Double(tierIdx) * 0.08
+                    let width: Double
+                    let height: Double
+                    switch type {
+                    case .CORAL_MOUND:
+                        width = (120.0 + h2 * 105.0) * sizeScale
+                        height = (78.0 + h3 * 68.0) * sizeScale
+                    case .KELP_CLUSTER:
+                        width = 88.0 + h2 * 64.0
+                        height = 115.0 + h3 * 92.0
+                    default:
+                        width = (112.0 + h2 * 96.0) * sizeScale
+                        height = (90.0 + h3 * 88.0) * sizeScale
+                    }
+
+                    placements.append(SeabedOutcropPlacement(
+                        worldX: worldX, baseY: terrace.topY, width: width, height: height,
+                        type: type, variant: Int(floor(h3 * 4.0)), seed: h1
+                    ))
                 }
             }
         }
 
-        let pA = presetForCell(cellIdx)
-        var pB = pA
-        var t = 0.0
-        if cellFrac < 0.28 {
-            pB = presetForCell(cellIdx - 1)
-            t = (1.0 - quinticSmoothstep(edge0: 0.0, edge1: 0.28, x: cellFrac)) * 0.5
-        } else if cellFrac > 0.72 {
-            pB = presetForCell(cellIdx + 1)
-            t = quinticSmoothstep(edge0: 0.72, edge1: 1.0, x: cellFrac) * 0.5
+        return placements
+    }
+
+    public struct SeabedCollisionResult {
+        public let y: Double
+        public let vy: Double
+        public let hitSeabed: Bool
+        public let hitAtollUnderside: Bool
+        public let floorY: Double
+        public let slope: Double
+    }
+
+    /// Physical Seabed Two-Way Collision Solver (Prevents swimming through the main seafloor or any of the 9 seabed terraces from above OR below!)
+    public static func resolveSeabedCollision(
+        worldX: Double,
+        worldY: Double,
+        vy: Double,
+        entityRadius: Double,
+        clearancePadding: Double = 6.0,
+        prevWorldY: Double? = nil
+    ) -> SeabedCollisionResult {
+        let mainFloorY = getFloorDepthAt(worldX: worldX)
+        let mainSlope = getTerrainSlopeAt(worldX: worldX)
+        let refPrevY = prevWorldY ?? (worldY - vy * 0.016)
+        let clearance = entityRadius + clearancePadding
+
+        // 1. Check all 9 seabed terraces (both landing on top AND bumping head against underside!)
+        for tierIdx in 0..<seabedTerraceTiers.count {
+            let terrace = getSeabedTerraceAt(worldX: worldX, tierIndex: tierIdx)
+            guard terrace.isPresent && terrace.edgeFactor > 0.2 else { continue }
+            let terraceTopMaxY = terrace.topY - clearance
+            let terraceUndersideMinY = terrace.bottomArchY + clearance * 0.88
+            let slabMidY = (terrace.topY + terrace.bottomArchY) * 0.5
+
+            // Case 1A: Approaching or resting on TOP of this terrace from above
+            if refPrevY <= slabMidY && worldY <= slabMidY + entityRadius * 0.6 {
+                if worldY > terraceTopMaxY {
+                    return SeabedCollisionResult(
+                        y: terraceTopMaxY,
+                        vy: min(0.0, vy * -0.15),
+                        hitSeabed: true,
+                        hitAtollUnderside: false,
+                        floorY: terrace.topY,
+                        slope: terrace.slope
+                    )
+                }
+                return SeabedCollisionResult(
+                    y: worldY, vy: vy, hitSeabed: false, hitAtollUnderside: false,
+                    floorY: terrace.topY, slope: terrace.slope
+                )
+            }
+
+            // Case 1B: Swimming UPWARD from below this terrace -> block upward penetration through the bedrock!
+            if refPrevY > slabMidY && worldY < terraceUndersideMinY {
+                return SeabedCollisionResult(
+                    y: terraceUndersideMinY,
+                    vy: max(0.0, vy * -0.2),
+                    hitSeabed: false,
+                    hitAtollUnderside: true,
+                    floorY: mainFloorY,
+                    slope: terrace.slope
+                )
+            }
         }
 
-        let relief = pA.relief * (1.0 - t) + pB.relief * t
-        let bias = pA.bias * (1.0 - t) + pB.bias * t
-        let clusterProb = pA.clusterProb * (1.0 - t) + pB.clusterProb * t
+        // 2. Main continuous seafloor collision
+        let maxAllowedY = mainFloorY - clearance
+        if worldY > maxAllowedY {
+            return SeabedCollisionResult(
+                y: maxAllowedY,
+                vy: min(0.0, vy * -0.15),
+                hitSeabed: true,
+                hitAtollUnderside: false,
+                floorY: mainFloorY,
+                slope: mainSlope
+            )
+        }
 
-        let rawH = getTerrainHeight(worldX: worldX)
-        let normRidge = tanh(rawH / 360.0)
-        let farOffset = max(0.0, (0.5 - 0.5 * normRidge) * 22.0 * relief)
-        let midOffset = max(0.0, (0.5 - 0.5 * noise1D(worldX * 0.0014, salt: 61)) * 30.0 * relief + max(0.0, bias * 0.55))
-        let nearOffset = max(0.0, (0.5 - 0.5 * normRidge) * 26.0 * relief + max(0.0, bias))
-
-        return ProceduralTerrainModulation(
-            farRidgeOffsetPx: farOffset,
-            midStratumOffsetPx: midOffset,
-            nearSeabedOffsetPx: nearOffset,
-            reliefMultiplier: relief,
-            seabedBiasPx: bias,
-            schoolClusterProbability: clusterProb
+        return SeabedCollisionResult(
+            y: worldY, vy: vy, hitSeabed: false, hitAtollUnderside: false,
+            floorY: mainFloorY, slope: mainSlope
         )
     }
 
+    public struct SeabedKineticStepResult {
+        public let x: Double
+        public let y: Double
+        public let vx: Double
+        public let vy: Double
+        public let hitSeabed: Bool
+        public let hitAtollUnderside: Bool
+        public let floorY: Double
+        public let slope: Double
+    }
+
+    /// Full 2D Kinetic Seabed Step with Sub-Stepping (prevents tunneling through steep walls or terrace undersides)
+    public static func resolveSeabedKineticStep(
+        prevX: Double,
+        prevY: Double,
+        nextX: Double,
+        nextY: Double,
+        vx: Double,
+        vy: Double,
+        entityRadius: Double,
+        clearancePadding: Double = 6.0
+    ) -> SeabedKineticStepResult {
+        let totalDx = nextX - prevX
+        let totalDy = nextY - prevY
+        let dist = hypot(totalDx, totalDy)
+        let steps = max(1, min(6, Int(ceil(dist / max(8.0, entityRadius * 0.45)))))
+
+        var curX = prevX
+        var curY = prevY
+        var curVx = vx
+        var curVy = vy
+        var hitSeabed = false
+        var hitAtollUnderside = false
+        var lastFloorY = getFloorDepthAt(worldX: nextX)
+        var lastSlope = 0.0
+
+        for s in 1...steps {
+            let stepPrevX = curX
+            let stepPrevY = curY
+            let targetX = prevX + (totalDx * Double(s)) / Double(steps)
+            let targetY = curY + totalDy / Double(steps)
+
+            let col = resolveSeabedCollision(
+                worldX: targetX,
+                worldY: targetY,
+                vy: curVy,
+                entityRadius: entityRadius,
+                clearancePadding: clearancePadding,
+                prevWorldY: stepPrevY
+            )
+
+            lastFloorY = col.floorY
+            lastSlope = col.slope
+
+            if col.hitAtollUnderside {
+                hitAtollUnderside = true
+                let prevColAtOldX = resolveSeabedCollision(
+                    worldX: stepPrevX,
+                    worldY: stepPrevY,
+                    vy: curVy,
+                    entityRadius: entityRadius,
+                    clearancePadding: clearancePadding,
+                    prevWorldY: stepPrevY
+                )
+                if !prevColAtOldX.hitAtollUnderside && !prevColAtOldX.hitSeabed && abs(stepPrevY - col.y) > entityRadius * 0.42 {
+                    curX = stepPrevX
+                    curVx = 0.0
+                    curY = max(stepPrevY, prevColAtOldX.y)
+                } else {
+                    curX = targetX
+                    curY = col.y
+                    curVy = col.vy
+                }
+            } else if col.hitSeabed {
+                hitSeabed = true
+                curX = targetX
+                curY = col.y
+                curVy = col.vy
+                if abs(col.slope) > 0.45 && curVx * col.slope < 0.0 {
+                    let damp = max(0.35, 1.0 - (abs(col.slope) - 0.45) * 0.35)
+                    curVx *= damp
+                }
+            } else {
+                curX = targetX
+                curY = col.y
+            }
+        }
+
+        return SeabedKineticStepResult(
+            x: curX,
+            y: curY,
+            vx: curVx,
+            vy: curVy,
+            hitSeabed: hitSeabed,
+            hitAtollUnderside: hitAtollUnderside,
+            floorY: lastFloorY,
+            slope: lastSlope
+        )
+    }
+
+    public static func sampleParallaxTerrainModulation(worldX: Double, depthY: Double) -> ProceduralTerrainModulation {
+        return ProceduralTerrainModulation(
+            farRidgeOffsetPx: 0.0,
+            midStratumOffsetPx: 0.0,
+            nearSeabedOffsetPx: 0.0,
+            reliefMultiplier: 1.0,
+            seabedBiasPx: 0.0,
+            schoolClusterProbability: 0.72
+        )
+    }
 
     /// Computes evolved shark stats for any of the 48 shark forms
     public static func computeEvolvedSharkStats(
@@ -1072,7 +1454,7 @@ public enum GameRules {
         return .DAMAGE
     }
 
-    /// Continuous bathymetric water color interpolation across 0m ~ 2200m+
+    /// Continuous bathymetric water color interpolation across 0m ~ 20,000m (1:1 parity with Web parallaxBackground.ts)
     public static func sampleBathymetricWaterRGB(depthMeters: Double) -> SIMD3<Double> {
         let stops: [(depth: Double, r: Double, g: Double, b: Double)] = [
             (-220, 56, 189, 248),
@@ -1083,8 +1465,11 @@ public enum GameRules {
             (520, 18, 68, 138),
             (780, 17, 38, 92),
             (1150, 10, 18, 48),
-            (1480, 9, 8, 26),
-            (1950, 24, 8, 14)
+            (1800, 9, 8, 28),
+            (3200, 14, 7, 24),
+            (6500, 18, 6, 18),
+            (12000, 22, 5, 12),
+            (20000, 10, 2, 8)
         ]
         if depthMeters <= stops[0].depth {
             return SIMD3(stops[0].r / 255.0, stops[0].g / 255.0, stops[0].b / 255.0)
@@ -1148,6 +1533,11 @@ public final class SpriteAtlasManager: ObservableObject {
     private var uiSettingImages: [String: UIImage] = [:]
     private var uiSettingIconImages: [String: UIImage] = [:]
     private var oceanLayerTextures: [String: SKTexture] = [:]
+    private var seabedStripTextures: [String: SKTexture] = [:]
+    private var seabedSubStratumTextures: [String: SKTexture] = [:]
+    private var ecologySpriteTextures: [String: SKTexture] = [:]
+    private var poiSpriteTextures: [String: SKTexture] = [:]
+    private var cavePortalShadowTex: SKTexture?
 
     private var cachedLoadingBg: UIImage?
     private var cachedLoadingLogo: UIImage?
@@ -1261,7 +1651,7 @@ public final class SpriteAtlasManager: ObservableObject {
                 self.loadingStageEn = "Spawning Marine Ecosystem..."
             }
 
-            // Stage 2 (0.38 -> 0.56): Slice 33 Prey Species (fish_24bdaa5a.png & fish2_fc857cfa.png)
+            // Stage 2 (0.38 -> 0.56): Load @3x Prey PNGs first, fallback to slicing fish_24bdaa5a.png & fish2_fc857cfa.png
             var localPreyUI: [String: UIImage] = [:]
             var localPreyTex: [String: SKTexture] = [:]
             let primarySheet = Self.loadBundledImage(named: "fish_24bdaa5a")
@@ -1271,17 +1661,26 @@ public final class SpriteAtlasManager: ObservableObject {
 
             for (idx, prey) in allPreys.enumerated() {
                 if localPreyTex[prey.spriteKey] != nil { continue }
-                let srcImg = prey.sheetName == "fish2_fc857cfa" ? fish2Sheet : primarySheet
-                if let img = srcImg,
-                   let sliced = Self.sliceAndKeyNormalizedCell(
-                       from: img,
-                       bounds: prey.normalizedBounds,
-                       preserveInteriorWhite: false
-                   ) {
-                    localPreyUI[prey.spriteKey] = sliced
-                    let tex = SKTexture(image: sliced)
+                if let raw3x = Self.loadBundledImage(named: "prey_\\(prey.id)@3x") ?? Self.loadBundledImage(named: "prey_\\(prey.id)"),
+                   let cg3x = raw3x.cgImage {
+                    let img3x = UIImage(cgImage: cg3x, scale: 3.0, orientation: .up)
+                    localPreyUI[prey.spriteKey] = img3x
+                    let tex = SKTexture(image: img3x)
                     tex.filteringMode = .linear
                     localPreyTex[prey.spriteKey] = tex
+                } else {
+                    let srcImg = prey.sheetName == "fish2_fc857cfa" ? fish2Sheet : primarySheet
+                    if let img = srcImg,
+                       let sliced = Self.sliceAndKeyNormalizedCell(
+                           from: img,
+                           bounds: prey.normalizedBounds,
+                           preserveInteriorWhite: false
+                       ) {
+                        localPreyUI[prey.spriteKey] = sliced
+                        let tex = SKTexture(image: sliced)
+                        tex.filteringMode = .linear
+                        localPreyTex[prey.spriteKey] = tex
+                    }
                 }
                 if idx % 8 == 7 || idx == totalPreys - 1 {
                     let prog = 0.38 + (Double(idx + 1) / Double(totalPreys)) * 0.18
@@ -1337,44 +1736,80 @@ public final class SpriteAtlasManager: ObservableObject {
                 self.uiSettingImages = settingResult.images
                 self.uiSettingIconImages = settingResult.icons
                 self.loadingProgress = 0.72
-                self.loadingStageZh = "正在构建无缝深海视差洋流..."
-                self.loadingStageEn = "Building Seamless Ocean Biomes..."
+                self.loadingStageZh = "正在构建 9 阶深海海床与珊瑚地貌..."
+                self.loadingStageEn = "Building 9-Tier Seabed & Coral Reefs..."
             }
 
-            // Stage 4 (0.72 -> 0.94): Process all 12 Multi-Biome Ocean Parallax Layers
-            let oceanLayers: [(name: String, isWater: Bool)] = [
-                ("bg_shallow_0_water_0e65cb68", true),
-                ("bg_shallow_1_far_8898229a", false),
-                ("bg_shallow_2_mid_b4e0d30a", false),
-                ("bg_shallow_3_near_96e92ee1", false),
-                ("bg_twilight_0_17bcb84c", true),
-                ("bg_twilight_1_04f5d35f", false),
-                ("bg_twilight_2_fd5a1b33", false),
-                ("bg_twilight_3_6e0dd7c1", false),
-                ("bg_abyss_0_1bbf506a", true),
-                ("bg_abyss_1_75e4a628", false),
-                ("bg_abyss_2_6ce66695", false),
-                ("bg_abyss_3_a4986280", false)
+            // Stage 4 (0.72 -> 0.94): Process Water Canopies + World Seabed Strips + Subsurface Bedrock Strata + Ecology & POI Atlases
+            let waterCanopies: [String] = [
+                "bg_shallow_0_water_0e65cb68",
+                "bg_twilight_0_17bcb84c",
+                "bg_abyss_0_1bbf506a"
             ]
             var localOceanTex: [String: SKTexture] = [:]
-            for (idx, layer) in oceanLayers.enumerated() {
-                if let rawImg = Self.loadBundledImage(named: layer.name) {
-                    let processed: UIImage
-                    if layer.isWater {
-                        processed = Self.processWaterLayerToSeamlessTile(rawImg, assetName: layer.name) ?? rawImg
-                    } else {
-                        processed = Self.processTerrainLayerToSeamlessStrip(rawImg, assetName: layer.name) ?? rawImg
-                    }
+            for (idx, waterName) in waterCanopies.enumerated() {
+                if let rawImg = Self.loadBundledImage(named: waterName) {
+                    let processed = Self.processWaterLayerToSeamlessTile(rawImg, assetName: waterName) ?? rawImg
                     let tex = SKTexture(image: processed)
                     tex.filteringMode = .linear
-                    localOceanTex[layer.name] = tex
+                    localOceanTex[waterName] = tex
                 }
-                let prog = 0.72 + (Double(idx + 1) / Double(oceanLayers.count)) * 0.22
+                let prog = 0.72 + (Double(idx + 1) / Double(waterCanopies.count)) * 0.06
                 let partialOcean = localOceanTex
                 await MainActor.run {
                     self.oceanLayerTextures = partialOcean
                     self.loadingProgress = max(self.loadingProgress, prog)
                 }
+            }
+
+            // Slice 4 Seamless Seabed Surface Strips & 4 Seamless Subsurface Bedrock Strata from world_seabed_strips_1794473245165
+            var localSeabedStrips: [String: SKTexture] = [:]
+            var localSeabedSubStrata: [String: SKTexture] = [:]
+            if let seabedSheet = Self.loadBundledImage(named: "world_seabed_strips_1794473245165") {
+                let stripDefs: [(id: String, y0: Double, y1: Double)] = [
+                    ("coral_reef", 0.0, 0.25),
+                    ("rocky_shelf", 0.25, 0.50),
+                    ("underwater_canyon", 0.50, 0.75),
+                    ("deep_abyss", 0.75, 1.00)
+                ]
+                for def in stripDefs {
+                    if let stripImg = Self.sliceSeabedStrip(from: seabedSheet, y0Ratio: def.y0, y1Ratio: def.y1) {
+                        let tex = SKTexture(image: stripImg)
+                        tex.filteringMode = .linear
+                        localSeabedStrips[def.id] = tex
+                    }
+                    if let subImg = Self.sliceSeabedSubStratum(from: seabedSheet, stripId: def.id, y0Ratio: def.y0, y1Ratio: def.y1) {
+                        let subTex = SKTexture(image: subImg)
+                        subTex.filteringMode = .linear
+                        localSeabedSubStrata[def.id] = subTex
+                    }
+                }
+            }
+            let committedStrips = localSeabedStrips
+            let committedSubStrata = localSeabedSubStrata
+            await MainActor.run {
+                self.seabedStripTextures = committedStrips
+                self.seabedSubStratumTextures = committedSubStrata
+                self.loadingProgress = max(self.loadingProgress, 0.85)
+            }
+
+            // Slice 16 Ecology Sprites (world_ecology_atlas_1794473252524) & 10 POI Sprites (world_pois_atlas_1794473250443)
+            var localEcologyTex: [String: SKTexture] = [:]
+            if let ecoSheet = Self.loadBundledImage(named: "world_ecology_atlas_1794473252524") {
+                localEcologyTex = Self.sliceWorldEcologyAtlas(from: ecoSheet)
+            }
+            var localPoiTex: [String: SKTexture] = [:]
+            if let poiSheet = Self.loadBundledImage(named: "world_pois_atlas_1794473250443") {
+                localPoiTex = Self.sliceWorldPoisAtlas(from: poiSheet)
+            }
+            let portalShadow = Self.makeCavePortalShadowTexture()
+            let committedEco = localEcologyTex
+            let committedPoi = localPoiTex
+            await MainActor.run {
+                self.ecologySpriteTextures = committedEco
+                self.poiSpriteTextures = committedPoi
+                self.cavePortalShadowTex = portalShadow
+                self.loadingProgress = max(self.loadingProgress, 0.94)
             }
 
             // Stage 5 (0.94 -> 1.00): Metal GPU Texture Preload & Smooth Fade-Out
@@ -1386,6 +1821,10 @@ public final class SpriteAtlasManager: ObservableObject {
                 let allGpuTextures = Array(self.sharkTextures.values)
                     + Array(self.preyTextures.values)
                     + Array(self.oceanLayerTextures.values)
+                    + Array(self.seabedStripTextures.values)
+                    + Array(self.seabedSubStratumTextures.values)
+                    + Array(self.ecologySpriteTextures.values)
+                    + Array(self.poiSpriteTextures.values)
 
                 SKTexture.preload(allGpuTextures) {
                     Task { @MainActor in
@@ -1469,40 +1908,75 @@ public final class SpriteAtlasManager: ObservableObject {
         return oceanLayerTextures[assetName]
     }
 
+    public func seabedStripTexture(for stripId: String) -> SKTexture? {
+        return seabedStripTextures[stripId] ?? seabedStripTextures["coral_reef"]
+    }
+
+    public func seabedSubStratumTexture(for stripId: String) -> SKTexture? {
+        return seabedSubStratumTextures[stripId] ?? seabedSubStratumTextures["coral_reef"]
+    }
+
+    public func ecologySpriteTexture(for id: String) -> SKTexture? {
+        return ecologySpriteTextures[id]
+    }
+
+    public func poiSpriteTexture(for id: String) -> SKTexture? {
+        return poiSpriteTextures[id]
+    }
+
+    public func cavePortalShadowTexture() -> SKTexture? {
+        if let tex = cavePortalShadowTex { return tex }
+        let tex = Self.makeCavePortalShadowTexture()
+        cavePortalShadowTex = tex
+        return tex
+    }
+
     nonisolated private static func loadBundledImage(named name: String) -> UIImage? {
-        let cleanBase = name.hasSuffix(".png") ? String(name.dropLast(4)) : name
+        var cleanBase = name
+        if cleanBase.hasSuffix(".png") {
+            cleanBase = String(cleanBase.dropLast(4))
+        } else if cleanBase.hasSuffix(".jpg") {
+            cleanBase = String(cleanBase.dropLast(4))
+        } else if cleanBase.hasSuffix(".jpeg") {
+            cleanBase = String(cleanBase.dropLast(5))
+        }
+        let exts = ["png", "jpg", "jpeg"]
         let roots: [URL] = [Bundle.main.resourceURL, Bundle.main.bundleURL].compactMap { $0 }
         for root in roots {
-            let candidates = [
-                root.appendingPathComponent("Assets/\\(cleanBase).png"),
-                root.appendingPathComponent("Assets/\\(cleanBase)@3x.png"),
-                root.appendingPathComponent("Resources/Assets/\\(cleanBase).png"),
-                root.appendingPathComponent("Resources/Assets/\\(cleanBase)@3x.png"),
-                root.appendingPathComponent("\\(cleanBase).png"),
-                root.appendingPathComponent("\\(cleanBase)@3x.png")
-            ]
-            for url in candidates {
-                if FileManager.default.fileExists(atPath: url.path),
-                   let img = UIImage(contentsOfFile: url.path) {
-                    return img
+            for ext in exts {
+                let candidates = [
+                    root.appendingPathComponent("Assets/\\(cleanBase).\\(ext)"),
+                    root.appendingPathComponent("Assets/\\(cleanBase)@3x.\\(ext)"),
+                    root.appendingPathComponent("Resources/Assets/\\(cleanBase).\\(ext)"),
+                    root.appendingPathComponent("Resources/Assets/\\(cleanBase)@3x.\\(ext)"),
+                    root.appendingPathComponent("\\(cleanBase).\\(ext)"),
+                    root.appendingPathComponent("\\(cleanBase)@3x.\\(ext)")
+                ]
+                for url in candidates {
+                    if FileManager.default.fileExists(atPath: url.path),
+                       let img = UIImage(contentsOfFile: url.path) {
+                        return img
+                    }
                 }
             }
         }
-        if let path = Bundle.main.path(forResource: cleanBase, ofType: "png"),
-           let img = UIImage(contentsOfFile: path) {
-            return img
-        }
-        if let path = Bundle.main.path(forResource: cleanBase, ofType: "png", inDirectory: "Assets"),
-           let img = UIImage(contentsOfFile: path) {
-            return img
-        }
-        if let path = Bundle.main.path(forResource: "\\(cleanBase)@3x", ofType: "png"),
-           let img = UIImage(contentsOfFile: path) {
-            return img
-        }
-        if let path = Bundle.main.path(forResource: "\\(cleanBase)@3x", ofType: "png", inDirectory: "Assets"),
-           let img = UIImage(contentsOfFile: path) {
-            return img
+        for ext in exts {
+            if let path = Bundle.main.path(forResource: cleanBase, ofType: ext),
+               let img = UIImage(contentsOfFile: path) {
+                return img
+            }
+            if let path = Bundle.main.path(forResource: cleanBase, ofType: ext, inDirectory: "Assets"),
+               let img = UIImage(contentsOfFile: path) {
+                return img
+            }
+            if let path = Bundle.main.path(forResource: "\\(cleanBase)@3x", ofType: ext),
+               let img = UIImage(contentsOfFile: path) {
+                return img
+            }
+            if let path = Bundle.main.path(forResource: "\\(cleanBase)@3x", ofType: ext, inDirectory: "Assets"),
+               let img = UIImage(contentsOfFile: path) {
+                return img
+            }
         }
         if let img = UIImage(named: cleanBase) { return img }
         return nil
@@ -2863,6 +3337,378 @@ public final class SpriteAtlasManager: ObservableObject {
             seamRatio: isPanoramic ? 0.10 : 0.14
         )
     }
+
+    /// Slices one of the 4 horizontal seabed surface bands from world_seabed_strips_1794473245165.jpg,
+    /// removes the top #FFFFFF background via top-edge BFS flood-fill, grounds the base, and cross-fades horizontally.
+    nonisolated private static func sliceSeabedStrip(from image: UIImage, y0Ratio: Double, y1Ratio: Double) -> UIImage? {
+        guard let cgImg = image.cgImage else { return nil }
+        let fullW = cgImg.width
+        let fullH = cgImg.height
+        let sy = max(0, Int((Double(fullH) * y0Ratio).rounded()))
+        let ey = min(fullH, Int((Double(fullH) * y1Ratio).rounded()))
+        let rawH = max(32, ey - sy)
+        let padX = max(2, Int((Double(fullW) * 0.008).rounded()))
+        let rawW = max(64, fullW - padX * 2)
+
+        guard let croppedCG = cgImg.cropping(to: CGRect(x: padX, y: sy, width: rawW, height: rawH)) else {
+            return nil
+        }
+
+        let w = rawW
+        let h = rawH
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        var visited = [UInt8](repeating: 0, count: w * h)
+        var queue = [Int](repeating: 0, count: w * h)
+        var qHead = 0
+        var qTail = 0
+
+        func isBg(_ i: Int) -> Bool {
+            let p = i * 4
+            let r = Int(rgba[p])
+            let g = Int(rgba[p + 1])
+            let b = Int(rgba[p + 2])
+            let minC = min(r, min(g, b))
+            let maxC = max(r, max(g, b))
+            return minC >= 205 && (maxC - minC) <= 42
+        }
+
+        func push(_ x: Int, _ y: Int) {
+            if x < 0 || x >= w || y < 0 || y >= Int(Double(h) * 0.82) { return }
+            let i = y * w + x
+            if visited[i] != 0 || !isBg(i) { return }
+            visited[i] = 1
+            queue[qTail] = i
+            qTail += 1
+        }
+
+        for x in 0..<w {
+            push(x, 0)
+            push(x, 1)
+        }
+        for y in 0..<Int(Double(h) * 0.45) {
+            push(0, y)
+            push(w - 1, y)
+        }
+
+        while qHead < qTail {
+            let curr = queue[qHead]
+            qHead += 1
+            let cx = curr % w
+            let cy = (curr - cx) / w
+            if cx > 0 { push(cx - 1, cy) }
+            if cx + 1 < w { push(cx + 1, cy) }
+            if cy > 0 { push(cx, cy - 1) }
+            if cy + 1 < h { push(cx, cy + 1) }
+        }
+
+        for i in 0..<(w * h) where visited[i] != 0 {
+            let p = i * 4
+            rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
+        }
+
+        // Feather top silhouette edge (2px despill)
+        if h > 2 && w > 2 {
+            for y in 1..<(h - 1) {
+                let rowOff = y * w
+                for x in 1..<(w - 1) {
+                    let i = rowOff + x
+                    if visited[i] != 0 { continue }
+                    let hasTrans = visited[i - 1] != 0 || visited[i + 1] != 0 || visited[i - w] != 0 || visited[i + w] != 0
+                    if hasTrans {
+                        let p = i * 4
+                        let r = Double(rgba[p])
+                        let g = Double(rgba[p + 1])
+                        let b = Double(rgba[p + 2])
+                        let minC = min(r, min(g, b))
+                        if minC > 165.0 {
+                            let keep = max(0.0, min(1.0, (235.0 - minC) / 70.0))
+                            rgba[p] = UInt8((r * 0.72 * keep).rounded())
+                            rgba[p + 1] = UInt8((g * 0.76 * keep).rounded())
+                            rgba[p + 2] = UInt8((b * 0.82 * keep).rounded())
+                            rgba[p + 3] = UInt8((Double(rgba[p + 3]) * keep).rounded())
+                        }
+                    }
+                }
+            }
+        }
+
+        // Ground lower 42% of each column so seabed base is 100% solid
+        let minSearchY = max(4, Int(Double(h) * 0.58))
+        for x in 0..<w {
+            var lastSolidY = -1
+            for y in stride(from: h - 1, through: minSearchY, by: -1) {
+                let p = (y * w + x) * 4
+                let r = Int(rgba[p]), g = Int(rgba[p + 1]), b = Int(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, max(g, b))
+                if rgba[p + 3] > 200 && !(minC >= 205 && (maxC - minC) <= 40) {
+                    lastSolidY = y
+                    break
+                }
+            }
+            if lastSolidY >= minSearchY && lastSolidY < h - 1 {
+                let srcY = max(0, lastSolidY - 2)
+                let sp = (srcY * w + x) * 4
+                let sr = rgba[sp], sg = rgba[sp + 1], sb = rgba[sp + 2]
+                for y in lastSolidY..<h {
+                    let dp = (y * w + x) * 4
+                    rgba[dp] = sr; rgba[dp + 1] = sg; rgba[dp + 2] = sb; rgba[dp + 3] = 255
+                }
+            }
+        }
+
+        var minY = h - 1
+        var maxY = 0
+        for y in 0..<h {
+            var opaqueCount = 0
+            let rowOff = y * w
+            for x in stride(from: 0, to: w, by: 2) {
+                if rgba[(rowOff + x) * 4 + 3] > 32 {
+                    opaqueCount += 1
+                }
+            }
+            if opaqueCount >= 6 {
+                if y < minY { minY = y }
+                if y > maxY { maxY = y }
+            }
+        }
+        if maxY <= minY + 16 {
+            minY = 0; maxY = h - 1
+        } else {
+            minY = max(0, minY - 2)
+            maxY = min(h - 1, max(minY + 24, maxY - 2))
+        }
+
+        let cropH = maxY - minY + 1
+        var croppedRgba = [UInt8](repeating: 0, count: w * cropH * 4)
+        for y in 0..<cropH {
+            let srcOff = (minY + y) * w * 4
+            let dstOff = y * w * 4
+            for byteIdx in 0..<(w * 4) {
+                croppedRgba[dstOff + byteIdx] = rgba[srcOff + byteIdx]
+            }
+        }
+
+        return makeHorizontallySeamlessImage(rgba: croppedRgba, width: w, height: cropH, seamRatio: 0.14)
+    }
+
+    /// Builds a 100% opaque, horizontally & vertically seamless subsurface bedrock stratum tile
+    /// from the lower 58% of each seabed band in world_seabed_strips_1794473245165.jpg (1:1 parity with Web sliceSeabedSubStratum).
+    nonisolated private static func sliceSeabedSubStratum(
+        from image: UIImage,
+        stripId: String,
+        y0Ratio: Double,
+        y1Ratio: Double
+    ) -> UIImage? {
+        guard let cgImg = image.cgImage else { return nil }
+        let fullW = cgImg.width
+        let fullH = cgImg.height
+        let bandSpan = y1Ratio - y0Ratio
+        let subY0 = y0Ratio + bandSpan * 0.42
+        let subY1 = y1Ratio - bandSpan * 0.02
+        let sy = max(0, Int((Double(fullH) * subY0).rounded()))
+        let ey = min(fullH, Int((Double(fullH) * subY1).rounded()))
+        let rawH = max(32, ey - sy)
+        let padX = max(2, Int((Double(fullW) * 0.01).rounded()))
+        let rawW = max(64, fullW - padX * 2)
+
+        guard let croppedCG = cgImg.cropping(to: CGRect(x: padX, y: sy, width: rawW, height: rawH)) else {
+            return nil
+        }
+
+        let w = rawW
+        let h = rawH
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        let fallbackRGB: (Double, Double, Double)
+        switch stripId {
+        case "coral_reef": fallbackRGB = (42.0, 36.0, 48.0)
+        case "rocky_shelf": fallbackRGB = (28.0, 38.0, 54.0)
+        case "underwater_canyon": fallbackRGB = (34.0, 26.0, 44.0)
+        default: fallbackRGB = (18.0, 16.0, 28.0)
+        }
+
+        for x in 0..<w {
+            var validR = fallbackRGB.0
+            var validG = fallbackRGB.1
+            var validB = fallbackRGB.2
+            for y in stride(from: h - 1, through: 0, by: -1) {
+                let p = (y * w + x) * 4
+                let r = Double(rgba[p]), g = Double(rgba[p + 1]), b = Double(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, min(g, b))
+                if rgba[p + 3] > 210 && !(minC >= 185.0 && (maxC - minC) <= 45.0) {
+                    validR = r * 0.72
+                    validG = g * 0.74
+                    validB = b * 0.78
+                    break
+                }
+            }
+
+            for y in 0..<h {
+                let p = (y * w + x) * 4
+                var r = Double(rgba[p]), g = Double(rgba[p + 1]), b = Double(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, max(g, b))
+                if rgba[p + 3] < 220 || (minC >= 180.0 && (maxC - minC) <= 48.0) {
+                    r = validR
+                    g = validG
+                    b = validB
+                } else {
+                    validR = r * 0.85 + validR * 0.15
+                    validG = g * 0.85 + validG * 0.15
+                    validB = b * 0.85 + validB * 0.15
+                }
+
+                let vRatio = Double(y) / Double(max(1, h - 1))
+                let strataWave = sin(vRatio * .pi * 6.0 + Double(x) * 0.035) * 0.06
+                    + cos(vRatio * .pi * 14.0 - Double(x) * 0.02) * 0.035
+                let depthShade = 0.86 - vRatio * 0.24 + strataWave
+
+                rgba[p] = UInt8(max(6.0, min(255.0, (r * depthShade).rounded())))
+                rgba[p + 1] = UInt8(max(6.0, min(255.0, (g * depthShade).rounded())))
+                rgba[p + 2] = UInt8(max(8.0, min(255.0, (b * depthShade).rounded())))
+                rgba[p + 3] = 255
+            }
+        }
+
+        // Cross-fade top and bottom 16% rows so vertical strata stack seamlessly
+        let vOverlap = max(4, Int((Double(h) * 0.16).rounded()))
+        for y in 0..<vOverlap {
+            let t = (Double(y) + 0.5) / Double(vOverlap)
+            let wTop = 0.5 - 0.5 * cos(.pi * t)
+            let wBot = 1.0 - wTop
+            let botY = h - vOverlap + y
+            for x in 0..<w {
+                let pTop = (y * w + x) * 4
+                let pBot = (botY * w + x) * 4
+                let rMix = UInt8(max(0.0, min(255.0, (Double(rgba[pTop]) * wTop + Double(rgba[pBot]) * wBot).rounded())))
+                let gMix = UInt8(max(0.0, min(255.0, (Double(rgba[pTop + 1]) * wTop + Double(rgba[pBot + 1]) * wBot).rounded())))
+                let bMix = UInt8(max(0.0, min(255.0, (Double(rgba[pTop + 2]) * wTop + Double(rgba[pBot + 2]) * wBot).rounded())))
+                rgba[pTop] = rMix; rgba[pTop + 1] = gMix; rgba[pTop + 2] = bMix
+            }
+        }
+
+        return makeHorizontallySeamlessImage(rgba: rgba, width: w, height: h, seamRatio: 0.16)
+    }
+
+    /// Slices the 4x4 World Ecology Atlas (world_ecology_atlas_1794473252524.jpg) into 16 transparent SKTextures
+    nonisolated private static func sliceWorldEcologyAtlas(from image: UIImage) -> [String: SKTexture] {
+        var out: [String: SKTexture] = [:]
+        let rows: [[String]] = [
+            ["kelp_1", "kelp_2", "kelp_3", "kelp_4"],
+            ["coral_1", "coral_2", "coral_3", "coral_4"],
+            ["rock_1", "rock_2", "rock_3", "rock_4"],
+            ["vent_1", "vent_2", "vent_3", "vent_4"]
+        ]
+        for r in 0..<4 {
+            for c in 0..<4 {
+                let id = rows[r][c]
+                let bounds = SIMD4<Double>(
+                    Double(c) * 0.25 + 0.015,
+                    Double(r) * 0.25 + 0.015,
+                    0.22,
+                    0.22
+                )
+                if let uiImg = sliceAndKeyNormalizedCell(from: image, bounds: bounds, preserveInteriorWhite: false) {
+                    let tex = SKTexture(image: uiImg)
+                    tex.filteringMode = .linear
+                    out[id] = tex
+                }
+            }
+        }
+        return out
+    }
+
+    /// Slices the 10 Landmark POIs from world_pois_atlas_1794473250443.jpg into transparent SKTextures
+    nonisolated private static func sliceWorldPoisAtlas(from image: UIImage) -> [String: SKTexture] {
+        var out: [String: SKTexture] = [:]
+        let defs: [(id: String, bounds: SIMD4<Double>)] = [
+            ("shipwreck_1", SIMD4(0.02, 0.02, 0.46, 0.22)),
+            ("shipwreck_2", SIMD4(0.52, 0.02, 0.46, 0.22)),
+            ("statue_1", SIMD4(0.02, 0.27, 0.46, 0.21)),
+            ("statue_2", SIMD4(0.52, 0.27, 0.46, 0.21)),
+            ("arch_1", SIMD4(0.02, 0.52, 0.46, 0.21)),
+            ("arch_2", SIMD4(0.52, 0.52, 0.46, 0.21)),
+            ("skeleton_1", SIMD4(0.02, 0.77, 0.30, 0.21)),
+            ("skeleton_2", SIMD4(0.35, 0.77, 0.30, 0.21)),
+            ("mine_1", SIMD4(0.68, 0.77, 0.14, 0.21)),
+            ("mine_2", SIMD4(0.84, 0.77, 0.14, 0.21))
+        ]
+        for def in defs {
+            if let uiImg = sliceAndKeyNormalizedCell(from: image, bounds: def.bounds, preserveInteriorWhite: false) {
+                let tex = SKTexture(image: uiImg)
+                tex.filteringMode = .linear
+                out[def.id] = tex
+            }
+        }
+        return out
+    }
+
+    /// Generates a soft radial abyssal portal shadow texture for downward-curved cave openings
+    nonisolated private static func makeCavePortalShadowTexture() -> SKTexture? {
+        let size = 128
+        var rgba = [UInt8](repeating: 0, count: size * size * 4)
+        let center = Double(size - 1) * 0.5
+        let maxR = Double(size) * 0.5
+        for y in 0..<size {
+            for x in 0..<size {
+                let dx = Double(x) - center
+                let dy = Double(y) - center
+                let r = min(1.0, hypot(dx, dy) / maxR)
+                let alpha = pow(1.0 - r * r, 1.8) * 0.76
+                let idx = (y * size + x) * 4
+                let rCol = 4.0 * alpha
+                let gCol = 16.0 * alpha
+                let bCol = 36.0 * alpha
+                rgba[idx] = UInt8(max(0.0, min(255.0, rCol.rounded())))
+                rgba[idx + 1] = UInt8(max(0.0, min(255.0, gCol.rounded())))
+                rgba[idx + 2] = UInt8(max(0.0, min(255.0, bCol.rounded())))
+                rgba[idx + 3] = UInt8(max(0.0, min(255.0, (alpha * 255.0).rounded())))
+            }
+        }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: size,
+            height: size,
+            bitsPerComponent: 8,
+            bytesPerRow: size * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ), let cgImg = ctx.makeImage() else { return nil }
+        let tex = SKTexture(cgImage: cgImg)
+        tex.filteringMode = .linear
+        return tex
+    }
 }
 `;
 }
@@ -3823,10 +4669,8 @@ public final class OceanGameScene: SKScene {
     }
 
     private let bubbleContainer = SKNode()
-    private let midProceduralTerrainNode = SKShapeNode()
-    private let nearProceduralTerrainNode = SKShapeNode()
-    private var proceduralStructurePool: [SKShapeNode] = []
-    private var proceduralPropPool: [SKShapeNode] = []
+    private var seabedArchFillPool: [SKShapeNode] = []
+    private var activeSeabedArchFillCount: Int = 0
     private var parallaxTilePool: [SKSpriteNode] = []
     private var activeParallaxTileCount: Int = 0
     private var ambientBubbles: [AmbientOceanBubble] = []
@@ -3853,44 +4697,24 @@ public final class OceanGameScene: SKScene {
         addChild(worldContainer)
         addChild(fxContainer)
 
-        midProceduralTerrainNode.zPosition = 3.6
-        midProceduralTerrainNode.lineWidth = 2.0
-        parallaxContainer.addChild(midProceduralTerrainNode)
-
-        nearProceduralTerrainNode.zPosition = 4.6
-        nearProceduralTerrainNode.lineWidth = 2.4
-        parallaxContainer.addChild(nearProceduralTerrainNode)
-
-        if proceduralStructurePool.isEmpty {
-            for _ in 0..<8 {
+        if seabedArchFillPool.isEmpty {
+            for _ in 0..<14 {
                 let sNode = SKShapeNode()
-                sNode.zPosition = 3.7
+                sNode.zPosition = 4.0
+                sNode.lineWidth = 0.0
+                sNode.strokeColor = .clear
                 sNode.isHidden = true
                 parallaxContainer.addChild(sNode)
-                proceduralStructurePool.append(sNode)
+                seabedArchFillPool.append(sNode)
             }
         } else {
-            for sNode in proceduralStructurePool where sNode.parent == nil {
+            for sNode in seabedArchFillPool where sNode.parent == nil {
                 parallaxContainer.addChild(sNode)
-            }
-        }
-
-        if proceduralPropPool.isEmpty {
-            for _ in 0..<28 {
-                let pNode = SKShapeNode()
-                pNode.zPosition = 4.7
-                pNode.isHidden = true
-                parallaxContainer.addChild(pNode)
-                proceduralPropPool.append(pNode)
-            }
-        } else {
-            for pNode in proceduralPropPool where pNode.parent == nil {
-                parallaxContainer.addChild(pNode)
             }
         }
 
         if parallaxTilePool.isEmpty {
-            for _ in 0..<32 {
+            for _ in 0..<160 {
                 let tileNode = SKSpriteNode()
                 tileNode.anchorPoint = CGPoint(x: 0, y: 0)
                 tileNode.isHidden = true
@@ -4066,7 +4890,7 @@ public final class OceanGameScene: SKScene {
             cameraY += Double.random(in: -shakeMag...shakeMag)
         }
 
-        // 3. Smooth Optical Growth Shrinking of Far / Mid / Near Background Layers
+        // 3. Smooth Optical Growth Shrinking of Background Layers
         let targetRelScale = stats.relativePreyScale
         if abs(targetRelScale - smoothedRelativePreyScale) > 0.35 {
             smoothedRelativePreyScale = targetRelScale
@@ -4083,7 +4907,7 @@ public final class OceanGameScene: SKScene {
         }
         let transition = GameRules.computeParallaxBiomeTransitionState(depthMeters: smoothedDepthRefY)
 
-        renderParallaxBackground(viewW: viewW, viewH: viewH, bgScales: bgScales, transition: transition)
+        renderParallaxBackground(viewW: viewW, viewH: viewH, bgScales: bgScales, transition: transition, zoom: stats.cameraZoom)
         stepAndRenderAmbientBubbles(viewW: viewW, viewH: viewH, bgScales: bgScales, transition: transition, dt: dt)
         stepAndRenderPreys(viewW: viewW, viewH: viewH, stats: stats, dt: dt, currentTime: currentTime)
         stepAndRenderDevourFX(viewW: viewW, viewH: viewH, stats: stats, dt: dt)
@@ -4135,8 +4959,28 @@ public final class OceanGameScene: SKScene {
         let speed = (isBoosting ? stats.boostSpeed : stats.moveSpeed * joySpeedFactor) * heatMult
         sharkVx = cos(sharkAngle) * speed
         sharkVy = sin(sharkAngle) * speed
-        sharkX += sharkVx * dt
-        sharkY = max(46.0, min(2200.0, sharkY + sharkVy * dt))
+
+        let prevX = sharkX
+        let prevY = sharkY
+        let nextX = sharkX + sharkVx * dt
+        let nextY = max(46.0, min(20000.0, sharkY + sharkVy * dt))
+
+        // Enforce 2-way physical seabed & 9-tier terrace collision (top landing + underside anti-penetration!)
+        let sharkHitRadius = 26.0 * stats.scale
+        let stepCol = GameRules.resolveSeabedKineticStep(
+            prevX: prevX,
+            prevY: prevY,
+            nextX: nextX,
+            nextY: nextY,
+            vx: sharkVx,
+            vy: sharkVy,
+            entityRadius: sharkHitRadius,
+            clearancePadding: 8.0
+        )
+        sharkX = stepCol.x
+        sharkY = max(46.0, min(20000.0, stepCol.y))
+        sharkVx = stepCol.vx
+        sharkVy = stepCol.vy
         swimPhase += dt * (isBoosting ? 12.5 : 7.8)
 
         // Emit swimming bubbles from shark tail (faster during Boost, shimmering Gold during Gold Frenzy!)
@@ -4403,12 +5247,13 @@ public final class OceanGameScene: SKScene {
         }
     }
 
-    // MARK: - Continuous Cross-Depth Multi-Biome Parallax Background (1:1 Parity with Web parallaxBackground.ts)
+    // MARK: - Continuous Cross-Depth Multi-Biome Parallax Background & 1.0x Physical Seabed (1:1 Parity with Web parallaxBackground.ts & worldGenerationSystem.ts)
     private func renderParallaxBackground(
         viewW: Double,
         viewH: Double,
         bgScales: ParallaxLayerGrowthScales,
-        transition: GameRules.ParallaxBiomeTransitionState
+        transition: GameRules.ParallaxBiomeTransitionState,
+        zoom: Double
     ) {
         let depthRefY = max(0.0, smoothedDepthRefY >= 0.0 ? smoothedDepthRefY : sharkY)
         let rgb = GameRules.sampleBathymetricWaterRGB(depthMeters: cameraY)
@@ -4418,17 +5263,18 @@ public final class OceanGameScene: SKScene {
         waterBgNode.position = CGPoint(x: viewW * 0.5, y: viewH * 0.5)
 
         activeParallaxTileCount = 0
+        activeSeabedArchFillCount = 0
 
-        let assetMap: [String: (water: String, far: String, mid: String, near: String)] = [
-            "bg_shallow": ("bg_shallow_0_water_0e65cb68", "bg_shallow_1_far_8898229a", "bg_shallow_2_mid_b4e0d30a", "bg_shallow_3_near_96e92ee1"),
-            "bg_twilight": ("bg_twilight_0_17bcb84c", "bg_twilight_1_04f5d35f", "bg_twilight_2_fd5a1b33", "bg_twilight_3_6e0dd7c1"),
-            "bg_abyss": ("bg_abyss_0_1bbf506a", "bg_abyss_1_75e4a628", "bg_abyss_2_6ce66695", "bg_abyss_3_a4986280")
+        let waterMap: [String: String] = [
+            "bg_shallow": "bg_shallow_0_water_0e65cb68",
+            "bg_twilight": "bg_twilight_0_17bcb84c",
+            "bg_abyss": "bg_abyss_0_1bbf506a"
         ]
 
         // 1. Layer 0 Water Backdrops blended with C2 quintic weights & soft vertical envelope
         if transition.shallow.waterAlpha > 0.01,
-           let names0 = assetMap["bg_shallow"],
-           let water0 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names0.water, isWaterCanopy: true) {
+           let wName0 = waterMap["bg_shallow"],
+           let water0 = SpriteAtlasManager.shared.oceanParallaxTexture(named: wName0, isWaterCanopy: true) {
             let refH = min(viewH, max(360.0, viewW * 0.65))
             let baseCanopyH = max(96.0, min(220.0, refH * 0.32))
             let canopyH = baseCanopyH * bgScales.waterScale
@@ -4450,8 +5296,8 @@ public final class OceanGameScene: SKScene {
         }
 
         if transition.twilight.waterAlpha > 0.01,
-           let names1 = assetMap["bg_twilight"],
-           let water1 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names1.water, isWaterCanopy: true) {
+           let wName1 = waterMap["bg_twilight"],
+           let water1 = SpriteAtlasManager.shared.oceanParallaxTexture(named: wName1, isWaterCanopy: true) {
             addTiledStrip(
                 texture: water1,
                 baseTargetH: viewH + 24.0,
@@ -4468,8 +5314,8 @@ public final class OceanGameScene: SKScene {
         }
 
         if transition.abyss.waterAlpha > 0.01,
-           let names2 = assetMap["bg_abyss"],
-           let water2 = SpriteAtlasManager.shared.oceanParallaxTexture(named: names2.water, isWaterCanopy: true) {
+           let wName2 = waterMap["bg_abyss"],
+           let water2 = SpriteAtlasManager.shared.oceanParallaxTexture(named: wName2, isWaterCanopy: true) {
             addTiledStrip(
                 texture: water2,
                 baseTargetH: viewH + 24.0,
@@ -4485,59 +5331,11 @@ public final class OceanGameScene: SKScene {
             )
         }
 
-        // 2. Layers 1, 2, 3 (Far, Mid, Near) with strict Optical Plane Z-Ordering across Biomes
-        //    (All Far z=2.1..2.3 -> All Mid z=3.1..3.3 -> All Near z=4.1..4.3)
-        if let names0 = assetMap["bg_shallow"] {
-            renderBiomeTerrainPlanes(
-                zonePrefix: "bg_shallow",
-                names: names0,
-                biomeFloorY: 680.0,
-                depthRefY: depthRefY,
-                metrics: transition.shallow,
-                viewW: viewW,
-                viewH: viewH,
-                bgScales: bgScales,
-                biomeZOffset: 0.1,
-                ambientWaterColor: ambientWaterColor
-            )
-        }
-
-        if let names1 = assetMap["bg_twilight"] {
-            renderBiomeTerrainPlanes(
-                zonePrefix: "bg_twilight",
-                names: names1,
-                biomeFloorY: 1340.0,
-                depthRefY: depthRefY,
-                metrics: transition.twilight,
-                viewW: viewW,
-                viewH: viewH,
-                bgScales: bgScales,
-                biomeZOffset: 0.2,
-                ambientWaterColor: ambientWaterColor
-            )
-        }
-
-        if let names2 = assetMap["bg_abyss"] {
-            renderBiomeTerrainPlanes(
-                zonePrefix: "bg_abyss",
-                names: names2,
-                biomeFloorY: 2100.0,
-                depthRefY: depthRefY,
-                metrics: transition.abyss,
-                viewW: viewW,
-                viewH: viewH,
-                bgScales: bgScales,
-                biomeZOffset: 0.3,
-                ambientWaterColor: ambientWaterColor
-            )
-        }
-
-        // 3. Render L1 Continuous Mid/Near Terrain Contours, L2 Structures & L3 Poisson-Clustered Seabed Props
-        renderProceduralOceanWorldOverlay(
+        // 2. Render 1.0x World-Space Physical Seabed, Subsurface Bedrock Strata, 9-Tier Seabed Terraces & Composite Coral Outcrops
+        renderPhysicalSeabedAndEcology(
             viewW: viewW,
             viewH: viewH,
-            depthRefY: depthRefY,
-            bgScales: bgScales
+            zoom: max(0.35, zoom)
         )
 
         // Hide any unused pooled tile nodes without removing them from the scene graph
@@ -4546,255 +5344,465 @@ public final class OceanGameScene: SKScene {
                 parallaxTilePool[i].isHidden = true
             }
         }
-    }
-
-    private func renderProceduralOceanWorldOverlay(
-        viewW: Double,
-        viewH: Double,
-        depthRefY: Double,
-        bgScales: ParallaxLayerGrowthScales
-    ) {
-        let effScale = max(0.45, bgScales.nearScale)
-        let isAbyss = depthRefY > 1100.0
-        let isTwilight = depthRefY > 520.0 && !isAbyss
-        let panoRefH = min(viewH, max(360.0, viewW * 0.65))
-        let nearTargetH = max(88.0, panoRefH * (isAbyss ? 0.38 : isTwilight ? 0.30 : 0.25)) * effScale
-        let crestHeightFromBottom = max(36.0 * effScale, nearTargetH * 0.54)
-
-        // 3A. L1 Midground Continuous Ridge & Canyon Contour Polygon (SpriteKit Y=0 is bottom of screen)
-        let midPath = CGMutablePath()
-        midPath.move(to: CGPoint(x: -8.0, y: -16.0))
-        let midParallax = 0.28
-        let midWorldCenter = (cameraX * midParallax) / effScale
-        let midStep = 24.0
-        var sx = -8.0
-        while sx <= viewW + midStep {
-            let wx = midWorldCenter + (sx - viewW * 0.5) / effScale
-            let dy = -GameRules.sampleColumnContourOffsetPx(worldX: wx, depthY: depthRefY, layerKind: 1) * 0.65 * effScale
-            let sy = crestHeightFromBottom + 20.0 * effScale + dy
-            midPath.addLine(to: CGPoint(x: sx, y: sy))
-            sx += midStep
-        }
-        midPath.addLine(to: CGPoint(x: viewW + 16.0, y: -16.0))
-        midPath.closeSubpath()
-        midProceduralTerrainNode.path = midPath
-        midProceduralTerrainNode.fillColor = isAbyss
-            ? UIColor(red: 24/255, green: 18/255, blue: 58/255, alpha: 0.66)
-            : isTwilight
-            ? UIColor(red: 14/255, green: 34/255, blue: 74/255, alpha: 0.58)
-            : UIColor(red: 12/255, green: 92/255, blue: 136/255, alpha: 0.50)
-        midProceduralTerrainNode.strokeColor = isAbyss
-            ? UIColor(red: 249/255, green: 115/255, blue: 22/255, alpha: 0.36)
-            : UIColor(red: 125/255, green: 211/255, blue: 252/255, alpha: 0.42)
-
-        // 3B. L2 Landform Structures (Voronoi cells: Reef Archways, Caves, Sand Dunes, Canyon Pillars, Hydrothermal Mounds)
-        let structSpan = 340.0
-        let halfWorldSpan = (viewW * 0.72) / effScale
-        let minVisWX = midWorldCenter - halfWorldSpan
-        let maxVisWX = midWorldCenter + halfWorldSpan
-        let firstStructCell = Int(floor(minVisWX / structSpan))
-        let lastStructCell = Int(ceil(maxVisWX / structSpan))
-        var activeStructIdx = 0
-
-        for cellIdx in firstStructCell...lastStructCell {
-            if activeStructIdx >= proceduralStructurePool.count { break }
-            let jitter = (GameRules.hash1D(cellIdx, salt: 503) - 0.5) * 0.56
-            let centerX = (Double(cellIdx) + 0.5 + jitter) * structSpan
-            let screenX = viewW * 0.5 + (centerX - midWorldCenter) * effScale
-            let sw = (200.0 + GameRules.hash1D(cellIdx, salt: 601) * 180.0) * effScale * 0.72
-            if screenX + sw < -40.0 || screenX - sw > viewW + 40.0 { continue }
-
-            let sh = (110.0 + GameRules.hash1D(cellIdx, salt: 619) * 85.0) * effScale * 0.76
-            let contourDy = -GameRules.sampleColumnContourOffsetPx(worldX: centerX, depthY: depthRefY, layerKind: 1) * 0.55 * effScale
-            let baseY = max(12.0, crestHeightFromBottom + contourDy - 10.0 * effScale)
-
-            let sNode = proceduralStructurePool[activeStructIdx]
-            activeStructIdx += 1
-            sNode.isHidden = false
-            sNode.position = CGPoint(x: screenX, y: baseY)
-
-            let p = CGMutablePath()
-            p.move(to: CGPoint(x: -sw * 0.52, y: -24.0))
-            p.addQuadCurve(to: CGPoint(x: 0, y: sh), control: CGPoint(x: -sw * 0.32, y: sh * 1.04))
-            p.addQuadCurve(to: CGPoint(x: sw * 0.52, y: -24.0), control: CGPoint(x: sw * 0.32, y: sh * 1.04))
-            p.closeSubpath()
-
-            sNode.path = p
-            sNode.fillColor = isAbyss
-                ? UIColor(red: 36/255, green: 24/255, blue: 78/255, alpha: 0.82)
-                : isTwilight
-                ? UIColor(red: 22/255, green: 44/255, blue: 98/255, alpha: 0.78)
-                : UIColor(red: 14/255, green: 106/255, blue: 142/255, alpha: 0.74)
-            sNode.strokeColor = isAbyss
-                ? UIColor(red: 251/255, green: 146/255, blue: 60/255, alpha: 0.48)
-                : UIColor(red: 125/255, green: 211/255, blue: 252/255, alpha: 0.52)
-            sNode.lineWidth = 2.2
-        }
-        for i in activeStructIdx..<proceduralStructurePool.count {
-            proceduralStructurePool[i].isHidden = true
-        }
-
-        // 3C. L1 Foreground Continuous Seabed Contour Polygon
-        let nearParallax = 0.38
-        let nearWorldCenter = (cameraX * nearParallax) / effScale
-        let nearPath = CGMutablePath()
-        nearPath.move(to: CGPoint(x: -8.0, y: -16.0))
-        sx = -8.0
-        while sx <= viewW + 20.0 {
-            let wx = nearWorldCenter + (sx - viewW * 0.5) / effScale
-            let dy = -GameRules.sampleColumnContourOffsetPx(worldX: wx, depthY: depthRefY, layerKind: 2) * 0.68 * effScale
-            let sy = crestHeightFromBottom + dy
-            nearPath.addLine(to: CGPoint(x: sx, y: sy))
-            sx += 20.0
-        }
-        nearPath.addLine(to: CGPoint(x: viewW + 16.0, y: -16.0))
-        nearPath.closeSubpath()
-        nearProceduralTerrainNode.path = nearPath
-        nearProceduralTerrainNode.fillColor = isAbyss
-            ? UIColor(red: 42/255, green: 16/255, blue: 42/255, alpha: 0.48)
-            : isTwilight
-            ? UIColor(red: 12/255, green: 46/255, blue: 88/255, alpha: 0.42)
-            : UIColor(red: 218/255, green: 158/255, blue: 52/255, alpha: 0.38)
-        nearProceduralTerrainNode.strokeColor = isAbyss
-            ? UIColor(red: 251/255, green: 146/255, blue: 60/255, alpha: 0.62)
-            : isTwilight
-            ? UIColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 0.58)
-            : UIColor(red: 254/255, green: 240/255, blue: 138/255, alpha: 0.66)
-
-        // 3D. L3 Poisson-Clustered Seabed Flora & Coral Props
-        let clusterSpan = 260.0
-        let firstCluster = Int(floor((nearWorldCenter - halfWorldSpan) / clusterSpan))
-        let lastCluster = Int(ceil((nearWorldCenter + halfWorldSpan) / clusterSpan))
-        var activePropIdx = 0
-
-        for cIdx in firstCluster...lastCluster {
-            let cCenter = (Double(cIdx) + 0.5) * clusterSpan
-            for pIdx in 0..<3 {
-                if activePropIdx >= proceduralPropPool.count { break }
-                let offset = (Double(pIdx) - 1.0) * 58.0 + (GameRules.hash1D(cIdx * 7 + pIdx, salt: 701) - 0.5) * 26.0
-                let propWX = cCenter + offset
-                let screenX = viewW * 0.5 + (propWX - nearWorldCenter) * effScale
-                if screenX < -30.0 || screenX > viewW + 30.0 { continue }
-
-                let dy = -GameRules.sampleColumnContourOffsetPx(worldX: propWX, depthY: depthRefY, layerKind: 2) * 0.68 * effScale
-                let propY = crestHeightFromBottom + dy - 4.0 * effScale
-                let pNode = proceduralPropPool[activePropIdx]
-                activePropIdx += 1
-                pNode.isHidden = false
-                pNode.position = CGPoint(x: screenX, y: propY)
-
-                let sway = sin(lastUpdateTime * 2.1 + Double(cIdx + pIdx)) * 8.0 * effScale
-                let propH = (38.0 + GameRules.hash1D(cIdx * 13 + pIdx, salt: 733) * 44.0) * effScale
-                let path = CGMutablePath()
-                path.move(to: CGPoint(x: 0, y: -4.0))
-                path.addQuadCurve(to: CGPoint(x: sway, y: propH), control: CGPoint(x: sway * 0.45, y: propH * 0.5))
-                path.move(to: CGPoint(x: -7.0 * effScale, y: -4.0))
-                path.addQuadCurve(to: CGPoint(x: -12.0 * effScale + sway * 0.7, y: propH * 0.78), control: CGPoint(x: -8.0 * effScale, y: propH * 0.4))
-                path.move(to: CGPoint(x: 7.0 * effScale, y: -4.0))
-                path.addQuadCurve(to: CGPoint(x: 12.0 * effScale + sway * 0.7, y: propH * 0.82), control: CGPoint(x: 8.0 * effScale, y: propH * 0.4))
-                pNode.path = path
-                pNode.fillColor = .clear
-                pNode.lineWidth = CGFloat(3.4 * effScale)
-                if isAbyss {
-                    pNode.strokeColor = (pIdx % 2 == 0)
-                        ? UIColor(red: 251/255, green: 146/255, blue: 60/255, alpha: 0.88)
-                        : UIColor(red: 192/255, green: 132/255, blue: 252/255, alpha: 0.88)
-                } else if isTwilight {
-                    pNode.strokeColor = (pIdx % 2 == 0)
-                        ? UIColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 0.88)
-                        : UIColor(red: 129/255, green: 140/255, blue: 248/255, alpha: 0.88)
-                } else {
-                    pNode.strokeColor = (cIdx + pIdx) % 2 == 0
-                        ? UIColor(red: 251/255, green: 113/255, blue: 133/255, alpha: 0.88)
-                        : UIColor(red: 52/255, green: 211/255, blue: 153/255, alpha: 0.88)
-                }
+        if activeSeabedArchFillCount < seabedArchFillPool.count {
+            for i in activeSeabedArchFillCount..<seabedArchFillPool.count {
+                seabedArchFillPool[i].isHidden = true
             }
         }
-        for i in activePropIdx..<proceduralPropPool.count {
-            proceduralPropPool[i].isHidden = true
-        }
     }
 
-    private func renderBiomeTerrainPlanes(
-        zonePrefix: String,
-        names: (water: String, far: String, mid: String, near: String),
-        biomeFloorY: Double,
-        depthRefY: Double,
-        metrics: GameRules.BiomePlaneTransitionMetrics,
+    private func acquirePooledArchFillNode() -> SKShapeNode {
+        if activeSeabedArchFillCount < seabedArchFillPool.count {
+            let node = seabedArchFillPool[activeSeabedArchFillCount]
+            activeSeabedArchFillCount += 1
+            node.isHidden = false
+            return node
+        }
+        let node = SKShapeNode()
+        node.strokeColor = .clear
+        node.lineWidth = 0
+        parallaxContainer.addChild(node)
+        seabedArchFillPool.append(node)
+        activeSeabedArchFillCount += 1
+        return node
+    }
+
+    private func addWarpedWorldStrip(
+        texture: SKTexture,
+        x0: Double,
+        x1: Double,
+        topEYAt: (Double) -> Double,
+        botEYAt: (Double) -> Double,
+        alpha: Double,
+        zPos: CGFloat,
+        flipX: Bool = false,
+        color: UIColor = .clear,
+        colorBlendFactor: Double = 0.0
+    ) {
+        let spanW = x1 - x0
+        guard spanW > 0.5 && alpha > 0.01 else { return }
+
+        let cols = 8
+        var topYs = [Double](repeating: 0.0, count: cols + 1)
+        var botYs = [Double](repeating: 0.0, count: cols + 1)
+        var minY = Double.greatestFiniteMagnitude
+        var maxY = -Double.greatestFiniteMagnitude
+
+        for c in 0...cols {
+            let u = Double(c) / Double(cols)
+            let ty = topEYAt(u)
+            let by = min(ty - 1.0, botEYAt(u))
+            topYs[c] = ty
+            botYs[c] = by
+            if by < minY { minY = by }
+            if ty > maxY { maxY = ty }
+        }
+
+        let boxH = max(4.0, maxY - minY)
+        let node = acquirePooledParallaxTile()
+        node.texture = texture
+        node.anchorPoint = CGPoint(x: 0.0, y: 0.0)
+        node.xScale = 1.0
+        node.yScale = 1.0
+        node.zRotation = 0.0
+        node.size = CGSize(width: spanW, height: boxH)
+        node.position = CGPoint(x: x0, y: minY)
+        node.alpha = CGFloat(alpha)
+        node.zPosition = zPos
+        node.color = color
+        node.colorBlendFactor = CGFloat(max(0.0, min(0.85, colorBlendFactor)))
+
+        var src: [SIMD2<Float>] = []
+        var dst: [SIMD2<Float>] = []
+        src.reserveCapacity((cols + 1) * 2)
+        dst.reserveCapacity((cols + 1) * 2)
+
+        for row in 0...1 {
+            let vSrc = Float(row)
+            for col in 0...cols {
+                let uNorm = Float(col) / Float(cols)
+                let uSrc = flipX ? (1.0 - uNorm) : uNorm
+                src.append(SIMD2<Float>(uSrc, vSrc))
+                let targetY = (row == 0) ? botYs[col] : topYs[col]
+                let vDst = Float((targetY - minY) / boxH)
+                dst.append(SIMD2<Float>(uNorm, vDst))
+            }
+        }
+        node.warpGeometry = SKWarpGeometryGrid(columns: cols, rows: 1, sourcePositions: src, destinationPositions: dst)
+    }
+
+    private func renderPhysicalSeabedAndEcology(
         viewW: Double,
         viewH: Double,
-        bgScales: ParallaxLayerGrowthScales,
-        biomeZOffset: CGFloat,
-        ambientWaterColor: UIColor
+        zoom: Double
     ) {
-        if metrics.farAlpha <= 0.01 && metrics.midAlpha <= 0.01 && metrics.nearAlpha <= 0.01 { return }
-        let u = tanh(max(0.0, biomeFloorY - depthRefY) / 480.0)
-        let procMod = GameRules.sampleParallaxTerrainModulation(worldX: cameraX, depthY: depthRefY)
-        let panoRefH = min(viewH, max(360.0, viewW * 0.65))
-        let baseNearH = max(88.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.25 : zonePrefix == "bg_twilight" ? 0.30 : 0.38))
-        let baseMidH = max(78.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.22 : zonePrefix == "bg_twilight" ? 0.35 : 0.45))
-        let baseFarH = max(82.0, panoRefH * (zonePrefix == "bg_shallow" ? 0.232 : 0.39))
+        let halfWorldW = (viewW * 0.5) / zoom + 450.0
+        let startWorldX = cameraX - halfWorldW
+        let endWorldX = cameraX + halfWorldW
 
-        // Layer 1 Far (z = 2.0 + biomeZOffset): Distant silhouettes veiled in underwater atmospheric scattering + L1 ridge contour
-        if metrics.farAlpha > 0.01, let farTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.far) {
-            let farH = baseFarH * bgScales.farScale
-            let baseFarY = (baseNearH * 0.32 - (-20.0 + 2.5 * u)) * bgScales.nearScale - farH * 0.12
-            let farBottomY = min(0.0, baseFarY - (metrics.farTransitionOffsetY + procMod.farRidgeOffsetPx * 0.65) * bgScales.nearScale)
-            let farFog = min(0.76, 0.22 + (1.0 - metrics.farWeight) * 0.52)
-            addTiledStrip(
-                texture: farTex,
-                baseTargetH: baseFarH,
-                scaledTargetH: farH,
-                bottomYFromBottom: farBottomY,
-                parallaxXFactor: 0.025,
-                phaseOffset: 0.37,
-                viewW: viewW,
-                alpha: metrics.farAlpha,
-                zPos: 2.0 + biomeZOffset,
-                fogColor: ambientWaterColor,
-                fogBlendFactor: farFog
-            )
+        let toScreenX: (Double) -> Double = { wx in
+            (wx - self.cameraX) * zoom + viewW * 0.5
+        }
+        let toScreenY: (Double) -> Double = { wy in
+            viewH * 0.5 - (wy - self.cameraY) * zoom
         }
 
-        // Layer 2 Mid (z = 3.0 + biomeZOffset): Strictly behind all Near planes across all biomes!
-        if metrics.midAlpha > 0.01, let midTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.mid) {
-            let midH = baseMidH * bgScales.midScale
-            let baseMidY = (baseNearH * 0.16 - (-10.0 + 14.0 * u)) * bgScales.nearScale - midH * 0.08
-            let midBottomY = min(0.0, baseMidY - (metrics.midTransitionOffsetY + procMod.midStratumOffsetPx * 0.75) * bgScales.nearScale)
-            let midFog = min(0.64, 0.08 + (1.0 - metrics.midWeight) * 0.48)
-            addTiledStrip(
-                texture: midTex,
-                baseTargetH: baseMidH,
-                scaledTargetH: midH,
-                bottomYFromBottom: midBottomY,
-                parallaxXFactor: 0.18,
-                phaseOffset: 0.63,
-                viewW: viewW,
-                alpha: metrics.midAlpha,
-                zPos: 3.0 + biomeZOffset,
-                fogColor: ambientWaterColor,
-                fogBlendFactor: midFog
-            )
+        // Determine active seabed strip ID by depth
+        let stripId: String
+        if cameraY < 620.0 {
+            stripId = "coral_reef"
+        } else if cameraY < 1350.0 {
+            stripId = "rocky_shelf"
+        } else if cameraY < 2800.0 {
+            stripId = "underwater_canyon"
+        } else {
+            stripId = "deep_abyss"
         }
 
-        // Layer 3 Near (z = 4.0 + biomeZOffset): Immediate foreground seabed always occludes Mid & Far!
-        if metrics.nearAlpha > 0.01, let nearTex = SpriteAtlasManager.shared.oceanParallaxTexture(named: names.near) {
-            let nearH = baseNearH * bgScales.nearScale
-            let nearBottomY = (-28.0 * u - metrics.nearTransitionOffsetY - procMod.nearSeabedOffsetPx) * bgScales.nearScale
-            let nearFog = min(0.52, (1.0 - metrics.nearWeight) * 0.42)
-            addTiledStrip(
-                texture: nearTex,
-                baseTargetH: baseNearH,
-                scaledTargetH: nearH,
-                bottomYFromBottom: nearBottomY,
-                parallaxXFactor: 0.38,
-                phaseOffset: 0.21,
-                viewW: viewW,
-                alpha: metrics.nearAlpha,
-                zPos: 4.0 + biomeZOffset,
-                fogColor: ambientWaterColor,
-                fogBlendFactor: nearFog
-            )
+        guard let stripTex = SpriteAtlasManager.shared.seabedStripTexture(for: stripId) else { return }
+        let subTex = SpriteAtlasManager.shared.seabedSubStratumTexture(for: stripId) ?? stripTex
+        let texSize = stripTex.size()
+        let texAspect = texSize.height > 0 ? Double(texSize.width / texSize.height) : 4.266
+        let tileWorldW = 680.0
+        let tileWorldH = tileWorldW / max(1.0, texAspect)
+
+        // 1A. Main Floor Underfill Polygon (prevents any sub-pixel gap below subsurface strata)
+        let firstTile = Int(floor(startWorldX / tileWorldW))
+        let lastTile = Int(ceil(endWorldX / tileWorldW))
+        var anyMainFloorVisible = false
+        for tIdx in firstTile...lastTile {
+            let fy0 = GameRules.getFloorDepthAt(worldX: Double(tIdx) * tileWorldW)
+            let fy1 = GameRules.getFloorDepthAt(worldX: Double(tIdx + 1) * tileWorldW)
+            let top0 = toScreenY(fy0 - tileWorldH * 0.62)
+            let top1 = toScreenY(fy1 - tileWorldH * 0.62)
+            if max(top0, top1) > -200.0 {
+                anyMainFloorVisible = true
+                break
+            }
+        }
+
+        if anyMainFloorVisible {
+            let fillNode = acquirePooledArchFillNode()
+            fillNode.zPosition = 2.6
+            let path = CGMutablePath()
+            let stepW = 80.0
+            let firstX = floor(startWorldX / stepW) * stepW
+            path.move(to: CGPoint(x: toScreenX(firstX), y: -640.0))
+            var wx = firstX
+            while wx <= endWorldX + stepW {
+                let fy = GameRules.getFloorDepthAt(worldX: wx)
+                let sy = toScreenY(fy - tileWorldH * 0.34)
+                path.addLine(to: CGPoint(x: toScreenX(wx), y: sy))
+                wx += stepW
+            }
+            path.addLine(to: CGPoint(x: toScreenX(wx), y: -640.0))
+            path.closeSubpath()
+            fillNode.path = path
+            fillNode.fillColor = stripId == "coral_reef"
+                ? UIColor(red: 28/255, green: 52/255, blue: 74/255, alpha: 0.96)
+                : stripId == "rocky_shelf"
+                ? UIColor(red: 16/255, green: 34/255, blue: 58/255, alpha: 0.96)
+                : UIColor(red: 10/255, green: 18/255, blue: 34/255, alpha: 0.98)
+
+            // 1B. Main Floor Multi-Tier Subsurface Bedrock Strata + Top Surface Strip
+            let subLayerScales: [(yStartFrac: Double, heightMult: Double, flipX: Bool, alpha: Double, shade: Double, zOff: CGFloat)] = [
+                (0.28, 1.45, true,  0.94, 0.18, 2.8),
+                (1.18, 1.65, false, 0.90, 0.38, 2.7),
+                (2.22, 1.85, true,  0.86, 0.56, 2.65)
+            ]
+
+            for tIdx in firstTile...lastTile {
+                let wx0 = Double(tIdx) * tileWorldW
+                let wx1 = wx0 + tileWorldW
+                let sx0 = toScreenX(wx0)
+                let sx1 = toScreenX(wx1)
+                if sx1 < -80.0 || sx0 > viewW + 80.0 { continue }
+
+                let screenTileH = tileWorldH * zoom
+                for sub in subLayerScales {
+                    let subH = screenTileH * sub.heightMult
+                    let topCheck = toScreenY(GameRules.getFloorDepthAt(worldX: wx0)) - screenTileH * sub.yStartFrac
+                    if topCheck < -subH - 80.0 { continue }
+                    addWarpedWorldStrip(
+                        texture: subTex,
+                        x0: sx0,
+                        x1: sx1,
+                        topEYAt: { u in
+                            let wx = wx0 + u * tileWorldW
+                            return toScreenY(GameRules.getFloorDepthAt(worldX: wx)) - screenTileH * sub.yStartFrac
+                        },
+                        botEYAt: { u in
+                            let wx = wx0 + u * tileWorldW
+                            return toScreenY(GameRules.getFloorDepthAt(worldX: wx)) - screenTileH * sub.yStartFrac - subH
+                        },
+                        alpha: sub.alpha,
+                        zPos: sub.zOff,
+                        flipX: sub.flipX,
+                        color: .black,
+                        colorBlendFactor: sub.shade
+                    )
+                }
+
+                // Main Seabed Top Surface Strip
+                addWarpedWorldStrip(
+                    texture: stripTex,
+                    x0: sx0,
+                    x1: sx1,
+                    topEYAt: { u in
+                        let wx = wx0 + u * tileWorldW
+                        return toScreenY(GameRules.getFloorDepthAt(worldX: wx) - tileWorldH * 0.62)
+                    },
+                    botEYAt: { u in
+                        let wx = wx0 + u * tileWorldW
+                        return toScreenY(GameRules.getFloorDepthAt(worldX: wx) + tileWorldH * 0.38)
+                    },
+                    alpha: 0.98,
+                    zPos: 3.2
+                )
+            }
+        }
+
+        // 2. Render 9 Non-Uniformly Spaced Continuous Seabed Terraces (414m down to 16,900m)
+        let terraceSubLayers: [(yStartFrac: Double, heightMult: Double, flipX: Bool, alpha: Double, shade: Double, zOff: CGFloat)] = [
+            (0.20, 0.88, true,  0.94, 0.16, 3.5),
+            (0.76, 1.04, false, 0.90, 0.34, 3.45)
+        ]
+
+        for (tierIdx, tier) in GameRules.seabedTerraceTiers.enumerated() {
+            let minScreenY = toScreenY(tier.baseDepth + 440.0)
+            let maxScreenY = toScreenY(tier.baseDepth - 240.0)
+            if minScreenY > viewH + 260.0 || maxScreenY < -260.0 { continue }
+
+            guard let tierStripTex = SpriteAtlasManager.shared.seabedStripTexture(for: tier.stripId) else { continue }
+            let tierSubTex = SpriteAtlasManager.shared.seabedSubStratumTexture(for: tier.stripId) ?? tierStripTex
+            let tierTexSize = tierStripTex.size()
+            let tierAspect = tierTexSize.height > 0 ? Double(tierTexSize.width / tierTexSize.height) : 4.266
+            let atollTileW = 480.0
+            let atollTileH = atollTileW / max(1.0, tierAspect)
+            let screenAtollH = atollTileH * zoom
+            let firstAtollTile = Int(floor(startWorldX / atollTileW))
+            let lastAtollTile = Int(ceil(endWorldX / atollTileW))
+
+            // 2A. Distant Cave Opening & Solid Rock Arch Backfill Polygon (replaces old floating pillars!)
+            let archFillNode = acquirePooledArchFillNode()
+            archFillNode.zPosition = 3.35
+            let archPath = CGMutablePath()
+            let stepX = 36.0
+            let startSampleX = Double(firstAtollTile) * atollTileW
+            let endSampleX = Double(lastAtollTile + 1) * atollTileW
+
+            var wx = startSampleX
+            var firstPt = true
+            while wx <= endSampleX {
+                let s = GameRules.getSeabedTerraceAt(worldX: wx, tierIndex: tierIdx)
+                let topY = toScreenY(s.topY) - screenAtollH * 0.16
+                if firstPt {
+                    archPath.move(to: CGPoint(x: toScreenX(wx), y: topY))
+                    firstPt = false
+                } else {
+                    archPath.addLine(to: CGPoint(x: toScreenX(wx), y: topY))
+                }
+                wx += stepX
+            }
+            wx = endSampleX
+            while wx >= startSampleX {
+                let s = GameRules.getSeabedTerraceAt(worldX: wx, tierIndex: tierIdx)
+                let botY = toScreenY(s.bottomArchY)
+                archPath.addLine(to: CGPoint(x: toScreenX(wx), y: botY))
+                wx -= stepX
+            }
+            archPath.closeSubpath()
+            archFillNode.path = archPath
+            archFillNode.fillColor = tier.stripId == "coral_reef"
+                ? UIColor(red: 14/255, green: 36/255, blue: 58/255, alpha: 0.94)
+                : tier.stripId == "rocky_shelf"
+                ? UIColor(red: 11/255, green: 25/255, blue: 46/255, alpha: 0.95)
+                : UIColor(red: 7/255, green: 14/255, blue: 28/255, alpha: 0.96)
+
+            // 2B. Cave Portal Elliptical Depth Shadow inside each downward-curved opening
+            let firstPeriod = Int(floor(startWorldX / tier.period))
+            let lastPeriod = Int(ceil(endWorldX / tier.period))
+            if let portalShadowTex = SpriteAtlasManager.shared.cavePortalShadowTexture() {
+                for pIdx in firstPeriod...lastPeriod {
+                    let gapCenterWX = (Double(pIdx) + 0.5) * tier.period - tier.phaseShift
+                    let sx = toScreenX(gapCenterWX)
+                    let portalHalfW = tier.period * tier.openDuty * 0.95 * zoom
+                    if sx + portalHalfW < -80.0 || sx - portalHalfW > viewW + 80.0 { continue }
+                    let sCenter = GameRules.getSeabedTerraceAt(worldX: gapCenterWX, tierIndex: tierIdx)
+                    let sy = toScreenY(sCenter.topY + 38.0)
+                    let portalNode = acquirePooledParallaxTile()
+                    portalNode.warpGeometry = nil
+                    portalNode.texture = portalShadowTex
+                    portalNode.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+                    portalNode.xScale = 1.0
+                    portalNode.yScale = 1.0
+                    portalNode.zRotation = 0.0
+                    portalNode.size = CGSize(width: portalHalfW * 2.1, height: max(56.0, 148.0 * zoom))
+                    portalNode.position = CGPoint(x: sx, y: sy)
+                    portalNode.alpha = 0.88
+                    portalNode.zPosition = 3.4
+                    portalNode.colorBlendFactor = 0.0
+                }
+            }
+
+            // 2C. Terrace Subsurface Strata (strictly clamped above bottomArchY so zero overflow under arch!)
+            for tIdx in firstAtollTile...lastAtollTile {
+                let wx0 = Double(tIdx) * atollTileW
+                let wx1 = wx0 + atollTileW
+                let sx0 = toScreenX(wx0)
+                let sx1 = toScreenX(wx1)
+                if sx1 < -80.0 || sx0 > viewW + 80.0 { continue }
+
+                for sub in terraceSubLayers {
+                    let subH = screenAtollH * sub.heightMult
+                    addWarpedWorldStrip(
+                        texture: tierSubTex,
+                        x0: sx0,
+                        x1: sx1,
+                        topEYAt: { u in
+                            let wx = wx0 + u * atollTileW
+                            let s = GameRules.getSeabedTerraceAt(worldX: wx, tierIndex: tierIdx)
+                            let archTopY = toScreenY(s.bottomArchY - 4.0)
+                            let rawTopY = toScreenY(s.topY) - screenAtollH * sub.yStartFrac
+                            return max(archTopY + 1.5, rawTopY)
+                        },
+                        botEYAt: { u in
+                            let wx = wx0 + u * atollTileW
+                            let s = GameRules.getSeabedTerraceAt(worldX: wx, tierIndex: tierIdx)
+                            let archTopY = toScreenY(s.bottomArchY - 4.0)
+                            let rawBotY = toScreenY(s.topY) - screenAtollH * sub.yStartFrac - subH
+                            return max(archTopY, rawBotY)
+                        },
+                        alpha: sub.alpha,
+                        zPos: sub.zOff,
+                        flipX: sub.flipX,
+                        color: .black,
+                        colorBlendFactor: sub.shade
+                    )
+                }
+
+                // 2D. Continuous Terrace Top Surface Strip (warps downward into cave opening!)
+                addWarpedWorldStrip(
+                    texture: tierStripTex,
+                    x0: sx0,
+                    x1: sx1,
+                    topEYAt: { u in
+                        let wx = wx0 + u * atollTileW
+                        let s = GameRules.getSeabedTerraceAt(worldX: wx, tierIndex: tierIdx)
+                        let sinkScale = 1.0 - s.caveFactor * 0.25
+                        return toScreenY(s.topY) + screenAtollH * 0.62 * sinkScale
+                    },
+                    botEYAt: { u in
+                        let wx = wx0 + u * atollTileW
+                        let s = GameRules.getSeabedTerraceAt(worldX: wx, tierIndex: tierIdx)
+                        let archTopY = toScreenY(s.bottomArchY - 2.0)
+                        let rawBotY = toScreenY(s.topY) - screenAtollH * 0.38
+                        return max(archTopY, rawBotY)
+                    },
+                    alpha: 0.98,
+                    zPos: 3.65
+                )
+            }
+        }
+
+        // 3. Render Composite Coral Outcrops, Seaweed Forests, Hydrothermal Vents & POIs along Main Floor & All 9 Terraces
+        let chunkWidth = 600.0
+        let firstChunk = Int(floor(startWorldX / chunkWidth)) - 1
+        let lastChunk = Int(ceil(endWorldX / chunkWidth)) + 1
+
+        struct CoralLayerSpec {
+            let isPoi: Bool
+            let spriteId: String
+            let dxRatio: Double
+            let dyRatio: Double
+            let scaleW: Double
+            let scaleH: Double
+            let flipX: Bool
+            let zOff: CGFloat
+        }
+
+        func layersForOutcrop(_ outcrop: GameRules.SeabedOutcropPlacement) -> [CoralLayerSpec] {
+            let v = max(1, min(4, outcrop.variant + 1))
+            let vNext = (v % 4) + 1
+            let vPrev = ((v + 1) % 4) + 1
+            let flipMain = outcrop.seed > 0.5
+
+            switch outcrop.type {
+            case .CORAL_MOUND:
+                return [
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(v)",      dxRatio: 0.0,   dyRatio: 0.04,  scaleW: 1.16, scaleH: 0.76, flipX: flipMain,  zOff: 0.01),
+                    CoralLayerSpec(isPoi: false, spriteId: "coral_\\(vNext)", dxRatio: -0.26, dyRatio: -0.04, scaleW: 0.72, scaleH: 0.78, flipX: !flipMain, zOff: 0.02),
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\\(vPrev)",  dxRatio: 0.24,  dyRatio: -0.06, scaleW: 0.58, scaleH: 1.05, flipX: flipMain,  zOff: 0.03),
+                    CoralLayerSpec(isPoi: false, spriteId: "coral_\\(v)",     dxRatio: 0.02,  dyRatio: -0.10, scaleW: 0.96, scaleH: 0.98, flipX: flipMain,  zOff: 0.04)
+                ]
+            case .KELP_CLUSTER:
+                return [
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(vPrev)",  dxRatio: 0.0,   dyRatio: 0.05,  scaleW: 1.08, scaleH: 0.56, flipX: !flipMain, zOff: 0.01),
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\\(vNext)",  dxRatio: -0.22, dyRatio: -0.02, scaleW: 0.76, scaleH: 0.88, flipX: !flipMain, zOff: 0.02),
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\\(v)",      dxRatio: 0.04,  dyRatio: -0.05, scaleW: 0.96, scaleH: 1.06, flipX: flipMain,  zOff: 0.03),
+                    CoralLayerSpec(isPoi: false, spriteId: "coral_\\(v)",     dxRatio: 0.18,  dyRatio: 0.01,  scaleW: 0.64, scaleH: 0.52, flipX: flipMain,  zOff: 0.04)
+                ]
+            case .ROCK_SPIRE:
+                var list: [CoralLayerSpec] = [
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(vNext)",  dxRatio: -0.20, dyRatio: 0.03,  scaleW: 0.82, scaleH: 0.74, flipX: !flipMain, zOff: 0.01),
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(v)",      dxRatio: 0.04,  dyRatio: -0.02, scaleW: 1.04, scaleH: 1.04, flipX: flipMain,  zOff: 0.02),
+                    CoralLayerSpec(isPoi: false, spriteId: "coral_\\(vPrev)", dxRatio: 0.22,  dyRatio: 0.02,  scaleW: 0.68, scaleH: 0.66, flipX: flipMain,  zOff: 0.03)
+                ]
+                if outcrop.seed > 0.78 {
+                    let poiIds = ["shipwreck_1", "statue_1", "arch_1", "skeleton_1"]
+                    let poiId = poiIds[outcrop.variant % poiIds.count]
+                    list.append(CoralLayerSpec(isPoi: true, spriteId: poiId, dxRatio: 0.0, dyRatio: -0.08, scaleW: 1.35, scaleH: 1.15, flipX: flipMain, zOff: 0.04))
+                }
+                return list
+            case .ABYSSAL_CHIMNEY:
+                return [
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\\(v)",      dxRatio: 0.0,   dyRatio: 0.04,  scaleW: 1.18, scaleH: 0.68, flipX: !flipMain, zOff: 0.01),
+                    CoralLayerSpec(isPoi: false, spriteId: "vent_\\(vNext)",  dxRatio: -0.22, dyRatio: -0.02, scaleW: 0.74, scaleH: 0.84, flipX: !flipMain, zOff: 0.02),
+                    CoralLayerSpec(isPoi: false, spriteId: "vent_\\(v)",      dxRatio: 0.06,  dyRatio: -0.06, scaleW: 0.96, scaleH: 1.08, flipX: flipMain,  zOff: 0.03)
+                ]
+            }
+        }
+
+        for cIdx in firstChunk...lastChunk {
+            let outcrops = GameRules.getSeabedOutcropsForChunk(chunkIndex: cIdx, chunkWidth: chunkWidth)
+            for outcrop in outcrops {
+                let sx = toScreenX(outcrop.worldX)
+                let sy = toScreenY(outcrop.baseY)
+                let drawBaseW = outcrop.width * zoom
+                let drawBaseH = outcrop.height * zoom
+                if sx + drawBaseW * 1.6 < -100.0 || sx - drawBaseW * 1.6 > viewW + 100.0 { continue }
+                if sy + drawBaseH * 1.6 < -100.0 || sy - drawBaseH * 1.6 > viewH + 100.0 { continue }
+
+                let slope = GameRules.getTerrainSlopeAt(worldX: outcrop.worldX)
+                let slopeRot = max(-0.26, min(0.26, atan(slope) * 0.48))
+                let layers = layersForOutcrop(outcrop)
+
+                for layer in layers {
+                    let texOpt = layer.isPoi
+                        ? SpriteAtlasManager.shared.poiSpriteTexture(for: layer.spriteId)
+                        : SpriteAtlasManager.shared.ecologySpriteTexture(for: layer.spriteId)
+                    guard let tex = texOpt else { continue }
+                    let drawW = drawBaseW * layer.scaleW
+                    let drawH = drawBaseH * layer.scaleH
+                    let sinkY = drawBaseH * 0.14
+                    let lx = sx + layer.dxRatio * drawBaseW
+                    // Note: in Web Canvas +dyRatio moves DOWN; in SpriteKit -dyRatio moves DOWN
+                    let ly = sy - layer.dyRatio * drawBaseH - sinkY
+
+                    let node = acquirePooledParallaxTile()
+                    node.warpGeometry = nil
+                    node.texture = tex
+                    node.anchorPoint = CGPoint(x: 0.5, y: 0.0)
+                    node.size = CGSize(width: drawW, height: drawH)
+                    node.position = CGPoint(x: lx, y: ly)
+                    node.xScale = layer.flipX ? -1.0 : 1.0
+                    node.yScale = 1.0
+                    node.zRotation = CGFloat(-slopeRot)
+                    node.alpha = 0.96
+                    node.zPosition = 3.8 + layer.zOff
+                    node.colorBlendFactor = 0.0
+                }
+            }
         }
     }
 
@@ -4844,6 +5852,11 @@ public final class OceanGameScene: SKScene {
             let x0 = (startX * displayScale).rounded() / displayScale
             let x1 = ((startX + tileW) * displayScale).rounded() / displayScale
             let node = acquirePooledParallaxTile()
+            node.warpGeometry = nil
+            node.anchorPoint = CGPoint(x: 0.0, y: 0.0)
+            node.xScale = 1.0
+            node.yScale = 1.0
+            node.zRotation = 0.0
             node.texture = texture
             // Exact physical pixel boundary abutment (x0 -> x1) with ZERO double-alpha overlap!
             node.size = CGSize(width: max(1.0, x1 - x0), height: alignedH)
@@ -4874,7 +5887,9 @@ public final class OceanGameScene: SKScene {
         let dist = nearShark ? Double.random(in: 220...480) : Double.random(in: 580...1400)
         let ang = Double.random(in: 0...(Double.pi * 2))
         let px = sharkX + cos(ang) * dist
-        let py = max(chosen.minDepth, min(chosen.maxDepth, sharkY + sin(ang) * dist * 0.6))
+        let localFloorLimit = max(140.0, GameRules.getFloorDepthAt(worldX: px) - chosen.radius - 28.0)
+        let rawPy = max(chosen.minDepth, min(chosen.maxDepth, sharkY + sin(ang) * dist * 0.6))
+        let py = min(rawPy, localFloorLimit)
         let dir: Double = Bool.random() ? 1.0 : -1.0
 
         let node = SKSpriteNode()
@@ -5238,6 +6253,7 @@ public final class OceanGameScene: SKScene {
                 }
             }
 
+            let prevPreyY = p.y
             p.x += p.vx * dt
             p.y += p.vy * dt
             if p.y < p.config.minDepth + 14.0 {
@@ -5246,6 +6262,17 @@ public final class OceanGameScene: SKScene {
             } else if p.y > p.config.maxDepth - 14.0 {
                 p.y = p.config.maxDepth - 14.0
                 p.vy = -abs(p.vy) * 0.65 - 18.0
+            }
+            let preyFloorCol = GameRules.resolveSeabedCollision(
+                worldX: p.x,
+                worldY: p.y,
+                vy: p.vy,
+                entityRadius: p.config.radius * visualScale * 0.75 + 12.0,
+                prevWorldY: prevPreyY
+            )
+            if preyFloorCol.hitSeabed || preyFloorCol.hitAtollUnderside {
+                p.y = preyFloorCol.y
+                p.vy = preyFloorCol.vy
             }
 
             let postDx = p.x - sharkX
@@ -8587,6 +9614,7 @@ targets:
       - path: HungrySharkEvolution
         excludes:
           - "Resources/Assets/*.png"
+          - "Resources/Assets/*.jpg"
       - path: HungrySharkEvolution/Resources/Assets
         type: folder
         buildPhase: resources
@@ -8653,10 +9681,10 @@ let package = Package(
 function generatePbxproj(assetFiles: string[] = []): string {
   // Valid Xcode 15/16 project.pbxproj referencing all 6 Swift files, Assets.xcassets, the bundled Assets folder,
   // GoogleMobileAds Swift Package (with strictly quoted minimumVersion = "11.2.0"),
-  // AND every individual PNG asset (including shark_form_00@3x.png .. shark_form_47@3x.png).
+  // AND every individual PNG/JPG asset (including shark_form_00@3x.png .. shark_form_47@3x.png, prey_140 @3x PNGs, and world seabed/ecology/POI JPG atlases).
   const sortedAssets = [...assetFiles]
     .map((f) => f.trim())
-    .filter((f) => f.length > 0 && f.endsWith('.png'))
+    .filter((f) => f.length > 0 && (f.endsWith('.png') || f.endsWith('.jpg')))
     .sort();
 
   const assetBuildFiles = sortedAssets
@@ -8669,7 +9697,8 @@ function generatePbxproj(assetFiles: string[] = []): string {
   const assetFileRefs = sortedAssets
     .map((f, i) => {
       const idxHex = String(i + 1).padStart(4, '0');
-      return `\t\tB200${idxHex}2B00000000000001 /* ${f} */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "${f}"; path = "Resources/Assets/${f}"; sourceTree = "<group>"; };`;
+      const fileType = f.endsWith('.jpg') ? 'image.jpeg' : 'image.png';
+      return `\t\tB200${idxHex}2B00000000000001 /* ${f} */ = {isa = PBXFileReference; lastKnownFileType = ${fileType}; name = "${f}"; path = "Resources/Assets/${f}"; sourceTree = "<group>"; };`;
     })
     .join('\n');
 
@@ -9245,15 +10274,15 @@ function main() {
     'utf8'
   );
 
-  // 2. Copy all PNG assets from public/assets/aistudio AND 48 individual @3x shark PNGs from public/assets/sharks_3x
-  //    into ios-native/HungrySharkEvolution/Resources/Assets, and generate Assets.xcassets (LaunchBg + LaunchLogo)
+  // 2. Copy all PNG & JPG assets from public/assets/aistudio, 48 individual @3x shark PNGs from public/assets/sharks_3x,
+  //    and 140 individual @3x prey PNGs from public/assets/prey_140 into ios-native/HungrySharkEvolution/Resources/Assets
   const srcAssetsDir = path.join(ROOT_DIR, 'public', 'assets', 'aistudio');
   generateLaunchAssetsCatalog(APP_DIR, srcAssetsDir);
 
   let copiedCount = 0;
   if (fs.existsSync(srcAssetsDir)) {
     for (const file of fs.readdirSync(srcAssetsDir)) {
-      if (file.endsWith('.png')) {
+      if (file.endsWith('.png') || file.endsWith('.jpg')) {
         fs.copyFileSync(
           path.join(srcAssetsDir, file),
           path.join(assetsDst, file)
@@ -9268,6 +10297,18 @@ function main() {
       if (file.endsWith('.png')) {
         fs.copyFileSync(
           path.join(srcSharks3xDir, file),
+          path.join(assetsDst, file)
+        );
+        copiedCount++;
+      }
+    }
+  }
+  const srcPrey140Dir = path.join(ROOT_DIR, 'public', 'assets', 'prey_140');
+  if (fs.existsSync(srcPrey140Dir)) {
+    for (const file of fs.readdirSync(srcPrey140Dir)) {
+      if (file.endsWith('.png')) {
+        fs.copyFileSync(
+          path.join(srcPrey140Dir, file),
           path.join(assetsDst, file)
         );
         copiedCount++;
@@ -9308,10 +10349,10 @@ function main() {
   }
 
   if (!xcodegenSuccess) {
-    const allBundledPngFiles = fs
+    const allBundledAssetFiles = fs
       .readdirSync(assetsDst)
-      .filter((f) => f.endsWith('.png'));
-    const pbxprojContent = generatePbxproj(allBundledPngFiles);
+      .filter((f) => f.endsWith('.png') || f.endsWith('.jpg'));
+    const pbxprojContent = generatePbxproj(allBundledAssetFiles);
     validateOpenStepPbxproj(pbxprojContent);
     fs.writeFileSync(pbxprojPath, pbxprojContent, 'utf8');
   }
@@ -9331,7 +10372,7 @@ function main() {
     `[build:ios] Native iOS project (SwiftUI + SpriteKit/Metal, ZERO WebView) generated at ./ios-native/`
   );
   console.log(
-    `[build:ios] Exported ${SHARK_EVOLUTION_FORMS.length} shark forms, ${GAME_CONFIG.preyTiers.length} prey species, and copied ${copiedCount} PNG assets.`
+    `[build:ios] Exported ${SHARK_EVOLUTION_FORMS.length} shark forms, ${GAME_CONFIG.preyTiers.length} prey species, and copied ${copiedCount} PNG/JPG assets.`
   );
 }
 
