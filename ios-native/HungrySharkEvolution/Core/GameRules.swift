@@ -546,96 +546,636 @@ public enum GameRules {
         return v0 + (v1 - v0) * u
     }
 
-    /// Continuous 1.0x world-space seafloor mountain & trench profile (matches Web TerrainGenerator.getFloorDepthAt)
-    public static func getFloorDepthAt(worldX x: Double) -> Double {
-        let macroWave = sin(x * 0.00016 + 0.35) * 0.55 + cos(x * 0.000075 - 0.8) * 0.45
-        let baseShelf = 1120.0 + (macroWave * 0.5 + 0.5) * 5200.0
-        let mountainRidge = noise1D(x * 0.00038, salt: 11) * 1450.0
-        let canyonCarve = noise1D(x * 0.0011, salt: 23) * 480.0
-        let reefBumps = noise1D(x * 0.0032, salt: 37) * 95.0
+    // MARK: - 1:1 Exact Web TerrainGenerator & 9-Tier Seabed Terrace Port (worldSeed = 123456789, generatorVersion = 1)
+    private static let terrainMaxSlope: Double = 1.65
+    private static let terrainSampleStepX: Double = 100.0
+    private static let terrainBaseFloorDepth: Double = 10100.0
+    private static let terrainLargeWaveAmplitude: Double = 9600.0
+    private static let terrainMediumWaveAmplitude: Double = 3800.0
+    private static let terrainSmallWaveAmplitude: Double = 720.0
+    private static let terrainMinFloorDepth: Double = 420.0
+    private static let terrainMaxFloorDepth: Double = 19800.0
+    private static let sandyPlainCellWidth: Double = 1800.0
+    private static let tanhGainNorm: Double = tanh(1.82)
 
-        let trenchSignal = noise1D(x * 0.00019 + 4.2, salt: 71)
-        let trenchFactor = max(0.0, (trenchSignal - 0.38) / 0.62)
-        let trenchDrop = trenchFactor * trenchFactor * 5500.0
+    private static var terrainBlockNodeCache: [Int: [Double]] = [:]
+    private static var terrainBlockCacheOrder: [Int] = []
+    private static let maxTerrainBlockCacheSize: Int = 128
 
-        let spawnDist = abs(x - 100.0)
-        let spawnFlatten = max(0.0, 1.0 - spawnDist / 900.0)
-        let rawDepth = baseShelf + mountainRidge + canyonCarve + reefBumps + trenchDrop
-        let flattened = rawDepth * (1.0 - spawnFlatten * 0.65) + 740.0 * (spawnFlatten * 0.65)
-
-        return max(520.0, min(18500.0, flattened))
+    /// Exact 1:1 port of Web terrainLatticeValue(latticeIndex, waveSalt, WorldConfig)
+    /// (worldSeed = 123456789, generatorVersion = 1, subsystemKey = "terrain", subHash = 0x8a86635c, baseH = 0x7811b100)
+    private static func terrainLatticeValue(_ latticeIndex: Int, waveSalt: Int) -> Double {
+        let ncx = UInt32(bitPattern: Int32(truncatingIfNeeded: latticeIndex))
+        let ncy = UInt32(bitPattern: Int32(truncatingIfNeeded: waveSalt))
+        var h: UInt32 = 0x7811b100
+        h = (h ^ ncx) &* 0x165667b1
+        h = (h ^ ncy) &* 0xd3a2646c
+        h = h ^ 0x8a86635c
+        h ^= h >> 16
+        h = h &* 0x85ebca6b
+        h ^= h >> 13
+        h = h &* 0xc2b2ae35
+        h ^= h >> 16
+        let nonZeroH: UInt32 = h != 0 ? h : 0x6d2b79f5
+        return (Double(nonZeroH) / 4294967296.0) * 2.0 - 1.0
     }
 
+    private static func smoothedTerrainLatticeValue(_ latticeIndex: Int, waveSalt: Int) -> Double {
+        let vm1 = terrainLatticeValue(latticeIndex - 1, waveSalt: waveSalt)
+        let v0 = terrainLatticeValue(latticeIndex, waveSalt: waveSalt)
+        let vp1 = terrainLatticeValue(latticeIndex + 1, waveSalt: waveSalt)
+        return 0.25 * vm1 + 0.5 * v0 + 0.25 * vp1
+    }
+
+    private static func contrastStretchedLatticeValue(_ latticeIndex: Int, waveSalt: Int) -> Double {
+        if terrainMinFloorDepth <= 600.0 {
+            if latticeIndex == 0 { return -0.94 }
+            if latticeIndex == 1 || latticeIndex == -1 {
+                let n = abs(terrainLatticeValue(latticeIndex, waveSalt: waveSalt + 7))
+                return 0.42 + 0.12 * n
+            }
+            if latticeIndex == 2 || latticeIndex == -2 {
+                let n = abs(terrainLatticeValue(latticeIndex, waveSalt: waveSalt + 13))
+                return 0.92 + 0.08 * n
+            }
+        }
+        let raw = terrainLatticeValue(latticeIndex, waveSalt: waveSalt)
+        if raw < 0.0 {
+            return -pow(abs(raw), 0.68) * 0.94
+        }
+        return pow(abs(raw), 0.56)
+    }
+
+    private static func evalSmoothTerrainWave(
+        _ worldX: Double,
+        wavelength: Double,
+        waveSalt: Int,
+        useContrastStretch: Bool = false
+    ) -> Double {
+        let scaled = worldX / wavelength
+        let i0 = Int(floor(scaled))
+        let t = scaled - Double(i0)
+        let u = t * t * (3.0 - 2.0 * t)
+        let v0 = useContrastStretch
+            ? contrastStretchedLatticeValue(i0, waveSalt: waveSalt)
+            : smoothedTerrainLatticeValue(i0, waveSalt: waveSalt)
+        let v1 = useContrastStretch
+            ? contrastStretchedLatticeValue(i0 + 1, waveSalt: waveSalt)
+            : smoothedTerrainLatticeValue(i0 + 1, waveSalt: waveSalt)
+        return v0 + (v1 - v0) * u
+    }
+
+    private static func evalWarpedTerrainWave(
+        _ worldX: Double,
+        wavelength: Double,
+        waveSalt: Int,
+        useContrastStretch: Bool = false
+    ) -> Double {
+        let scaled = worldX / wavelength
+        let i0 = Int(floor(scaled))
+        let t = scaled - Double(i0)
+        let h = t * t * (3.0 - 2.0 * t)
+
+        let asymScale = useContrastStretch ? 0.32 : 0.54
+        let stepScale = useContrastStretch ? 0.26 : 0.38
+        let asym = terrainLatticeValue(i0, waveSalt: waveSalt + 19) * asymScale
+        let step1 = terrainLatticeValue(i0, waveSalt: waveSalt + 37) * stepScale
+        let step2 = terrainLatticeValue(i0, waveSalt: waveSalt + 53) * (stepScale * 0.55)
+
+        let warpedU = h
+            + asym * h * (1.0 - h) * (1.0 - 2.0 * h)
+            + step1 * (sin(.pi * 2.0 * h) / (.pi * 2.0))
+            + step2 * (sin(.pi * 4.0 * h) / (.pi * 4.0))
+        let u = max(0.0, min(1.0, warpedU))
+
+        let v0 = useContrastStretch
+            ? contrastStretchedLatticeValue(i0, waveSalt: waveSalt)
+            : smoothedTerrainLatticeValue(i0, waveSalt: waveSalt)
+        let v1 = useContrastStretch
+            ? contrastStretchedLatticeValue(i0 + 1, waveSalt: waveSalt)
+            : smoothedTerrainLatticeValue(i0 + 1, waveSalt: waveSalt)
+        return v0 + (v1 - v0) * u
+    }
+
+    private static func evalRidgedTerrainWave(
+        _ worldX: Double,
+        wavelength: Double,
+        waveSalt: Int
+    ) -> Double {
+        let rawW = evalSmoothTerrainWave(worldX, wavelength: wavelength, waveSalt: waveSalt, useContrastStretch: false)
+        let w = tanh(rawW * 1.82) / tanhGainNorm
+        let eps = 0.34
+        let minVal = sqrt(eps)
+        let maxVal = sqrt(1.0 + eps)
+        let normFold = (sqrt(w * w + eps) - minVal) / (maxVal - minVal)
+        let roundedFold = 1.0 - 2.0 * normFold
+        let cosineArch = cos(w * .pi * 0.94)
+        var blended = roundedFold * 0.62 + cosineArch * 0.38
+        if blended < -0.20 {
+            let u = min(1.0, (-blended - 0.20) / 0.80)
+            let flatDome = u - 0.34 * u * u
+            blended = -(0.20 + 0.80 * (flatDome / 0.66) * 0.90)
+        }
+        return max(-1.0, min(1.0, blended))
+    }
+
+    private static func evalSlopeVariationOffset(_ worldX: Double) -> Double {
+        let mountainChain =
+            evalRidgedTerrainWave(worldX, wavelength: 1180.0, waveSalt: 601) * 320.0 +
+            evalRidgedTerrainWave(worldX, wavelength: 780.0, waveSalt: 619) * 260.0
+        let subPeaks =
+            evalWarpedTerrainWave(worldX, wavelength: 520.0, waveSalt: 643, useContrastStretch: false) * 210.0 +
+            evalRidgedTerrainWave(worldX, wavelength: 340.0, waveSalt: 661) * 145.0
+        let phaseMod = evalSmoothTerrainWave(worldX, wavelength: 920.0, waveSalt: 677) * 1.8
+        let ridgeWave =
+            sin((worldX / 220.0) * .pi * 2.0 + phaseMod) * 72.0 +
+            cos((worldX / 145.0) * .pi * 2.0 - phaseMod * 0.7) * 34.0
+        return mountainChain + subPeaks + ridgeWave
+    }
+
+    private static func evalBaseMacroOffsetAtX(_ worldX: Double, effA1: Double, isBlockAnchor: Bool) -> Double {
+        let macroPrimary = isBlockAnchor
+            ? evalSmoothTerrainWave(worldX, wavelength: 18500.0, waveSalt: 101, useContrastStretch: true)
+            : evalWarpedTerrainWave(worldX, wavelength: 18500.0, waveSalt: 101, useContrastStretch: true)
+        let macroSecondary = isBlockAnchor
+            ? evalSmoothTerrainWave(worldX, wavelength: 26000.0, waveSalt: 157, useContrastStretch: true)
+            : evalWarpedTerrainWave(worldX, wavelength: 26000.0, waveSalt: 157, useContrastStretch: true)
+        var combinedMacroNorm = max(-1.0, min(1.0, macroPrimary * 0.62 + macroSecondary * 0.38))
+
+        if combinedMacroNorm < -0.35 {
+            let u = min(1.0, (-combinedMacroNorm - 0.35) / 0.65)
+            let flatTop = u - 0.36 * u * u
+            combinedMacroNorm = -(0.35 + 0.65 * (flatTop / 0.64))
+        }
+
+        var macroOffset = combinedMacroNorm * effA1
+        if terrainMinFloorDepth <= 600.0 && effA1 >= 5000.0 {
+            let absX = abs(worldX)
+            if absX < 7600.0 {
+                let targetOriginOffset: Double
+                if absX <= 560.0 {
+                    let u = absX / 560.0
+                    let spawnHills =
+                        sin(worldX / 88.0) * 34.0 +
+                        cos(worldX / 52.0 + 0.8) * 22.0 +
+                        sin(worldX / 155.0 - 0.5) * 28.0
+                    targetOriginOffset = -effA1 + 22.0 + 30.0 * (u * u) + spawnHills
+                } else if absX <= 4200.0 {
+                    let slopeProgress = (absX - 560.0) / 3640.0
+                    let smoothDrop = 0.44 * slopeProgress + 0.56 * quinticSmoothstep(0.0, 1.0, slopeProgress)
+                    let mountainOsc = sin((absX - 560.0) / 115.0) * 195.0 + cos(worldX / 74.0) * 115.0
+                    targetOriginOffset = -effA1 + 52.0 + 3880.0 * smoothDrop + mountainOsc * sin(.pi * slopeProgress)
+                } else {
+                    targetOriginOffset = -effA1 + 3932.0 + (absX - 4200.0) * 0.72
+                }
+                let oceanBlend = quinticSmoothstep(3600.0, 7600.0, absX)
+                macroOffset = targetOriginOffset + (macroOffset - targetOriginOffset) * oceanBlend
+            }
+        }
+        return macroOffset
+    }
+
+    public static func evalSandyPlainFactor(_ worldX: Double) -> Double {
+        let scaled = worldX / sandyPlainCellWidth
+        let cellIdx = Int(floor(scaled))
+        let u = scaled - Double(cellIdx)
+
+        let rampIn = quinticSmoothstep(0.0, 0.16, u)
+        let rampOut = 1.0 - quinticSmoothstep(0.84, 1.0, u)
+        let cellWindow = rampIn * rampOut
+
+        let cellCenterX = (Double(cellIdx) + 0.5) * sandyPlainCellWidth
+        let w1 = evalSmoothTerrainWave(cellCenterX, wavelength: 3200.0, waveSalt: 509)
+        let w2 = terrainLatticeValue(cellIdx, waveSalt: 577)
+        let selectorSignal = w1 * 0.55 + w2 * 0.45
+        let cellStrength = quinticSmoothstep(-0.28, 0.08, selectorSignal)
+        let rawPlain = cellWindow * cellStrength
+
+        if terrainMinFloorDepth <= 600.0 {
+            let absX = abs(worldX)
+            if absX <= 520.0 { return 0.75 }
+            if absX < 3400.0 { return rawPlain * 0.25 }
+        }
+        return rawPlain
+    }
+
+    private static func evalRawRandomFloorDepthAtX(_ worldX: Double, isBlockAnchor: Bool = false) -> Double {
+        let A1 = terrainLargeWaveAmplitude
+        let A2 = terrainMediumWaveAmplitude
+        let A3 = terrainSmallWaveAmplitude
+        let plainFactor = evalSandyPlainFactor(worldX)
+
+        let roughEnvWave = evalSmoothTerrainWave(worldX, wavelength: 5800.0, waveSalt: 707)
+        let baseRoughness = 0.46 + 0.54 * (0.5 + 0.5 * roughEnvWave)
+        let roughness = baseRoughness * (1.0 - 0.58 * plainFactor)
+
+        let effA1 = min(A1, 9600.0)
+        var macroOffset = evalBaseMacroOffsetAtX(worldX, effA1: effA1, isBlockAnchor: false)
+
+        if plainFactor > 0.05 && effA1 > 200.0 && abs(worldX) > 3400.0 {
+            let cellIdx = Int(floor(worldX / sandyPlainCellWidth))
+            let cellCenterX = (Double(cellIdx) + 0.5) * sandyPlainCellWidth
+            let centerMacroOffset = evalBaseMacroOffsetAtX(cellCenterX, effA1: effA1, isBlockAnchor: true)
+            let originBlend = quinticSmoothstep(3400.0, 4200.0, abs(worldX))
+            let gentleMacroLock = plainFactor * 0.52 * originBlend
+            let rollingHills =
+                sin((worldX / 580.0) * .pi * 2.0 + Double(cellIdx) * 1.7) * 64.0 +
+                cos((worldX / 310.0) * .pi * 2.0 - Double(cellIdx) * 1.1) * 32.0
+            macroOffset = macroOffset + (centerMacroOffset - macroOffset) * gentleMacroLock + rollingHills * plainFactor * originBlend
+        }
+
+        let originDetailFade = terrainMinFloorDepth <= 600.0 ? quinticSmoothstep(560.0, 1280.0, abs(worldX)) : 1.0
+
+        let effA2 = min(A2, 3800.0) * originDetailFade
+        let mesoRidgedPrimary = evalRidgedTerrainWave(worldX, wavelength: 2100.0, waveSalt: 263)
+        let mesoRidgedSecondary = evalRidgedTerrainWave(worldX, wavelength: 1320.0, waveSalt: 281)
+        let mesoWarped = evalWarpedTerrainWave(worldX, wavelength: 1750.0, waveSalt: 202, useContrastStretch: false)
+        var mesoFolded = mesoRidgedPrimary * 0.44 + mesoRidgedSecondary * 0.32 + mesoWarped * 0.24
+        if mesoFolded < -0.24 {
+            let uPeak = min(1.0, (-mesoFolded - 0.24) / 0.76)
+            let flatPeak = uPeak - 0.35 * uPeak * uPeak
+            mesoFolded = -(0.24 + 0.76 * (flatPeak / 0.65) * 0.85)
+        }
+        let mesoEnvelope = (0.58 + 0.42 * baseRoughness) * (1.0 - 0.62 * plainFactor)
+        let mediumOffset = mesoFolded * effA2 * mesoEnvelope * 0.42
+
+        let effA3 = min(A3, 720.0) * originDetailFade
+        let slopeVarWeight = originDetailFade * (0.38 + 0.62 * (1.0 - 0.65 * plainFactor)) * min(1.0, A2 / 1000.0)
+        let mountainRangeOffset = evalSlopeVariationOffset(worldX) * slopeVarWeight
+        let cragWave = evalWarpedTerrainWave(worldX, wavelength: 480.0, waveSalt: 303, useContrastStretch: false)
+        let microJagged = evalSmoothTerrainWave(worldX, wavelength: 230.0, waveSalt: 409)
+        let smallOffset =
+            mountainRangeOffset +
+            cragWave * effA3 * (0.45 + 0.55 * roughness) +
+            microJagged * min(effA3 * 0.38, 180.0) * (0.45 + 0.55 * roughness)
+
+        let blockSpan = 20.0 * terrainSampleStepX
+        let blockInteriorArch = sin((worldX / blockSpan) * .pi)
+        let mountainCap = 240.0 + 480.0 * (blockInteriorArch * blockInteriorArch)
+        let rawMountainSum = mediumOffset + smallOffset
+        let boundedMountainOffset = mountainCap > 0.0 ? mountainCap * tanh(rawMountainSum / mountainCap) : 0.0
+
+        var rawDepth = terrainBaseFloorDepth + macroOffset + boundedMountainOffset
+        if terrainMinFloorDepth <= 600.0 && rawDepth < 740.0 {
+            let shallowExcess = 740.0 - rawDepth
+            let maxGentleRise = 310.0
+            let cushionedRise = maxGentleRise * tanh(shallowExcess / maxGentleRise)
+            rawDepth = 740.0 - cushionedRise
+        }
+        return rawDepth
+    }
+
+    private static func evalGridNodeFloorDepth(_ gridIndex: Int) -> Double {
+        let stepX = terrainSampleStepX
+        let blockSteps = 20
+        let blockIdx = Int(floor(Double(gridIndex) / Double(blockSteps)))
+        let localStep = gridIndex - blockIdx * blockSteps
+
+        if let cached = terrainBlockNodeCache[blockIdx] {
+            return cached[localStep]
+        }
+
+        let maxStepDelta = terrainMaxSlope * stepX
+        let blockStartGrid = blockIdx * blockSteps
+
+        var scratchRawY = [Double](repeating: 0.0, count: blockSteps + 1)
+        var scratchDeltas = [Double](repeating: 0.0, count: blockSteps)
+        var scratchRooms = [Double](repeating: 0.0, count: blockSteps)
+        var scratchWeightedRooms = [Double](repeating: 0.0, count: blockSteps)
+        var scratchStepRhythm = [Double](repeating: 0.0, count: blockSteps)
+
+        for j in 0...blockSteps {
+            let gx = blockStartGrid + j
+            let yVal = evalRawRandomFloorDepthAtX(Double(gx) * stepX, isBlockAnchor: false)
+            scratchRawY[j] = max(terrainMinFloorDepth, min(terrainMaxFloorDepth, yVal))
+        }
+
+        let safeLimit = maxStepDelta - 1e-6
+        let redistributionLimit = 1.36 * stepX
+        var clampedSum = 0.0
+
+        for j in 0..<blockSteps {
+            let stepGridIdx = blockStartGrid + j
+            let midX = (Double(stepGridIdx) + 0.5) * stepX
+            let isSpawnZone = terrainMinFloorDepth <= 600.0 && abs(midX) <= 600.0
+            let pf = evalSandyPlainFactor(midX)
+            let rawD = scratchRawY[j + 1] - scratchRawY[j]
+
+            let hStep = terrainLatticeValue(stepGridIdx, waveSalt: 829)
+            let ridgePhase = sin(Double(stepGridIdx) * 1.35 + hStep * 1.45)
+            let modulatedD: Double
+
+            if isSpawnZone {
+                modulatedD = rawD
+                scratchStepRhythm[j] = 0.0
+            } else if pf > 0.32 {
+                let hillSlope = (sin(Double(stepGridIdx) * 1.55 + hStep * 0.9) * 0.14
+                    + cos(Double(stepGridIdx) * 0.85 - hStep * 0.7) * 0.06) * stepX
+                modulatedD = rawD * (1.0 - 0.68 * pf) + hillSlope * pf
+                scratchStepRhythm[j] = 0.03
+            } else if ridgePhase < -0.56 {
+                let reverseKick = (hStep < 0.0 ? -0.22 : 0.12) * stepX
+                modulatedD = rawD * 0.25 + reverseKick
+                scratchStepRhythm[j] = 0.06
+            } else {
+                modulatedD = rawD
+                scratchStepRhythm[j] = 1.0
+            }
+
+            let c = max(-redistributionLimit, min(redistributionLimit, modulatedD))
+            scratchDeltas[j] = c
+            clampedSum += c
+        }
+
+        let targetDiff = scratchRawY[blockSteps] - scratchRawY[0]
+        let excess = targetDiff - clampedSum
+        if abs(excess) > 1e-9 {
+            var totalWeightedRoom = 0.0
+            for j in 0..<blockSteps {
+                let midX = (Double(blockStartGrid + j) + 0.5) * stepX
+                let isSpawnZone = terrainMinFloorDepth <= 600.0 && abs(midX) <= 600.0
+                let pf = evalSandyPlainFactor(midX)
+                let room = isSpawnZone
+                    ? 0.0
+                    : max(0.0, excess > 0.0 ? (redistributionLimit - scratchDeltas[j]) : (scratchDeltas[j] + redistributionLimit))
+                scratchRooms[j] = room
+                let nonPlain = max(0.02, min(1.0, 1.0 - pf))
+                let weight = min(1.0, nonPlain * nonPlain * scratchStepRhythm[j])
+                scratchWeightedRooms[j] = room * weight
+                totalWeightedRoom += scratchWeightedRooms[j]
+            }
+
+            if totalWeightedRoom >= abs(excess) && totalWeightedRoom > 1e-9 {
+                let ratio = abs(excess) / totalWeightedRoom
+                let sign = excess > 0.0 ? 1.0 : -1.0
+                for j in 0..<blockSteps {
+                    scratchDeltas[j] += sign * scratchWeightedRooms[j] * ratio
+                }
+            } else {
+                let sign = excess > 0.0 ? 1.0 : -1.0
+                var remainingExcess = abs(excess)
+                if totalWeightedRoom > 1e-9 {
+                    for j in 0..<blockSteps {
+                        let add = min(scratchRooms[j], scratchWeightedRooms[j])
+                        scratchDeltas[j] += sign * add
+                        scratchRooms[j] = max(0.0, scratchRooms[j] - add)
+                        remainingExcess -= add
+                    }
+                }
+                if remainingExcess > 1e-9 {
+                    var totalRoom = 0.0
+                    for j in 0..<blockSteps { totalRoom += scratchRooms[j] }
+                    if totalRoom > 1e-9 {
+                        let ratio = min(1.0, remainingExcess / totalRoom)
+                        for j in 0..<blockSteps {
+                            scratchDeltas[j] += sign * scratchRooms[j] * ratio
+                        }
+                    }
+                }
+            }
+        }
+
+        let minAbsD = 0.045 * stepX
+        let absAvgDeadHalf = 0.048 * stepX
+        for m in 0..<10 {
+            let j0 = m * 2
+            let j1 = j0 + 1
+            let d0 = scratchDeltas[j0]
+            let d1 = scratchDeltas[j1]
+            let avg = (d0 + d1) * 0.5
+            let absAvg = abs(avg)
+            let cMax = max(0.0, safeLimit - absAvg - 1e-4)
+            let midX = Double(blockStartGrid + j0 + 1) * stepX
+            let pf = evalSandyPlainFactor(midX)
+            let hPair = abs(terrainLatticeValue(blockStartGrid + j0, waveSalt: 947))
+
+            let targetC = pf > 0.32
+                ? (0.068 + 0.035 * hPair) * stepX
+                : (0.105 + 0.085 * hPair + 0.08 * min(1.0, absAvg / stepX)) * stepX
+            var c = max((d1 - d0) * 0.5, min(cMax * 0.92, targetC))
+            if c > cMax * 0.96 { c = cMax * 0.96 }
+
+            if abs(c - absAvg) < absAvgDeadHalf {
+                let upperC = absAvg + absAvgDeadHalf
+                let lowerC = absAvg - absAvgDeadHalf
+                if upperC <= cMax * 0.96 {
+                    c = upperC
+                } else if lowerC >= 0.048 * stepX {
+                    c = lowerC
+                }
+            }
+            scratchDeltas[j0] = avg - c
+            scratchDeltas[j1] = avg + c
+        }
+
+        for m in 0..<9 {
+            let jOdd = m * 2 + 1
+            let jEvenNext = jOdd + 1
+            let diffOddEven = scratchDeltas[jEvenNext] - scratchDeltas[jOdd]
+            if abs(diffOddEven) < 0.095 * stepX {
+                let needed = diffOddEven + 0.115 * stepX
+                let jEvenCurr = m * 2
+                let roomCurr = min(safeLimit + scratchDeltas[jEvenCurr], safeLimit - scratchDeltas[jOdd])
+                var boostCurr = min(roomCurr * 0.85, needed)
+                if boostCurr > 0.0 && (abs(scratchDeltas[jEvenCurr] - boostCurr) < minAbsD || abs(scratchDeltas[jOdd] + boostCurr) < minAbsD) {
+                    let altBoost = min(roomCurr * 0.92, boostCurr + 2.2 * minAbsD)
+                    if abs(scratchDeltas[jEvenCurr] - altBoost) >= minAbsD && abs(scratchDeltas[jOdd] + altBoost) >= minAbsD {
+                        boostCurr = altBoost
+                    } else {
+                        boostCurr = 0.0
+                    }
+                }
+                if boostCurr > 0.0 {
+                    scratchDeltas[jEvenCurr] -= boostCurr
+                    scratchDeltas[jOdd] += boostCurr
+                }
+
+                let remNeeded = scratchDeltas[jEvenNext] - scratchDeltas[jOdd] + 0.11 * stepX
+                if remNeeded > 0.0 {
+                    let jOddNext = jEvenNext + 1
+                    let roomNext = min(safeLimit + scratchDeltas[jEvenNext], safeLimit - scratchDeltas[jOddNext])
+                    var boostNext = min(roomNext * 0.85, remNeeded)
+                    if boostNext > 0.0 && (abs(scratchDeltas[jEvenNext] - boostNext) < minAbsD || abs(scratchDeltas[jOddNext] + boostNext) < minAbsD) {
+                        let altBoost = min(roomNext * 0.92, boostNext + 2.2 * minAbsD)
+                        if abs(scratchDeltas[jEvenNext] - altBoost) >= minAbsD && abs(scratchDeltas[jOddNext] + altBoost) >= minAbsD {
+                            boostNext = altBoost
+                        } else {
+                            boostNext = 0.0
+                        }
+                    }
+                    if boostNext > 0.0 {
+                        scratchDeltas[jEvenNext] -= boostNext
+                        scratchDeltas[jOddNext] += boostNext
+                    }
+                }
+            }
+        }
+
+        let latticeStep = 0.36 * stepX
+        func snapBoundaryPair(jTarget: Int, jPartner: Int, jInnerNeighbor: Int, latticeOffset: Double) {
+            let pairSum = scratchDeltas[jTarget] + scratchDeltas[jPartner]
+            let currTarget = scratchDeltas[jTarget]
+            let baseK = Int((currTarget - latticeOffset) / latticeStep + (currTarget - latticeOffset >= 0 ? 0.5 : -0.5))
+            var bestTarget = currTarget
+            var bestScore = Double.infinity
+            for dk in -3...3 {
+                let candTarget = Double(baseK + dk) * latticeStep + latticeOffset
+                let candPartner = pairSum - candTarget
+                if abs(candTarget) > safeLimit || abs(candPartner) > safeLimit { continue }
+                if abs(candTarget) < minAbsD || abs(candPartner) < minAbsD { continue }
+                if abs(candTarget - candPartner) < 0.095 * stepX { continue }
+                if abs(candPartner - scratchDeltas[jInnerNeighbor]) < 0.095 * stepX { continue }
+                let score = abs(candTarget - currTarget)
+                if score < bestScore {
+                    bestScore = score
+                    bestTarget = candTarget
+                }
+            }
+            scratchDeltas[jTarget] = bestTarget
+            scratchDeltas[jPartner] = pairSum - bestTarget
+        }
+
+        snapBoundaryPair(jTarget: 0, jPartner: 1, jInnerNeighbor: 2, latticeOffset: 0.09 * stepX)
+        snapBoundaryPair(jTarget: 19, jPartner: 18, jInnerNeighbor: 17, latticeOffset: -0.09 * stepX)
+
+        var solvedNodes = [Double](repeating: 0.0, count: blockSteps + 1)
+        var accY = scratchRawY[0]
+        solvedNodes[0] = max(terrainMinFloorDepth, min(terrainMaxFloorDepth, accY))
+        for j in 0..<blockSteps {
+            let clampedStep = max(-maxStepDelta, min(maxStepDelta, scratchDeltas[j]))
+            accY += clampedStep
+            solvedNodes[j + 1] = max(terrainMinFloorDepth, min(terrainMaxFloorDepth, accY))
+        }
+
+        if terrainBlockNodeCache.count >= maxTerrainBlockCacheSize, let oldest = terrainBlockCacheOrder.first {
+            terrainBlockCacheOrder.removeFirst()
+            terrainBlockNodeCache.removeValue(forKey: oldest)
+        }
+        terrainBlockNodeCache[blockIdx] = solvedNodes
+        terrainBlockCacheOrder.append(blockIdx)
+
+        return solvedNodes[localStep]
+    }
+
+    /// Continuous 1.0x world-space seafloor mountain & trench profile (100% bit-for-bit parity with Web getFloorDepthAt)
+    public static func getFloorDepthAt(worldX x: Double) -> Double {
+        if !x.isFinite { return terrainBaseFloorDepth }
+        let stepX = terrainSampleStepX
+        let scaled = x / stepX
+        let k0 = Int(floor(scaled))
+        let frac = scaled - Double(k0)
+        let y0 = evalGridNodeFloorDepth(k0)
+        if frac == 0.0 { return y0 }
+        let y1 = evalGridNodeFloorDepth(k0 + 1)
+        let interpolated = y0 + (y1 - y0) * frac
+        return max(terrainMinFloorDepth, min(terrainMaxFloorDepth, interpolated))
+    }
+
+    /// Exact 1:1 port of Web getTerrainSlopeAt(worldX)
     public static func getTerrainSlopeAt(worldX x: Double) -> Double {
-        let d1 = getFloorDepthAt(worldX: x - 8.0)
-        let d2 = getFloorDepthAt(worldX: x + 8.0)
-        return (d2 - d1) / 16.0
+        if !x.isFinite { return 0.0 }
+        let stepX = terrainSampleStepX
+        let k0 = Int(floor(x / stepX))
+        let y0 = evalGridNodeFloorDepth(k0)
+        let y1 = evalGridNodeFloorDepth(k0 + 1)
+        return (y1 - y0) / stepX
     }
 
     public struct SeabedTerraceTierSpec {
         public let tierIndex: Int
-        public let baseDepth: Double
-        public let period: Double
-        public let phaseShift: Double
-        public let openDuty: Double
         public let stripId: String
-        public let reliefAmp: Double
-        public let dropAmplitude: Double
-        public let thicknessBase: Double
-        public let clearanceFromMainFloor: Double
+        public let baseRidgeY: Double
+        public let minRidgeY: Double
+        public let maxRidgeY: Double
+        public let maxVisualRimY: Double
+        public let archTargetBaseY: Double
+        public let archMaxDepthY: Double
+        public let cellWidth: Double
+        public let seamPhaseOffsetX: Double
+        public let skipZeroSeam: Bool
+        public let openingHalfWidth: Double
+        public let bowlHalfWidth: Double
+        public let bowlDropDepth: Double
+        public let minMainFloorForOpening: Double
+        public let graftStartMainY: Double
+        public let graftEndMainY: Double
+        public let graftFuseMainY: Double
+        public let seedSalt: Int
+
+        public var baseDepth: Double { baseRidgeY }
+        public var thicknessBase: Double { archTargetBaseY - baseRidgeY }
     }
 
-    /// 9-Tier Non-Uniformly Spaced Multi-Depth Seabed Terraces (414m -> 16,900m, 1:1 parity with Web SEABED_TERRACE_TIERS)
+    /// 9-Tier Non-Uniformly Spaced Multi-Depth Seabed Terraces (414m -> 16,900m, 100% 1:1 parity with Web SEABED_TERRACE_TIERS)
     public static let seabedTerraceTiers: [SeabedTerraceTierSpec] = [
-        // Tier 0 (~414m, spacing baseline): Shallow sunlit coral seabed
         SeabedTerraceTierSpec(
-            tierIndex: 0, baseDepth: 414.0, period: 1680.0, phaseShift: 0.0, openDuty: 0.24,
-            stripId: "coral_reef", reliefAmp: 1.0, dropAmplitude: 175.0, thicknessBase: 195.0, clearanceFromMainFloor: 130.0
+            tierIndex: 0, stripId: "coral_reef",
+            baseRidgeY: 414.0, minRidgeY: 332.0, maxRidgeY: 496.0, maxVisualRimY: 648.0,
+            archTargetBaseY: 708.0, archMaxDepthY: 736.0, cellWidth: 1600.0, seamPhaseOffsetX: 0.0,
+            skipZeroSeam: true, openingHalfWidth: 232.0, bowlHalfWidth: 416.0, bowlDropDepth: 148.0,
+            minMainFloorForOpening: 680.0, graftStartMainY: 560.0, graftEndMainY: 880.0, graftFuseMainY: 760.0, seedSalt: 613
         ),
-        // Tier 1 (~820m, gap +406m): Upper twilight rocky coral shelf
         SeabedTerraceTierSpec(
-            tierIndex: 1, baseDepth: 820.0, period: 1960.0, phaseShift: 740.0, openDuty: 0.28,
-            stripId: "rocky_shelf", reliefAmp: 1.32, dropAmplitude: 215.0, thicknessBase: 225.0, clearanceFromMainFloor: 165.0
+            tierIndex: 1, stripId: "rocky_shelf",
+            baseRidgeY: 1220.0, minRidgeY: 1130.0, maxRidgeY: 1310.0, maxVisualRimY: 1475.0,
+            archTargetBaseY: 1512.0, archMaxDepthY: 1545.0, cellWidth: 1800.0, seamPhaseOffsetX: 800.0,
+            skipZeroSeam: false, openingHalfWidth: 248.0, bowlHalfWidth: 440.0, bowlDropDepth: 156.0,
+            minMainFloorForOpening: 1500.0, graftStartMainY: 1370.0, graftEndMainY: 1710.0, graftFuseMainY: 1575.0, seedSalt: 1619
         ),
-        // Tier 2 (~1380m, gap +560m): Lower twilight canyon terrace
         SeabedTerraceTierSpec(
-            tierIndex: 2, baseDepth: 1380.0, period: 2240.0, phaseShift: 1420.0, openDuty: 0.30,
-            stripId: "underwater_canyon", reliefAmp: 1.62, dropAmplitude: 255.0, thicknessBase: 250.0, clearanceFromMainFloor: 190.0
+            tierIndex: 2, stripId: "rocky_shelf",
+            baseRidgeY: 2220.0, minRidgeY: 2120.0, maxRidgeY: 2320.0, maxVisualRimY: 2495.0,
+            archTargetBaseY: 2532.0, archMaxDepthY: 2568.0, cellWidth: 2000.0, seamPhaseOffsetX: 350.0,
+            skipZeroSeam: false, openingHalfWidth: 266.0, bowlHalfWidth: 468.0, bowlDropDepth: 164.0,
+            minMainFloorForOpening: 2520.0, graftStartMainY: 2380.0, graftEndMainY: 2750.0, graftFuseMainY: 2600.0, seedSalt: 2633
         ),
-        // Tier 3 (~2180m, gap +800m): Midnight canyon terrace
         SeabedTerraceTierSpec(
-            tierIndex: 3, baseDepth: 2180.0, period: 2560.0, phaseShift: 520.0, openDuty: 0.31,
-            stripId: "underwater_canyon", reliefAmp: 1.85, dropAmplitude: 295.0, thicknessBase: 275.0, clearanceFromMainFloor: 215.0
+            tierIndex: 3, stripId: "underwater_canyon",
+            baseRidgeY: 3460.0, minRidgeY: 3350.0, maxRidgeY: 3570.0, maxVisualRimY: 3755.0,
+            archTargetBaseY: 3792.0, archMaxDepthY: 3832.0, cellWidth: 2200.0, seamPhaseOffsetX: 1100.0,
+            skipZeroSeam: false, openingHalfWidth: 284.0, bowlHalfWidth: 496.0, bowlDropDepth: 172.0,
+            minMainFloorForOpening: 3780.0, graftStartMainY: 3630.0, graftEndMainY: 4030.0, graftFuseMainY: 3865.0, seedSalt: 3671
         ),
-        // Tier 4 (~3350m, gap +1170m): Upper abyssal basalt shelf
         SeabedTerraceTierSpec(
-            tierIndex: 4, baseDepth: 3350.0, period: 2920.0, phaseShift: 1680.0, openDuty: 0.33,
-            stripId: "deep_abyss", reliefAmp: 2.10, dropAmplitude: 340.0, thicknessBase: 300.0, clearanceFromMainFloor: 240.0
+            tierIndex: 4, stripId: "underwater_canyon",
+            baseRidgeY: 5040.0, minRidgeY: 4910.0, maxRidgeY: 5170.0, maxVisualRimY: 5365.0,
+            archTargetBaseY: 5402.0, archMaxDepthY: 5446.0, cellWidth: 2400.0, seamPhaseOffsetX: 600.0,
+            skipZeroSeam: false, openingHalfWidth: 302.0, bowlHalfWidth: 524.0, bowlDropDepth: 180.0,
+            minMainFloorForOpening: 5390.0, graftStartMainY: 5230.0, graftEndMainY: 5660.0, graftFuseMainY: 5480.0, seedSalt: 4723
         ),
-        // Tier 5 (~5050m, gap +1700m): Mid-abyssal volcanic terrace
         SeabedTerraceTierSpec(
-            tierIndex: 5, baseDepth: 5050.0, period: 3320.0, phaseShift: 910.0, openDuty: 0.34,
-            stripId: "deep_abyss", reliefAmp: 2.35, dropAmplitude: 390.0, thicknessBase: 330.0, clearanceFromMainFloor: 265.0
+            tierIndex: 5, stripId: "underwater_canyon",
+            baseRidgeY: 7060.0, minRidgeY: 6910.0, maxRidgeY: 7210.0, maxVisualRimY: 7420.0,
+            archTargetBaseY: 7456.0, archMaxDepthY: 7506.0, cellWidth: 2600.0, seamPhaseOffsetX: 1500.0,
+            skipZeroSeam: false, openingHalfWidth: 324.0, bowlHalfWidth: 560.0, bowlDropDepth: 192.0,
+            minMainFloorForOpening: 7440.0, graftStartMainY: 7270.0, graftEndMainY: 7740.0, graftFuseMainY: 7545.0, seedSalt: 5801
         ),
-        // Tier 6 (~7500m, gap +2450m): Deep abyssal trench ledge
         SeabedTerraceTierSpec(
-            tierIndex: 6, baseDepth: 7500.0, period: 3760.0, phaseShift: 2190.0, openDuty: 0.36,
-            stripId: "deep_abyss", reliefAmp: 2.65, dropAmplitude: 450.0, thicknessBase: 360.0, clearanceFromMainFloor: 290.0
+            tierIndex: 6, stripId: "underwater_canyon",
+            baseRidgeY: 9640.0, minRidgeY: 9470.0, maxRidgeY: 9810.0, maxVisualRimY: 10030.0,
+            archTargetBaseY: 10066.0, archMaxDepthY: 10122.0, cellWidth: 2900.0, seamPhaseOffsetX: 700.0,
+            skipZeroSeam: false, openingHalfWidth: 350.0, bowlHalfWidth: 604.0, bowlDropDepth: 206.0,
+            minMainFloorForOpening: 10050.0, graftStartMainY: 9880.0, graftEndMainY: 10380.0, graftFuseMainY: 10165.0, seedSalt: 6883
         ),
-        // Tier 7 (~11200m, gap +3700m): Upper Hadal fault terrace
         SeabedTerraceTierSpec(
-            tierIndex: 7, baseDepth: 11200.0, period: 4280.0, phaseShift: 1270.0, openDuty: 0.38,
-            stripId: "deep_abyss", reliefAmp: 3.00, dropAmplitude: 520.0, thicknessBase: 395.0, clearanceFromMainFloor: 320.0
+            tierIndex: 7, stripId: "deep_abyss",
+            baseRidgeY: 12900.0, minRidgeY: 12710.0, maxRidgeY: 13090.0, maxVisualRimY: 13324.0,
+            archTargetBaseY: 13360.0, archMaxDepthY: 13422.0, cellWidth: 3200.0, seamPhaseOffsetX: 1900.0,
+            skipZeroSeam: false, openingHalfWidth: 380.0, bowlHalfWidth: 652.0, bowlDropDepth: 222.0,
+            minMainFloorForOpening: 13340.0, graftStartMainY: 13160.0, graftEndMainY: 13700.0, graftFuseMainY: 13470.0, seedSalt: 7949
         ),
-        // Tier 8 (~16900m, gap +5700m): Deep Hadal abyssal core ledge
         SeabedTerraceTierSpec(
-            tierIndex: 8, baseDepth: 16900.0, period: 4880.0, phaseShift: 2840.0, openDuty: 0.40,
-            stripId: "deep_abyss", reliefAmp: 3.40, dropAmplitude: 600.0, thicknessBase: 430.0, clearanceFromMainFloor: 350.0
+            tierIndex: 8, stripId: "deep_abyss",
+            baseRidgeY: 16900.0, minRidgeY: 16690.0, maxRidgeY: 17110.0, maxVisualRimY: 17360.0,
+            archTargetBaseY: 17396.0, archMaxDepthY: 17464.0, cellWidth: 3600.0, seamPhaseOffsetX: 900.0,
+            skipZeroSeam: false, openingHalfWidth: 416.0, bowlHalfWidth: 710.0, bowlDropDepth: 240.0,
+            minMainFloorForOpening: 17370.0, graftStartMainY: 17180.0, graftEndMainY: 17760.0, graftFuseMainY: 17515.0, seedSalt: 9013
         )
     ]
 
     public struct SeabedTerraceSample {
         public let isPresent: Bool
+        public let isDiveOpening: Bool
         public let topY: Double
         public let bottomArchY: Double
         public let edgeFactor: Double
@@ -646,99 +1186,178 @@ public enum GameRules {
         public let stripId: String
     }
 
-    private static func evalSeabedTerraceRawAt(
+    /// Exact 1:1 port of Web evalTerraceSeabedContinuousRaw(worldX, tier, WorldConfig)
+    private static func evalTerraceSeabedContinuousRaw(
         worldX: Double,
-        spec: SeabedTerraceTierSpec,
-        mainFloor: Double
-    ) -> (isPresent: Bool, topY: Double, bottomArchY: Double, edgeFactor: Double, caveFactor: Double) {
-        let saltBase = spec.tierIndex * 131
-        let warpedX = worldX + spec.phaseShift + noise1D(worldX * 0.00055, salt: 401 + saltBase) * 260.0
-        let cellPhase = ((warpedX.truncatingRemainder(dividingBy: spec.period)) + spec.period).truncatingRemainder(dividingBy: spec.period) / spec.period
-        let distFromGapCenter = abs(cellPhase - 0.5) * 2.0 // 0 at cave center, 1 at plateau center
+        tier: SeabedTerraceTierSpec
+    ) -> (
+        topY: Double,
+        slope: Double,
+        edgeWeight: Double,
+        openingDepthFactor: Double,
+        isDiveOpening: Bool,
+        bottomArchY: Double,
+        bottomSlope: Double
+    ) {
+        let seedPhase = (Double((123456789 + tier.seedSalt * 131) & 0xffff) / 65536.0) * .pi * 2.0
+        let cellWave = evalSmoothTerrainWave(worldX, wavelength: tier.cellWidth, waveSalt: tier.seedSalt)
+        let k1 = (.pi * 2.0) / (1180.0 + Double(tier.tierIndex) * 110.0)
+        let k2 = (.pi * 2.0) / (560.0 + Double(tier.tierIndex) * 45.0)
+        let k3 = (.pi * 2.0) / (290.0 + Double(tier.tierIndex) * 22.0)
+        let k4 = (.pi * 2.0) / 155.0
 
-        let relief = (noise1D(worldX * 0.0022, salt: 419 + saltBase) * 34.0
-            + noise1D(worldX * 0.0068, salt: 431 + saltBase) * 12.0) * min(1.85, spec.reliefAmp)
-        let baseTopY = spec.baseDepth + relief
+        let ampScale = 1.0 + Double(tier.tierIndex) * 0.08
+        let w1 = sin(worldX * k1 + seedPhase) * (32.0 * ampScale)
+        let w2 = cos(worldX * k2 - seedPhase * 0.7 + 1.1) * (20.0 * ampScale)
+        let w3 = sin(worldX * k3 + seedPhase * 1.3 + 2.4) * (11.0 * ampScale)
+        let w4 = cos(worldX * k4 - seedPhase * 0.4 + 0.6) * 5.0
+        let rawRidgeY = max(
+            tier.minRidgeY,
+            min(tier.maxRidgeY, tier.baseRidgeY + cellWave * (22.0 * ampScale) + w1 + w2 + w3 + w4)
+        )
 
-        // Unified C2-continuous cosine-bell bowl curve across both the solid cave shoulders AND the receding cave back-wall
-        // (1:1 mathematical parity with Web evalTerraceSeabedContinuousRaw — eliminates any vertical cliff cut or V-pinch at the cave lip!)
-        let bowlDuty = min(0.86, spec.openDuty * 1.68)
-        let openFactor: Double
-        if distFromGapCenter < bowlDuty {
-            let rimNorm = distFromGapCenter / max(0.01, bowlDuty)
-            openFactor = 0.5 * (1.0 + cos(rimNorm * .pi))
+        let dRidgeDx =
+            cos(worldX * k1 + seedPhase) * (32.0 * ampScale * k1) -
+            sin(worldX * k2 - seedPhase * 0.7 + 1.1) * (20.0 * ampScale * k2) +
+            cos(worldX * k3 + seedPhase * 1.3 + 2.4) * (11.0 * ampScale * k3) -
+            sin(worldX * k4 - seedPhase * 0.4 + 0.6) * (5.0 * k4)
+
+        let shiftedX = worldX - tier.seamPhaseOffsetX
+        let rawSeamIdx = Int((shiftedX / tier.cellWidth).rounded())
+        let nearestOpenSeamIdx: Int
+        if tier.skipZeroSeam {
+            nearestOpenSeamIdx = shiftedX >= 0.0 ? max(1, rawSeamIdx) : min(-1, rawSeamIdx)
         } else {
-            openFactor = 0.0
+            nearestOpenSeamIdx = rawSeamIdx
         }
-        let archBowlDrop = min(176.0, spec.dropAmplitude * 0.54) * pow(openFactor, 1.35)
-        let visualRimY = min(mainFloor - 26.0, baseTopY + archBowlDrop)
+        let nearestOpenSeamX = Double(nearestOpenSeamIdx) * tier.cellWidth + tier.seamPhaseOffsetX
+        let distFromSeam = worldX - nearestOpenSeamX
+        let absDist = abs(distFromSeam)
 
-        // Inside the downward cave opening (shark can swim freely up & down through this portal!)
-        if distFromGapCenter < spec.openDuty {
-            let normCave = distFromGapCenter / max(0.01, spec.openDuty) // 0 at center of opening, 1 at rim lip
-            let caveArch = 0.5 * (1.0 + cos(normCave * .pi))
-            let caveBottomY = min(mainFloor, visualRimY + 86.0 + caveArch * 74.0)
-            return (
-                isPresent: false,
-                topY: visualRimY,
-                bottomArchY: caveBottomY,
-                edgeFactor: 0.0,
-                caveFactor: openFactor
-            )
+        let seamMainFloorY = getFloorDepthAt(worldX: nearestOpenSeamX)
+        let hasOpeningAtSeam = seamMainFloorY > tier.minMainFloorForOpening
+
+        var openingDepthFactor = 0.0
+        var dOpeningFactorDx = 0.0
+        if hasOpeningAtSeam && absDist < tier.bowlHalfWidth {
+            let rimNorm = absDist / tier.bowlHalfWidth
+            openingDepthFactor = 0.5 * (1.0 + cos(rimNorm * .pi))
+            if absDist > 1e-4 {
+                dOpeningFactorDx = -0.5 * (.pi / tier.bowlHalfWidth) * sin(rimNorm * .pi) * (distFromSeam >= 0.0 ? 1.0 : -1.0)
+            }
         }
 
-        let rampSpan = 0.22
-        let edgeFactor = min(1.0, (distFromGapCenter - spec.openDuty) / rampSpan)
-        let smoothEdge = edgeFactor * edgeFactor * edgeFactor * (edgeFactor * (edgeFactor * 6.0 - 15.0) + 10.0)
+        let bowlPower = 1.35
+        let archBowlDrop = openingDepthFactor > 0.0 ? tier.bowlDropDepth * pow(openingDepthFactor, bowlPower) : 0.0
+        let dArchBowlDropDx = openingDepthFactor > 1e-4
+            ? tier.bowlDropDepth * bowlPower * pow(openingDepthFactor, bowlPower - 1.0) * dOpeningFactorDx
+            : 0.0
+
+        let visualRimY = max(tier.minRidgeY - 7.0, min(tier.maxVisualRimY, rawRidgeY + archBowlDrop))
+        let visualRimSlope = max(-1.35, min(1.35, dRidgeDx + dArchBowlDropDx))
+
+        let isDiveOpening = hasOpeningAtSeam && absDist < tier.openingHalfWidth
+        let edgeWeight: Double
+        if !hasOpeningAtSeam {
+            edgeWeight = 1.0
+        } else if isDiveOpening {
+            edgeWeight = 0.0
+        } else {
+            edgeWeight = quinticSmoothstep(tier.openingHalfWidth, tier.openingHalfWidth + 160.0, absDist)
+        }
+
         let topY = visualRimY
+        let slope = visualRimSlope
 
-        // Taper bottomArchY from rounded cave lip (topY + 86m at edgeFactor = 0, preserving full coral strip height!)
-        // down to the vaulted arch ceiling under the plateau
+        let wallRampSpan = 165.0
+        let wallDropU: Double
+        if !hasOpeningAtSeam {
+            wallDropU = 1.0
+        } else if isDiveOpening {
+            wallDropU = 0.0
+        } else {
+            wallDropU = max(0.0, min(1.0, (absDist - tier.openingHalfWidth) / wallRampSpan))
+        }
+        let wallDropT: Double
+        if wallDropU <= 0.0 {
+            wallDropT = 0.0
+        } else if wallDropU >= 1.0 {
+            wallDropT = 1.0
+        } else {
+            wallDropT = wallDropU * wallDropU * wallDropU * (wallDropU * (wallDropU * 6.0 - 15.0) + 10.0)
+        }
+        let dWallDropTDx: Double
+        if !hasOpeningAtSeam || isDiveOpening || wallDropU <= 0.0 || wallDropU >= 1.0 {
+            dWallDropTDx = 0.0
+        } else {
+            dWallDropTDx = ((30.0 * wallDropU * wallDropU * (wallDropU - 1.0) * (wallDropU - 1.0)) / wallRampSpan) * (distFromSeam >= 0.0 ? 1.0 : -1.0)
+        }
+
+        let stalactiteWave = sin(worldX * 0.017 + seedPhase * 1.1) * 14.0 + cos(worldX * 0.029 - seedPhase * 0.6) * 8.0
+        let dStalactiteDx = cos(worldX * 0.017 + seedPhase * 1.1) * (14.0 * 0.017) - sin(worldX * 0.029 - seedPhase * 0.6) * (8.0 * 0.029)
+
         let lipArchY = topY + 86.0
-        let stalactiteWave = noise1D(worldX * 0.0038, salt: 443 + saltBase) * (18.0 * min(1.6, spec.reliefAmp))
-        let targetDeepArchY = min(mainFloor, max(topY + 195.0, baseTopY + spec.thicknessBase + stalactiteWave))
-        let bottomArchY = min(mainFloor, lipArchY + (targetDeepArchY - lipArchY) * smoothEdge)
+        let targetDeepArchY = max(topY + 195.0, min(tier.archMaxDepthY, tier.archTargetBaseY + stalactiteWave))
+        let bottomArchY = lipArchY + (targetDeepArchY - lipArchY) * wallDropT
+        let rawBottomSlope = slope * (1.0 - wallDropT) + wallDropT * dStalactiteDx + (targetDeepArchY - lipArchY) * dWallDropTDx
+        let bottomSlope = max(-2.6, min(2.6, rawBottomSlope))
 
         return (
-            isPresent: true,
             topY: topY,
+            slope: slope,
+            edgeWeight: edgeWeight,
+            openingDepthFactor: openingDepthFactor,
+            isDiveOpening: isDiveOpening,
             bottomArchY: bottomArchY,
-            edgeFactor: smoothEdge,
-            caveFactor: openFactor
+            bottomSlope: bottomSlope
         )
     }
 
-    /// Samples any of the 9 continuous seabed terraces (tierIndex = 0..8).
-    /// Where isPresent == false (and main floor is deep enough), caveFactor (0 -> 1) describes the downward-curved cave opening!
+    /// Samples any of the 9 continuous seabed terraces (tierIndex = 0..8) with 100% mathematical parity with Web getSeabedTerraceAt.
     public static func getSeabedTerraceAt(worldX: Double, tierIndex: Int = 0) -> SeabedTerraceSample {
         let clampedTier = max(0, min(seabedTerraceTiers.count - 1, tierIndex))
-        let spec = seabedTerraceTiers[clampedTier]
-        let mainFloor = getFloorDepthAt(worldX: worldX)
-        if mainFloor < spec.baseDepth + spec.clearanceFromMainFloor {
+        let tier = seabedTerraceTiers[clampedTier]
+        let raw = evalTerraceSeabedContinuousRaw(worldX: worldX, tier: tier)
+        let mainFloorY = getFloorDepthAt(worldX: worldX)
+        let mainSlope = getTerrainSlopeAt(worldX: worldX)
+
+        if mainFloorY <= tier.graftStartMainY {
             return SeabedTerraceSample(
-                isPresent: false, topY: mainFloor, bottomArchY: mainFloor,
-                edgeFactor: 0.0, caveFactor: 0.0, slope: 0.0, bottomSlope: 0.0,
-                tierIndex: spec.tierIndex, stripId: spec.stripId
+                isPresent: false,
+                isDiveOpening: false,
+                topY: mainFloorY,
+                bottomArchY: max(raw.bottomArchY, mainFloorY + 60.0),
+                edgeFactor: 0.0,
+                caveFactor: 0.0,
+                slope: mainSlope,
+                bottomSlope: mainSlope,
+                tierIndex: tier.tierIndex,
+                stripId: tier.stripId
             )
         }
 
-        let center = evalSeabedTerraceRawAt(worldX: worldX, spec: spec, mainFloor: mainFloor)
-        let left = evalSeabedTerraceRawAt(worldX: worldX - 4.0, spec: spec, mainFloor: getFloorDepthAt(worldX: worldX - 4.0))
-        let right = evalSeabedTerraceRawAt(worldX: worldX + 4.0, spec: spec, mainFloor: getFloorDepthAt(worldX: worldX + 4.0))
-
-        let exactTopSlope = max(-2.4, min(2.4, (right.topY - left.topY) / 8.0))
-        let exactBottomSlope = max(-2.6, min(2.6, (right.bottomArchY - left.bottomArchY) / 8.0))
+        let graftT = quinticSmoothstep(tier.graftStartMainY, tier.graftEndMainY, mainFloorY)
+        let graftedTopY = mainFloorY + (raw.topY - mainFloorY) * graftT
+        let graftedSlope = mainSlope + (raw.slope - mainSlope) * graftT
+        let graftedBottomArchY: Double
+        if mainFloorY < tier.graftFuseMainY {
+            graftedBottomArchY = max(raw.bottomArchY, min(tier.archMaxDepthY + 6.0, mainFloorY + 48.0 * (1.0 - graftT * 0.5)))
+        } else {
+            graftedBottomArchY = min(mainFloorY - 22.0, max(graftedTopY + 86.0, raw.bottomArchY))
+        }
+        let graftedEdgeWeight = raw.edgeWeight * graftT
 
         return SeabedTerraceSample(
-            isPresent: center.isPresent,
-            topY: center.topY,
-            bottomArchY: center.bottomArchY,
-            edgeFactor: center.edgeFactor,
-            caveFactor: center.caveFactor,
-            slope: exactTopSlope,
-            bottomSlope: exactBottomSlope,
-            tierIndex: spec.tierIndex,
-            stripId: spec.stripId
+            isPresent: !raw.isDiveOpening && graftedEdgeWeight > 0.02,
+            isDiveOpening: raw.isDiveOpening && graftT > 0.02,
+            topY: graftedTopY,
+            bottomArchY: graftedBottomArchY,
+            edgeFactor: graftedEdgeWeight,
+            caveFactor: raw.openingDepthFactor * graftT,
+            slope: graftedSlope,
+            bottomSlope: raw.bottomSlope * graftT + mainSlope * (1.0 - graftT),
+            tierIndex: tier.tierIndex,
+            stripId: tier.stripId
         )
     }
 

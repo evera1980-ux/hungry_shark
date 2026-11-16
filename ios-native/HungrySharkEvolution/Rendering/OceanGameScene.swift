@@ -1894,7 +1894,9 @@ public final class OceanGameScene: SKScene {
             wx = endSampleX
             while wx >= startSampleX {
                 let s = GameRules.getSeabedTerraceAt(worldX: wx, tierIndex: tierIdx)
-                let botY = toScreenY(s.bottomArchY)
+                let botY = (!s.isPresent && !s.isDiveOpening)
+                    ? toScreenY(s.topY + 18.0)
+                    : toScreenY(s.bottomArchY)
                 archPath.addLine(to: CGPoint(x: toScreenX(wx), y: botY))
                 wx -= stepX
             }
@@ -1924,7 +1926,7 @@ public final class OceanGameScene: SKScene {
 
             while scanX <= scanLimitX {
                 let s = GameRules.getSeabedTerraceAt(worldX: scanX, tierIndex: tierIdx)
-                if !s.isPresent {
+                if s.isDiveOpening {
                     if !inCave {
                         inCave = true
                         curCaveStart = scanX
