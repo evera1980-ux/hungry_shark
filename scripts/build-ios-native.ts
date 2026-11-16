@@ -729,6 +729,10 @@ public enum GameRules {
         return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
     }
 
+    public static func quinticSmoothstep(_ edge0: Double, _ edge1: Double, _ x: Double) -> Double {
+        return quinticSmoothstep(edge0: edge0, edge1: edge1, x: x)
+    }
+
     private static func compensateUnderLayerAlpha(_ rawWeight: Double) -> Double {
         if rawWeight <= 0.0001 { return 0.0 }
         if rawWeight >= 0.9999 { return 1.0 }
@@ -1019,13 +1023,13 @@ public enum GameRules {
                     targetOriginOffset = -effA1 + 22.0 + 30.0 * (u * u) + spawnHills
                 } else if absX <= 4200.0 {
                     let slopeProgress = (absX - 560.0) / 3640.0
-                    let smoothDrop = 0.44 * slopeProgress + 0.56 * quinticSmoothstep(0.0, 1.0, slopeProgress)
+                    let smoothDrop = 0.44 * slopeProgress + 0.56 * quinticSmoothstep(edge0: 0.0, edge1: 1.0, x: slopeProgress)
                     let mountainOsc = sin((absX - 560.0) / 115.0) * 195.0 + cos(worldX / 74.0) * 115.0
                     targetOriginOffset = -effA1 + 52.0 + 3880.0 * smoothDrop + mountainOsc * sin(.pi * slopeProgress)
                 } else {
                     targetOriginOffset = -effA1 + 3932.0 + (absX - 4200.0) * 0.72
                 }
-                let oceanBlend = quinticSmoothstep(3600.0, 7600.0, absX)
+                let oceanBlend = quinticSmoothstep(edge0: 3600.0, edge1: 7600.0, x: absX)
                 macroOffset = targetOriginOffset + (macroOffset - targetOriginOffset) * oceanBlend
             }
         }
@@ -1037,15 +1041,15 @@ public enum GameRules {
         let cellIdx = Int(floor(scaled))
         let u = scaled - Double(cellIdx)
 
-        let rampIn = quinticSmoothstep(0.0, 0.16, u)
-        let rampOut = 1.0 - quinticSmoothstep(0.84, 1.0, u)
+        let rampIn = quinticSmoothstep(edge0: 0.0, edge1: 0.16, x: u)
+        let rampOut = 1.0 - quinticSmoothstep(edge0: 0.84, edge1: 1.0, x: u)
         let cellWindow = rampIn * rampOut
 
         let cellCenterX = (Double(cellIdx) + 0.5) * sandyPlainCellWidth
         let w1 = evalSmoothTerrainWave(cellCenterX, wavelength: 3200.0, waveSalt: 509)
         let w2 = terrainLatticeValue(cellIdx, waveSalt: 577)
         let selectorSignal = w1 * 0.55 + w2 * 0.45
-        let cellStrength = quinticSmoothstep(-0.28, 0.08, selectorSignal)
+        let cellStrength = quinticSmoothstep(edge0: -0.28, edge1: 0.08, x: selectorSignal)
         let rawPlain = cellWindow * cellStrength
 
         if terrainMinFloorDepth <= 600.0 {
@@ -1073,7 +1077,7 @@ public enum GameRules {
             let cellIdx = Int(floor(worldX / sandyPlainCellWidth))
             let cellCenterX = (Double(cellIdx) + 0.5) * sandyPlainCellWidth
             let centerMacroOffset = evalBaseMacroOffsetAtX(cellCenterX, effA1: effA1, isBlockAnchor: true)
-            let originBlend = quinticSmoothstep(3400.0, 4200.0, abs(worldX))
+            let originBlend = quinticSmoothstep(edge0: 3400.0, edge1: 4200.0, x: abs(worldX))
             let gentleMacroLock = plainFactor * 0.52 * originBlend
             let rollingHills =
                 sin((worldX / 580.0) * .pi * 2.0 + Double(cellIdx) * 1.7) * 64.0 +
@@ -1081,7 +1085,7 @@ public enum GameRules {
             macroOffset = macroOffset + (centerMacroOffset - macroOffset) * gentleMacroLock + rollingHills * plainFactor * originBlend
         }
 
-        let originDetailFade = terrainMinFloorDepth <= 600.0 ? quinticSmoothstep(560.0, 1280.0, abs(worldX)) : 1.0
+        let originDetailFade = terrainMinFloorDepth <= 600.0 ? quinticSmoothstep(edge0: 560.0, edge1: 1280.0, x: abs(worldX)) : 1.0
 
         let effA2 = min(A2, 3800.0) * originDetailFade
         let mesoRidgedPrimary = evalRidgedTerrainWave(worldX, wavelength: 2100.0, waveSalt: 263)
@@ -1560,7 +1564,7 @@ public enum GameRules {
         } else if isDiveOpening {
             edgeWeight = 0.0
         } else {
-            edgeWeight = quinticSmoothstep(tier.openingHalfWidth, tier.openingHalfWidth + 160.0, absDist)
+            edgeWeight = quinticSmoothstep(edge0: tier.openingHalfWidth, edge1: tier.openingHalfWidth + 160.0, x: absDist)
         }
 
         let topY = visualRimY
@@ -1633,7 +1637,7 @@ public enum GameRules {
             )
         }
 
-        let graftT = quinticSmoothstep(tier.graftStartMainY, tier.graftEndMainY, mainFloorY)
+        let graftT = quinticSmoothstep(edge0: tier.graftStartMainY, edge1: tier.graftEndMainY, x: mainFloorY)
         let graftedTopY = mainFloorY + (raw.topY - mainFloorY) * graftT
         let graftedSlope = mainSlope + (raw.slope - mainSlope) * graftT
         let graftedBottomArchY: Double
