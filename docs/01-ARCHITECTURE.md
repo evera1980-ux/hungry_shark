@@ -1,7 +1,7 @@
 # 01. 项目系统架构与模块说明书 (System Architecture)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-15
+> **最后更新**：2026-11-16
 > **关联约束**：修改任何模块划分、文件职责、主循环状态或存档 Schema 时，必须同步更新本文档（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
@@ -63,13 +63,13 @@
     │   ├── UiAtlasIcon.tsx                    # UI 图集渲染组件（UiAtlasIcon / UiAvatarDataBar / UiBannerButton / UiSettingModalFrame / UiSettingSharkCard / UiSettingButton）
     │   └── SharkEvolutionAtlasModal.tsx       # 48 阶鲨鱼图谱弹窗（支持血统筛选、本体升级与新形态解锁）
     └── game/
-        ├── preyDatabase140.ts                 # 140 种新海洋生物元数据、双语词典、游泳步态分类集合与真实水深+体型深海映射生成器（+ cyber_mine 共 141 项）
-        ├── config.ts                          # 静态世界常量、3 大深度带、接入 buildPrey140TiersWithMines() 的 141 项生态配置
+        ├── preyDatabase140.ts                 # 134 种现役海洋生物元数据（已剔除海牛/儒艮/海象/海狮等 6 种非鱼形态哺乳类）、双语词典、游泳步态分类集合与真实水深+体型深海映射生成器（+ cyber_mine 共 135 项）
+        ├── config.ts                          # 静态世界常量、3 大深度带、接入 buildPrey140TiersWithMines() 的 135 项生态配置
         ├── sharkEvolutionConfig.ts            # 48 阶鲨鱼进化矩阵、四重血统、三重解锁门禁、跨局存档读写
         ├── rules.ts                           # 纯函数核心规则（Lv/T 属性合成、猎物相对体型缩放、碰撞判定）
         ├── rules.test.ts                      # 核心纯函数单元测试套件（41 项核心断言）
-        ├── spriteSheetManager.ts              # 8×6 鲨鱼精灵图 + 140 种猎物 @3x 独立 PNG 按需/分批裁剪缓存 + UI 图集加载与离屏缓存
-        ├── canvasRenderer.ts                  # 鲨鱼多段脊柱游动渲染、140 种猎物五步态骨骼渲染、状态指示环与定制图标头标
+        ├── spriteSheetManager.ts              # 8×6 鲨鱼精灵图 + 猎物 @3x 独立 PNG 按需/分批裁剪缓存 + UI 图集加载与离屏缓存
+        ├── canvasRenderer.ts                  # 鲨鱼多段脊柱游动渲染、134 种现役猎物五步态骨骼渲染、状态指示环与定制图标头标
         ├── parallaxBackground.ts              # 13 张 AI 分层美术背景离屏 BFS 抠图/余弦无缝拼接与五层真视差海洋环境引擎
         ├── worldGenerationSystem.ts           # 八模块程序化海底世界生成系统（WorldGenerator / BiomeManager / TerrainGenerator / StructureGenerator / EcologyGenerator / ChunkManager / DecorationRenderer / WorldStateManager）
         ├── infiniteWorldManager.ts            # 无限水平环形世界与动态深海垂直下潜边界控制器
@@ -150,6 +150,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-16 | **剔除海狮/海象/海牛/儒艮等非鱼形态哺乳类并修正 `PREY-203` 灰鲸朝向与游动方向**：① 从 `RAW_PREY_140_TUPLES`、`PREY_140_RIGID_IDS` 及 iOS 打包资源过滤中移除 `PREY-122` 海牛、`PREY-123` 儒艮、`PREY-124` 海象、`PREY-125` 北海狮、`PREY-126` 南美海狮与 `PREY-209` 北极海象（保留海龟与鲸豚，现役生态配置调整为 **134 种海洋生物 + `cyber_mine` = 135 项**）；② 水平镜像 `src/assets/images/prey_203_graywhale_1794661665632.jpg` 并重切 `PREY-203.png` / `PREY-203@3x.png`，使灰鲸严格面朝右侧、尾鳍朝左，与 Web/iOS 脊柱正弦摆尾方向（`u=0` 头部稳态、`u=1` 尾部推进）完全一致 | `src/game/preyDatabase140.ts`, `src/assets/images/prey_203_graywhale_1794661665632.jpg`, `public/assets/prey_140/PREY-203@3x.png`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts` |
 | 2026-11-15 | **新增 `src/game/preyDatabase140.ts` 并将双端生态体系切换为 140 种新猎物（`PREY-001..210`）+ `cyber_mine`**：① 建立 `PREY_140_RECORDS` 与 `buildPrey140TiersWithMines()` 替换 `config.ts` 旧 33 项配置并同步 `i18n.ts`；② `spriteSheetManager.ts` 增加 `prey140Frames` 分批/按需透明 `@3x.png` 加载器（限宽 420px + 紧凑非透明裁切）；③ `canvasRenderer.ts` 与 `ecosystemSpawner.ts` / `App.tsx` 全面切换至 140 种生物步态（新增 `SHARK_APEX`）、`0~20000m` 五段阶位权重与 `<=515m` 浅海伴游深度钳制；④ 同步 `scripts/build-ios-native.ts` 并通过 41/41 单元测试 | `src/game/preyDatabase140.ts`, `src/game/config.ts`, `src/game/i18n.ts`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts` |
 | 2026-11-14 | **消除沿洞口向下斜线水平移动时的速度叠加（`evalTerraceSeabedContinuousRaw` / `resolveSeabedKineticStep` / `App.tsx` / `scripts/build-ios-native.ts`）**：① **补齐洞口下弯斜壁解析导数 `dWallDropTDx`**：在 `evalTerraceSeabedContinuousRaw` 中将洞口两侧下弯过渡 `wallDropT` 升级为 $C^2$ 五次平滑曲线（`wallRampSpan = 165m`）并精确计算解析导数 `(targetDeepArchY - lipArchY) * dWallDropTDx` 计入 `bottomSlope`（限幅 `[-2.6, 2.6]`），使水平移动撞击洞口向下斜壁时的切向缩放系数 `bTangentScale = 1 / sqrt(1 + bSlope^2)` 与真实斜率严格一致；② **二分二维弧长守恒与零垂直速度注入**：在 `resolveSeabedKineticStep` 中对洞顶斜壁与表层斜坡执行 6 次二分弧长守恒收缩（确保 `effectiveSpeed2D <= intendedSpeed`），并移除向下一帧注入 `(finalY - prevEngineY) / dt` 垂直速度的逻辑，同时在 `src/App.tsx` 与 iOS `GameRules.swift` 中钳制二维合速度模长 $\sqrt{v_x^2 + v_y^2} \le \text{targetSpeed}$，彻底根治跨帧水平速度 `vx` 与斜坡残留 `vy` 勾股叠加超速问题 | `src/game/worldGenerationSystem.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts`, `docs/01-ARCHITECTURE.md`, `docs/02-DESIGN_SPEC.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-14 | **扩展为全深度 9 级随深度递增的非均匀间距连续阶梯海床架构（`SEABED_TERRACE_TIERS` / `getSeabedTerraceAt`）+ 层间交错弧形下潜洞口 + 全层级双向防穿透碰撞与生态附着（覆盖 `414m` 浅海至 `16900m` 冥渊海沟）**：① **9 级随深度递增的非均匀间距连续海床矩阵**：按浅海连续海床的同等实现范式，从阳光浅海一路向深渊铺设 9 层间距随深度递增的阶梯海床——`Tier 0` 阳光浅海珊瑚层（`~414m`）$\xrightarrow{+806\text{m}}$ `Tier 1` 上暮光层礁石阶地（`~1220m`）$\xrightarrow{+1000\text{m}}$ `Tier 2` 中暮光层海谷台地（`~2220m`）$\xrightarrow{+1240\text{m}}$ `Tier 3` 深暮光半深海峡谷（`~3460m`）$\xrightarrow{+1580\text{m}}$ `Tier 4` 半深海裂谷前哨阶地（`~5040m`）$\xrightarrow{+2020\text{m}}$ `Tier 5` 深海玄武岩断崖（`~7060m`）$\xrightarrow{+2580\text{m}}$ `Tier 6` 深渊幽冥海盆阶地（`~9640m`）$\xrightarrow{+3260\text{m}}$ `Tier 7` 超深渊黑曜石裂谷（`~12900m`）$\xrightarrow{+4000\text{m}}$ `Tier 8` 冥渊海沟热液前哨（`~16900m`），不仅层间垂直间距（`806m -> 4000m`）与净空走廊高度（`394m -> 3268m`）随深度严格递增，水平周期（`1600m -> 3600m`）与下潜洞口宽度（`464m -> 832m`）亦随深海巨型进化鲨鱼体型同步放大；② **上下层交错下潜洞口与主海山无痕嫁接**：各层均采用无悬空立柱、连续海床后壁 + 向远处弯曲的弧形下潜洞口 + 三阶地下沉积岩层（含 `coral_reef`、`rocky_shelf`、`underwater_canyon` 与 `deep_abyss` 黑曜熔岩材质）设计，并通过 `seamPhaseOffsetX` 将相邻层的下潜洞口水平错开，且各层与主海床大陆坡交汇处执行 $C^2$ 平滑嫁接并隐去山根内部表层线；③ **全层级双向物理碰撞与底栖生态扩展**：`resolveSeabedCollision` 与 `resolveSeabedKineticStep` 遍历全部 9 层阶梯海床，支持各层顶面承托、底部拱形洞顶防向上穿透阻挡（`hitAtollUnderside = true`）以及层间水平走廊 100% 畅通巡游；`getShallowCoralAtollOutcropsForChunk` 与 `WorldRenderer.renderActiveChunkEntities` 同步扩展至 `240m~18000m`，在全部浅/中/深渊海床顶面附着生成底栖群落 | `src/game/worldGenerationSystem.ts`, `src/game/rules.test.ts`, `docs/01-ARCHITECTURE.md`, `docs/02-DESIGN_SPEC.md` |

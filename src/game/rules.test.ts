@@ -63,9 +63,9 @@ test('I18N dictionary has complete and matching keys in both zh and en', () => {
   );
 });
 
-test('GAME_CONFIG has 15 organs across 3 factions and 5 slots, plus 141 target prey & hazard entries (140 new species + cyber_mine)', () => {
+test('GAME_CONFIG has 15 organs across 3 factions and 5 slots, plus 135 target prey & hazard entries (134 active marine species + cyber_mine)', () => {
   assert.equal(GAME_CONFIG.organs.length, 15);
-  assert.equal(GAME_CONFIG.preyTiers.length, 141);
+  assert.equal(GAME_CONFIG.preyTiers.length, 135);
 
   const factions = new Set(GAME_CONFIG.organs.map((o) => o.faction));
   const slots = new Set(GAME_CONFIG.organs.map((o) => o.slot));
@@ -3243,14 +3243,20 @@ test('Undulating Mountain Range Seabed (Zero Flat or Diagonal Straight Lines), U
   }
 });
 
-test('140 New Marine Prey Species + Cyber Mine: Complete Asset Presence, Depth Stratification & Body-Size Deep Trend', () => {
-  assert.equal(PREY_140_RECORDS.length, 140);
-  assert.equal(GAME_CONFIG.preyTiers.length, 141);
+test('134 Active Marine Prey Species + Cyber Mine: Non-Fish Mammal Exclusion, Asset Presence, Depth Stratification & Body-Size Deep Trend', () => {
+  assert.equal(PREY_140_RECORDS.length, 134);
+  assert.equal(GAME_CONFIG.preyTiers.length, 135);
 
   const byId = Object.fromEntries(GAME_CONFIG.preyTiers.map((p) => [p.id, p]));
   assert.ok(byId['cyber_mine'], 'cyber_mine must remain retained');
+  assert.ok(byId['PREY-203'], 'PREY-203 Gray Whale must remain active');
 
-  // 1. Verify every PREY-001..PREY-210 has a valid transparent @3x.png file on disk
+  // Verify pinnipeds/sirenians (manatee, dugong, walrus, sea lions) are excluded from spawning
+  for (const excludedId of ['PREY-122', 'PREY-123', 'PREY-124', 'PREY-125', 'PREY-126', 'PREY-209']) {
+    assert.equal(byId[excludedId], undefined, `${excludedId} must be excluded from active preyTiers`);
+  }
+
+  // 1. Verify every active prey record has a valid transparent @3x.png file on disk
   for (const rec of PREY_140_RECORDS) {
     const cfg = byId[rec.id];
     assert.ok(cfg, `Missing PreyTierConfig for ${rec.id}`);

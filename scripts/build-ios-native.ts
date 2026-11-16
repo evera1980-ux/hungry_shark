@@ -3,6 +3,7 @@ import path from 'node:path';
 import child_process from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { GAME_CONFIG } from '../src/game/config';
+import { PREY_140_RECORD_BY_ID } from '../src/game/preyDatabase140';
 import { SHARK_EVOLUTION_FORMS, LINEAGE_META } from '../src/game/sharkEvolutionConfig';
 import {
   SHARK_CELL_BOUNDS,
@@ -6236,8 +6237,7 @@ public final class OceanGameScene: SKScene {
         "PREY-099", "PREY-103"
     ]
     private static let prey140RigidIds: Set<String> = [
-        "PREY-114", "PREY-115", "PREY-116",
-        "PREY-122", "PREY-123", "PREY-124", "PREY-125", "PREY-126", "PREY-209"
+        "PREY-114", "PREY-115", "PREY-116"
     ]
 
     private func classifyPreySwimGait(_ p: PreyTierConfig) -> PreySwimGait {
@@ -11977,6 +11977,8 @@ function main() {
   if (fs.existsSync(srcPrey140Dir)) {
     for (const file of fs.readdirSync(srcPrey140Dir)) {
       if (file.endsWith('@3x.png')) {
+        const preyId = file.replace(/@3x\.png$/, '');
+        if (!PREY_140_RECORD_BY_ID[preyId]) continue;
         fs.copyFileSync(
           path.join(srcPrey140Dir, file),
           path.join(assetsDst, file)

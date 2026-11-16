@@ -1,7 +1,7 @@
 # 03. 核心数值策划与系统公式圣经 (Game Balance & Numerical Design)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-15
+> **最后更新**：2026-11-16
 > **关联约束**：修改 `src/game/rules.ts`、`src/game/sharkEvolutionConfig.ts`、`src/game/config.ts`、`src/game/preyDatabase140.ts` 或 `src/game/infiniteProgressionManager.ts` 中的任何数值参数或公式时，**必须在同一次提交中更新本文档对应的章节与表格**（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
@@ -52,7 +52,7 @@
 
 ## 2. 咬合阶位（`T1 ~ T8`）计算规则与克制法则
 
-`T`（Bite Tier，咬合阶位，显示为琥珀色徽章 `T1 ~ T8`）是决定**食物链吞噬关系**的核心指标。海洋中全部 140 种生物（外加 1 种深海水雷 `cyber_mine`，共计 141 项生态配置）划分为 `T1` 至 `T8` 共 8 个生态位阶。
+`T`（Bite Tier，咬合阶位，显示为琥珀色徽章 `T1 ~ T8`）是决定**食物链吞噬关系**的核心指标。海洋中全部 134 种现役海洋生物（已剔除海狮/海象/海牛/儒艮等 6 种非鱼形态哺乳类，外加 1 种深海水雷 `cyber_mine`，共计 135 项生态配置）划分为 `T1` 至 `T8` 共 8 个生态位阶。
 
 ### 2.1 鲨鱼当前咬合阶位 `T` 的完整合成公式
 位于 `src/game/rules.ts` ➔ `computeEvolvedSharkStats()`：
@@ -192,7 +192,7 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 ### 5.1 金币 `🪙` 与基因 `🧬` 的获取/消耗平衡（~4:1 产出比）
 - **金币 `🪙`（高频养成与战术货币）**：
-  - **获取**：全部 141 项猎物与障碍配置（140 种海洋生物 + `cyber_mine`）的 `coinValue` 与 `geneValue` 按约 **4:1 ~ 4.5:1** 黄金比例配置；普通猎物死亡爆出的拾取球中 **75% 为金币球 `COIN`**、25% 为基因结晶；此外包含黄金变异鱼 `3.0x` 金币倍率与悬赏目标鱼丰厚金币奖励。
+  - **获取**：全部 135 项现役猎物与障碍配置（134 种海洋生物 + `cyber_mine`）的 `coinValue` 与 `geneValue` 按约 **4:1 ~ 4.5:1** 黄金比例配置；普通猎物死亡爆出的拾取球中 **75% 为金币球 `COIN`**、25% 为基因结晶；此外包含黄金变异鱼 `3.0x` 金币倍率与悬赏目标鱼丰厚金币奖励。
   - **消耗**：① 强化当前鲨鱼躯体等级（`Lv.1 -> Lv.10`）；② 破茧进化解锁新鲨鱼形态；③ 局内释放 `🪙 黄金狂暴` 战术爆发技能。
 - **基因碎片 `🧬`（高价值突破与质变货币）**：
   - **获取**：浅海普通小鱼仅少量产出基因（`geneValue = 1~2`），高浓度基因产出来自：**🎯 悬赏目标鱼**（完成悬赏奖励 `18 + 4 * tier` 基因及必掉额外基因结晶）、**深渊巨兽变异体 (`ABYSS_BEHEMOTH`, `2.5x` 基因)** 与 **`T4+` 深海大型猎物**。
@@ -218,10 +218,10 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 ---
 
-## 6. 海洋深度生态分布规则（140 种真实水深生物 + `cyber_mine`，`0m ~ 20000m` 体大优先深海分层）
+## 6. 海洋深度生态分布规则（134 种现役真实水深生物 + `cyber_mine`，`0m ~ 20000m` 体大优先深海分层）
 
 ### 6.1 双因子映射算法 (`computeMappedPrey140Config` in `src/game/preyDatabase140.ts`) 与五大深海生态带
-游戏生态库 `GAME_CONFIG.preyTiers` 由 `buildPrey140TiersWithMines()` 生成，包含 `docs/06-PREY_DATABASE_140.md` 中的 **140 种真实海洋生物（`PREY-001 ~ PREY-100` 普通鱼、`PREY-101 ~ PREY-130` 大型海洋生物、`PREY-201 ~ PREY-210` 巨型海洋生物）** 与 **1 种保留的爆破障碍（`cyber_mine`：`T6`，`560m ~ 20000m`）**，总计 **141 项**（旧版 32 种混合生物、潜艇、辐射粘液及海底遗物全部移除）。
+游戏生态库 `GAME_CONFIG.preyTiers` 由 `buildPrey140TiersWithMines()` 生成，包含 `docs/06-PREY_DATABASE_140.md` 中的 **134 种现役海洋生物（`PREY-001 ~ PREY-100` 普通鱼、`PREY-101 ~ PREY-130` 与 `PREY-201 ~ PREY-210` 大/巨型鱼类与鲸豚，已剔除 `PREY-122..126, 209` 海狮/海象/海牛/儒艮）** 与 **1 种保留的爆破障碍（`cyber_mine`：`T6`，`560m ~ 20000m`）**，总计 **135 项**（旧版 32 种混合生物、潜艇、辐射粘液及海底遗物全部移除）。
 
 由于现实鱼类真实水深多集中在 `0~300m`、最深 `2000m`，而游戏世界深度为 `0m ~ 20000m`，系统采用 **「真实生存水深对数分位数 `depthFactor` + 尺寸级别 `sizeClass` 深海偏移」** 双因子纯函数映射到 5 大深度区间：
 - **对数水深基准**：$\text{depthFactor} = \min\big(1,\; \ln(1 + \text{realMaxDepth}) / \ln(1 + 1200)\big)$。
@@ -276,6 +276,7 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-16 | **剔除 6 种非鱼形态海洋哺乳类（海狮/海象/海牛/儒艮）并修正 `PREY-203` 灰鲸方向**：从 `preyDatabase140.ts` 中移除 `PREY-122` 海牛、`PREY-123` 儒艮、`PREY-124` 海象、`PREY-125` 北海狮、`PREY-126` 南美海狮、`PREY-209` 北极海象（现役调整为 134 种海洋生物 + `cyber_mine` = 135 项），并更新 `rules.test.ts` 校验与 `PREY-203` 右朝向贴图 | `src/game/preyDatabase140.ts`, `src/game/rules.test.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-15 | **全平台（Web + iOS 原生）猎物体系全面替换为 140 种新海洋生物（`PREY-001 ~ PREY-210`）+ 保留深海水雷 `cyber_mine`（共 141 项），按真实水深 + 体型加权分层铺满 `0m ~ 20000m`**：① 新增 `src/game/preyDatabase140.ts` 收录 140 种生物元数据、中英双语字典与 `computeMappedPrey140Config` 双因子映射公式（按 `realMinDepth/realMaxDepth` 与 `XS -> 巨型` 尺寸级别优先向深海偏移，同时为 `realMinDepth >= 50m` 的深海发光小鱼保留直达 `20000m` 的基础补给链）；② 替换 `GAME_CONFIG.preyTiers`、更新 `ecosystemSpawner.ts`（含 `shallowMateCap = 515m` 伴游钳制与五段 `0~20000m` 阶位权重）、`App.tsx` 开局迎宾鱼群及 `i18n.ts`；③ 升级 `spriteSheetManager.ts` 与 `canvasRenderer.ts`（分批/按需加载 `@3x.png` 透明资产并执行 420px 限宽与紧致透明边界裁切，新增 `SHARK_APEX` 步态）；④ 同步更新 `scripts/build-ios-native.ts`（唯一 `spriteKey`、`@3x` 打包、五步态分类与深海分层刷新）与 `rules.test.ts`（41/41 通过） | `src/game/preyDatabase140.ts`, `src/game/config.ts`, `src/game/i18n.ts`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/06-PREY_DATABASE_140.md` |
 | 2026-11-15 | **修复 9 层阶梯海床洞口悬崖与大陆坡嫁接山根（~633m）穿墙穿模 Bug（Web + iOS 原生双端同步）**：① 将 `getSeabedTerraceAt` 实体碰撞激活由 `graftedEdgeWeight > 0.02` 改为 `graftT > 0.03`，彻底清除洞口唇边 `0~22m` 碰撞盲区；② 在 `resolveSeabedCollision` 中识别无洞下走廊的实心嫁接山根楔块（`floorEngineY - bottomArchY <= radius * 1.25`），防止误判 `hitAtollUnderside` 反向压入地下；③ 在 `resolveSeabedKineticStep` 中新增 `hitsTerraceVerticalWallHorizontally` 二维水平悬崖阻挡（含 6 次二分精定位与狭窄山根楔形区防挤入） | `src/game/worldGenerationSystem.ts`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-12 | **世界海洋深度上限扩展至 `20000m`（`1m = 1 worldPx`）并补齐 `T3 ~ T6` 超深海原生鱼种覆盖（`maxDepth: 99999`）**：将 `WorldConfig.bounds.maxDepth` 统一为 `20000m`（海床深度范围 `[420m, 19800m]`），并将 `cyber_mine`（`T3`）、`glowing_lanternfish`（`T3`）、`giant_humboldt_squid`（`T4`）、`trench_blobfish`（`T5`）、`radioactive_slime_hazard`（`T6`）的栖息深度上限设为 `99999`，与原本即为 `maxDepth: 99999` 的 `T7 ~ T8` 深渊巨兽共同构成直达 `20000m` 海沟底部的完整食物链 | `src/game/config.ts`, `src/game/worldGenerationSystem.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |

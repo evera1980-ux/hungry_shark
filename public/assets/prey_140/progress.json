@@ -6,7 +6,7 @@
   "lastCompletedName": "蓝鲸幼体/亚成体",
   "nextResumeId": "ALL_DONE",
   "nextResumeName": null,
-  "updatedAt": "2026-11-14T13:09:33.889Z",
+  "updatedAt": "2026-11-16T08:00:38.247Z",
   "outputDirectory": "/public/assets/prey_140",
   "completed": [
     {
@@ -1469,7 +1469,7 @@
       "file3x": "/assets/prey_140/PREY-203@3x.png",
       "width3x": 1260,
       "height3x": 408,
-      "bytes": 431355,
+      "bytes": 393647,
       "sourceArtifact": "prey_203_graywhale_1794661665632.jpg"
     },
     {

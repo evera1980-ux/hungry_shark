@@ -1,7 +1,7 @@
 # 02. 渲染规范、UI/UX 与移动端多指交互设计规范 (Design & Interaction Spec)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-15
+> **最后更新**：2026-11-16
 > **关联约束**：凡修改鲨鱼/猎物渲染逻辑、HUD 布局、按钮事件绑定或移动端摇杆交互时，必须遵守并在变更后同步更新本文档（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
@@ -47,12 +47,12 @@
 ### 2.2 渲染与物理碰撞统一数据源及 5 大海洋族群差异化游动步态
 - `drawPreyEntity()` 中的绘制缩放比例 `visualScale` 与 `App.tsx` 中 `resolvePreyEncounter()` 的碰撞半径缩放比例**必须调用同一个纯函数 `getPreyRelativeVisualScale(prey, shark.stats, prey.mutationVariant, frenzyActive)`**（内部固定使用 `normalBiteTier` 计算视觉尺寸）。
 - 严禁在 `canvasRenderer.ts` 中私自放大或缩小猎物尺寸而不经过 `getPreyRelativeVisualScale`；所有切片摆尾变形（`drawUndulatingSpriteFrame`）严格在 `drawW × drawH` 基准包围盒内部执行。
-- **五大生物族群差异化步态 (`getPreySwimGait` 适配 140 种新猎物 + `cyber_mine`)**：
+- **五大生物族群差异化步态 (`getPreySwimGait` 适配 134 种现役猎物 + `cyber_mine`)**：
   1. `CARANGIFORM`（小丑鱼、蓝吊、金枪鱼、灯笼鱼、海豚、巨鲸等标准流线型鱼类与鲸豚）：前部稳定 + 后 65% 躯干 S 波摆尾推进。
   2. `SHARK_APEX`（猫鲨、斑马鲨、护士鲨、礁鲨、锤头鲨、大白鲨、虎鲨、鲸鲨等 `PREY-089..098, 111..113`）：采用高幅有力的新月尾鳍推进包络。
   3. `ANGUILLIFORM`（蝰鱼、龙鱼、深海巨型梭鱼类 `PREY-079, 081, 083, 127..129`）：全身修长波段丝滑蜿蜒游走。
   4. `PUFFER_BUOYANT`（箱鲀、河豚、刺豚、牛角鱼、狮子鱼、躄鱼、翻车鱼 `PREY-050..054, 069..073, 099, 103`）：圆润躯体呼吸浮游 + 末端尾鳍高频小幅拨水。
-  5. `RIGID_PROPULSION`（海龟 `PREY-114..116`、海牛/儒艮/海象/海狮 `PREY-122..126, 209` 与保留水雷 `cyber_mine`）：保持刚性躯壳/金属外壳不发生橡胶弯曲，施加稳定鳍桨推进或机械微振。
+  5. `RIGID_PROPULSION`（海龟 `PREY-114..116` 与保留水雷 `cyber_mine`）：保持刚性躯壳/金属外壳不发生橡胶弯曲，施加稳定鳍桨推进或机械微振（海牛/儒艮/海象/海狮 `PREY-122..126, 209` 已于 2026-11-16 从现役池移除）。
 - **独立 `@3x` 透明 PNG 按需分批加载 (`spriteSheetManager.ts`)**：优先分批加载浅海珊瑚鱼 `/assets/prey_140/PREY-XXX@3x.png`（上限 `420px` 宽并紧致裁切透明边缘与碰撞箱对齐），`cyber_mine` 继续复用 `PREY_MINE` 精灵图。
 - **猎物情绪与速度耦合**：`prey.phase` 推进速率与猎物瞬时移速（`Math.hypot(vx, vy) / baseSpeed`）实时联动，受惊逃窜或冲锋扑咬时摆尾频率自动翻倍。
 
@@ -227,6 +227,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-16 | **剔除海狮/海象/海牛/儒艮等非鱼形态哺乳类并修正 `PREY-203` 灰鲸朝向与游动方向**：① 从 `preyDatabase140.ts` 与 `build-ios-native.ts` 移除 `PREY-122..126` 与 `PREY-209`（保留海龟与鲸豚，现役调整为 134 种海洋生物 + `cyber_mine` = 135 项）；② 水平镜像 `src/assets/images/prey_203_graywhale_1794661665632.jpg` 并重生成 `PREY-203.png` / `PREY-203@3x.png`，使灰鲸面朝右侧、尾鳍朝左，确保渲染朝向与脊柱尾部波动方向在 Web/iOS 双端均完全正确 | `src/game/preyDatabase140.ts`, `src/assets/images/prey_203_graywhale_1794661665632.jpg`, `public/assets/prey_140/PREY-203@3x.png`, `scripts/build-ios-native.ts`, `docs/02-DESIGN_SPEC.md` |
 | 2026-11-15 | **接入 140 种新猎物 `@3x` 独立透明 PNG 渲染与五步态分类（Web + iOS 同步）**：① `spriteSheetManager.ts` 新增 `prey140Frames` 分批/按需预加载与非透明紧致裁切（`420px` 限宽），确保所有新猎物渲染框与 `getPreyRelativeVisualScale()` 碰撞半径 100% 对齐；② `canvasRenderer.ts` 与 `OceanGameScene.swift` 同步切换为 140 物种五步态（新增 `SHARK_APEX` 强尾鳍推进）；③ `App.tsx` 开局展示鱼群更换为 `PREY-001/003/015/002/044` 浅海珊瑚鱼组合 | `src/game/preyDatabase140.ts`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `docs/02-DESIGN_SPEC.md` |
 | 2026-11-14 | **将旧版 4×4 卡通海床生态图集 `world_ecology_atlas_1794473252524.jpg` 重新生成为 4 张独立、不切图、写实风格、`2048×2048`（`@3x` Retina 216 DPI）高分辨率透明背景 PNG（`ecology_coral_reef_cluster.png`、`ecology_rocky_outcrop.png`、`ecology_kelp_forest_cluster.png`、`ecology_abyssal_vent_debris.png`）**：① 使用 Nano Banana 生成 4 张独立 `1:1` 写实风格海底生态群落原图（带天然礁石基座的复合鹿角珊瑚/脑珊瑚/柳珊瑚海扇/管状海绵群落、大陆架藤壶花岗岩与青脉玄武岩尖塔、植根礁石的巨藻气囊叶与绿松石海草丛、深渊黑烟囱熔岩喷口与红羽巨型管虫/发光海葵/锈蚀古铁锚），并通过 `scripts/build-ecology-sprites.ts`（`npm run build:ecology`）超分至 `2048×2048`（`@3x` 216 DPI）、执行四边连通域去白底、镂空海扇网格/海藻叶隙清理、热液烟羽半透明解混与 3 遍抗锯齿白边解混，同步输出至 `src/assets/images/` 与 `public/assets/aistudio/`；② 更新 `src/game/worldGenerationSystem.ts`（`WORLD_ECOLOGY_SPRITE_URLS`、`prepareStandaloneEcologySpriteCanvas`）与 `scripts/build-ios-native.ts`，直接加载 4 张独立 `@3x` 透明 PNG 而无需 4×4 网格切图 | `scripts/build-ecology-sprites.ts`, `src/assets/images/ecology_*.png`, `public/assets/aistudio/ecology_*.png`, `src/game/worldGenerationSystem.ts`, `scripts/build-ios-native.ts`, `docs/02-DESIGN_SPEC.md` |
 | 2026-11-14 | **消除沿洞口向下斜线水平移动时的速度叠加（`evalTerraceSeabedContinuousRaw` / `resolveSeabedKineticStep` / `App.tsx` / `scripts/build-ios-native.ts`）**：① 在 `evalTerraceSeabedContinuousRaw` 中补齐洞口两侧向下弯曲斜壁的解析导数 `(targetDeepArchY - lipArchY) * dWallDropTDx` 并计入 `bottomSlope`；② 在 `resolveSeabedKineticStep` 中采用 6 次二分弧长守恒收缩并移除向下一帧注入 `(finalY - prevEngineY) / dt` 垂直速度的逻辑，同时在 `App.tsx` 与 iOS `GameRules.swift` 中钳制二维合速度模长 $\le \text{targetSpeed}$，彻底解决沿洞口向下斜线水平移动时的速度叠加问题 | `src/game/worldGenerationSystem.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts`, `docs/02-DESIGN_SPEC.md`, `docs/01-ARCHITECTURE.md` |

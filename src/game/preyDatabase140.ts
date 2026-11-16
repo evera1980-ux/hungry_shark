@@ -149,11 +149,6 @@ const RAW_PREY_140_TUPLES: RawPreyTuple[] = [
   ['PREY-119', '大型海鲹', 'Giant Trevally', '大型海洋生物', 0, 200, 100, 170, 'L'],
   ['PREY-120', '宽吻海豚', 'Bottlenose Dolphin', '大型海洋生物', 0, 300, 250, 400, 'XL'],
   ['PREY-121', '长吻海豚', 'Spinner Dolphin', '大型海洋生物', 0, 300, 200, 300, 'L'],
-  ['PREY-122', '海牛', 'West Indian Manatee', '大型海洋生物', 0, 30, 250, 400, 'XL'],
-  ['PREY-123', '儒艮', 'Dugong', '大型海洋生物', 0, 30, 250, 300, 'XL'],
-  ['PREY-124', '海象', 'Walrus', '大型海洋生物', 0, 100, 300, 400, 'XXL'],
-  ['PREY-125', '北海狮', 'Steller Sea Lion', '大型海洋生物', 0, 300, 250, 350, 'XL'],
-  ['PREY-126', '南美海狮', 'South American Sea Lion', '大型海洋生物', 0, 300, 200, 300, 'L'],
   ['PREY-127', '大西洋鲟', 'Atlantic Sturgeon', '大型海洋生物', 0, 200, 150, 300, 'XL'],
   ['PREY-128', '白鲟', 'Beluga Sturgeon', '大型海洋生物', 0, 100, 200, 400, 'XXL'],
   ['PREY-129', '巨型梭鱼', 'Great Barracuda', '大型海洋生物', 0, 100, 100, 200, 'XL'],
@@ -166,7 +161,6 @@ const RAW_PREY_140_TUPLES: RawPreyTuple[] = [
   ['PREY-206', '虎鲸', 'Orca', '巨型海洋生物', 0, 300, 500, 800, '巨型'],
   ['PREY-207', '伪虎鲸', 'False Killer Whale', '巨型海洋生物', 0, 1000, 400, 600, 'XXL'],
   ['PREY-208', '领航鲸', 'Pilot Whale', '巨型海洋生物', 0, 1000, 400, 600, 'XXL'],
-  ['PREY-209', '北极海象', 'Arctic Walrus', '巨型海洋生物', 0, 100, 300, 400, 'XXL'],
   ['PREY-210', '蓝鲸幼体/亚成体', 'Juvenile Blue Whale', '巨型海洋生物', 0, 200, 800, 1500, '巨型'],
 ];
 
@@ -253,12 +247,6 @@ export const PREY_140_RIGID_IDS = new Set<string>([
   'PREY-114',
   'PREY-115',
   'PREY-116',
-  'PREY-122',
-  'PREY-123',
-  'PREY-124',
-  'PREY-125',
-  'PREY-126',
-  'PREY-209',
 ]);
 
 export const PREY_140_PUFFER_IDS = PUFFER_LIKE_IDS;

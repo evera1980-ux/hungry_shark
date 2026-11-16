@@ -1463,8 +1463,7 @@ public final class OceanGameScene: SKScene {
         "PREY-099", "PREY-103"
     ]
     private static let prey140RigidIds: Set<String> = [
-        "PREY-114", "PREY-115", "PREY-116",
-        "PREY-122", "PREY-123", "PREY-124", "PREY-125", "PREY-126", "PREY-209"
+        "PREY-114", "PREY-115", "PREY-116"
     ]
 
     private func classifyPreySwimGait(_ p: PreyTierConfig) -> PreySwimGait {

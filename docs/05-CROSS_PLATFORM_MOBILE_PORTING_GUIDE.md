@@ -1,7 +1,7 @@
 # 05. 移动端与跨平台原生移植避坑指南 (Cross-Platform Mobile Porting & Pitfalls Guide)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-15
+> **最后更新**：2026-11-16
 > **适用范围**：将本项目（Web Canvas 2D + React 基準实现）移植/打包至 **纯原生 iOS (SwiftUI + SpriteKit Metal)**、**纯原生 Android (Jetpack Compose + OpenGL/Canvas)**、**鸿蒙 HarmonyOS NEXT (ArkUI + XComponent)**、**微信小游戏 / 抖音小游戏** 或 **Unity / Cocos / Flutter** 等其他平台时的强制工程核查清单。
 
 ---
@@ -96,7 +96,7 @@
    - **效果**：手指点击桌面图标的 `0ms` 瞬间即呈现 `#061528` 深海幽蓝底色与品牌剪影，彻底消除黑屏或白屏闪烁。
 2. **第二层：后台异步纹理解码与 `StartupLoadingView` 60/120fps 动态加载层（消除 0.3s ~ 3.0s 主线程冻结）**：
    - **主线程零阻塞**：`OceanGameScene.didMove(to:)` 严禁同步调用耗时纹理解码，改为调用 `SpriteAtlasManager.shared.startAsyncPreloadIfNeeded()`，并在首帧仅通过 `loadSingleSharkOnDemand` 按需秒级加载当前选中的 1 条主角鲨鱼。
-   - **后台分阶段异步预热**：在 `Task.detached(priority: .userInitiated)` 后台高优线程中依次完成：① UI 金属按钮/横幅与 9-Slice 结算框裁切（`0% -> 18%`）→ ② 48 阶 `@3x` 鲨鱼高清纹理加载（`18% -> 38%`）→ ③ 140 种 `@3x` 独立透明猎物 PNG（`PREY-001@3x .. PREY-210@3x`）与水雷加载（`38% -> 56%`）→ ④ 12 层深海视差背景去底与海床贴图加载（`56% -> 92%`）→ ⑤ `SKTexture.preload` 异步上传 Metal GPU（`92% -> 100%`），通过 `@MainActor` 实时驱动 `@Published loadingProgress`（`0.0 ~ 1.0`）。
+   - **后台分阶段异步预热**：在 `Task.detached(priority: .userInitiated)` 后台高优线程中依次完成：① UI 金属按钮/横幅与 9-Slice 结算框裁切（`0% -> 18%`）→ ② 48 阶 `@3x` 鲨鱼高清纹理加载（`18% -> 38%`）→ ③ 134 种现役 `@3x` 独立透明猎物 PNG（已剔除海牛/儒艮/海象/海狮 `PREY-122..126, 209`）与水雷加载（`38% -> 56%`）→ ④ 12 层深海视差背景去底与海床贴图加载（`56% -> 92%`）→ ⑤ `SKTexture.preload` 异步上传 Metal GPU（`92% -> 100%`），通过 `@MainActor` 实时驱动 `@Published loadingProgress`（`0.0 ~ 1.0`）。
    - **丝滑淡出交接**：当 `atlas.isReady == true` 时，自动回调 `scene.onAtlasPreloadCompleted()` 刷新场景纹理，同时 `StartupLoadingView` 执行 `0.45s` 平滑透明度淡出，无缝露出已发光就绪的首页标题界面。
 3. **方案 A：零代码改动的静态素材热替换约定（Hot-Replaceable Assets）**：
    - 资源目录（Web 源目录 `public/assets/aistudio/` 同步拷贝至 iOS `HungrySharkEvolution/Resources/Assets/`）固定约定以下 3 个标准文件名：
@@ -140,6 +140,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-16 | **Web 与 iOS 双端剔除海狮/海象/海牛/儒艮并修复 `PREY-203` 灰鲸反转方向与摆尾波**：① 从 `preyDatabase140.ts` 与 iOS `prey140RigidIds` 移除 `PREY-122..126` 与 `PREY-209`，且 `build-ios-native.ts` 资源拷贝按 `PREY_140_RECORD_BY_ID` 严格过滤（iOS 仅打包 134 种现役猎物 `@3x.png`）；② 水平镜像 `src/assets/images/prey_203_graywhale_1794661665632.jpg` 并重生成 `PREY-203.png` / `PREY-203@3x.png`，使其与双端 `u=0/1` 头部刚性、尾部推进的脊柱摆动方向完全一致 | `src/game/preyDatabase140.ts`, `src/assets/images/prey_203_graywhale_1794661665632.jpg`, `public/assets/prey_140/PREY-203@3x.png`, `scripts/build-ios-native.ts`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-15 | **Web 与 iOS 原生双端同步完成 140 种新猎物（`PREY-001 ~ PREY-210`）+ 水雷 `cyber_mine`（共 141 项）全面替换**：① 修正 `scripts/build-ios-native.ts` 中 `generateSwiftConfigFile` 的 `spriteKey` 回退碰撞坑点（由共享 `"FISH2_CLOWNFISH"` 修正为唯一 `p.spriteKey ?? p.id`，`sheetName = "prey_140"`、`normalizedBounds = [0,0,1,1]`）；② `SpriteAtlasManager.swift` Stage 2 与 `loadSinglePreyOnDemand` 同步优先加载 `"\(prey.id)@3x"` 独立透明 PNG（仅拷贝 `public/assets/prey_140/*@3x.png` 避免非 `@3x` 冗余包体）；③ `OceanGameScene.swift` 同步五类生物步态（补齐 `.SHARK_APEX` 与 `prey140*Ids` 集合）、默认悬赏目标切换为 `"PREY-001"`，并按 `0m ~ 20000m` 五段阶位权重 + `<= 495m` 浅海钳制完成生态刷怪同步 | `scripts/build-ios-native.ts`, `ios-native/`, `src/game/preyDatabase140.ts`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts`, `src/game/ecosystemSpawner.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-15 | **根除洞口边缘游动闪烁 & 633m 悬崖/山根楔形穿墙穿模 + 修复结算重开自动游动与轻微移动背景刷新**：① **彻底消除洞口边缘闪烁与悬崖垂直切边**：定位此前为修复轻微移动刷新而引入的 `clippedStartWX`（随 `cameraX` 滑动的 32m `solidRuns` 扫描网格）在遭遇 `isPresent` 22m 洞唇盲区时引发 `rsWX1` 与 `bandSpans`（`0.52/0.80` 阶跃渐隐）逐帧跳变的根本原因；改为全固定世界网格 `chunkStep = 240m / polyGridStep = 40m`（完全不随 `cameraX` 漂移）、取消 `bandSpans` 阶跃半透明切片、调整图层层级（实心内填 `z=3.42` 严格遮盖洞口暗影 `z=3.39`）、加宽 `2A` 后壁 `clampBowlBotY` 収拢过渡至 `42m`（大于网格列宽），并在大陆坡嫁接区（`mainY < graftFuseMainY`）按 `fuseU` 向上收拢 `visualBotY`，彻底消灭竖向切边与底部突出岩块；② **根除洞口悬崖与 633m 山根楔形穿墙（Web + iOS 双端同步）**：将 `getSeabedTerraceAt` 激活阈值由 `graftedEdgeWeight > 0.02`（含 22m 洞唇物理盲区）修正为 `graftT > 0.03`；在 `resolveSeabedCollision` 中识别无洞下水道的实心嫁接山根楔块（`mainFloorY - bottomArchY <= clearance * 1.25`），禁止错误触发 `hitAtollUnderside` 导致把鲨鱼按进山体；并在 `resolveSeabedKineticStep` 新增 `hitsTerraceVerticalWallHorizontally` 二维水平悬崖壁阻挡与二分寻址（`6` 次迭代），彻底杜绝从洞口横穿悬崖壁或从深侧水平/斜向挤穿山根；③ **双端输入状态全周期清零（根治死亡结算重开自动游动）**：iOS 新增 `runSequenceId`、`resetInputState()`、`resetSimulationForNewRun` 与 SwiftUI `@GestureState` 复位；Web 抽出 `clearAllInputs()`、起始速度归零并加装 `gameState === 'playing'` 输入护栏 | `scripts/build-ios-native.ts`, `ios-native/`, `src/game/worldGenerationSystem.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-14 | **消除 Web 与 iOS 双端沿洞口向下斜线水平移动时的速度叠加（`GameRules.getSeabedTerraceAt` / `GameRules.resolveSeabedKineticStep`）**：在 Swift `getSeabedTerraceAt` 中补齐洞口下弯斜坡导数 `dRimDropDx`，并在 `resolveSeabedKineticStep` 子步循环中同步执行切向投影 `tangentScale = 1 / sqrt(1 + slope^2)` 与二维步长守恒钳制 `hypot(dx, dy) <= maxSubstepDist` | `scripts/build-ios-native.ts`, `src/game/worldGenerationSystem.ts`, `src/App.tsx`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
