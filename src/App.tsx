@@ -855,6 +855,31 @@ export default function App() {
     []
   );
 
+  const clearAllInputs = useCallback(() => {
+    const input = simRef.current.input;
+    input.keys.clear();
+    input.joyActive = false;
+    input.joyPointerId = null;
+    input.joyDx = 0;
+    input.joyDy = 0;
+    input.boostPointerHeld = false;
+    input.boostPointerId = null;
+    input.canvasPointerActive = false;
+    input.canvasPointerId = null;
+    input.rightMouseBoostHeld = false;
+    if (joystickKnobRef.current) {
+      joystickKnobRef.current.style.transform = 'translate3d(0px, 0px, 0)';
+    }
+    setJoystickVisual({ active: false, dx: 0, dy: 0 });
+    setBoostVisual(false);
+  }, []);
+
+  useEffect(() => {
+    if (gameState !== 'playing' || showAtlasModal) {
+      clearAllInputs();
+    }
+  }, [gameState, showAtlasModal, clearAllInputs]);
+
   // Initialize or reset a run
   const startNewRun = useCallback(
     (withMaxMechaTrial: boolean = false) => {
@@ -890,7 +915,7 @@ export default function App() {
       sim.shark = {
         x: 0,
         y: 220,
-        vx: stats.moveSpeed * 0.6,
+        vx: 0,
         vy: 0,
         angle: 0,
         targetAngle: 0,
@@ -929,21 +954,7 @@ export default function App() {
       sim.camera.zoom = stats.cameraZoom;
 
       // Clear held inputs
-      sim.input.keys.clear();
-      sim.input.joyActive = false;
-      sim.input.joyPointerId = null;
-      sim.input.joyDx = 0;
-      sim.input.joyDy = 0;
-      sim.input.boostPointerHeld = false;
-      sim.input.boostPointerId = null;
-      sim.input.canvasPointerActive = false;
-      sim.input.canvasPointerId = null;
-      sim.input.rightMouseBoostHeld = false;
-      if (joystickKnobRef.current) {
-        joystickKnobRef.current.style.transform = 'translate3d(0px, 0px, 0)';
-      }
-      setJoystickVisual({ active: false, dx: 0, dy: 0 });
-      setBoostVisual(false);
+      clearAllInputs();
 
       // Reset pools
       sim.particles.forEach((p) => (p.active = false));
@@ -1110,7 +1121,7 @@ export default function App() {
       document.body.dataset.state = 'playing';
       setGameState('playing');
     },
-    [rollTargetBountyConfig, spawnFloatText]
+    [clearAllInputs, rollTargetBountyConfig, spawnFloatText]
   );
 
   // If booted with ?autostart=1, initialize the ocean run immediately on mount
@@ -1632,19 +1643,7 @@ export default function App() {
     };
 
     const handleWindowBlur = () => {
-      simRef.current.input.keys.clear();
-      simRef.current.input.joyActive = false;
-      simRef.current.input.joyPointerId = null;
-      simRef.current.input.boostPointerHeld = false;
-      simRef.current.input.boostPointerId = null;
-      simRef.current.input.canvasPointerActive = false;
-      simRef.current.input.canvasPointerId = null;
-      simRef.current.input.rightMouseBoostHeld = false;
-      if (joystickKnobRef.current) {
-        joystickKnobRef.current.style.transform = 'translate3d(0px, 0px, 0)';
-      }
-      setJoystickVisual({ active: false, dx: 0, dy: 0 });
-      setBoostVisual(false);
+      clearAllInputs();
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -1655,7 +1654,7 @@ export default function App() {
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [handleInRunBreakthroughOrAtlas, startNewRun]);
+  }, [clearAllInputs, handleInRunBreakthroughOrAtlas, startNewRun]);
 
   // Main 60 FPS Canvas 2D Simulation & Render Loop
   useEffect(() => {
@@ -2909,6 +2908,7 @@ export default function App() {
             masteryGenesBonus: economyUsesRef.current.runMasteryGenesAwarded,
             masteryCrownTier: finalMastery.newCrownTier,
           });
+          clearAllInputs();
           document.body.dataset.state = 'gameover';
           setGameState('gameover');
         }
@@ -3425,6 +3425,7 @@ export default function App() {
   };
 
   const handleCanvasPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (gameStateRef.current !== 'playing') return;
     if (
       simRef.current.input.canvasPointerActive &&
       simRef.current.input.canvasPointerId !== null &&
@@ -3460,6 +3461,7 @@ export default function App() {
   // Uses direct DOM transform on joystickKnobRef during pointermove so holding the joystick
   // causes ZERO React re-renders and never blocks simultaneous right-thumb button taps on mobile!
   const handleJoystickPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (gameStateRef.current !== 'playing') return;
     e.stopPropagation();
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -3490,6 +3492,7 @@ export default function App() {
   };
 
   const handleJoystickPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (gameStateRef.current !== 'playing') return;
     if (
       !simRef.current.input.joyActive ||
       (simRef.current.input.joyPointerId !== null &&
@@ -4664,6 +4667,7 @@ export default function App() {
                       type="button"
                       aria-label={t('btn_boost')}
                       onPointerDown={(e) => {
+                        if (gameStateRef.current !== 'playing') return;
                         e.stopPropagation();
                         try {
                           e.currentTarget.setPointerCapture(e.pointerId);
