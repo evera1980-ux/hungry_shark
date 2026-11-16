@@ -659,34 +659,44 @@ public enum GameRules {
         let relief = (noise1D(worldX * 0.0022, salt: 419 + saltBase) * 34.0
             + noise1D(worldX * 0.0068, salt: 431 + saltBase) * 12.0) * min(1.85, spec.reliefAmp)
         let baseTopY = spec.baseDepth + relief
-        let lipDropAmp = min(88.0, spec.dropAmplitude * 0.34)
-        let caveBowlDrop = min(210.0, spec.dropAmplitude * 0.68)
+
+        // Unified C2-continuous cosine-bell bowl curve across both the solid cave shoulders AND the receding cave back-wall
+        // (1:1 mathematical parity with Web evalTerraceSeabedContinuousRaw — eliminates any vertical cliff cut or V-pinch at the cave lip!)
+        let bowlDuty = min(0.86, spec.openDuty * 1.68)
+        let openFactor: Double
+        if distFromGapCenter < bowlDuty {
+            let rimNorm = distFromGapCenter / max(0.01, bowlDuty)
+            openFactor = 0.5 * (1.0 + cos(rimNorm * .pi))
+        } else {
+            openFactor = 0.0
+        }
+        let archBowlDrop = min(176.0, spec.dropAmplitude * 0.54) * pow(openFactor, 1.35)
+        let visualRimY = min(mainFloor - 26.0, baseTopY + archBowlDrop)
 
         // Inside the downward cave opening (shark can swim freely up & down through this portal!)
         if distFromGapCenter < spec.openDuty {
             let normCave = distFromGapCenter / max(0.01, spec.openDuty) // 0 at center of opening, 1 at rim lip
             let caveArch = 0.5 * (1.0 + cos(normCave * .pi))
-            let caveFloorY = min(mainFloor - 24.0, baseTopY + lipDropAmp + caveArch * caveBowlDrop)
-            let caveBottomY = min(mainFloor, caveFloorY + 42.0 + caveArch * 110.0)
+            let caveBottomY = min(mainFloor, visualRimY + 86.0 + caveArch * 74.0)
             return (
                 isPresent: false,
-                topY: caveFloorY,
+                topY: visualRimY,
                 bottomArchY: caveBottomY,
                 edgeFactor: 0.0,
-                caveFactor: caveArch
+                caveFactor: openFactor
             )
         }
 
-        let rampSpan = 0.18
+        let rampSpan = 0.22
         let edgeFactor = min(1.0, (distFromGapCenter - spec.openDuty) / rampSpan)
         let smoothEdge = edgeFactor * edgeFactor * edgeFactor * (edgeFactor * (edgeFactor * 6.0 - 15.0) + 10.0)
-        let rimDrop = (1.0 - smoothEdge) * lipDropAmp
-        let topY = min(mainFloor - 36.0, baseTopY + rimDrop)
+        let topY = visualRimY
 
-        // Taper bottomArchY from rounded cave lip (topY + 42m at edgeFactor = 0) down to vaulted arch ceiling under the plateau
-        let lipArchY = topY + 42.0
+        // Taper bottomArchY from rounded cave lip (topY + 86m at edgeFactor = 0, preserving full coral strip height!)
+        // down to the vaulted arch ceiling under the plateau
+        let lipArchY = topY + 86.0
         let stalactiteWave = noise1D(worldX * 0.0038, salt: 443 + saltBase) * (18.0 * min(1.6, spec.reliefAmp))
-        let targetDeepArchY = min(mainFloor, max(topY + 185.0, baseTopY + spec.thicknessBase + stalactiteWave))
+        let targetDeepArchY = min(mainFloor, max(topY + 195.0, baseTopY + spec.thicknessBase + stalactiteWave))
         let bottomArchY = min(mainFloor, lipArchY + (targetDeepArchY - lipArchY) * smoothEdge)
 
         return (
@@ -694,7 +704,7 @@ public enum GameRules {
             topY: topY,
             bottomArchY: bottomArchY,
             edgeFactor: smoothEdge,
-            caveFactor: 0.0
+            caveFactor: openFactor
         )
     }
 
@@ -753,48 +763,66 @@ public enum GameRules {
         public let seed: Double
     }
 
-    /// Generates deterministic seabed outcrops along both the main seafloor AND all 9 seabed terraces
+    /// Generates deterministic, naturally proportioned seabed outcrops along both the main seafloor AND all 9 seabed terraces
+    /// (5 variants per family: 0..3 = 16 distinct stylized atlas sprites, 4 = rare composite cluster; strict anti-repetition between neighbors)
     public static func getSeabedOutcropsForChunk(chunkIndex: Int, chunkWidth: Double = 600.0) -> [SeabedOutcropPlacement] {
         var placements: [SeabedOutcropPlacement] = []
         let chunkStartX = Double(chunkIndex) * chunkWidth
 
-        // 1. Main seafloor outcrops
+        // 1. Main seafloor outcrops (natural 38m..68m height scale with neighbor non-repetition)
         let count = 2 + Int(floor(hash1D(chunkIndex, salt: 811) * 2.0)) // 2 or 3 per chunk
         let slotSpan = chunkWidth / Double(count)
+        var prevMainVariant = -1
+        var prevMainType: SeabedOutcropType? = nil
 
         for i in 0..<count {
             let h1 = hash1D(chunkIndex * 7 + i, salt: 823)
             let h2 = hash1D(chunkIndex * 13 + i, salt: 829)
             let h3 = hash1D(chunkIndex * 19 + i, salt: 839)
-            let worldX = chunkStartX + (Double(i) + 0.18 + h1 * 0.64) * slotSpan
+            let worldX = chunkStartX + (Double(i) + 0.16 + h1 * 0.68) * slotSpan
             let baseY = getFloorDepthAt(worldX: worldX)
 
-            let type: SeabedOutcropType
+            var type: SeabedOutcropType
             if baseY < 620.0 {
-                type = h2 < 0.68 ? .CORAL_MOUND : .KELP_CLUSTER
-            } else if baseY < 1350.0 {
-                type = h2 < 0.45 ? .CORAL_MOUND : (h2 < 0.78 ? .ROCK_SPIRE : .KELP_CLUSTER)
+                type = h2 < 0.54 ? .CORAL_MOUND : (h2 < 0.82 ? .KELP_CLUSTER : .ROCK_SPIRE)
+            } else if baseY < 1450.0 {
+                type = h2 < 0.38 ? .CORAL_MOUND : (h2 < 0.72 ? .ROCK_SPIRE : .KELP_CLUSTER)
             } else {
-                type = h2 < 0.58 ? .ROCK_SPIRE : .ABYSSAL_CHIMNEY
+                // Mix rocks, deep bioluminescent corals/anemones, and vents in the abyss so it's never all volcanoes!
+                type = h2 < 0.46 ? .ROCK_SPIRE : (h2 < 0.76 ? .ABYSSAL_CHIMNEY : .CORAL_MOUND)
             }
+            if type == prevMainType && type == .ABYSSAL_CHIMNEY {
+                type = .ROCK_SPIRE
+            }
+
+            // Variant 0..3 = 16 distinct individual sprites from world_ecology_atlas; Variant 4 = rare standalone cluster (~12% chance, never twice in a row)
+            var variant = h3 > 0.88 ? 4 : Int(floor((h3 / 0.88) * 4.0))
+            if variant == prevMainVariant {
+                variant = (variant + 1) % 4
+            }
+            prevMainVariant = variant
+            prevMainType = type
 
             let width: Double
             let height: Double
             switch type {
             case .CORAL_MOUND:
-                width = 115.0 + h2 * 105.0
-                height = 75.0 + h3 * 70.0
+                width = 52.0 + h2 * 34.0
+                height = 38.0 + h3 * 26.0
             case .KELP_CLUSTER:
-                width = 90.0 + h2 * 70.0
-                height = 130.0 + h3 * 110.0
-            default:
-                width = 110.0 + h2 * 95.0
-                height = 95.0 + h3 * 95.0
+                width = 46.0 + h2 * 28.0
+                height = 52.0 + h3 * 34.0
+            case .ROCK_SPIRE:
+                width = 54.0 + h2 * 36.0
+                height = 40.0 + h3 * 28.0
+            case .ABYSSAL_CHIMNEY:
+                width = 50.0 + h2 * 32.0
+                height = 42.0 + h3 * 28.0
             }
 
             placements.append(SeabedOutcropPlacement(
                 worldX: worldX, baseY: baseY, width: width, height: height,
-                type: type, variant: Int(floor(h3 * 4.0)), seed: h1
+                type: type, variant: variant, seed: h1
             ))
         }
 
@@ -803,43 +831,50 @@ public enum GameRules {
         let terraceSlotSpan = chunkWidth / Double(terraceSlotCount)
         for tierIdx in 0..<seabedTerraceTiers.count {
             let saltOffset = tierIdx * 197
+            var prevTerraceVariant = -1
             for i in 0..<terraceSlotCount {
                 let h1 = hash1D(chunkIndex * 11 + i, salt: 911 + saltOffset)
-                if tierIdx >= 4 && h1 < 0.28 { continue }
+                if tierIdx >= 4 && h1 < 0.32 { continue }
                 let h2 = hash1D(chunkIndex * 17 + i, salt: 919 + saltOffset)
                 let h3 = hash1D(chunkIndex * 23 + i, salt: 929 + saltOffset)
                 let worldX = chunkStartX + (Double(i) + 0.16 + h1 * 0.68) * terraceSlotSpan
                 let terrace = getSeabedTerraceAt(worldX: worldX, tierIndex: tierIdx)
-                if terrace.isPresent && terrace.edgeFactor > 0.22 {
+                if terrace.isPresent && terrace.edgeFactor > 0.24 {
                     let type: SeabedOutcropType
                     if tierIdx == 0 {
-                        type = h2 < 0.74 ? .CORAL_MOUND : .KELP_CLUSTER
+                        type = h2 < 0.56 ? .CORAL_MOUND : (h2 < 0.84 ? .KELP_CLUSTER : .ROCK_SPIRE)
                     } else if tierIdx == 1 {
-                        type = h2 < 0.50 ? .CORAL_MOUND : (h2 < 0.80 ? .ROCK_SPIRE : .KELP_CLUSTER)
+                        type = h2 < 0.44 ? .CORAL_MOUND : (h2 < 0.76 ? .ROCK_SPIRE : .KELP_CLUSTER)
                     } else if tierIdx <= 3 {
-                        type = h2 < 0.30 ? .CORAL_MOUND : .ROCK_SPIRE
+                        type = h2 < 0.36 ? .CORAL_MOUND : (h2 < 0.78 ? .ROCK_SPIRE : .KELP_CLUSTER)
                     } else {
-                        type = h2 < 0.56 ? .ROCK_SPIRE : .ABYSSAL_CHIMNEY
+                        type = h2 < 0.52 ? .ROCK_SPIRE : (h2 < 0.80 ? .ABYSSAL_CHIMNEY : .CORAL_MOUND)
                     }
 
-                    let sizeScale = 1.0 + Double(tierIdx) * 0.08
+                    var variant = h3 > 0.88 ? 4 : Int(floor((h3 / 0.88) * 4.0))
+                    if variant == prevTerraceVariant {
+                        variant = (variant + 1) % 4
+                    }
+                    prevTerraceVariant = variant
+
+                    let sizeScale = 0.88 + Double((chunkIndex + i + tierIdx) % 3) * 0.08
                     let width: Double
                     let height: Double
                     switch type {
                     case .CORAL_MOUND:
-                        width = (120.0 + h2 * 105.0) * sizeScale
-                        height = (78.0 + h3 * 68.0) * sizeScale
+                        width = (50.0 + h2 * 32.0) * sizeScale
+                        height = (36.0 + h3 * 24.0) * sizeScale
                     case .KELP_CLUSTER:
-                        width = 88.0 + h2 * 64.0
-                        height = 115.0 + h3 * 92.0
+                        width = (44.0 + h2 * 26.0) * sizeScale
+                        height = (48.0 + h3 * 32.0) * sizeScale
                     default:
-                        width = (112.0 + h2 * 96.0) * sizeScale
-                        height = (90.0 + h3 * 88.0) * sizeScale
+                        width = (52.0 + h2 * 34.0) * sizeScale
+                        height = (38.0 + h3 * 26.0) * sizeScale
                     }
 
                     placements.append(SeabedOutcropPlacement(
                         worldX: worldX, baseY: terrace.topY, width: width, height: height,
-                        type: type, variant: Int(floor(h3 * 4.0)), seed: h1
+                        type: type, variant: variant, seed: h1
                     ))
                 }
             }

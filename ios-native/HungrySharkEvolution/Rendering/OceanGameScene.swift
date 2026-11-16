@@ -1871,6 +1871,8 @@ public final class OceanGameScene: SKScene {
             // 2A. Solid Terrace & Recessed Cave Wall Backfill Polygon (strictly under physical topY)
             let archFillNode = acquirePooledArchFillNode()
             archFillNode.zPosition = 3.34
+            archFillNode.lineWidth = 0.0
+            archFillNode.strokeColor = .clear
             let archPath = CGMutablePath()
             let stepX = 32.0
             let startSampleX = Double(firstAtollTile) * atollTileW
@@ -1880,8 +1882,7 @@ public final class OceanGameScene: SKScene {
             var firstPt = true
             while wx <= endSampleX {
                 let s = GameRules.getSeabedTerraceAt(worldX: wx, tierIndex: tierIdx)
-                let recessDrop = s.isPresent ? 18.0 : (36.0 + s.caveFactor * 54.0)
-                let topY = toScreenY(s.topY + recessDrop)
+                let topY = toScreenY(s.topY + 18.0)
                 if firstPt {
                     archPath.move(to: CGPoint(x: toScreenX(wx), y: topY))
                     firstPt = false
@@ -1900,12 +1901,12 @@ public final class OceanGameScene: SKScene {
             archPath.closeSubpath()
             archFillNode.path = archPath
             archFillNode.fillColor = tier.stripId == "coral_reef"
-                ? UIColor(red: 12/255, green: 32/255, blue: 52/255, alpha: 0.94)
+                ? UIColor(red: 14/255, green: 34/255, blue: 56/255, alpha: 0.94)
                 : tier.stripId == "rocky_shelf"
-                ? UIColor(red: 9/255, green: 21/255, blue: 40/255, alpha: 0.95)
-                : UIColor(red: 5/255, green: 10/255, blue: 22/255, alpha: 0.96)
+                ? UIColor(red: 10/255, green: 24/255, blue: 44/255, alpha: 0.95)
+                : UIColor(red: 5/255, green: 12/255, blue: 26/255, alpha: 0.96)
 
-            // 2B. Detect Exact Warped Cave Openings Across Visible Span & Render Multi-Layer Cave Portals
+            // 2B. Detect Exact Warped Cave Openings Across Visible Span & Render Web-Identical Continuous Receding Cave Bowl (A1)
             struct DetectedCaveOpening {
                 let startWX: Double
                 let endWX: Double
@@ -1914,8 +1915,8 @@ public final class OceanGameScene: SKScene {
             }
             var detectedCaves: [DetectedCaveOpening] = []
             let scanStep = 20.0
-            var scanX = startSampleX - 220.0
-            let scanLimitX = endSampleX + 220.0
+            var scanX = startSampleX - 240.0
+            let scanLimitX = endSampleX + 240.0
             var inCave = false
             var curCaveStart = 0.0
             var curPeakWX = 0.0
@@ -1960,42 +1961,96 @@ public final class OceanGameScene: SKScene {
             }
 
             let portalShadowTex = SpriteAtlasManager.shared.cavePortalShadowTexture()
-            let flankSpritePrefix: String = tier.stripId == "coral_reef"
-                ? "coral_"
-                : tier.stripId == "rocky_shelf"
-                ? "rock_"
-                : "vent_"
+            let deepOceanHazeColor = tier.stripId == "deep_abyss"
+                ? UIColor(red: 8/255, green: 10/255, blue: 22/255, alpha: 1.0)
+                : UIColor(red: 7/255, green: 26/255, blue: 52/255, alpha: 1.0)
 
             for (cIdx, cave) in detectedCaves.enumerated() {
-                let caveSpanW = max(90.0, cave.endWX - cave.startWX)
-                let sxStart = toScreenX(cave.startWX)
-                let sxEnd = toScreenX(cave.endWX)
+                let bowlPad = 110.0
+                let bowlStartWX = cave.startWX - bowlPad
+                let bowlEndWX = cave.endWX + bowlPad
+                let bowlSpanW = max(160.0, bowlEndWX - bowlStartWX)
+                let sxStart = toScreenX(bowlStartWX)
+                let sxEnd = toScreenX(bowlEndWX)
                 if sxEnd < -120.0 || sxStart > viewW + 120.0 { continue }
 
-                // (i) Receding Darkened Background Cave Bowl Strip behind the opening
-                addWarpedWorldStrip(
-                    texture: tierStripTex,
-                    x0: toScreenX(cave.startWX - 28.0),
-                    x1: toScreenX(cave.endWX + 28.0),
-                    topEYAt: { u in
-                        let cwx = (cave.startWX - 28.0) + u * (caveSpanW + 56.0)
-                        let s = GameRules.getSeabedTerraceAt(worldX: cwx, tierIndex: tierIdx)
-                        return toScreenY(s.topY + 18.0 + s.caveFactor * 52.0)
-                    },
-                    botEYAt: { u in
-                        let cwx = (cave.startWX - 28.0) + u * (caveSpanW + 56.0)
-                        let s = GameRules.getSeabedTerraceAt(worldX: cwx, tierIndex: tierIdx)
-                        return toScreenY(s.bottomArchY + 24.0)
-                    },
-                    alpha: 0.92,
-                    zPos: 3.38,
-                    flipX: (cIdx % 2 == 1),
-                    color: .black,
-                    colorBlendFactor: 0.58
-                )
+                // (i) Receding Subsurface Rock Strata along the downward-curving cave back-wall (Web A1 lines 3471-3509)
+                let bowlSegs = 2
+                let bowlSegW = bowlSpanW / Double(bowlSegs)
+                for bSeg in 0..<bowlSegs {
+                    let bwx0 = bowlStartWX + Double(bSeg) * bowlSegW
+                    let bwx1 = bwx0 + bowlSegW
+                    let bsx0 = toScreenX(bwx0)
+                    let bsx1 = toScreenX(bwx1)
 
-                // (ii) Deep Elliptical Abyssal Cave Portal Shadow centered at exact warped caveCenterWX
+                    addWarpedWorldStrip(
+                        texture: tierSubTex,
+                        x0: bsx0,
+                        x1: bsx1,
+                        topEYAt: { u in
+                            let cwx = bwx0 + u * bowlSegW
+                            let s = GameRules.getSeabedTerraceAt(worldX: cwx, tierIndex: tierIdx)
+                            return toScreenY(s.topY + 24.0)
+                        },
+                        botEYAt: { u in
+                            let cwx = bwx0 + u * bowlSegW
+                            let s = GameRules.getSeabedTerraceAt(worldX: cwx, tierIndex: tierIdx)
+                            return toScreenY(s.topY + 156.0)
+                        },
+                        alpha: 0.84,
+                        zPos: 3.35,
+                        flipX: (bSeg % 2 == 1),
+                        color: deepOceanHazeColor,
+                        colorBlendFactor: 0.56
+                    )
+
+                    addWarpedWorldStrip(
+                        texture: tierSubTex,
+                        x0: bsx0,
+                        x1: bsx1,
+                        topEYAt: { u in
+                            let cwx = bwx0 + u * bowlSegW
+                            let s = GameRules.getSeabedTerraceAt(worldX: cwx, tierIndex: tierIdx)
+                            return toScreenY(s.topY + 106.0)
+                        },
+                        botEYAt: { u in
+                            let cwx = bwx0 + u * bowlSegW
+                            let s = GameRules.getSeabedTerraceAt(worldX: cwx, tierIndex: tierIdx)
+                            return toScreenY(s.topY + 242.0)
+                        },
+                        alpha: 0.66,
+                        zPos: 3.345,
+                        flipX: (bSeg % 2 == 0),
+                        color: deepOceanHazeColor,
+                        colorBlendFactor: 0.68
+                    )
+
+                    // (ii) Continuous Receding Cave Back-Wall Top Surface Strip darkened by deep-ocean atmospheric perspective (Web A1 lines 3580-3633)
+                    addWarpedWorldStrip(
+                        texture: tierStripTex,
+                        x0: bsx0,
+                        x1: bsx1,
+                        topEYAt: { u in
+                            let cwx = bwx0 + u * bowlSegW
+                            let s = GameRules.getSeabedTerraceAt(worldX: cwx, tierIndex: tierIdx)
+                            return toScreenY(s.topY - terraceCrestLift * 0.85)
+                        },
+                        botEYAt: { u in
+                            let cwx = bwx0 + u * bowlSegW
+                            let s = GameRules.getSeabedTerraceAt(worldX: cwx, tierIndex: tierIdx)
+                            return toScreenY(s.topY - terraceCrestLift * 0.85 + terraceStripWorldH * 0.92)
+                        },
+                        alpha: 0.92,
+                        zPos: 3.38,
+                        flipX: ((cIdx + bSeg) % 2 == 1),
+                        color: deepOceanHazeColor,
+                        colorBlendFactor: 0.48
+                    )
+                }
+
+                // (iii) Soft Elliptical Abyssal Cave Portal Shadow centered in the recessed cave bowl (Web A1 lines 3532-3547)
                 let sCenter = GameRules.getSeabedTerraceAt(worldX: cave.centerWX, tierIndex: tierIdx)
+                let caveSpanW = max(120.0, cave.endWX - cave.startWX)
                 if let shadowTex = portalShadowTex {
                     let portalNode = acquirePooledParallaxTile()
                     portalNode.warpGeometry = nil
@@ -2005,98 +2060,75 @@ public final class OceanGameScene: SKScene {
                     portalNode.yScale = 1.0
                     portalNode.zRotation = 0.0
                     portalNode.size = CGSize(
-                        width: max(130.0 * zoom, caveSpanW * 1.24 * zoom),
-                        height: max(78.0, 196.0 * zoom)
+                        width: max(160.0 * zoom, caveSpanW * 1.32 * zoom),
+                        height: max(90.0 * zoom, 210.0 * zoom)
                     )
                     portalNode.position = CGPoint(
                         x: toScreenX(cave.centerWX),
-                        y: toScreenY(sCenter.topY + 34.0)
+                        y: toScreenY(sCenter.topY + 46.0)
                     )
-                    portalNode.alpha = 0.96
+                    portalNode.alpha = 0.88
                     portalNode.zPosition = 3.40
                     portalNode.colorBlendFactor = 0.0
                 }
 
-                // (iii) Concentric 3D Cave Tunnel Arch Rings + Bioluminescent Cyan/Magma Rim Highlights
+                // (iv) Subtle Unfilled Quadratic Cave Ledge Contours (Web A1 lines 3550-3576 — NO filled black V-polygon or harsh neon triangles!)
+                let sLeftLip = GameRules.getSeabedTerraceAt(worldX: cave.startWX, tierIndex: tierIdx)
+                let sRightLip = GameRules.getSeabedTerraceAt(worldX: cave.endWX, tierIndex: tierIdx)
+                let lipAvgY = (sLeftLip.topY + sRightLip.topY) * 0.5
                 for ringIdx in 0..<2 {
-                    let insetFrac = Double(ringIdx) * 0.16
-                    let ringStartWX = cave.startWX + caveSpanW * insetFrac
-                    let ringEndWX = cave.endWX - caveSpanW * insetFrac
-                    let ringSpan = max(36.0, ringEndWX - ringStartWX)
-                    let ringDepthOffset = Double(ringIdx) * 26.0
+                    let spreadFactor = 1.0 - Double(ringIdx) * 0.16
+                    let halfSpan = (caveSpanW * 0.54) * spreadFactor
+                    let leftX = toScreenX(cave.centerWX - halfSpan)
+                    let rightX = toScreenX(cave.centerWX + halfSpan)
+                    let topY = toScreenY(lipAvgY + 12.0 + Double(ringIdx) * 28.0)
+                    let dipY = toScreenY(sCenter.topY + 64.0 + Double(ringIdx) * 44.0)
+                    let ctrlX = toScreenX(cave.centerWX)
 
                     let ringNode = acquirePooledArchFillNode()
-                    ringNode.zPosition = CGFloat(3.42 + Double(ringIdx) * 0.01)
+                    ringNode.zPosition = CGFloat(3.41 + Double(ringIdx) * 0.005)
                     let ringPath = CGMutablePath()
-                    let rSteps = 12
-                    for step in 0...rSteps {
-                        let u = Double(step) / Double(rSteps)
-                        let rwx = ringStartWX + u * ringSpan
-                        let s = GameRules.getSeabedTerraceAt(worldX: rwx, tierIndex: tierIdx)
-                        let archEnvelope = sin(u * .pi)
-                        let throatY = s.topY + ringDepthOffset + archEnvelope * (68.0 + Double(ringIdx) * 22.0)
-                        let pt = CGPoint(x: toScreenX(rwx), y: toScreenY(throatY))
-                        if step == 0 {
-                            ringPath.move(to: pt)
-                        } else {
-                            ringPath.addLine(to: pt)
-                        }
-                    }
-                    for step in (0...rSteps).reversed() {
-                        let u = Double(step) / Double(rSteps)
-                        let rwx = ringStartWX + u * ringSpan
-                        let s = GameRules.getSeabedTerraceAt(worldX: rwx, tierIndex: tierIdx)
-                        let archEnvelope = sin(u * .pi)
-                        let rimTopY = s.topY - 6.0 + ringDepthOffset * 0.45 + archEnvelope * 18.0
-                        ringPath.addLine(to: CGPoint(x: toScreenX(rwx), y: toScreenY(rimTopY)))
-                    }
-                    ringPath.closeSubpath()
+                    ringPath.move(to: CGPoint(x: leftX, y: topY))
+                    ringPath.addQuadCurve(to: CGPoint(x: rightX, y: topY), control: CGPoint(x: ctrlX, y: dipY))
                     ringNode.path = ringPath
-                    ringNode.fillColor = ringIdx == 0
-                        ? UIColor(red: 4/255, green: 11/255, blue: 24/255, alpha: 0.86)
-                        : UIColor(red: 2/255, green: 6/255, blue: 15/255, alpha: 0.92)
-                    ringNode.lineWidth = CGFloat(max(2.0, (ringIdx == 0 ? 3.6 : 2.4) * zoom))
-                    if tier.baseDepth < 2200.0 {
-                        ringNode.strokeColor = ringIdx == 0
-                            ? UIColor(red: 56/255, green: 189/255, blue: 248/255, alpha: 0.82)
-                            : UIColor(red: 34/255, green: 211/255, blue: 238/255, alpha: 0.58)
-                    } else {
-                        ringNode.strokeColor = ringIdx == 0
-                            ? UIColor(red: 251/255, green: 146/255, blue: 60/255, alpha: 0.84)
-                            : UIColor(red: 56/255, green: 189/255, blue: 248/255, alpha: 0.62)
-                    }
+                    ringNode.fillColor = .clear
+                    ringNode.lineWidth = CGFloat(max(1.5, (4.2 - Double(ringIdx) * 1.2) * zoom))
+                    ringNode.strokeColor = UIColor(red: 14/255, green: 34/255, blue: 58/255, alpha: ringIdx == 0 ? 0.52 : 0.36)
                 }
 
-                // (iv) Flanking Cave Lip Rock/Coral Guardian Outcrops at Left & Right Cave Shoulders
-                let lipShoulders: [(wx: Double, tiltSign: Double, variantIdx: Int)] = [
-                    (cave.startWX - 10.0, -1.0, (tierIdx + cIdx) % 4 + 1),
-                    (cave.endWX + 10.0,    1.0, (tierIdx + cIdx + 1) % 4 + 1)
+                // (v) Rounded Cave Lip Embedded Guardian Boulders (Web A2 lines 3871-3893: mossy_slab / basalt_boulder at natural 0.44 scale)
+                let lipShoulders: [(wx: Double, tiltSign: Double, rockId: String)] = [
+                    (cave.startWX - 12.0, -1.0, (tierIdx + cIdx) % 2 == 0 ? "rock_2" : "rock_1"),
+                    (cave.endWX + 12.0,    1.0, (tierIdx + cIdx) % 2 == 0 ? "rock_1" : "rock_2")
                 ]
                 for shoulder in lipShoulders {
                     let sLip = GameRules.getSeabedTerraceAt(worldX: shoulder.wx, tierIndex: tierIdx)
-                    if let lipTex = SpriteAtlasManager.shared.ecologySpriteTexture(for: "\(flankSpritePrefix)\(shoulder.variantIdx)") {
-                        let lipW = 112.0 * zoom
-                        let lipH = 98.0 * zoom
+                    if let lipTex = SpriteAtlasManager.shared.ecologySpriteTexture(for: shoulder.rockId) {
+                        let texSize = lipTex.size()
+                        let aspect = max(0.6, min(1.8, Double(texSize.width / max(1.0, texSize.height))))
+                        let lipH = 44.0 * zoom
+                        let lipW = lipH * aspect
                         let lipNode = acquirePooledParallaxTile()
                         lipNode.warpGeometry = nil
                         lipNode.texture = lipTex
-                        lipNode.anchorPoint = CGPoint(x: 0.5, y: 0.0)
+                        lipNode.anchorPoint = CGPoint(x: 0.5, y: 0.5)
                         lipNode.size = CGSize(width: lipW, height: lipH)
                         lipNode.position = CGPoint(
                             x: toScreenX(shoulder.wx),
-                            y: toScreenY(sLip.topY + 14.0)
+                            y: toScreenY(sLip.topY + 24.0)
                         )
                         lipNode.xScale = shoulder.tiltSign < 0 ? 1.0 : -1.0
                         lipNode.yScale = 1.0
-                        lipNode.zRotation = CGFloat(shoulder.tiltSign * 0.18)
-                        lipNode.alpha = 0.96
-                        lipNode.zPosition = 3.72
-                        lipNode.colorBlendFactor = 0.0
+                        lipNode.zRotation = CGFloat(-shoulder.tiltSign * 0.28)
+                        lipNode.alpha = 0.90
+                        lipNode.zPosition = 3.62
+                        lipNode.color = deepOceanHazeColor
+                        lipNode.colorBlendFactor = 0.16
                     }
                 }
             }
 
-            // 2C & 2D. Foreground Solid Terrace Subsurface Strata & Top Surface Strip (Parted Cleanly at Cave Lips!)
+            // 2C & 2D. Foreground Solid Terrace Subsurface Strata & Top Surface Strip (Web A2 lines 3745-3925)
             let subSegCount = 3
             let subSegW = atollTileW / Double(subSegCount)
 
@@ -2109,7 +2141,7 @@ public final class OceanGameScene: SKScene {
                     let sMid = GameRules.getSeabedTerraceAt(worldX: (segWX0 + segWX1) * 0.5, tierIndex: tierIdx)
                     let s1 = GameRules.getSeabedTerraceAt(worldX: segWX1, tierIndex: tierIdx)
 
-                    // Skip foreground rock completely inside passable cave mouths so the cave portal is 100% open!
+                    // Skip foreground rock inside passable cave mouths so the receding A1 cave bowl is 100% visible!
                     if !s0.isPresent && !sMid.isPresent && !s1.isPresent {
                         continue
                     }
@@ -2147,7 +2179,7 @@ public final class OceanGameScene: SKScene {
                     let sx1 = toScreenX(segWX1)
                     if sx1 < -80.0 || sx0 > viewW + 80.0 { continue }
 
-                    // 2C. Solid Terrace Subsurface Strata (clamped strictly above s.bottomArchY)
+                    // 2C. Solid Terrace Subsurface Strata (clamped smoothly above s.bottomArchY)
                     for sub in terraceSubLayers {
                         addWarpedWorldStrip(
                             texture: tierSubTex,
@@ -2200,7 +2232,7 @@ public final class OceanGameScene: SKScene {
             }
         }
 
-        // 3. Render Composite Coral Outcrops, Seaweed Forests, Hydrothermal Vents & POIs along Main Floor & All 9 Terraces
+        // 3. Render Diverse Multi-Variant Coral Outcrops, Seaweed Forests, Rocks, Hydrothermal Vents & POIs along Main Floor & All 9 Terraces
         let chunkWidth = 600.0
         let firstChunk = Int(floor(startWorldX / chunkWidth)) - 1
         let lastChunk = Int(ceil(endWorldX / chunkWidth)) + 1
@@ -2210,39 +2242,69 @@ public final class OceanGameScene: SKScene {
             let spriteId: String
             let dxRatio: Double
             let dyRatio: Double
-            let scaleW: Double
             let scaleH: Double
             let flipX: Bool
             let zOff: CGFloat
+            let isCompositeHero: Bool
         }
 
         func layersForOutcrop(_ outcrop: GameRules.SeabedOutcropPlacement) -> [CoralLayerSpec] {
-            let v = max(1, min(4, outcrop.variant + 1))
+            // outcrop.variant is 0..4 (v = 1..5, where 1..4 are the 16 distinct stylized atlas sprites and 5 is the cleaned standalone cluster)
+            let v = max(1, min(5, outcrop.variant + 1))
+            let isHero = (v == 5)
+            let v2 = ((outcrop.variant + 1) % 4) + 1
+            let rockV = (Int((outcrop.seed * 13.0).rounded(.down)) % 3) + 1
+            let kelpV = (Int((outcrop.seed * 17.0).rounded(.down)) % 3) + 1
             let flipMain = outcrop.seed > 0.5
 
             switch outcrop.type {
             case .CORAL_MOUND:
+                if isHero {
+                    return [
+                        CoralLayerSpec(isPoi: false, spriteId: "kelp_\(kelpV)", dxRatio: -0.34, dyRatio: 0.03, scaleH: 0.64, flipX: !flipMain, zOff: 0.01, isCompositeHero: false),
+                        CoralLayerSpec(isPoi: false, spriteId: "coral_5",        dxRatio: 0.0,   dyRatio: 0.0,  scaleH: 0.95, flipX: flipMain,  zOff: 0.03, isCompositeHero: true)
+                    ]
+                }
                 return [
-                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(v)",  dxRatio: -0.28, dyRatio: 0.02,  scaleW: 0.62, scaleH: 0.68, flipX: !flipMain, zOff: 0.01),
-                    CoralLayerSpec(isPoi: false, spriteId: "coral_\(v)", dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.08, scaleH: 1.08, flipX: flipMain,  zOff: 0.03)
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(rockV)", dxRatio: 0.0,   dyRatio: 0.06, scaleH: 0.56, flipX: !flipMain, zOff: 0.01, isCompositeHero: false),
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(kelpV)", dxRatio: -0.36, dyRatio: 0.04, scaleH: 0.68, flipX: !flipMain, zOff: 0.02, isCompositeHero: false),
+                    CoralLayerSpec(isPoi: false, spriteId: "coral_\(v2)",   dxRatio: 0.32,  dyRatio: 0.03, scaleH: 0.64, flipX: !flipMain, zOff: 0.025, isCompositeHero: false),
+                    CoralLayerSpec(isPoi: false, spriteId: "coral_\(v)",    dxRatio: 0.0,   dyRatio: 0.0,  scaleH: 0.96, flipX: flipMain,  zOff: 0.03, isCompositeHero: false)
                 ]
             case .KELP_CLUSTER:
+                if isHero {
+                    return [
+                        CoralLayerSpec(isPoi: false, spriteId: "rock_\(rockV)", dxRatio: 0.0, dyRatio: 0.05, scaleH: 0.48, flipX: !flipMain, zOff: 0.01, isCompositeHero: false),
+                        CoralLayerSpec(isPoi: false, spriteId: "kelp_5",         dxRatio: 0.0, dyRatio: 0.0,  scaleH: 0.92, flipX: flipMain,  zOff: 0.02, isCompositeHero: true)
+                    ]
+                }
                 return [
-                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(v)",  dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.06, scaleH: 1.12, flipX: flipMain,  zOff: 0.02)
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(rockV)", dxRatio: 0.0,   dyRatio: 0.05, scaleH: 0.48, flipX: !flipMain, zOff: 0.01, isCompositeHero: false),
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(v2)",    dxRatio: -0.28, dyRatio: 0.03, scaleH: 0.72, flipX: !flipMain, zOff: 0.02, isCompositeHero: false),
+                    CoralLayerSpec(isPoi: false, spriteId: "kelp_\(v)",     dxRatio: 0.08,  dyRatio: 0.0,  scaleH: 0.98, flipX: flipMain,  zOff: 0.03, isCompositeHero: false)
                 ]
             case .ROCK_SPIRE:
                 var list: [CoralLayerSpec] = [
-                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(v)",  dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.08, scaleH: 1.08, flipX: flipMain,  zOff: 0.02)
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(v)", dxRatio: 0.0, dyRatio: 0.0, scaleH: isHero ? 0.92 : 0.96, flipX: flipMain, zOff: 0.02, isCompositeHero: isHero)
                 ]
-                if outcrop.seed > 0.78 {
-                    let poiIds = ["shipwreck_1", "statue_1", "arch_1", "skeleton_1"]
-                    let poiId = poiIds[outcrop.variant % poiIds.count]
-                    list.append(CoralLayerSpec(isPoi: true, spriteId: poiId, dxRatio: 0.0, dyRatio: -0.08, scaleW: 1.35, scaleH: 1.15, flipX: flipMain, zOff: 0.04))
+                if !isHero && outcrop.seed > 0.35 && outcrop.seed <= 0.84 {
+                    list.append(CoralLayerSpec(isPoi: false, spriteId: "coral_\(v2)", dxRatio: flipMain ? -0.30 : 0.30, dyRatio: 0.04, scaleH: 0.58, flipX: !flipMain, zOff: 0.03, isCompositeHero: false))
+                } else if outcrop.seed > 0.84 {
+                    let poiIds = ["shipwreck_1", "shipwreck_2", "arch_1", "arch_2", "treasure_1", "treasure_2", "skeleton_1", "statue_1", "nest_1", "nest_2"]
+                    let poiIdx = Int((outcrop.seed * 97.0).rounded(.down)) % poiIds.count
+                    let poiId = poiIds[poiIdx]
+                    list.append(CoralLayerSpec(isPoi: true, spriteId: poiId, dxRatio: 0.0, dyRatio: -0.02, scaleH: 1.12, flipX: flipMain, zOff: 0.04, isCompositeHero: false))
                 }
                 return list
             case .ABYSSAL_CHIMNEY:
+                if isHero {
+                    return [
+                        CoralLayerSpec(isPoi: false, spriteId: "vent_5", dxRatio: 0.0, dyRatio: 0.0, scaleH: 0.90, flipX: flipMain, zOff: 0.02, isCompositeHero: true)
+                    ]
+                }
                 return [
-                    CoralLayerSpec(isPoi: false, spriteId: "vent_\(v)",  dxRatio: 0.0,   dyRatio: 0.0,   scaleW: 1.08, scaleH: 1.12, flipX: flipMain,  zOff: 0.02)
+                    CoralLayerSpec(isPoi: false, spriteId: "rock_\(rockV)", dxRatio: -0.28, dyRatio: 0.04, scaleH: 0.54, flipX: !flipMain, zOff: 0.01, isCompositeHero: false),
+                    CoralLayerSpec(isPoi: false, spriteId: "vent_\(v)",     dxRatio: 0.0,   dyRatio: 0.0,  scaleH: 0.94, flipX: flipMain,  zOff: 0.02, isCompositeHero: false)
                 ]
             }
         }
@@ -2254,23 +2316,38 @@ public final class OceanGameScene: SKScene {
                 let sy = toScreenY(outcrop.baseY)
                 let drawBaseW = outcrop.width * zoom
                 let drawBaseH = outcrop.height * zoom
-                if sx + drawBaseW * 1.6 < -100.0 || sx - drawBaseW * 1.6 > viewW + 100.0 { continue }
-                if sy + drawBaseH * 1.6 < -100.0 || sy - drawBaseH * 1.6 > viewH + 100.0 { continue }
+                if sx + drawBaseW * 2.0 < -100.0 || sx - drawBaseW * 2.0 > viewW + 100.0 { continue }
+                if sy + drawBaseH * 2.0 < -100.0 || sy - drawBaseH * 2.0 > viewH + 100.0 { continue }
 
                 let slope = GameRules.getTerrainSlopeAt(worldX: outcrop.worldX)
                 let slopeRot = max(-0.26, min(0.26, atan(slope) * 0.48))
                 let layers = layersForOutcrop(outcrop)
+
+                // Depth-matched underwater color grading so outcrops blend naturally with the seabed
+                let tintColor: UIColor
+                if outcrop.baseY < 620.0 {
+                    tintColor = UIColor(red: 14/255, green: 42/255, blue: 68/255, alpha: 1.0)
+                } else if outcrop.baseY < 1450.0 {
+                    tintColor = UIColor(red: 10/255, green: 26/255, blue: 48/255, alpha: 1.0)
+                } else {
+                    tintColor = UIColor(red: 12/255, green: 14/255, blue: 28/255, alpha: 1.0)
+                }
 
                 for layer in layers {
                     let texOpt = layer.isPoi
                         ? SpriteAtlasManager.shared.poiSpriteTexture(for: layer.spriteId)
                         : SpriteAtlasManager.shared.ecologySpriteTexture(for: layer.spriteId)
                     guard let tex = texOpt else { continue }
-                    let drawW = drawBaseW * layer.scaleW
+                    let texSize = tex.size()
+                    guard texSize.width >= 16.0 && texSize.height >= 16.0 else { continue }
+                    // Preserve true sprite aspect ratio so no sprite is ever stretched or squashed!
+                    let texAspect = max(0.45, min(2.2, Double(texSize.width / texSize.height)))
                     let drawH = drawBaseH * layer.scaleH
-                    let sinkY = drawBaseH * 0.14
+                    let drawW = drawH * texAspect
+                    // Deep 26% base embedding + slope sink so outcrops sit firmly inside the seabed rock
+                    let slopeSink = abs(slope) * drawW * 0.28
+                    let sinkY = drawH * 0.26 + slopeSink
                     let lx = sx + layer.dxRatio * drawBaseW
-                    // Note: in Web Canvas +dyRatio moves DOWN; in SpriteKit -dyRatio moves DOWN
                     let ly = sy - layer.dyRatio * drawBaseH - sinkY
 
                     let node = acquirePooledParallaxTile()
@@ -2282,9 +2359,10 @@ public final class OceanGameScene: SKScene {
                     node.xScale = layer.flipX ? -1.0 : 1.0
                     node.yScale = 1.0
                     node.zRotation = CGFloat(-slopeRot)
-                    node.alpha = 0.96
-                    node.zPosition = 3.8 + layer.zOff
-                    node.colorBlendFactor = 0.0
+                    node.alpha = layer.isCompositeHero ? 0.92 : 0.95
+                    node.zPosition = 3.78 + layer.zOff
+                    node.color = tintColor
+                    node.colorBlendFactor = layer.isCompositeHero ? 0.26 : 0.12
                 }
             }
         }

@@ -7182,12 +7182,14 @@ function sliceAndCleanWorldSpriteRegion(
 }
 
 /**
- * 从独立的 2048x2048 (@3x) 写实透明背景海床生态 PNG 直接构建离屏精灵 Canvas（不切网格图）
- * 仅对齐底部非透明岩石基座边缘，确保 drawBottomAnchoredSprite 100% 严丝合缝锚定在海床上。
+ * 从独立的 2048x2048 (@3x) 写实透明背景海床生态 PNG 构建离屏精灵 Canvas：
+ * 1) 针对深渊热液喷口 (`removeTopWhiteSmoke = true`) 自动滤除顶部亮白/浅灰静态烟团，消除深黑海床背景下的突兀白块；
+ * 2) 底部 16% 岩石基座做余弦 Alpha 柔化渐隐，确保嵌入海床条带时无生硬裁切边缘。
  */
 function prepareStandaloneEcologySpriteCanvas(
   sourceImg: HTMLImageElement,
-  maxTargetDim: number = 420
+  maxTargetDim: number = 380,
+  removeTopWhiteSmoke: boolean = false
 ): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
   const natW = sourceImg.naturalWidth || sourceImg.width;
@@ -7207,14 +7209,38 @@ function prepareStandaloneEcologySpriteCanvas(
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(sourceImg, 0, 0, natW, natH, 0, 0, w, h);
 
-  const data = ctx.getImageData(0, 0, w, h).data;
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+
+  if (removeTopWhiteSmoke) {
+    const smokeCutY = Math.floor(h * 0.28);
+    for (let y = 0; y < smokeCutY; y++) {
+      const vRatio = y / Math.max(1, smokeCutY);
+      for (let x = 0; x < w; x++) {
+        const p = (y * w + x) * 4;
+        const a = data[p + 3];
+        if (a === 0) continue;
+        const r = data[p];
+        const g = data[p + 1];
+        const b = data[p + 2];
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        const sat = maxC - minC;
+        if (vRatio < 0.62 || (minC > 95 && sat < 48) || (r > 135 && g > 115 && b > 105 && sat < 64)) {
+          const keep = vRatio < 0.62 ? 0 : Math.max(0, Math.min(1, (vRatio - 0.62) / 0.38)) * 0.35;
+          data[p + 3] = Math.round(a * keep);
+        }
+      }
+    }
+  }
+
   let minX = w;
   let minY = h;
   let maxX = -1;
   let maxY = -1;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (data[(y * w + x) * 4 + 3] > 20) {
+      if (data[(y * w + x) * 4 + 3] > 24) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -7226,6 +7252,25 @@ function prepareStandaloneEcologySpriteCanvas(
   if (maxX < minX || maxY < minY) {
     return work;
   }
+
+  const boxH = Math.max(1, maxY - minY + 1);
+  const featherStartY = minY + Math.floor(boxH * 0.84);
+  for (let y = minY; y <= maxY; y++) {
+    let baseFade = 1.0;
+    if (y >= featherStartY) {
+      const t = (y - featherStartY) / Math.max(1, maxY - featherStartY);
+      baseFade = 0.5 * (1 + Math.cos(Math.PI * Math.min(1, t * 0.82)));
+    }
+    for (let x = minX; x <= maxX; x++) {
+      const p = (y * w + x) * 4;
+      if (data[p + 3] === 0) continue;
+      data[p] = Math.round(data[p] * 0.90);
+      data[p + 1] = Math.round(data[p + 1] * 0.93);
+      data[p + 2] = Math.round(Math.min(255, data[p + 2] * 0.96 + 6));
+      data[p + 3] = Math.round(data[p + 3] * baseFade);
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
 
   const pad = 2;
   const cropX = Math.max(0, minX - pad);
@@ -7653,82 +7698,85 @@ export class WorldAssetRegistry {
     };
     poiImg.src = WORLD_ATLAS_ASSET_URLS.poisAtlas;
 
-    // 3. 直接加载 4 张独立的 2048x2048 (@3x) 写实风格透明背景海床生态 PNG（无需 4x4 网格切图）
+    // 3A. 加载 4x4 (16种) 独立单体生态图集，确保每种珊瑚/礁石/海草/残骸/喷口拥有截然不同的丰富造型，彻底告别单一素材重复
+    const ecoAtlasImg = new Image();
+    ecoAtlasImg.crossOrigin = 'anonymous';
+    ecoAtlasImg.onload = () => {
+      const cellSlices: Array<{
+        assetKey: string;
+        variant: string;
+        aliasKey?: string;
+        col: number;
+        row: number;
+        cleanHoles: boolean;
+      }> = [
+        // Row 0: 4 种珊瑚
+        { assetKey: 'eco_coral_cluster', variant: 'staghorn', aliasKey: 'flora_coral_cluster', col: 0, row: 0, cleanHoles: true },
+        { assetKey: 'eco_coral_cluster', variant: 'brain_coral', col: 1, row: 0, cleanHoles: false },
+        { assetKey: 'eco_coral_cluster', variant: 'fan_coral', col: 2, row: 0, cleanHoles: true },
+        { assetKey: 'eco_coral_cluster', variant: 'tube_sponge', aliasKey: 'flora_sponge_colony', col: 3, row: 0, cleanHoles: false },
+        // Row 1: 3 种海床礁石 + 1 种黑烟囱喷口
+        { assetKey: 'eco_seabed_rock', variant: 'basalt_boulder', aliasKey: 'ambient_rock_outcrop', col: 0, row: 1, cleanHoles: false },
+        { assetKey: 'eco_seabed_rock', variant: 'mossy_slab', col: 1, row: 1, cleanHoles: false },
+        { assetKey: 'eco_seabed_rock', variant: 'jagged_spire', col: 2, row: 1, cleanHoles: false },
+        { assetKey: 'eco_bubble_stream', variant: 'thermal_micro_vent', aliasKey: 'ambient_hydrothermal_vent', col: 3, row: 1, cleanHoles: false },
+        // Row 2: 3 种海草巨藻 + 1 种蓝光裂隙喷口
+        { assetKey: 'eco_seagrass_bed', variant: 'meadow_tuft', aliasKey: 'flora_kelp_patch', col: 0, row: 2, cleanHoles: true },
+        { assetKey: 'eco_seagrass_bed', variant: 'ribbon_grass', col: 1, row: 2, cleanHoles: true },
+        { assetKey: 'eco_seagrass_bed', variant: 'kelp_sprout', col: 2, row: 2, cleanHoles: true },
+        { assetKey: 'eco_bubble_stream', variant: 'canyon_fissure_vent', col: 3, row: 2, cleanHoles: false },
+        // Row 3: 3 种沉船残骸 + 1 种荧光海葵晶簇
+        { assetKey: 'eco_shipwreck_debris', variant: 'rusted_anchor', aliasKey: 'ambient_sunken_debris', col: 0, row: 3, cleanHoles: true },
+        { assetKey: 'eco_shipwreck_debris', variant: 'broken_mast_timber', col: 1, row: 3, cleanHoles: true },
+        { assetKey: 'eco_shipwreck_debris', variant: 'barnacle_cannon', col: 2, row: 3, cleanHoles: false },
+        { assetKey: 'eco_coral_cluster', variant: 'biolum_anemone', aliasKey: 'flora_sea_anemone', col: 3, row: 3, cleanHoles: false },
+      ];
+
+      for (const spec of cellSlices) {
+        const rect: readonly [number, number, number, number] = [
+          spec.col * 0.25 + 0.015,
+          spec.row * 0.25 + 0.015,
+          (spec.col + 1) * 0.25 - 0.015,
+          (spec.row + 1) * 0.25 - 0.015,
+        ];
+        const canvas = sliceAndCleanWorldSpriteRegion(ecoAtlasImg, rect, spec.cleanHoles, 320);
+        if (canvas) {
+          this.spriteCanvases.set(`${spec.assetKey}:${spec.variant}`, canvas);
+          if (!this.spriteCanvases.has(spec.assetKey)) {
+            this.spriteCanvases.set(spec.assetKey, canvas);
+          }
+          if (spec.aliasKey) {
+            this.spriteCanvases.set(spec.aliasKey, canvas);
+          }
+          if (spec.variant === 'canyon_fissure_vent') {
+            this.spriteCanvases.set('eco_bubble_stream:reef_oxygen_plume', canvas);
+          }
+        }
+      }
+    };
+    ecoAtlasImg.src = WORLD_ATLAS_ASSET_URLS.ecologyAtlas;
+
+    // 3B. 加载 4 张独立的 2048x2048 (@3x) 写实复合生态 PNG 作为稀有主群落变体 (:composite_cluster)，不覆盖 16 种单体变体
     const standaloneEcoSpecs: Array<{
       url: string;
-      primaryAssetKeys: readonly string[];
-      variantsMap: ReadonlyArray<{ assetKey: string; variants: readonly string[] }>;
+      assetKey: string;
+      removeSmoke: boolean;
     }> = [
-      {
-        url: WORLD_ECOLOGY_SPRITE_URLS.coral_reef_cluster,
-        primaryAssetKeys: [
-          'eco_coral_cluster',
-          'flora_coral_cluster',
-          'flora_sea_anemone',
-          'flora_sponge_colony',
-        ],
-        variantsMap: [
-          {
-            assetKey: 'eco_coral_cluster',
-            variants: ['staghorn', 'brain_coral', 'fan_coral', 'tube_sponge', 'biolum_anemone'],
-          },
-        ],
-      },
-      {
-        url: WORLD_ECOLOGY_SPRITE_URLS.rocky_outcrop,
-        primaryAssetKeys: ['eco_seabed_rock', 'ambient_rock_outcrop'],
-        variantsMap: [
-          {
-            assetKey: 'eco_seabed_rock',
-            variants: ['basalt_boulder', 'mossy_slab', 'jagged_spire'],
-          },
-        ],
-      },
-      {
-        url: WORLD_ECOLOGY_SPRITE_URLS.kelp_forest_cluster,
-        primaryAssetKeys: ['eco_seagrass_bed', 'flora_kelp_patch'],
-        variantsMap: [
-          {
-            assetKey: 'eco_seagrass_bed',
-            variants: ['meadow_tuft', 'ribbon_grass', 'kelp_sprout'],
-          },
-        ],
-      },
-      {
-        url: WORLD_ECOLOGY_SPRITE_URLS.abyssal_vent_debris,
-        primaryAssetKeys: [
-          'eco_bubble_stream',
-          'eco_shipwreck_debris',
-          'flora_tube_worm_patch',
-          'ambient_hydrothermal_vent',
-          'ambient_sunken_debris',
-        ],
-        variantsMap: [
-          {
-            assetKey: 'eco_bubble_stream',
-            variants: ['thermal_micro_vent', 'canyon_fissure_vent', 'reef_oxygen_plume'],
-          },
-          {
-            assetKey: 'eco_shipwreck_debris',
-            variants: ['rusted_anchor', 'broken_mast_timber', 'barnacle_cannon'],
-          },
-        ],
-      },
+      { url: WORLD_ECOLOGY_SPRITE_URLS.coral_reef_cluster, assetKey: 'eco_coral_cluster', removeSmoke: false },
+      { url: WORLD_ECOLOGY_SPRITE_URLS.rocky_outcrop, assetKey: 'eco_seabed_rock', removeSmoke: false },
+      { url: WORLD_ECOLOGY_SPRITE_URLS.kelp_forest_cluster, assetKey: 'eco_seagrass_bed', removeSmoke: false },
+      { url: WORLD_ECOLOGY_SPRITE_URLS.abyssal_vent_debris, assetKey: 'eco_bubble_stream', removeSmoke: true },
     ];
 
     for (const spec of standaloneEcoSpecs) {
       const ecoImg = new Image();
       ecoImg.crossOrigin = 'anonymous';
       ecoImg.onload = () => {
-        const canvas = prepareStandaloneEcologySpriteCanvas(ecoImg, 420);
+        const canvas = prepareStandaloneEcologySpriteCanvas(ecoImg, 360, spec.removeSmoke);
         if (!canvas) return;
-        for (const key of spec.primaryAssetKeys) {
-          this.spriteCanvases.set(key, canvas);
-        }
-        for (const mapping of spec.variantsMap) {
-          for (const v of mapping.variants) {
-            this.spriteCanvases.set(`${mapping.assetKey}:${v}`, canvas);
-          }
+        this.spriteCanvases.set(`${spec.assetKey}:composite_cluster`, canvas);
+        if (!this.spriteCanvases.has(spec.assetKey)) {
+          this.spriteCanvases.set(spec.assetKey, canvas);
         }
       };
       ecoImg.src = spec.url;
@@ -7844,9 +7892,9 @@ export class WorldRenderer {
   }
 
   /**
-   * 写实复合大珊瑚礁盘渲染器 (Photorealistic Standalone Coral Reef Outcrop Renderer)
-   * 直接使用完整的 2048x2048 (@3x) 独立写实透明 PNG (`ecology_coral_reef_cluster.png`，内含天然礁石基座、
-   * 脑珊瑚、紫金管状海绵、紫色柳珊瑚海扇与冠层鹿角珊瑚)，无需切图拼接，底部直接嵌入海底斜坡并搭配礁麓伴生海藻。
+   * 多样化复合珊瑚礁群落渲染器 (Multi-Variant Coral Reef Outcrop Renderer)
+   * 结合 16 种单体生态变体（鹿角珊瑚、脑珊瑚、海扇、管状海绵、荧光海葵、苔藓石板、巨藻）与低频（~14%）写实复合群落，
+   * 保持自然克制的比例（34m~52m），底部深嵌海床，彻底解决单一写实素材过大、突兀、重复单调的问题。
    */
   private renderCompositeCoralReefMound(
     ctx: CanvasRenderingContext2D,
@@ -7859,58 +7907,103 @@ export class WorldRenderer {
     nowSec: number,
     skipBgAnim: boolean
   ): void {
-    const coralClusterSprite = this.assetRegistry.getSpriteCanvas('eco_coral_cluster');
-    const rockOutcropSprite = this.assetRegistry.getSpriteCanvas('eco_seabed_rock');
-    const kelpClusterSprite = this.assetRegistry.getSpriteCanvas('eco_seagrass_bed');
-    const abyssalVentSprite = this.assetRegistry.getSpriteCanvas('eco_bubble_stream');
-
     const isDeepAbyss = biomeId === 'deep_abyss';
+    const clampedScale = Math.max(0.68, Math.min(1.12, scale * 0.82));
     const slopeAngle = Math.atan2(localSlope, 1) * 0.68;
-    const reefSpanHalfW = 36 * scale;
-    const slopeEmbedSink = Math.abs(localSlope) * reefSpanHalfW + 7 * scale;
+    const reefSpanHalfW = 28 * clampedScale;
+    const slopeEmbedSink = Math.abs(localSlope) * reefSpanHalfW + 8 * clampedScale;
 
     const sway = skipBgAnim
       ? 0
       : Math.sin(nowSec * 1.35 + (seedHash % 97) * 0.065) * 0.025;
+
+    const rockVariants = ['mossy_slab', 'basalt_boulder', 'jagged_spire'] as const;
+    const coralVariants = isDeepAbyss
+      ? (['biolum_anemone', 'tube_sponge', 'brain_coral'] as const)
+      : (['staghorn', 'brain_coral', 'fan_coral', 'tube_sponge', 'biolum_anemone'] as const);
+    const kelpVariants = ['meadow_tuft', 'ribbon_grass', 'kelp_sprout'] as const;
+
+    const baseRockSprite = this.assetRegistry.getSpriteCanvas(
+      'eco_seabed_rock',
+      rockVariants[seedHash % rockVariants.length]
+    );
+    const primaryCoralVar = coralVariants[(seedHash >>> 4) % coralVariants.length];
+    const secondaryCoralVar = coralVariants[(seedHash >>> 8) % coralVariants.length];
+    const useCompositeHero = (seedHash % 7) === 0;
+
+    const mainCoralSprite = useCompositeHero
+      ? (this.assetRegistry.getSpriteCanvas('eco_coral_cluster', 'composite_cluster') ??
+         this.assetRegistry.getSpriteCanvas('eco_coral_cluster', primaryCoralVar))
+      : this.assetRegistry.getSpriteCanvas('eco_coral_cluster', primaryCoralVar);
+    const sideCoralSprite = this.assetRegistry.getSpriteCanvas('eco_coral_cluster', secondaryCoralVar);
+    const sideKelpSprite = this.assetRegistry.getSpriteCanvas(
+      'eco_seagrass_bed',
+      kelpVariants[(seedHash >>> 12) % kelpVariants.length]
+    );
 
     ctx.save();
     ctx.translate(anchorEngineX, anchorFloorEngineY + slopeEmbedSink);
     ctx.rotate(slopeAngle);
 
     // 1. 礁盘底部接触环境光遮蔽阴影 (Contact Ambient Occlusion)
-    ctx.fillStyle = 'rgba(2, 6, 23, 0.44)';
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
     ctx.beginPath();
-    ctx.ellipse(0, 2 * scale, 42 * scale, 8 * scale, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 2 * clampedScale, 32 * clampedScale, 6.5 * clampedScale, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 2. 礁麓侧翼伴生海藻或深渊礁石衬底（约 66% 礁盘带侧翼伴生群落，增强自然生态层次感）
-    if ((seedHash % 3) !== 0) {
-      const sideSprite = isDeepAbyss ? rockOutcropSprite : kelpClusterSprite;
-      const sideSign = (seedHash & 1) === 0 ? -1 : 1;
+    // 2. 底层护根礁石基座
+    if (!useCompositeHero && baseRockSprite) {
       this.drawBottomAnchoredSprite(
         ctx,
-        sideSprite,
-        sideSign * 26 * scale,
-        3 * scale,
-        36 * scale,
-        0.26,
-        sideSign * 0.12 + sway * 1.4,
-        (seedHash & 2) !== 0,
-        '#10b981'
+        baseRockSprite,
+        0,
+        4 * clampedScale,
+        24 * clampedScale,
+        0.34,
+        0,
+        (seedHash & 1) !== 0,
+        '#334155'
       );
     }
 
-    // 3. 绘制完整独立的 @3x 写实复合大珊瑚礁盘主体（深渊偶现热液管虫海葵礁群）
-    const mainSprite =
-      isDeepAbyss && (seedHash & 4) !== 0 ? abyssalVentSprite : coralClusterSprite;
+    // 3. 侧翼伴生海草或次级珊瑚簇（错落大小比例，打破单调）
+    const sideSign = (seedHash & 2) === 0 ? -1 : 1;
+    if ((seedHash % 3) !== 0 && sideKelpSprite) {
+      this.drawBottomAnchoredSprite(
+        ctx,
+        sideKelpSprite,
+        sideSign * 18 * clampedScale,
+        3 * clampedScale,
+        28 * clampedScale,
+        0.28,
+        sideSign * 0.12 + sway * 1.4,
+        (seedHash & 4) !== 0,
+        '#10b981'
+      );
+    }
+    if (!useCompositeHero && sideCoralSprite && secondaryCoralVar !== primaryCoralVar) {
+      this.drawBottomAnchoredSprite(
+        ctx,
+        sideCoralSprite,
+        -sideSign * 15 * clampedScale,
+        2 * clampedScale,
+        26 * clampedScale,
+        0.28,
+        -sideSign * 0.10 + sway * 0.6,
+        (seedHash & 16) !== 0,
+        '#f43f5e'
+      );
+    }
+
+    // 4. 主珊瑚簇（严格控制在 38m~46m 自然高度，绝不喧宾夺主）
     this.drawBottomAnchoredSprite(
       ctx,
-      mainSprite,
+      mainCoralSprite,
       0,
-      2 * scale,
-      62 * scale,
-      0.24,
-      sway * 0.5,
+      2 * clampedScale,
+      (useCompositeHero ? 46 : 40) * clampedScale,
+      0.28,
+      sway * 0.4,
       (seedHash & 8) !== 0,
       '#fb7185'
     );
@@ -7919,9 +8012,9 @@ export class WorldRenderer {
   }
 
   /**
-   * 写实海底岩礁露头与深渊热液残骸渲染器 (Photorealistic Standalone Rock Outcrop & Abyssal Vent/Debris Renderer)
-   * 直接使用完整的 2048x2048 (@3x) 独立写实透明 PNG (`ecology_rocky_outcrop.png` 与 `ecology_abyssal_vent_debris.png`)，
-   * 底部 100% 嵌入海床地形。
+   * 多样化海底岩礁露头与沉船残骸渲染器 (Multi-Variant Rock Outcrop & Debris Renderer)
+   * 按 variant 精确区分玄武岩巨石、苔藓阶梯岩、裂隙尖塔、铁锚、船舵木板与古炮，仅以 ~12% 低频穿插写实复合礁石，
+   * 尺寸控制在 34m~48m 并深嵌海床 28%。
    */
   private renderAnchoredRockOrDebrisWithEpifauna(
     ctx: CanvasRenderingContext2D,
@@ -7937,11 +8030,21 @@ export class WorldRenderer {
     skipBgAnim: boolean
   ): void {
     const assetKey = objType === 'rock' ? 'eco_seabed_rock' : 'eco_shipwreck_debris';
-    const mainSprite = this.assetRegistry.getSpriteCanvas(assetKey, variant);
-    const coralClusterSprite = this.assetRegistry.getSpriteCanvas('eco_coral_cluster');
+    const useCompositeRock = objType === 'rock' && (seedHash % 8) === 0;
+    const mainSprite = useCompositeRock
+      ? (this.assetRegistry.getSpriteCanvas('eco_seabed_rock', 'composite_cluster') ??
+         this.assetRegistry.getSpriteCanvas(assetKey, variant))
+      : this.assetRegistry.getSpriteCanvas(assetKey, variant);
+
+    const epifaunaVariants = ['brain_coral', 'tube_sponge', 'biolum_anemone', 'staghorn'] as const;
+    const coralClusterSprite = this.assetRegistry.getSpriteCanvas(
+      'eco_coral_cluster',
+      epifaunaVariants[(seedHash >>> 5) % epifaunaVariants.length]
+    );
+    const clampedScale = Math.max(0.65, Math.min(1.08, scale * 0.80));
     const slopeAngle = Math.atan2(localSlope, 1) * 0.65;
-    const baseH = (objType === 'shipwreck_debris' ? 58 : 54) * scale;
-    const slopeEmbedSink = Math.abs(localSlope) * (baseH * 0.45) + 6 * scale;
+    const baseH = (objType === 'shipwreck_debris' ? 42 : (useCompositeRock ? 46 : 38)) * clampedScale;
+    const slopeEmbedSink = Math.abs(localSlope) * (baseH * 0.45) + 7 * clampedScale;
     const sway = skipBgAnim ? 0 : Math.sin(nowSec * 1.4 + (seedHash % 83) * 0.07) * 0.025;
 
     ctx.save();
@@ -7949,34 +8052,34 @@ export class WorldRenderer {
     ctx.rotate(slopeAngle);
 
     // 1. 底部接触阴影
-    ctx.fillStyle = 'rgba(2, 6, 23, 0.42)';
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.40)';
     ctx.beginPath();
-    ctx.ellipse(0, 2 * scale, 36 * scale, 7.5 * scale, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 2 * clampedScale, 28 * clampedScale, 6 * clampedScale, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 2. 绘制完整独立的 @3x 写实海底岩礁尖塔或深渊热液铁锚残骸主体
+    // 2. 绘制岩石或残骸主体
     this.drawBottomAnchoredSprite(
       ctx,
       mainSprite,
       0,
-      2 * scale,
+      2 * clampedScale,
       baseH,
-      0.25,
+      0.28,
       0,
       (seedHash & 2) !== 0,
       '#475569'
     );
 
-    // 3. 在浅海/中层水域的部分岩石侧麓伴生一簇小型写实珊瑚礁群落
-    if (objType === 'rock' && biomeId === 'coral_reef' && (seedHash % 3) === 0) {
+    // 3. 在岩石侧麓伴生一簇小型共生珊瑚/海葵
+    if (objType === 'rock' && biomeId !== 'deep_abyss' && (seedHash % 3) === 0 && coralClusterSprite) {
       const sideSign = (seedHash & 4) === 0 ? -1 : 1;
       this.drawBottomAnchoredSprite(
         ctx,
         coralClusterSprite,
-        sideSign * 20 * scale,
-        2 * scale,
-        34 * scale,
-        0.28,
+        sideSign * 15 * clampedScale,
+        2 * clampedScale,
+        24 * clampedScale,
+        0.30,
         sideSign * 0.14 + sway,
         (seedHash & 8) !== 0,
         '#f43f5e'

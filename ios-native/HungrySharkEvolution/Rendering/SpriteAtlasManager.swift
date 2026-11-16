@@ -293,21 +293,28 @@ public final class SpriteAtlasManager: ObservableObject {
                 self.loadingProgress = max(self.loadingProgress, 0.85)
             }
 
-            // Load 4 Standalone High-Res (@3x) Realistic Transparent Ecology PNGs (no 4x4 sprite sheet slicing) & 10 POI Sprites
+            // Load 16 Distinct Ecology Sprites from world_ecology_atlas_1794473252524 + 4 Cleaned/Feathered Standalone @3x Clusters (as _5 variants) & 10 POI Sprites
             var localEcologyTex: [String: SKTexture] = [:]
-            let standaloneEcologyDefs: [(prefix: String, assetName: String)] = [
-                ("coral", "ecology_coral_reef_cluster"),
-                ("rock", "ecology_rocky_outcrop"),
-                ("kelp", "ecology_kelp_forest_cluster"),
-                ("vent", "ecology_abyssal_vent_debris")
+            if let ecoSheet = Self.loadBundledImage(named: "world_ecology_atlas_1794473252524") {
+                localEcologyTex = Self.sliceWorldEcologyAtlas(from: ecoSheet)
+            }
+            let standaloneEcologyDefs: [(prefix: String, assetName: String, removeSmoke: Bool)] = [
+                ("coral", "ecology_coral_reef_cluster", false),
+                ("rock", "ecology_rocky_outcrop", false),
+                ("kelp", "ecology_kelp_forest_cluster", false),
+                ("vent", "ecology_abyssal_vent_debris", true)
             ]
             for def in standaloneEcologyDefs {
-                if let ecoImg = Self.loadBundledImage(named: def.assetName) {
-                    let tex = SKTexture(image: ecoImg)
+                if let rawEcoImg = Self.loadBundledImage(named: def.assetName) {
+                    let cleanedImg = Self.prepareStandaloneEcologyImage(from: rawEcoImg, removeTopWhiteSmoke: def.removeSmoke) ?? rawEcoImg
+                    let tex = SKTexture(image: cleanedImg)
                     tex.filteringMode = .linear
+                    localEcologyTex["\(def.prefix)_5"] = tex
                     localEcologyTex[def.prefix] = tex
                     for idx in 1...4 {
-                        localEcologyTex["\(def.prefix)_\(idx)"] = tex
+                        if localEcologyTex["\(def.prefix)_\(idx)"] == nil {
+                            localEcologyTex["\(def.prefix)_\(idx)"] = tex
+                        }
                     }
                 }
             }
@@ -1150,6 +1157,7 @@ public final class SpriteAtlasManager: ObservableObject {
     }
 
     /// CoreGraphics Perimeter BFS Flood-Fill + Boundary Color-to-Alpha White Unmixing
+    /// (Includes strict [x0, y0, x1, y1] & 2D bounding-box guards so a 1px or thin barcode texture can NEVER be created!)
     nonisolated private static func sliceAndKeyNormalizedCell(
         from sheetImage: UIImage,
         bounds: SIMD4<Double>,
@@ -1159,20 +1167,22 @@ public final class SpriteAtlasManager: ObservableObject {
         guard let cgSheet = sheetImage.cgImage else { return nil }
         let fullW = Double(cgSheet.width)
         let fullH = Double(cgSheet.height)
+        guard bounds.z > bounds.x + 0.03, bounds.w > bounds.y + 0.03 else { return nil }
 
         let sx = max(0, Int((bounds.x * fullW).rounded(.down)))
         let sy = max(0, Int((bounds.y * fullH).rounded(.down)))
         let cellW = max(1, min(cgSheet.width - sx, Int(((bounds.z - bounds.x) * fullW).rounded(.down))))
         let cellH = max(1, min(cgSheet.height - sy, Int(((bounds.w - bounds.y) * fullH).rounded(.down))))
+        guard cellW >= 24 && cellH >= 24 else { return nil }
 
         guard let croppedCG = cgSheet.cropping(to: CGRect(x: sx, y: sy, width: cellW, height: cellH)) else {
             return nil
         }
 
-        let maxCellW = topSkyOnly ? 1024 : 320
+        let maxCellW = topSkyOnly ? 1024 : 340
         let scale = cellW > maxCellW ? Double(maxCellW) / Double(cellW) : 1.0
-        let w = max(1, Int((Double(cellW) * scale).rounded()))
-        let h = max(1, Int((Double(cellH) * scale).rounded()))
+        let w = max(16, Int((Double(cellW) * scale).rounded()))
+        let h = max(16, Int((Double(cellH) * scale).rounded()))
 
         var rgba = [UInt8](repeating: 0, count: w * h * 4)
         let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -1187,7 +1197,7 @@ public final class SpriteAtlasManager: ObservableObject {
             space: colorSpace,
             bitmapInfo: bitmapInfo
         ) else {
-            return UIImage(cgImage: croppedCG)
+            return nil
         }
 
         ctx.interpolationQuality = .high
@@ -1207,7 +1217,7 @@ public final class SpriteAtlasManager: ObservableObject {
             let b = Int(rgba[p + 2])
             let maxC = max(r, max(g, b))
             let minC = min(r, min(g, b))
-            return minC >= 226 && (maxC - minC) <= 26
+            return minC >= 224 && (maxC - minC) <= 28
         }
 
         func enqueue(_ x: Int, _ y: Int) {
@@ -1245,6 +1255,26 @@ public final class SpriteAtlasManager: ObservableObject {
             if cx + 1 < w { enqueue(cx + 1, cy) }
             if cy > 0 { enqueue(cx, cy - 1) }
             if cy + 1 < h { enqueue(cx, cy + 1) }
+        }
+
+        // Clear enclosed pure-white holes inside rigging/anchors/coral branches when !preserveInteriorWhite
+        if !preserveInteriorWhite && !topSkyOnly {
+            for idx in 0..<(w * h) {
+                if visited[idx] != 0 { continue }
+                let p = idx * 4
+                let r = Int(rgba[p])
+                let g = Int(rgba[p + 1])
+                let b = Int(rgba[p + 2])
+                let minC = min(r, min(g, b))
+                let maxC = max(r, max(g, b))
+                if minC >= 242 && (maxC - minC) <= 14 {
+                    rgba[p] = 0
+                    rgba[p + 1] = 0
+                    rgba[p + 2] = 0
+                    rgba[p + 3] = 0
+                    visited[idx] = 1
+                }
+            }
         }
 
         // Boundary Color-to-Alpha unmixing on 2px halo around removed white background + tight bounding-box measurement
@@ -1297,18 +1327,22 @@ public final class SpriteAtlasManager: ObservableObject {
         }
 
         guard let outCG = ctx.makeImage() else { return nil }
-        // Tight-crop non-transparent bounding box for all shark & prey sprites (1:1 parity with Web spriteSheetManager.ts)
-        if !topSkyOnly && maxX >= minX && maxY >= minY {
-            let pad = 2
-            let cx = max(0, minX - pad)
-            let cy = max(0, minY - pad)
-            let cw = min(w - cx, (maxX - minX + 1) + pad * 2)
-            let ch = min(h - cy, (maxY - minY + 1) + pad * 2)
-            if cw > 4 && ch > 4, let tightCG = outCG.cropping(to: CGRect(x: cx, y: cy, width: cw, height: ch)) {
-                return UIImage(cgImage: tightCG)
-            }
+        if topSkyOnly {
+            return UIImage(cgImage: outCG)
         }
-        return UIImage(cgImage: outCG)
+        guard maxX >= minX && maxY >= minY else { return nil }
+        let pad = 2
+        let cx = max(0, minX - pad)
+        let cy = max(0, minY - pad)
+        let cw = min(w - cx, (maxX - minX + 1) + pad * 2)
+        let ch = min(h - cy, (maxY - minY + 1) + pad * 2)
+        guard cw >= 18 && ch >= 18 else { return nil }
+        let aspect = Double(cw) / Double(ch)
+        guard aspect >= 0.18 && aspect <= 5.5 else { return nil }
+        guard let tightCG = outCG.cropping(to: CGRect(x: cx, y: cy, width: cw, height: ch)) else {
+            return nil
+        }
+        return UIImage(cgImage: tightCG)
     }
 
     /// Synthesizes a horizontally-seamless tile from an RGBA pixel buffer by cross-fading a seamRatio overlap band
@@ -2056,14 +2090,120 @@ public final class SpriteAtlasManager: ObservableObject {
         return makeHorizontallySeamlessImage(rgba: outRgba, width: w, height: outH, seamRatio: 0.12)
     }
 
+    /// Cleans standalone @3x ecology PNGs: removes top white/grey static smoke on hydrothermal vents,
+    /// softens bottom 16% rock base alpha for seamless seabed embedding, and tight-crops non-transparent bounds
+    nonisolated private static func prepareStandaloneEcologyImage(
+        from image: UIImage,
+        removeTopWhiteSmoke: Bool
+    ) -> UIImage? {
+        guard let cg = image.cgImage else { return nil }
+        let maxDim = 360.0
+        let scale = min(1.0, maxDim / Double(max(cg.width, cg.height)))
+        let w = max(24, Int((Double(cg.width) * scale).rounded()))
+        let h = max(24, Int((Double(cg.height) * scale).rounded()))
+
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+
+        if removeTopWhiteSmoke {
+            let smokeCutY = Int(Double(h) * 0.28)
+            for y in 0..<smokeCutY {
+                let vRatio = Double(y) / Double(max(1, smokeCutY))
+                for x in 0..<w {
+                    let p = (y * w + x) * 4
+                    let a = rgba[p + 3]
+                    if a == 0 { continue }
+                    let r = Int(rgba[p])
+                    let g = Int(rgba[p + 1])
+                    let b = Int(rgba[p + 2])
+                    let maxC = max(r, max(g, b))
+                    let minC = min(r, min(g, b))
+                    let sat = maxC - minC
+                    if vRatio < 0.62 || (minC > 95 && sat < 48) || (r > 135 && g > 115 && b > 105 && sat < 64) {
+                        let keep = vRatio < 0.62 ? 0.0 : max(0.0, min(1.0, (vRatio - 0.62) / 0.38)) * 0.35
+                        rgba[p] = UInt8((Double(r) * keep).rounded())
+                        rgba[p + 1] = UInt8((Double(g) * keep).rounded())
+                        rgba[p + 2] = UInt8((Double(b) * keep).rounded())
+                        rgba[p + 3] = UInt8((Double(a) * keep).rounded())
+                    }
+                }
+            }
+        }
+
+        var minX = w
+        var minY = h
+        var maxX = 0
+        var maxY = 0
+        for y in 0..<h {
+            for x in 0..<w {
+                if rgba[(y * w + x) * 4 + 3] > 24 {
+                    if x < minX { minX = x }
+                    if x > maxX { maxX = x }
+                    if y < minY { minY = y }
+                    if y > maxY { maxY = y }
+                }
+            }
+        }
+        guard maxX >= minX && maxY >= minY else { return nil }
+
+        let boxH = max(1, maxY - minY + 1)
+        let featherStartY = minY + Int(Double(boxH) * 0.84)
+        for y in minY...maxY {
+            var baseFade = 1.0
+            if y >= featherStartY {
+                let t = Double(y - featherStartY) / Double(max(1, maxY - featherStartY))
+                baseFade = 0.5 * (1.0 + cos(.pi * min(1.0, t * 0.82)))
+            }
+            for x in minX...maxX {
+                let p = (y * w + x) * 4
+                let a = rgba[p + 3]
+                if a == 0 { continue }
+                rgba[p] = UInt8((Double(rgba[p]) * 0.90 * baseFade).rounded())
+                rgba[p + 1] = UInt8((Double(rgba[p + 1]) * 0.93 * baseFade).rounded())
+                rgba[p + 2] = UInt8((min(255.0, Double(rgba[p + 2]) * 0.96 + 6.0) * baseFade).rounded())
+                rgba[p + 3] = UInt8((Double(a) * baseFade).rounded())
+            }
+        }
+
+        guard let fullCG = ctx.makeImage() else { return nil }
+        let pad = 2
+        let cx = max(0, minX - pad)
+        let cy = max(0, minY - pad)
+        let cw = min(w - cx, (maxX - minX + 1) + pad * 2)
+        let ch = min(h - cy, (maxY - minY + 1) + pad * 2)
+        guard cw >= 18 && ch >= 18,
+              let tightCG = fullCG.cropping(to: CGRect(x: cx, y: cy, width: cw, height: ch)) else {
+            return nil
+        }
+        return UIImage(cgImage: tightCG)
+    }
+
     /// Slices the 4x4 World Ecology Atlas (world_ecology_atlas_1794473252524.jpg) into 16 transparent SKTextures
+    /// using exact [x0, y0, x1, y1] normalized bounds and matching the true 4x4 layout of the atlas!
     nonisolated private static func sliceWorldEcologyAtlas(from image: UIImage) -> [String: SKTexture] {
         var out: [String: SKTexture] = [:]
+        // True 4x4 layout of world_ecology_atlas_1794473252524.jpg:
+        // Row 0: pink staghorn, cyan brain coral, purple sea fan, tube sponge
+        // Row 1: basalt boulder, mossy stepped slab, cyan-fissured spire, black smoker chimney
+        // Row 2: green seagrass, cyan ribbon grass, golden giant kelp, cyan bubble fissure rock
+        // Row 3: rusted anchor, ship wheel & planks, sunken cannon, bioluminescent anemones
         let rows: [[String]] = [
-            ["kelp_1", "kelp_2", "kelp_3", "kelp_4"],
             ["coral_1", "coral_2", "coral_3", "coral_4"],
-            ["rock_1", "rock_2", "rock_3", "rock_4"],
-            ["vent_1", "vent_2", "vent_3", "vent_4"]
+            ["rock_1",  "rock_2",  "rock_3",  "vent_1"],
+            ["kelp_1",  "kelp_2",  "kelp_3",  "vent_2"],
+            ["vent_3",  "rock_4",  "debris_1", "vent_4"]
         ]
         for r in 0..<4 {
             for c in 0..<4 {
@@ -2071,8 +2211,8 @@ public final class SpriteAtlasManager: ObservableObject {
                 let bounds = SIMD4<Double>(
                     Double(c) * 0.25 + 0.015,
                     Double(r) * 0.25 + 0.015,
-                    0.22,
-                    0.22
+                    Double(c + 1) * 0.25 - 0.015,
+                    Double(r + 1) * 0.25 - 0.015
                 )
                 if let uiImg = sliceAndKeyNormalizedCell(from: image, bounds: bounds, preserveInteriorWhite: false) {
                     let tex = SKTexture(image: uiImg)
@@ -2081,23 +2221,29 @@ public final class SpriteAtlasManager: ObservableObject {
                 }
             }
         }
+        if out["kelp_4"] == nil {
+            out["kelp_4"] = out["kelp_2"] ?? out["kelp_1"]
+        }
         return out
     }
 
     /// Slices the 10 Landmark POIs from world_pois_atlas_1794473250443.jpg into transparent SKTextures
+    /// using the exact [x0, y0, x1, y1] normalized bounds from Web (100% eliminates 1px barcode slices!)
     nonisolated private static func sliceWorldPoisAtlas(from image: UIImage) -> [String: SKTexture] {
         var out: [String: SKTexture] = [:]
         let defs: [(id: String, bounds: SIMD4<Double>)] = [
-            ("shipwreck_1", SIMD4(0.02, 0.02, 0.46, 0.22)),
-            ("shipwreck_2", SIMD4(0.52, 0.02, 0.46, 0.22)),
-            ("statue_1", SIMD4(0.02, 0.27, 0.46, 0.21)),
-            ("statue_2", SIMD4(0.52, 0.27, 0.46, 0.21)),
-            ("arch_1", SIMD4(0.02, 0.52, 0.46, 0.21)),
-            ("arch_2", SIMD4(0.52, 0.52, 0.46, 0.21)),
-            ("skeleton_1", SIMD4(0.02, 0.77, 0.30, 0.21)),
-            ("skeleton_2", SIMD4(0.35, 0.77, 0.30, 0.21)),
-            ("mine_1", SIMD4(0.68, 0.77, 0.14, 0.21)),
-            ("mine_2", SIMD4(0.84, 0.77, 0.14, 0.21))
+            // Row 1 (Top 5 landmarks)
+            ("shipwreck_1", SIMD4(0.005, 0.010, 0.268, 0.370)),
+            ("arch_1",      SIMD4(0.265, 0.040, 0.465, 0.375)),
+            ("treasure_1",  SIMD4(0.465, 0.080, 0.602, 0.375)),
+            ("nest_1",      SIMD4(0.602, 0.080, 0.782, 0.375)),
+            ("skeleton_1",  SIMD4(0.782, 0.060, 0.992, 0.375)),
+            // Row 2 (Bottom 5 landmarks)
+            ("shipwreck_2", SIMD4(0.008, 0.660, 0.242, 0.985)),
+            ("arch_2",      SIMD4(0.245, 0.640, 0.455, 0.985)),
+            ("treasure_2",  SIMD4(0.458, 0.690, 0.618, 0.985)),
+            ("nest_2",      SIMD4(0.618, 0.680, 0.835, 0.985)),
+            ("statue_1",    SIMD4(0.835, 0.540, 0.988, 0.985))
         ]
         for def in defs {
             if let uiImg = sliceAndKeyNormalizedCell(from: image, bounds: def.bounds, preserveInteriorWhite: false) {
@@ -2106,6 +2252,8 @@ public final class SpriteAtlasManager: ObservableObject {
                 out[def.id] = tex
             }
         }
+        out["statue_2"] = out["statue_1"]
+        out["skeleton_2"] = out["nest_2"] ?? out["skeleton_1"]
         return out
     }
 
