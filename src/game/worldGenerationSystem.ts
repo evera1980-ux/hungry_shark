@@ -2562,7 +2562,7 @@ export function getSeabedTerraceAt(
   const graftedEdgeWeight = raw.edgeWeight * graftT;
 
   return {
-    active: !raw.isDiveOpening && graftedEdgeWeight > 0.02,
+    active: !raw.isDiveOpening && graftT > 0.03,
     tierIndex: tier.tierIndex,
     isDiveOpening: raw.isDiveOpening,
     openingDepthFactor: raw.openingDepthFactor * graftT,
@@ -2788,7 +2788,33 @@ export function resolveSeabedCollision(
     const terrace = getSeabedTerraceAt(worldX, tIdx, config);
     if (!terrace.active) continue;
 
-    const topAllowedY = terrace.topFloorY - safeRadius;
+    // 当主海床山坡上抬 (mainFloorY < graftFuseMainY) 使拱顶嵌入山根内部时，不存在洞下水通道，整个区间为实心山体楔块！
+    const hasUnderCorridor = floorEngineY - terrace.bottomArchY > safeRadius * 1.25;
+    if (!hasUnderCorridor) {
+      const wedgeTopY = Math.min(terrace.topFloorY, floorEngineY);
+      const wedgeTopAllowedY = Math.min(maxAllowedMainY, wedgeTopY - safeRadius);
+      if (engineY > wedgeTopAllowedY && refY >= tierSpec.minRidgeY - safeRadius - 260) {
+        const wedgeSlope =
+          terrace.topFloorY <= floorEngineY ? terrace.slope : mainSlope;
+        const wedgeTangentScale = 1 / Math.sqrt(1 + wedgeSlope * wedgeSlope);
+        return {
+          engineX,
+          engineY: wedgeTopAllowedY,
+          vy: vy > 0 ? -vy * 0.12 : vy,
+          collided: true,
+          floorWorldY: meterDepthToWorldY(wedgeTopY),
+          floorEngineY: wedgeTopY,
+          slope: wedgeSlope,
+          tangentScale: wedgeTangentScale,
+          onShallowAtoll: true,
+          hitAtollUnderside: false,
+          terraceTierIndex: tIdx,
+        };
+      }
+      continue;
+    }
+
+    const topAllowedY = Math.min(maxAllowedMainY, terrace.topFloorY - safeRadius);
     const bottomAllowedY = terrace.bottomArchY + safeRadius;
 
     // 严格区分「该层海床上方」与「该层海床下方」：凡起始高度位于表层以下 (refY > topFloorY + 4) 的实体一律归属该层下方，严禁向上穿透至表层！
@@ -2884,6 +2910,56 @@ export interface SeabedKineticStepResult {
   effectiveSpeed2D: number;
 }
 
+function hitsTerraceVerticalWallHorizontally(
+  prevEngineX: number,
+  prevEngineY: number,
+  candEngineX: number,
+  entityRadiusMeters: number,
+  config: WorldConfigType
+): boolean {
+  if (Math.abs(candEngineX - prevEngineX) < 1e-6) return false;
+  const safeRadius = Math.max(0, entityRadiusMeters);
+  const prevWorldX = prevEngineX * WORLD_UNITS_PER_METER;
+  const candWorldX = candEngineX * WORLD_UNITS_PER_METER;
+  const candMainY = getEngineFloorDepthAt(candEngineX, config);
+
+  for (let tIdx = 0; tIdx < SEABED_TERRACE_TIERS.length; tIdx++) {
+    const tierSpec = SEABED_TERRACE_TIERS[tIdx];
+    const bandMinY = tierSpec.minRidgeY - safeRadius - 120;
+    const bandMaxY = tierSpec.archMaxDepthY + safeRadius + 120;
+    if (prevEngineY < bandMinY || prevEngineY > bandMaxY) {
+      continue;
+    }
+
+    const nextT = getSeabedTerraceAt(candWorldX, tIdx, config);
+    if (!nextT.active) continue;
+
+    const prevT = getSeabedTerraceAt(prevWorldX, tIdx, config);
+    const candHasUnderCorridor = candMainY - nextT.bottomArchY > safeRadius * 1.25;
+
+    // Case A: 实体在洞口开阔水域水平越过洞唇壁面 (!prevT.active -> nextT.active)，
+    // 且垂直位置正对着实心悬崖断面（或该处已嫁接为无洞下通道的实心山根）
+    if (!prevT.active) {
+      const insideVerticalCliff =
+        prevEngineY > nextT.topFloorY - safeRadius * 0.15 &&
+        (!candHasUnderCorridor || prevEngineY < nextT.bottomArchY + safeRadius * 0.35);
+      if (insideVerticalCliff) {
+        return true;
+      }
+    }
+
+    // Case B: 实体位于拱顶下方走廊/洞腔内，试图水平挤入洞顶与主海床交汇的狭窄山根楔形区（垂直净空 < 2*r + 4）
+    if (
+      prevEngineY > nextT.topFloorY + 4 &&
+      candMainY - nextT.bottomArchY < safeRadius * 2 + 4 &&
+      prevEngineY > Math.min(nextT.topFloorY, candMainY) - safeRadius * 0.15
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function resolveSeabedKineticStep(
   prevEngineX: number,
   prevEngineY: number,
@@ -2900,8 +2976,44 @@ export function resolveSeabedKineticStep(
   const rawNextX = prevEngineX + vx * dt;
   const rawNextY = prevEngineY + vy * dt;
 
+  let stepTargetX = rawNextX;
+  let hitWallHorizontally = false;
+  if (
+    hitsTerraceVerticalWallHorizontally(
+      prevEngineX,
+      prevEngineY,
+      rawNextX,
+      entityRadiusMeters,
+      config
+    )
+  ) {
+    hitWallHorizontally = true;
+    let lo = 0;
+    let hi = 1;
+    let safeX = prevEngineX;
+    for (let iter = 0; iter < 6; iter++) {
+      const mid = (lo + hi) * 0.5;
+      const candX = prevEngineX + (rawNextX - prevEngineX) * mid;
+      if (
+        hitsTerraceVerticalWallHorizontally(
+          prevEngineX,
+          prevEngineY,
+          candX,
+          entityRadiusMeters,
+          config
+        )
+      ) {
+        hi = mid;
+      } else {
+        lo = mid;
+        safeX = candX;
+      }
+    }
+    stepTargetX = safeX;
+  }
+
   const initialCol = resolveSeabedCollision(
-    rawNextX,
+    stepTargetX,
     rawNextY,
     entityRadiusMeters,
     vy,
@@ -2910,14 +3022,16 @@ export function resolveSeabedKineticStep(
   );
 
   if (!initialCol.collided) {
+    const effectiveVx = hitWallHorizontally ? 0 : vx;
+    const effectiveSpeed = Math.hypot(stepTargetX - prevEngineX, rawNextY - prevEngineY) / dt;
     return {
-      engineX: rawNextX,
+      engineX: stepTargetX,
       engineY: rawNextY,
-      vx,
+      vx: effectiveVx,
       vy,
-      collided: false,
+      collided: hitWallHorizontally,
       collision: initialCol,
-      effectiveSpeed2D: intendedSpeed,
+      effectiveSpeed2D: effectiveSpeed,
     };
   }
 
@@ -2927,20 +3041,21 @@ export function resolveSeabedKineticStep(
     const bSlope = initialCol.slope;
     const bTangentScale = initialCol.tangentScale; // 1 / sqrt(1 + bSlope^2)
     // 当水平移动挤压向下倾斜的洞壁 (vx * bSlope > 0) 时，将速度矢量正交投影到洞壁单位切向量 T = (bTangentScale, bSlope * bTangentScale)，防止水平位移与垂直下推位移叠加
-    const vParallelUnder = (vx + Math.max(0, vy) * bSlope) * bTangentScale;
+    const effVx = hitWallHorizontally ? 0 : vx;
+    const vParallelUnder = (effVx + Math.max(0, vy) * bSlope) * bTangentScale;
     const tangentSpeed =
-      vx * bSlope > 0
-        ? vx * vParallelUnder <= 0
+      effVx * bSlope > 0
+        ? effVx * vParallelUnder <= 0
           ? 0
           : Math.max(
               -intendedSpeed * 0.88,
               Math.min(intendedSpeed * 0.88, vParallelUnder * 0.88)
             )
-        : vx * 0.88;
-    let adjustedDx = tangentSpeed * bTangentScale * dt;
+        : effVx * 0.88;
+    let adjustedDx = hitWallHorizontally ? (stepTargetX - prevEngineX) : tangentSpeed * bTangentScale * dt;
     let finalX = prevEngineX + adjustedDx;
 
-    // 若目标 X 处于当前层拱顶与主海床山腰交汇的狭窄山根楔形区内（垂直净空 < 2 * radius + 4），阻止水平挤入山根以防穿模
+    // 若目标 X 会横向穿透悬崖壁或挤入当前层拱顶与主海床交汇的狭窄山根楔形区（垂直净空 < 2 * radius + 4），阻止水平穿过以防穿模
     const nextTerrace = getSeabedTerraceAt(
       finalX * WORLD_UNITS_PER_METER,
       hitTierIdx,
@@ -2948,11 +3063,19 @@ export function resolveSeabedKineticStep(
     );
     const nextMainFloorY = getEngineFloorDepthAt(finalX, config);
     if (
-      nextTerrace.active &&
-      nextMainFloorY - nextTerrace.bottomArchY < entityRadiusMeters * 2 + 4
+      hitsTerraceVerticalWallHorizontally(
+        prevEngineX,
+        prevEngineY,
+        finalX,
+        entityRadiusMeters,
+        config
+      ) ||
+      (nextTerrace.active &&
+        nextMainFloorY - nextTerrace.bottomArchY < entityRadiusMeters * 2 + 4)
     ) {
-      finalX = prevEngineX;
-      adjustedDx = 0;
+      finalX = stepTargetX;
+      adjustedDx = finalX - prevEngineX;
+      hitWallHorizontally = true;
     }
 
     let secondCol = resolveSeabedCollision(
@@ -3030,9 +3153,10 @@ export function resolveSeabedKineticStep(
       secondCol = bestCol.collided ? bestCol : secondCol;
     }
 
-    // 严禁把地形下推量 (finalY - prevEngineY)/dt 注入 nextVy，彻底杜绝跨帧 vy 与水平摇杆 vx 形成勾股速度叠加！
     let nextVx =
-      adjustedDx === 0
+      hitWallHorizontally
+        ? 0
+        : adjustedDx === 0
         ? vx * 0.35
         : vx * bSlope > 0
         ? tangentSpeed * bTangentScale
@@ -3060,14 +3184,14 @@ export function resolveSeabedKineticStep(
   // 分支 B：实体与海床顶面（含洞口向下的弧形斜坡顶面）发生接触，根据局部斜率 slope 的单位切向量 T = (tangentScale, slope * tangentScale) 正交投影步长
   const slope = initialCol.slope;
   const tangentScale = initialCol.tangentScale; // 1 / sqrt(1 + slope^2)
-  const isMovingUphill = vx * slope < -1e-4;
+  const isMovingUphill = !hitWallHorizontally && vx * slope < -1e-4;
 
-  let adjustedDx = vx * dt;
-  let nextVx = vx;
+  let adjustedDx = hitWallHorizontally ? (stepTargetX - prevEngineX) : vx * dt;
+  let nextVx = hitWallHorizontally ? 0 : vx;
   let nextVy = vy > 0 ? 0 : vy * tangentScale * 0.88;
   let maxArcDist = maxAllowedStepDist * 0.88;
 
-  if (isMovingUphill) {
+  if (!hitWallHorizontally && isMovingUphill) {
     // 顺着斜坡上坡游动：将速度正交投影到斜坡单位切向量并乘以 0.88 阻尼，使水平分量为 cos^2(theta) * 0.88，斜向 2D 合成弧长 <= cos(theta) * 0.88 * intendedSpeed * dt
     const vParallelUp = (vx + Math.min(0, vy) * slope) * tangentScale;
     const uphillTangentSpeed =
@@ -3080,7 +3204,7 @@ export function resolveSeabedKineticStep(
       maxAllowedStepDist * 0.88,
       Math.max(maxAllowedStepDist * 0.25, Math.abs(uphillTangentSpeed) * dt)
     );
-  } else {
+  } else if (!hitWallHorizontally) {
     // 下坡或贴底滑行：将速度矢量 (vx, vy) 投影到海床单位切向量 T = (tangentScale, slope * tangentScale)
     const vParallelDown = (vx + Math.max(0, vy) * slope) * tangentScale;
     const downhillTangentSpeed =
@@ -3096,6 +3220,20 @@ export function resolveSeabedKineticStep(
   }
 
   let finalX = prevEngineX + adjustedDx;
+  if (
+    hitsTerraceVerticalWallHorizontally(
+      prevEngineX,
+      prevEngineY,
+      finalX,
+      entityRadiusMeters,
+      config
+    )
+  ) {
+    finalX = stepTargetX;
+    adjustedDx = finalX - prevEngineX;
+    nextVx = 0;
+    hitWallHorizontally = true;
+  }
   let secondCol = resolveSeabedCollision(
     finalX,
     rawNextY,

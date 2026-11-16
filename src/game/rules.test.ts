@@ -3150,6 +3150,96 @@ test('Undulating Mountain Range Seabed (Zero Flat or Diagonal Straight Lines), U
       y = step.engineY;
     }
   }
+
+  // 8D: Horizontal cave cliff-wall blocking — swimming inside Tier 0 cave opening directly toward
+  // the vertical cliff face [topFloorY, bottomArchY] at seam + openingHalfWidth (3200 + 232) must block cleanly!
+  {
+    const targetSpeed = 320;
+    const dt = 1 / 60;
+    const lipRightX = 3200 + 232;
+    const sampleAtWall = getShallowCoralAtollAt(lipRightX + 12, WorldConfig);
+    assert.equal(sampleAtWall.active, true, '12m past cave lip must have active solid collision (no 22m dead-zone)');
+
+    let x = 3200;
+    let y = (sampleAtWall.topFloorY + sampleAtWall.bottomArchY) * 0.5;
+    let vx = targetSpeed;
+    let vy = 0;
+
+    for (let frame = 0; frame < 60; frame++) {
+      const step = resolveSeabedKineticStep(x, y, targetSpeed, 0, dt, sharkRadius, WorldConfig);
+      x = step.engineX;
+      y = step.engineY;
+      vx = step.vx;
+      vy = step.vy;
+      assert.ok(
+        x <= lipRightX + 1.0,
+        `Frame ${frame}: Shark swimming horizontally into Tier 0 right cave cliff wall at y=${y.toFixed(1)} must be blocked before lip (${lipRightX}), got x=${x.toFixed(2)}`
+      );
+      void vx;
+      void vy;
+    }
+  }
+
+  // 8E: 633m Graft Mountain Wedge Anti-Penetration — find where mainFloorY crosses ~633m in Tier 0 graft zone,
+  // verify solid activation, zero inverted hitAtollUnderside, and zero horizontal/diagonal pass-through!
+  {
+    let wedgeX: number | null = null;
+    for (let wx = 400; wx <= 3000; wx += 10) {
+      const fy = getFloorDepthAt(wx, WorldConfig);
+      if (fy >= 620 && fy <= 650) {
+        wedgeX = wx;
+        break;
+      }
+    }
+    assert.ok(wedgeX !== null, 'Must locate Tier 0 graft zone where mainFloorY is ~633m');
+    const tWedge = getShallowCoralAtollAt(wedgeX, WorldConfig);
+    const fyWedge = getFloorDepthAt(wedgeX, WorldConfig);
+    assert.equal(
+      tWedge.active,
+      true,
+      `Tier 0 at mainFloorY=${fyWedge.toFixed(1)}m (x=${wedgeX}) must have active collision`
+    );
+
+    const colAtWedge = resolveSeabedCollision(
+      wedgeX,
+      fyWedge - 5,
+      sharkRadius,
+      120,
+      WorldConfig,
+      tWedge.topFloorY + 12
+    );
+    assert.equal(colAtWedge.collided, true);
+    assert.equal(
+      colAtWedge.hitAtollUnderside,
+      false,
+      'Solid graft mountain wedge without open under-corridor must NEVER invert into hitAtollUnderside'
+    );
+    assert.ok(
+      colAtWedge.engineY <= fyWedge - sharkRadius + 1e-4,
+      `Graft wedge collision must keep shark above mainFloorY - radius (${(fyWedge - sharkRadius).toFixed(2)}), got ${colAtWedge.engineY.toFixed(2)}`
+    );
+
+    // Swim horizontally/diagonally from deeper open side right into the ~633m graft mountain wedge over 90 frames
+    let x = wedgeX + 180;
+    let y = fyWedge - 12;
+    let vx = -280;
+    let vy = 40;
+    for (let frame = 0; frame < 90; frame++) {
+      const step = resolveSeabedKineticStep(x, y, -280, 40, 1 / 60, sharkRadius, WorldConfig);
+      x = step.engineX;
+      y = step.engineY;
+      vx = step.vx;
+      vy = step.vy;
+      const curFloor = getFloorDepthAt(x, WorldConfig);
+      assert.ok(
+        y <= curFloor - sharkRadius + 1e-2,
+        `Frame ${frame}: Shark at x=${x.toFixed(1)} must never pass underground past graft cliff (y=${y.toFixed(2)}, maxY=${(curFloor - sharkRadius).toFixed(2)})`
+      );
+      void vx;
+      void vy;
+    }
+  }
 });
+
 
 

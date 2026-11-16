@@ -878,6 +878,8 @@ public struct ContentView: View {
         return s
     }()
     @State private var knobOffset: CGSize = .zero
+    @GestureState private var isJoystickDragging: Bool = false
+    @GestureState private var isBoostDragging: Bool = false
 
     public init() {
         GADInfoPlistRuntimePatch.installIfNeeded()
@@ -905,6 +907,33 @@ public struct ContentView: View {
             }
         }
         .statusBarHidden(true)
+        .onChange(of: isJoystickDragging) { dragging in
+            if !dragging {
+                knobOffset = .zero
+                vm.joyDx = 0
+                vm.joyDy = 0
+                vm.joyActive = false
+            }
+        }
+        .onChange(of: isBoostDragging) { dragging in
+            if !dragging {
+                vm.isBoostingHeld = false
+            }
+        }
+        .onChange(of: vm.gameState) { _ in
+            knobOffset = .zero
+            vm.resetInputState()
+        }
+        .onChange(of: vm.runSequenceId) { _ in
+            knobOffset = .zero
+            vm.resetInputState()
+        }
+        .onChange(of: vm.showEvolutionAtlas) { shown in
+            if shown {
+                knobOffset = .zero
+                vm.resetInputState()
+            }
+        }
     }
 
     private var oceanSpriteCanvasLayer: some View {
@@ -1348,6 +1377,9 @@ public struct ContentView: View {
         .contentShape(Circle())
         .gesture(
             DragGesture(minimumDistance: 0)
+                .updating($isJoystickDragging) { _, state, _ in
+                    state = true
+                }
                 .onChanged { value in
                     let maxR: CGFloat = 42
                     let dx = value.translation.width
@@ -1368,6 +1400,12 @@ public struct ContentView: View {
                     vm.joyActive = false
                 }
         )
+        .onDisappear {
+            knobOffset = .zero
+            vm.joyDx = 0
+            vm.joyDy = 0
+            vm.joyActive = false
+        }
     }
 
 public struct FixedEvolutionHudButton: View {
@@ -1637,9 +1675,15 @@ public struct FixedEvolutionHudButton: View {
             .contentShape(Circle())
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($isBoostDragging) { _, state, _ in
+                        state = true
+                    }
                     .onChanged { _ in vm.isBoostingHeld = true }
                     .onEnded { _ in vm.isBoostingHeld = false }
             )
+            .onDisappear {
+                vm.isBoostingHeld = false
+            }
         }
     }
 

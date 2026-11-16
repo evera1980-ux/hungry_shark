@@ -1352,7 +1352,7 @@ public enum GameRules {
         let graftedEdgeWeight = raw.edgeWeight * graftT
 
         return SeabedTerraceSample(
-            isPresent: !raw.isDiveOpening && graftedEdgeWeight > 0.02,
+            isPresent: !raw.isDiveOpening && graftT > 0.03,
             isDiveOpening: raw.isDiveOpening && graftT > 0.02,
             topY: graftedTopY,
             bottomArchY: graftedBottomArchY,
@@ -1540,8 +1540,28 @@ public enum GameRules {
             }
 
             let terrace = getSeabedTerraceAt(worldX: worldX, tierIndex: tierIdx)
-            guard terrace.isPresent && terrace.edgeFactor > 0.02 else { continue }
-            let terraceTopMaxY = terrace.topY - clearance
+            guard terrace.isPresent else { continue }
+
+            // Solid graft mountain wedge when main seafloor rises above terrace bottomArchY (zero under-corridor)
+            let hasUnderCorridor = (mainFloorY - terrace.bottomArchY) > (clearance * 1.25)
+            if !hasUnderCorridor {
+                let wedgeTopY = min(terrace.topY, mainFloorY)
+                let wedgeTopMaxY = min(maxAllowedMainY, wedgeTopY - clearance)
+                if worldY > wedgeTopMaxY && refPrevY >= spec.baseDepth - 240.0 - clearance - 260.0 {
+                    let wedgeSlope = terrace.topY <= mainFloorY ? terrace.slope : mainSlope
+                    return SeabedCollisionResult(
+                        y: wedgeTopMaxY,
+                        vy: min(0.0, vy * -0.12),
+                        hitSeabed: true,
+                        hitAtollUnderside: false,
+                        floorY: wedgeTopY,
+                        slope: wedgeSlope
+                    )
+                }
+                continue
+            }
+
+            let terraceTopMaxY = min(maxAllowedMainY, terrace.topY - clearance)
             let terraceUndersideMinY = terrace.bottomArchY + clearance * 0.90
 
             if worldY > terraceTopMaxY && worldY < terraceUndersideMinY {
@@ -1600,8 +1620,51 @@ public enum GameRules {
         public let slope: Double
     }
 
-    /// Full 2D Kinetic Seabed Step with Sub-Stepping, Unit-Tangent Vector Projection & 8-Iteration Binary Search Arc-Length Conservation
-    /// (100% eliminates speed stacking along cave opening downward slopes & prevents tunneling into rocks)
+    private static func hitsTerraceVerticalWallHorizontally(
+        prevX: Double,
+        prevY: Double,
+        candX: Double,
+        entityRadius: Double,
+        clearancePadding: Double
+    ) -> Bool {
+        if abs(candX - prevX) < 1e-6 { return false }
+        let clearance = max(0.0, entityRadius + clearancePadding)
+        let candMainY = getFloorDepthAt(worldX: candX)
+
+        for tierIdx in 0..<seabedTerraceTiers.count {
+            let spec = seabedTerraceTiers[tierIdx]
+            let bandMinY = spec.baseDepth - 240.0 - clearance
+            let bandMaxY = spec.baseDepth + spec.thicknessBase + 380.0 + clearance
+            if prevY < bandMinY || prevY > bandMaxY {
+                continue
+            }
+
+            let nextT = getSeabedTerraceAt(worldX: candX, tierIndex: tierIdx)
+            if !nextT.isPresent { continue }
+
+            let prevT = getSeabedTerraceAt(worldX: prevX, tierIndex: tierIdx)
+            let candHasUnderCorridor = (candMainY - nextT.bottomArchY) > (clearance * 1.25)
+
+            // Case A: Crossing from an open cave/graft void (!prevT.isPresent) directly horizontally into a cliff wall
+            if !prevT.isPresent {
+                let insideVerticalCliff = prevY > nextT.topY - clearance * 0.15
+                    && (!candHasUnderCorridor || prevY < nextT.bottomArchY + clearance * 0.35)
+                if insideVerticalCliff {
+                    return true
+                }
+            }
+
+            // Case B: Attempting to squeeze horizontally into a pinched graft mountain wedge (clearance < 2 * r + 4)
+            if prevY > nextT.topY + 4.0
+                && (candMainY - nextT.bottomArchY) < (clearance * 2.0 + 4.0)
+                && prevY > min(nextT.topY, candMainY) - clearance * 0.15 {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Full 2D Kinetic Seabed Step with Sub-Stepping, 2D Cliff-Wall Blocking, Unit-Tangent Vector Projection & 8-Iteration Binary Search Arc-Length Conservation
     public static func resolveSeabedKineticStep(
         prevX: Double,
         prevY: Double,
@@ -1633,8 +1696,40 @@ public enum GameRules {
         for _ in 1...steps {
             let stepPrevX = curX
             let stepPrevY = curY
-            let targetX = stepPrevX + stepDx
+            let rawTargetX = stepPrevX + stepDx
             let targetY = stepPrevY + stepDy
+
+            var targetX = rawTargetX
+            var hitWallHorizontally = false
+            if hitsTerraceVerticalWallHorizontally(
+                prevX: stepPrevX,
+                prevY: stepPrevY,
+                candX: rawTargetX,
+                entityRadius: entityRadius,
+                clearancePadding: clearancePadding
+            ) {
+                hitWallHorizontally = true
+                var lo = 0.0
+                var hi = 1.0
+                var safeX = stepPrevX
+                for _ in 0..<6 {
+                    let mid = (lo + hi) * 0.5
+                    let cx = stepPrevX + (rawTargetX - stepPrevX) * mid
+                    if hitsTerraceVerticalWallHorizontally(
+                        prevX: stepPrevX,
+                        prevY: stepPrevY,
+                        candX: cx,
+                        entityRadius: entityRadius,
+                        clearancePadding: clearancePadding
+                    ) {
+                        hi = mid
+                    } else {
+                        lo = mid
+                        safeX = cx
+                    }
+                }
+                targetX = safeX
+            }
 
             let col = resolveSeabedCollision(
                 worldX: targetX,
@@ -1651,33 +1746,46 @@ public enum GameRules {
 
             if col.hitAtollUnderside {
                 hitAtollUnderside = true
-                // Project step onto underside unit tangent T = (tangentScale, col.slope * tangentScale)
-                let dotParallel = (stepDx + max(0.0, stepDy) * col.slope) * tangentScale
-                let isPushingIntoSlope = stepDx * col.slope > 1e-6
+                let effStepDx = hitWallHorizontally ? 0.0 : stepDx
+                let dotParallel = (effStepDx + max(0.0, stepDy) * col.slope) * tangentScale
+                let isPushingIntoSlope = effStepDx * col.slope > 1e-6
                 let stepTangentMag: Double
                 if isPushingIntoSlope {
-                    if stepDx * dotParallel <= 0.0 {
+                    if effStepDx * dotParallel <= 0.0 {
                         stepTangentMag = 0.0
                     } else {
                         stepTangentMag = max(-maxSubstepDist * 0.88, min(maxSubstepDist * 0.88, dotParallel * 0.88))
                     }
                 } else {
-                    stepTangentMag = stepDx * 0.88
+                    stepTangentMag = effStepDx * 0.88
                 }
-                let projectedX = stepPrevX + (isPushingIntoSlope ? stepTangentMag * tangentScale : stepTangentMag)
+                let projectedX = hitWallHorizontally
+                    ? targetX
+                    : (stepPrevX + (isPushingIntoSlope ? stepTangentMag * tangentScale : stepTangentMag))
                 let maxAllowed = isPushingIntoSlope
                     ? min(maxSubstepDist * 0.88, max(maxSubstepDist * 0.25, abs(stepTangentMag)))
                     : maxSubstepDist * 0.88
 
+                var finalStepX = projectedX
+                if hitsTerraceVerticalWallHorizontally(
+                    prevX: stepPrevX,
+                    prevY: stepPrevY,
+                    candX: finalStepX,
+                    entityRadius: entityRadius,
+                    clearancePadding: clearancePadding
+                ) {
+                    finalStepX = targetX
+                    hitWallHorizontally = true
+                }
+
                 let secondCol = resolveSeabedCollision(
-                    worldX: projectedX,
+                    worldX: finalStepX,
                     worldY: targetY,
                     vy: curVy,
                     entityRadius: entityRadius,
                     clearancePadding: clearancePadding,
                     prevWorldY: stepPrevY
                 )
-                var finalStepX = projectedX
                 var finalStepY = secondCol.hitAtollUnderside ? secondCol.y : max(targetY, col.y)
 
                 let actualSubDist = hypot(finalStepX - stepPrevX, finalStepY - stepPrevY)
@@ -1725,32 +1833,44 @@ public enum GameRules {
                 curX = finalStepX
                 curY = finalStepY
                 let vParallel = (vx + max(0.0, vy) * col.slope) * tangentScale
-                curVx = isPushingIntoSlope ? (vParallel * tangentScale * 0.88) : (vx * 0.88)
+                curVx = hitWallHorizontally ? 0.0 : (isPushingIntoSlope ? (vParallel * tangentScale * 0.88) : (vx * 0.88))
                 curVy = vy < 0.0 ? 0.0 : vy * tangentScale * 0.88
             } else if col.hitSeabed {
                 hitSeabed = true
-                let isUphill = stepDx * col.slope < -1e-5
+                let effStepDx = hitWallHorizontally ? 0.0 : stepDx
+                let isUphill = effStepDx * col.slope < -1e-5
                 let effDy = isUphill ? min(0.0, stepDy) : max(0.0, stepDy)
-                let dotParallel = (stepDx + effDy * col.slope) * tangentScale
+                let dotParallel = (effStepDx + effDy * col.slope) * tangentScale
                 let damp = isUphill ? 0.88 : 0.90
                 let stepTangentMag: Double
-                if stepDx * dotParallel <= 0.0 {
+                if effStepDx * dotParallel <= 0.0 {
                     stepTangentMag = 0.0
                 } else {
                     stepTangentMag = max(-maxSubstepDist * damp, min(maxSubstepDist * damp, dotParallel * damp))
                 }
-                let projectedX = stepPrevX + stepTangentMag * tangentScale
+                let projectedX = hitWallHorizontally ? targetX : (stepPrevX + stepTangentMag * tangentScale)
                 let maxAllowed = min(maxSubstepDist * damp, max(maxSubstepDist * 0.25, abs(stepTangentMag)))
 
+                var finalStepX = projectedX
+                if hitsTerraceVerticalWallHorizontally(
+                    prevX: stepPrevX,
+                    prevY: stepPrevY,
+                    candX: finalStepX,
+                    entityRadius: entityRadius,
+                    clearancePadding: clearancePadding
+                ) {
+                    finalStepX = targetX
+                    hitWallHorizontally = true
+                }
+
                 let secondCol = resolveSeabedCollision(
-                    worldX: projectedX,
+                    worldX: finalStepX,
                     worldY: targetY,
                     vy: curVy,
                     entityRadius: entityRadius,
                     clearancePadding: clearancePadding,
                     prevWorldY: stepPrevY
                 )
-                var finalStepX = projectedX
                 var finalStepY = secondCol.hitSeabed ? secondCol.y : min(targetY, col.y)
 
                 let actualSubDist = hypot(finalStepX - stepPrevX, finalStepY - stepPrevY)
@@ -1798,11 +1918,15 @@ public enum GameRules {
                 curX = finalStepX
                 curY = finalStepY
                 let vParallel = (vx + (isUphill ? min(0.0, vy) : max(0.0, vy)) * col.slope) * tangentScale
-                curVx = vParallel * tangentScale * damp
+                curVx = hitWallHorizontally ? 0.0 : (vParallel * tangentScale * damp)
                 curVy = vy > 0.0 ? 0.0 : vy * tangentScale * damp
             } else {
                 curX = targetX
                 curY = col.y
+                if hitWallHorizontally {
+                    hitSeabed = true
+                    curVx = 0.0
+                }
             }
         }
 
