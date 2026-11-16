@@ -1417,10 +1417,11 @@ export default function App() {
     setShowAtlasModal(true);
   }, [handleUnlockAndSelectSharkForm]);
 
-  // Ad Placement 2: Watch Ad on Death for Full HP + 8s Gold Frenzy Magnet Revive
+  // Ad Placement 2: Watch Ad on Death for In-Place Full HP + 8s Gold Frenzy Magnet Revive
   const handleReviveWithFrenzyAd = useCallback(() => {
     adManager.showRewardedVideoAd('REVIVE_FRENZY', () => {
       const sim = simRef.current;
+      clearAllInputs();
       infiniteProgressionManager.addFrenzyStack();
       sim.shark.stats = recomputeSharkStats(sim.shark.level, true);
       sim.shark.frenzyTimer =
@@ -1428,21 +1429,37 @@ export default function App() {
       sim.shark.hp = sim.shark.stats.maxHp;
       sim.shark.ghostHp = sim.shark.stats.maxHp;
       sim.shark.energy = sim.shark.stats.maxEnergy;
+      // Preserve exact death coordinates (原地复活); only clear residual knockback/velocity and grant shield
+      sim.shark.vx = 0;
+      sim.shark.vy = 0;
+      sim.shark.y = Math.max(46, Math.min(20000, sim.shark.y));
+      sim.shark.hitFlashTimer = 0;
+      sim.shark.hitstopTimer = 0;
+      sim.shark.invulnerableTimer = Math.max(sim.shark.invulnerableTimer, 2.5);
 
       soundFX.playEvolution();
       spawnFloatText(
         sim.shark.x,
         sim.shark.y - 40,
         'float_frenzy_start',
-        '8s GOLD FRENZY!',
+        langRef.current === 'zh' ? '原地满血复活!' : 'REVIVED IN PLACE!',
         '#fde047',
         1.35
       );
+      setHudState((prev) => ({
+        ...prev,
+        hp: Math.ceil(sim.shark.hp),
+        maxHp: sim.shark.stats.maxHp,
+        energy: Math.round(sim.shark.energy),
+        maxEnergy: sim.shark.stats.maxEnergy,
+        biteTier: sim.shark.stats.biteTier,
+        frenzyTimer: Number(sim.shark.frenzyTimer.toFixed(1)),
+      }));
       setReviveOffered(false);
       document.body.dataset.state = 'playing';
       setGameState('playing');
     });
-  }, [recomputeSharkStats, spawnFloatText]);
+  }, [clearAllInputs, recomputeSharkStats, spawnFloatText]);
 
   // Ad Placement 3: Title Screen Trial Tier VI Cosmic Mecha Leviathan Shark
   const handleTrialMaxMechaAd = useCallback(() => {

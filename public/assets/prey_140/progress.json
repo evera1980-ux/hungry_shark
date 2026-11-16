@@ -6,7 +6,7 @@
   "lastCompletedName": "蓝鲸幼体/亚成体",
   "nextResumeId": "ALL_DONE",
   "nextResumeName": null,
-  "updatedAt": "2026-11-16T08:00:38.247Z",
+  "updatedAt": "2026-11-16T08:57:23.344Z",
   "outputDirectory": "/public/assets/prey_140",
   "completed": [
     {
@@ -1216,7 +1216,7 @@
       "file3x": "/assets/prey_140/PREY-110@3x.png",
       "width3x": 900,
       "height3x": 356,
-      "bytes": 287523,
+      "bytes": 257658,
       "sourceArtifact": "prey_110_mantaray_1794661504599.jpg"
     },
     {

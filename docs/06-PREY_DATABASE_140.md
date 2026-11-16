@@ -13,9 +13,9 @@
 | **已生成透明 PNG 数量** | **140 / 140**（完成率 `100.0%`） |
 | **当前已生成到（最后完成）** | **PREY-210（蓝鲸幼体/亚成体，1200×317 @3x）** |
 | **下次继续生成起点（断点续传）** | **🎉 全部 140 条已生成完毕** |
-| **双端游戏实装状态（2026-11-16）** | **✅ 已全量接入 Web + iOS 原生游戏逻辑**：`src/game/preyDatabase140.ts`（现役 **134 种**鱼类与鲸豚 + 保留 `cyber_mine` = **135 项**；已剔除海牛 `PREY-122`、儒艮 `PREY-123`、海象 `PREY-124`、北海狮 `PREY-125`、南美海狮 `PREY-126`、北极海象 `PREY-209` 等非鱼形态哺乳类，并水平镜像校正 `PREY-203` 灰鲸朝向与游动摆尾方向），同步 `spriteSheetManager.ts` / `canvasRenderer.ts` / `ecosystemSpawner.ts` 与 `scripts/build-ios-native.ts` |
 | **资产输出目录** | `/public/assets/prey_140/PREY-XXX.png`（原图去底） & `/public/assets/prey_140/PREY-XXX@3x.png`（iPhone `@3x` Retina 216 DPI） |
 | **进度 JSON 索引** | `/public/assets/prey_140/progress.json` |
+| **双端游戏实装状态（2026-11-16）** | **现役 134 种海洋生物 + `cyber_mine`（135 项）已在 Web 与 iOS 原生双端实装**：剔除 `PREY-122` 海牛、`PREY-123` 儒艮、`PREY-124` 海象、`PREY-125` 北海狮、`PREY-126` 南美海狮、`PREY-209` 北极海象 6 种非鱼形态哺乳类，并水平镜像修正 `PREY-203` 灰鲸与 `PREY-110` 蝠鲼原图朝向右侧与脊柱摆动游姿 |
 
 ## 字段说明
 

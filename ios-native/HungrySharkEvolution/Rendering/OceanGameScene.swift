@@ -94,6 +94,9 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
     private var sdkStarted: Bool = false
     private var pendingRewardAction: (() -> Void)? = nil
     private var pendingUnavailableAction: (() -> Void)? = nil
+    private var activeAdRewardCallback: (() -> Void)? = nil
+    private var activeAdDidEarnReward: Bool = false
+    private var activeAdDidDismiss: Bool = false
     private var timeoutTask: Task<Void, Never>? = nil
     #endif
 
@@ -218,12 +221,23 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
         timeoutTask = nil
         isConnectingAd = false
         rewardedAd = nil
+        activeAdDidEarnReward = false
+        activeAdDidDismiss = false
+        activeAdRewardCallback = pending
         ad.fullScreenContentDelegate = self
-        ad.present(fromRootViewController: rootVC) {
-            print("[GoogleAdMob] 🎁 User completed rewarded ad, granting reward!")
-            pending()
+        ad.present(fromRootViewController: rootVC) { [weak self] in
+            print("[GoogleAdMob] 🎁 User earned ad reward (will apply on ad close).")
+            self?.handleAdRewardEarned()
         }
         preloadRewardedAd()
+    }
+
+    private func handleAdRewardEarned() {
+        activeAdDidEarnReward = true
+        if activeAdDidDismiss, let cb = activeAdRewardCallback {
+            activeAdRewardCallback = nil
+            cb()
+        }
     }
 
     private func failPendingAdIfAny() {
@@ -246,10 +260,13 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
         if let ad = rewardedAd, let rootVC = Self.topViewController() {
             print("[GoogleAdMob] 🎬 Presenting real Google rewarded video ad immediately...")
             rewardedAd = nil
+            activeAdDidEarnReward = false
+            activeAdDidDismiss = false
+            activeAdRewardCallback = onReward
             ad.fullScreenContentDelegate = self
-            ad.present(fromRootViewController: rootVC) {
-                print("[GoogleAdMob] 🎁 User completed rewarded ad, granting reward!")
-                onReward()
+            ad.present(fromRootViewController: rootVC) { [weak self] in
+                print("[GoogleAdMob] 🎁 User earned ad reward (will apply on ad close).")
+                self?.handleAdRewardEarned()
             }
             preloadRewardedAd()
             return
@@ -294,12 +311,22 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
 #if canImport(GoogleMobileAds)
 extension GoogleAdMobManager: GADFullScreenContentDelegate {
     public func adDidDismissFullScreenContent(_ ad: GADFullScreenPresentingAd) {
-        print("[GoogleAdMob] 🎬 Ad was dismissed by user (closed). Preloading next ad...")
+        print("[GoogleAdMob] 🎬 Ad dismissed by user. Granting earned reward if eligible & preloading next ad...")
+        activeAdDidDismiss = true
+        if activeAdDidEarnReward, let cb = activeAdRewardCallback {
+            activeAdRewardCallback = nil
+            cb()
+        } else {
+            activeAdRewardCallback = nil
+        }
         preloadRewardedAd()
     }
 
     public func ad(_ ad: GADFullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
         print("[GoogleAdMob] ❌ Failed to present full screen ad: \(error.localizedDescription)")
+        activeAdRewardCallback = nil
+        activeAdDidEarnReward = false
+        activeAdDidDismiss = false
         failPendingAdIfAny()
     }
 }
@@ -358,6 +385,7 @@ public final class GameViewModel: ObservableObject {
 
     // GameOver Revive & Settlement
     @Published public var reviveOffered: Bool = false
+    private var reviveUsedInCurrentRun: Bool = false
     @Published public var runSurvivalSec: Int = 0
     @Published public var runCoinsEarned: Int = 0
     @Published public var runGenesEarned: Int = 0
@@ -539,6 +567,7 @@ public final class GameViewModel: ObservableObject {
         runPeakCombo = 0
         runMaxDepth = 22
         reviveOffered = false
+        reviveUsedInCurrentRun = false
         settlementDoubled = false
         lastMasterySettlement = nil
 
@@ -585,9 +614,10 @@ public final class GameViewModel: ObservableObject {
         guard gameState != "gameover" else { return }
         resetInputState()
         gameState = "gameover"
-        if !reviveOffered {
+        if !reviveUsedInCurrentRun {
             reviveOffered = true
         } else {
+            reviveOffered = false
             finalizeRunSettlement()
         }
         persistSave()
@@ -778,12 +808,14 @@ public final class GameViewModel: ObservableObject {
         switch kind {
         case .REVIVE:
             resetInputState()
+            reviveUsedInCurrentRun = true
             reviveOffered = false
+            frenzyActive = true
+            recomputeCurrentSharkStats()
+            frenzyTimer = GameConfigGenerated.frenzyDuration + currentStats.frenzyDurationBonus
             hp = maxHp
             ghostHpPct = 100
             energy = maxEnergy
-            frenzyActive = true
-            frenzyTimer = 4.5
             gameState = "playing"
         case .DOUBLE_SETTLEMENT:
             if !settlementDoubled {
@@ -1117,17 +1149,34 @@ public final class OceanGameScene: SKScene {
         }
 
         // Reset shark, world pools, and inputs cleanly on EVERY new run (including GameOver Settlement -> Play Again!)
-        if vm.runSequenceId != lastTrackedRunSequenceId {
+        let startedNewRunThisFrame = vm.runSequenceId != lastTrackedRunSequenceId
+        if startedNewRunThisFrame {
             lastTrackedRunSequenceId = vm.runSequenceId
             if vm.gameState == "playing" {
                 resetSimulationForNewRun(vm: vm)
             }
         }
         if vm.gameState != lastTrackedGameState {
-            if vm.gameState == "playing" && (lastTrackedGameState == "title" || lastTrackedGameState == "gameover") {
+            if vm.gameState == "playing" && lastTrackedGameState == "title" {
                 sharkY = max(145.0, min(260.0, sharkY))
                 cameraY = sharkY
                 vm.resetInputState()
+            } else if !startedNewRunThisFrame && vm.gameState == "playing" && lastTrackedGameState == "gameover" {
+                // In-place ad revive: preserve exact death (sharkX, sharkY, cameraX, cameraY)!
+                sharkVx = 0.0
+                sharkVy = 0.0
+                sharkY = max(46.0, min(20000.0, sharkY))
+                cameraX = sharkX
+                cameraY = sharkY
+                invulnTimer = max(invulnTimer, 2.5)
+                vm.resetInputState()
+                spawnFloatingText(
+                    x: sharkX,
+                    y: sharkY - 40.0,
+                    text: vm.lang == "zh" ? "原地满血复活!" : "REVIVED IN PLACE!",
+                    color: UIColor(red: 253/255, green: 224/255, blue: 71/255, alpha: 1.0),
+                    fontSize: 16
+                )
             }
             lastTrackedGameState = vm.gameState
         }
