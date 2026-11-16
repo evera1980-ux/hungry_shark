@@ -224,9 +224,10 @@ export class EcosystemSpawner {
       const rawMateX = poissonPt ? poissonPt.x : anchor.x + (rng() - 0.5) * 96;
       const rawMateY = poissonPt ? poissonPt.y : anchor.y + (rng() - 0.5) * 64;
       const mateX = infiniteWorldManager.wrapEntityX(rawMateX);
+      const shallowMateCap = sharkY <= 430 ? 515 : anchor.config.maxDepth;
       const mateY = Math.max(
         Math.max(25, anchor.config.minDepth),
-        Math.min(anchor.config.maxDepth, rawMateY)
+        Math.min(Math.min(anchor.config.maxDepth, shallowMateCap), rawMateY)
       );
 
       const entity = this.pool.pop() ?? ({} as PreyEntity);
@@ -296,14 +297,9 @@ export class EcosystemSpawner {
       spawnX,
       spawnY
     );
-    const isMultiFishSprite =
-      chosenTier.id === 'gene_jelly' ||
-      chosenTier.id === 'neon_tetra_school' ||
-      chosenTier.id === 'silver_barracuda';
     const clusterTriggerProb = 0.28 * (0.75 + macroEval.schoolClusterProbability * 0.45);
     if (
       chosenTier.tier === 1 &&
-      !isMultiFishSprite &&
       !chosenTier.isHazard &&
       rng() < clusterTriggerProb
     ) {
@@ -391,8 +387,10 @@ export class EcosystemSpawner {
       habitatPool.length > 0
         ? habitatPool
         : isShallowZone
-        ? allPreys.filter((p) => p.maxDepth <= 520)
-        : allPreys.filter((p) => p.minDepth >= 500);
+        ? allPreys.filter((p) => p.minDepth <= 520)
+        : depth > 1150
+        ? allPreys.filter((p) => p.maxDepth >= 1150)
+        : allPreys.filter((p) => p.minDepth >= 500 || p.maxDepth >= 800);
 
     // 整个阳光珊瑚浅水区 (0m ~ 520m) 全程永久禁止刷出鳗鱼等主动冲刺攻击型掠食者（EEL_CHARGER / SUB_PATROL / HEAVY_CRUISER / KRAKEN_BOSS）与水雷
     const sanctuaryFilteredPool = isShallowZone
@@ -417,21 +415,27 @@ export class EcosystemSpawner {
       }
     }
 
-    // 根据真实海洋生态垂直分层与玩家当前咬合阶位动态分配 Tier 1..8 阶位权重：
-    // - 浅海新手/T1开局保护期：84% T1 可吞噬小鱼 + 16% 温顺 T2 鱼（零主动攻击掠食者）
-    // - 浅海 T1 常态期：76% T1 + 18% T2 + 6% T3（保证 >75% 鱼可直接吞噬）
-    // - 浅海 T2+ 进阶期：58% T1 + 28% T2 + 14% T3（浅海仅栖息 T1~T3 珊瑚礁鱼群，0% T4+ 掠食者）
-    // - 暮光带 (520~1150m)：T3~T6 中层发光鱼、海鳝与乌贼；深渊带 (1150m+)：T3~T8 深渊掠食者与巨兽
+    // 根据真实海洋生态垂直分层与玩家当前咬合阶位动态分配 Tier 1..8 阶位权重（覆盖 0m ~ 20,000m 五大生态带）：
+    // - 浅海新手/T1开局保护期：82% T1 可吞噬小鱼 + 18% 温顺 T2 鱼（零主动攻击掠食者）
+    // - 浅海 T1 常态期：72% T1 + 20% T2 + 8% T3（保证 >75% 鱼可直接吞噬）
+    // - 浅海 T2+ 进阶期：54% T1 + 30% T2 + 16% T3（浅海仅栖息 T1~T3 珊瑚礁鱼群，0% T4+ 掠食者）
+    // - 暮光带 (520~1150m)：T2~T6 远洋礁坡鱼、海龟、礁鲨与感应水雷
+    // - 午夜/深渊带 (1150~8000m)：深海发光小鱼补给 (T2~T4) + 大型远洋捕食者 (T5~T8)
+    // - 海沟终极深渊带 (8000~20000m)：深海龙鱼/灯笼鱼群 + 抹香鲸/蓝鲸/虎鲸等巨型海兽 (T6~T8)
     const tierWeights =
-      depth > 1150
-        ? [0, 0, 12, 18, 22, 20, 16, 12]
+      depth > 8000
+        ? [0, 6, 10, 12, 10, 16, 22, 24]
+        : depth > 3500
+        ? [0, 8, 12, 16, 16, 18, 18, 12]
+        : depth > 1150
+        ? [0, 10, 14, 18, 20, 18, 14, 6]
         : depth > 520
-        ? [0, 0, 32, 30, 24, 14, 0, 0]
+        ? [0, 10, 26, 28, 22, 14, 0, 0]
         : isEarlySanctuary
-        ? [84, 16, 0, 0, 0, 0, 0, 0]
+        ? [82, 18, 0, 0, 0, 0, 0, 0]
         : this.activeSharkBiteTier <= 1
-        ? [76, 18, 6, 0, 0, 0, 0, 0]
-        : [58, 28, 14, 0, 0, 0, 0, 0];
+        ? [72, 20, 8, 0, 0, 0, 0, 0]
+        : [54, 30, 16, 0, 0, 0, 0, 0];
 
     const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
     let roll = rng() * totalWeight;

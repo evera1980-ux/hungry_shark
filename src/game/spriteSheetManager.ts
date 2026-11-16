@@ -2,6 +2,10 @@ import {
   getShark3xImageUrl,
   type SharkSpriteKey,
 } from './sharkEvolutionConfig';
+import {
+  PREY_140_RECORDS,
+  getPrey140ImageUrl,
+} from './preyDatabase140';
 
 export type PrimarySpriteFrameKey =
   | 'BASE_SHARK'      // Row 0, Col 0 (0)
@@ -402,6 +406,10 @@ export class SpriteSheetManager {
   public uiIconsLoaded: boolean = false;
   public uiBannersLoaded: boolean = false;
   public uiSettingsLoaded: boolean = false;
+  public prey140Frames: Record<string, HTMLCanvasElement> = {};
+  public prey140LoadedCount: number = 0;
+  private prey140LoadingSet: Set<string> = new Set();
+  private prey140BatchStarted: boolean = false;
   private loadingPromise: Promise<void> | null = null;
   private listeners: Set<() => void> = new Set();
 
@@ -597,6 +605,9 @@ export class SpriteSheetManager {
       imgSettings.src = uiSettingsUrl;
     });
 
+    // Kick off prioritized background streaming of all 140 transparent @3x prey assets
+    void this.loadPrey140Assets();
+
     this.loadingPromise = Promise.all([
       loadPrimary,
       loadFish2,
@@ -606,6 +617,155 @@ export class SpriteSheetManager {
       loadUiSettings,
     ]).then(() => undefined);
     return this.loadingPromise;
+  }
+
+  private cropAndScalePreyImage(img: HTMLImageElement): HTMLCanvasElement | null {
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    if (!srcW || !srcH) return null;
+
+    const MAX_PREY_W = 420;
+    const scale = Math.min(1, MAX_PREY_W / srcW);
+    const scaledW = Math.max(1, Math.round(srcW * scale));
+    const scaledH = Math.max(1, Math.round(srcH * scale));
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = scaledW;
+    tempCanvas.height = scaledH;
+    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+    if (!tempCtx) return null;
+    tempCtx.imageSmoothingEnabled = true;
+    tempCtx.imageSmoothingQuality = 'high';
+    tempCtx.drawImage(img, 0, 0, scaledW, scaledH);
+
+    // Crop tightly around non-transparent pixels so every species matches its hitbox visual contract
+    let minX = scaledW;
+    let minY = scaledH;
+    let maxX = 0;
+    let maxY = 0;
+    let hasPixels = false;
+
+    try {
+      const imgData = tempCtx.getImageData(0, 0, scaledW, scaledH);
+      const data = imgData.data;
+      for (let py = 0; py < scaledH; py++) {
+        const rowOff = py * scaledW;
+        for (let px = 0; px < scaledW; px++) {
+          if (data[(rowOff + px) * 4 + 3] > 14) {
+            hasPixels = true;
+            if (px < minX) minX = px;
+            if (py < minY) minY = py;
+            if (px > maxX) maxX = px;
+            if (py > maxY) maxY = py;
+          }
+        }
+      }
+    } catch {
+      hasPixels = false;
+    }
+
+    const outCanvas = document.createElement('canvas');
+    if (hasPixels && maxX >= minX && maxY >= minY) {
+      const pad = 2;
+      const bx = Math.max(0, minX - pad);
+      const by = Math.max(0, minY - pad);
+      const bw = Math.min(scaledW - bx, maxX - minX + 1 + pad * 2);
+      const bh = Math.min(scaledH - by, maxY - minY + 1 + pad * 2);
+      outCanvas.width = Math.max(1, bw);
+      outCanvas.height = Math.max(1, bh);
+      const oCtx = outCanvas.getContext('2d');
+      if (oCtx) {
+        oCtx.drawImage(tempCanvas, bx, by, bw, bh, 0, 0, bw, bh);
+      }
+    } else {
+      outCanvas.width = scaledW;
+      outCanvas.height = scaledH;
+      const oCtx = outCanvas.getContext('2d');
+      if (oCtx) {
+        oCtx.drawImage(tempCanvas, 0, 0);
+      }
+    }
+
+    tempCanvas.width = 0;
+    tempCanvas.height = 0;
+    return outCanvas;
+  }
+
+  public ensurePrey140Loaded(id: string, url?: string | null): void {
+    if (typeof Image === 'undefined' || typeof document === 'undefined') return;
+    if (this.prey140Frames[id] || this.prey140LoadingSet.has(id)) return;
+    const srcUrl = url || getPrey140ImageUrl(id);
+    if (!srcUrl) return;
+    this.prey140LoadingSet.add(id);
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const cropped = this.cropAndScalePreyImage(img);
+      if (cropped) {
+        this.prey140Frames[id] = cropped;
+        this.prey140LoadedCount = Object.keys(this.prey140Frames).length;
+        this.notifyListeners();
+      }
+      img.onload = null;
+      img.onerror = null;
+      this.prey140LoadingSet.delete(id);
+    };
+    img.onerror = () => {
+      img.onload = null;
+      img.onerror = null;
+      this.prey140LoadingSet.delete(id);
+    };
+    img.src = srcUrl;
+  }
+
+  private async loadPrey140Assets(): Promise<void> {
+    if (this.prey140BatchStarted) return;
+    if (typeof Image === 'undefined' || typeof document === 'undefined') return;
+    this.prey140BatchStarted = true;
+
+    // Prioritize sunlit shallow reef species first so initial spawn frame renders crisp fish immediately
+    const prioritized = [...PREY_140_RECORDS].sort((a, b) => {
+      const aShallow = a.realMinDepth < 50 && (a.sizeClass === 'XS' || a.sizeClass === 'S' || a.sizeClass === 'M') ? 0 : 1;
+      const bShallow = b.realMinDepth < 50 && (b.sizeClass === 'XS' || b.sizeClass === 'S' || b.sizeClass === 'M') ? 0 : 1;
+      if (aShallow !== bShallow) return aShallow - bShallow;
+      return a.realMinDepth - b.realMinDepth;
+    });
+
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < prioritized.length; i += BATCH_SIZE) {
+      const batch = prioritized.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(
+          (rec) =>
+            new Promise<void>((resolve) => {
+              if (this.prey140Frames[rec.id]) {
+                resolve();
+                return;
+              }
+              const img = new Image();
+              img.crossOrigin = 'anonymous';
+              img.onload = () => {
+                const cropped = this.cropAndScalePreyImage(img);
+                if (cropped) {
+                  this.prey140Frames[rec.id] = cropped;
+                  this.prey140LoadedCount = Object.keys(this.prey140Frames).length;
+                }
+                img.onload = null;
+                img.onerror = null;
+                resolve();
+              };
+              img.onerror = () => {
+                img.onload = null;
+                img.onerror = null;
+                resolve();
+              };
+              img.src = getPrey140ImageUrl(rec.id);
+            })
+        )
+      );
+      this.notifyListeners();
+    }
   }
 
   private createChromaKeyCanvas(
@@ -2019,9 +2179,17 @@ export class SpriteSheetManager {
   }
 
   public getPreySprite(config: {
+    id?: string;
     tier: number;
     spriteKey?: SpriteFrameKey;
+    externalPngUrl?: string | null;
   }): HTMLCanvasElement | undefined {
+    if (config.id && this.prey140Frames[config.id]) {
+      return this.prey140Frames[config.id];
+    }
+    if (config.externalPngUrl && config.id) {
+      this.ensurePrey140Loaded(config.id, config.externalPngUrl);
+    }
     if (config.spriteKey && this.frames[config.spriteKey]) {
       return this.frames[config.spriteKey];
     }

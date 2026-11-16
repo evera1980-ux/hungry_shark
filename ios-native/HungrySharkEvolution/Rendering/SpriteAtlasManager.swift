@@ -161,7 +161,10 @@ public final class SpriteAtlasManager: ObservableObject {
 
             for (idx, prey) in allPreys.enumerated() {
                 if localPreyTex[prey.spriteKey] != nil { continue }
-                if let raw3x = Self.loadBundledImage(named: "prey_\(prey.id)@3x") ?? Self.loadBundledImage(named: "prey_\(prey.id)"),
+                if let raw3x = Self.loadBundledImage(named: "\(prey.id)@3x")
+                    ?? Self.loadBundledImage(named: prey.id)
+                    ?? Self.loadBundledImage(named: "prey_\(prey.id)@3x")
+                    ?? Self.loadBundledImage(named: "prey_\(prey.id)"),
                    let cg3x = raw3x.cgImage {
                     let img3x = UIImage(cgImage: cg3x, scale: 3.0, orientation: .up)
                     localPreyUI[prey.spriteKey] = img3x
@@ -394,11 +397,31 @@ public final class SpriteAtlasManager: ObservableObject {
         return sharkUIImages[spriteKey]
     }
 
+    private func loadSinglePreyOnDemand(for spriteKey: String) {
+        guard preyTextures[spriteKey] == nil else { return }
+        guard let prey = GameConfigGenerated.preyTiers.first(where: { $0.id == spriteKey || $0.spriteKey == spriteKey }) else { return }
+        if let raw3x = Self.loadBundledImage(named: "\(prey.id)@3x")
+            ?? Self.loadBundledImage(named: prey.id)
+            ?? Self.loadBundledImage(named: "prey_\(prey.id)@3x")
+            ?? Self.loadBundledImage(named: "prey_\(prey.id)"),
+           let cg3x = raw3x.cgImage {
+            let img3x = UIImage(cgImage: cg3x, scale: 3.0, orientation: .up)
+            preyUIImages[prey.spriteKey] = img3x
+            let tex = SKTexture(image: img3x)
+            tex.filteringMode = .linear
+            preyTextures[prey.spriteKey] = tex
+        }
+    }
+
     public func preyTexture(for spriteKey: String) -> SKTexture? {
+        if let tex = preyTextures[spriteKey] { return tex }
+        loadSinglePreyOnDemand(for: spriteKey)
         return preyTextures[spriteKey]
     }
 
     public func preyUIImage(for spriteKey: String) -> UIImage? {
+        if let img = preyUIImages[spriteKey] { return img }
+        loadSinglePreyOnDemand(for: spriteKey)
         return preyUIImages[spriteKey]
     }
 

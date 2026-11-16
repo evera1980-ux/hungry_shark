@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { I18N, translate } from './i18n';
 import { GAME_CONFIG } from './config';
+import { PREY_140_RECORDS } from './preyDatabase140';
 import {
   computeSharkStats,
   computeEvolvedSharkStats,
@@ -60,9 +63,9 @@ test('I18N dictionary has complete and matching keys in both zh and en', () => {
   );
 });
 
-test('GAME_CONFIG has 15 organs across 3 factions and 5 slots, plus 33 target prey species across 8 tiers', () => {
+test('GAME_CONFIG has 15 organs across 3 factions and 5 slots, plus 141 target prey & hazard entries (140 new species + cyber_mine)', () => {
   assert.equal(GAME_CONFIG.organs.length, 15);
-  assert.equal(GAME_CONFIG.preyTiers.length, 33);
+  assert.equal(GAME_CONFIG.preyTiers.length, 141);
 
   const factions = new Set(GAME_CONFIG.organs.map((o) => o.faction));
   const slots = new Set(GAME_CONFIG.organs.map((o) => o.slot));
@@ -108,9 +111,9 @@ test('computeSharkStats scales speed, bite tier, zoom, and drain reduction with 
 
 test('resolvePreyEncounter distinguishes devourable prey from oversized hazards', () => {
   const baseStats = computeSharkStats(1, {}, false);
-  const tier1Prey = GAME_CONFIG.preyTiers[0]; // Tier 1 Jellyfish
-  const tier6Mine = GAME_CONFIG.preyTiers[5]; // Tier 6 Mine
-  const tier8Boss = GAME_CONFIG.preyTiers[7]; // Tier 8 Kraken Boss
+  const tier1Prey = GAME_CONFIG.preyTiers.find((p) => p.tier === 1 && !p.isHazard)!;
+  const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!;
+  const tier8Boss = GAME_CONFIG.preyTiers.find((p) => p.tier === 8 && p.isBoss)!;
 
   const eatSmall = resolvePreyEncounter(baseStats, tier1Prey, false, false);
   assert.equal(eatSmall.canDevour, true);
@@ -300,7 +303,7 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   assert.ok(lateDrain > earlyDrain * 2.5, 'Late-game metabolic hunger drain must scale up significantly');
 
   // 3. Abyss Behemoth adds +1 effective Bite Tier and increases fail damage
-  const tier4Sub = GAME_CONFIG.preyTiers[3]; // Tier 4 Submarine
+  const tier4Sub = GAME_CONFIG.preyTiers.find((p) => p.tier === 4 && !p.isHazard)!; // Tier 4 Pelagic Prey
   assert.equal(getEffectivePreyTier(tier4Sub, 'NONE'), 4);
   assert.equal(getEffectivePreyTier(tier4Sub, 'ABYSS_BEHEMOTH'), 5);
 
@@ -352,13 +355,13 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   // (b) Deep-sea hazards (Naval Mines) ALWAYS explode outside of Gold Frenzy, even at Lv.16 Bite Tier 8 while boosting
   const maxShark = computeSharkStats(16, getMaxMechaLoadout(), false);
   assert.equal(maxShark.biteTier, 8);
-  const tier6Mine = GAME_CONFIG.preyTiers[5];
+  const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!;
   const mineHitAtMaxLevel = resolvePreyEncounter(maxShark, tier6Mine, false, true, 'NONE', 1.5);
   assert.equal(mineHitAtMaxLevel.canDevour, false, 'Mines must ALWAYS explode outside of Gold Frenzy even at Bite Tier 8');
   assert.ok(mineHitAtMaxLevel.hpDelta < -80, 'Mines deal lethal flat + maxHP% damage in deep sea');
 
   // (c) Tier 8 Bosses & Tier 7+ Abyss Behemoths require active Boost outside of Gold Frenzy even at Bite Tier 8
-  const tier8Boss = GAME_CONFIG.preyTiers[7];
+  const tier8Boss = GAME_CONFIG.preyTiers.find((p) => p.tier === 8 && p.isBoss)!;
   const bossNoBoost = resolvePreyEncounter(maxShark, tier8Boss, false, false, 'NONE', 1.2);
   const bossWithBoost = resolvePreyEncounter(maxShark, tier8Boss, false, true, 'NONE', 1.2);
   assert.equal(bossNoBoost.canDevour, false, 'Tier 8 Boss counter-bites if shark is not actively Boosting');
@@ -567,7 +570,7 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
   assert.ok(omegaStats.relativePreyScale < statsLv1.relativePreyScale, 'Higher generation + in-run level shrinks surrounding prey');
 
   // Verify canEatMines allows devouring Naval Mines even outside of Gold Frenzy!
-  const tier6Mine = GAME_CONFIG.preyTiers[5];
+  const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!;
   const omegaMineOutcome = resolvePreyEncounter(omegaStats, tier6Mine, false, false, 'NONE', 1.0);
   assert.equal(omegaMineOutcome.canDevour, true, 'Shark with canEatMines (Tier V+ Mecha/Omega) devours naval mines safely');
 
@@ -778,8 +781,8 @@ test('Senior QA Audit: 48-Shark Panel Stats, Trait Descriptions, and Gameplay Ca
   );
 
   // 3. Verify Specific Shark Trait Multipliers & Combat Mitigation in resolvePreyEncounter
-  const tier6Mine = GAME_CONFIG.preyTiers[5]; // Naval Mine hazard
-  const tier8Boss = GAME_CONFIG.preyTiers[7]; // Kraken Boss
+  const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!; // Naval Mine hazard
+  const tier8Boss = GAME_CONFIG.preyTiers.find((p) => p.tier === 8 && p.isBoss)!; // Apex Whale Boss
 
   const standardTier2 = computeEvolvedSharkStats(1, 'shark_11_tiger_shark', 1, false, 1.0, 1);
   const bullShark = computeEvolvedSharkStats(1, 'shark_10_bull_shark', 1, false, 1.0, 1);
@@ -815,15 +818,14 @@ test('Senior QA Audit: 48-Shark Panel Stats, Trait Descriptions, and Gameplay Ca
 test('Biomechanical Swimming Gait Classification & Anatomical Spine Envelope Invariants', () => {
   const byId = Object.fromEntries(GAME_CONFIG.preyTiers.map((p) => [p.id, p]));
 
-  assert.equal(getPreySwimGait(byId['coral_clownfish']), 'CARANGIFORM');
-  assert.equal(getPreySwimGait(byId['electric_eel']), 'ANGUILLIFORM');
-  assert.equal(getPreySwimGait(byId['green_moray_eel']), 'ANGUILLIFORM');
-  assert.equal(getPreySwimGait(byId['gene_jelly']), 'MEDUSOID_JET');
-  assert.equal(getPreySwimGait(byId['cthulhu_kraken']), 'MEDUSOID_JET');
-  assert.equal(getPreySwimGait(byId['gold_puffer']), 'PUFFER_BUOYANT');
-  assert.equal(getPreySwimGait(byId['probe_sub']), 'RIGID_PROPULSION');
+  assert.equal(getPreySwimGait(byId['PREY-001']), 'CARANGIFORM');
+  assert.equal(getPreySwimGait(byId['PREY-079']), 'ANGUILLIFORM');
+  assert.equal(getPreySwimGait(byId['PREY-129']), 'ANGUILLIFORM');
+  assert.equal(getPreySwimGait(byId['PREY-052']), 'PUFFER_BUOYANT');
+  assert.equal(getPreySwimGait(byId['PREY-103']), 'PUFFER_BUOYANT');
+  assert.equal(getPreySwimGait(byId['PREY-115']), 'RIGID_PROPULSION');
   assert.equal(getPreySwimGait(byId['cyber_mine']), 'RIGID_PROPULSION');
-  assert.equal(getPreySwimGait(byId['cyber_mecha_shark_boss']), 'SHARK_APEX');
+  assert.equal(getPreySwimGait(byId['PREY-112']), 'SHARK_APEX');
 
   // Verify snout (u=0) stays anchored with minimal sway while caudal fin (u=1) whips with maximum amplitude
   const drawH = 60;
@@ -3240,6 +3242,59 @@ test('Undulating Mountain Range Seabed (Zero Flat or Diagonal Straight Lines), U
     }
   }
 });
+
+test('140 New Marine Prey Species + Cyber Mine: Complete Asset Presence, Depth Stratification & Body-Size Deep Trend', () => {
+  assert.equal(PREY_140_RECORDS.length, 140);
+  assert.equal(GAME_CONFIG.preyTiers.length, 141);
+
+  const byId = Object.fromEntries(GAME_CONFIG.preyTiers.map((p) => [p.id, p]));
+  assert.ok(byId['cyber_mine'], 'cyber_mine must remain retained');
+
+  // 1. Verify every PREY-001..PREY-210 has a valid transparent @3x.png file on disk
+  for (const rec of PREY_140_RECORDS) {
+    const cfg = byId[rec.id];
+    assert.ok(cfg, `Missing PreyTierConfig for ${rec.id}`);
+    assert.ok(cfg.minDepth < cfg.maxDepth, `${rec.id} must have minDepth < maxDepth`);
+    assert.ok(cfg.externalPngUrl?.endsWith(`${rec.id}@3x.png`), `${rec.id} must reference @3x PNG asset`);
+    const filePath = path.resolve(process.cwd(), 'public', cfg.externalPngUrl!.replace(/^\//, ''));
+    assert.ok(fs.existsSync(filePath), `Missing prey asset on disk: ${filePath}`);
+  }
+
+  // 2. Verify "体大的优先靠近深海" (larger body size classes trend progressively deeper)
+  const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', '巨型'] as const;
+  const avgMidByClass: Record<string, number> = {};
+  for (const sz of sizeOrder) {
+    const recs = PREY_140_RECORDS.filter((r) => r.sizeClass === sz);
+    assert.ok(recs.length > 0, `Expected species for sizeClass ${sz}`);
+    const avgMid =
+      recs.reduce((acc, r) => {
+        const c = byId[r.id];
+        return acc + (c.minDepth + c.maxDepth) * 0.5;
+      }, 0) / recs.length;
+    avgMidByClass[sz] = avgMid;
+  }
+  assert.ok(avgMidByClass['S'] >= avgMidByClass['XS'] - 150, 'S fish should not sit shallower than XS reef fish');
+  assert.ok(avgMidByClass['L'] > avgMidByClass['S'], 'L species must average deeper than S species');
+  assert.ok(avgMidByClass['XL'] > avgMidByClass['L'], 'XL species must average deeper than L species');
+  assert.ok(avgMidByClass['XXL'] > avgMidByClass['XL'], 'XXL species must average deeper than XL species');
+  assert.ok(avgMidByClass['巨型'] > avgMidByClass['XXL'], 'Giant whale species must average deeper than XXL species');
+
+  // 3. Verify healthy biodiversity across all 5 depth bands down to 20,000m (including deep-sea small food chain)
+  const checkDepths = [180, 750, 2200, 6500, 14000, 19500];
+  for (const d of checkDepths) {
+    const matching = GAME_CONFIG.preyTiers.filter((p) => d >= p.minDepth && d <= p.maxDepth);
+    assert.ok(
+      matching.length >= 6,
+      `Depth ${d}m must have rich prey diversity (>= 6 species), got ${matching.length}`
+    );
+    const hasEdibleTier = matching.some((p) => !p.isHazard && p.tier <= 4);
+    assert.ok(
+      hasEdibleTier,
+      `Depth ${d}m must retain edible T1~T4 prey so deep-sea food chain never starves`
+    );
+  }
+});
+
 
 
 

@@ -6,6 +6,12 @@ import {
 } from './rules';
 import { getSharkFormById } from './sharkEvolutionConfig';
 import { spriteSheetManager } from './spriteSheetManager';
+import {
+  PREY_140_ELONGATED_IDS,
+  PREY_140_PUFFER_IDS,
+  PREY_140_RIGID_IDS,
+  PREY_140_SHARK_LIKE_IDS,
+} from './preyDatabase140';
 
 export interface RenderSharkParams {
   x: number;
@@ -74,11 +80,33 @@ const RIGID_PROPULSION_IDS = new Set<string>([
  * Classifies each marine species into one of 5 authentic biomechanical swimming gaits.
  */
 export function getPreySwimGait(config: PreyTierConfig): SwimGaitType {
-  if (config.id === 'cyber_mecha_shark_boss') return 'SHARK_APEX';
-  if (ANGUILLIFORM_IDS.has(config.id)) return 'ANGUILLIFORM';
-  if (MEDUSOID_JET_IDS.has(config.id)) return 'MEDUSOID_JET';
-  if (PUFFER_BUOYANT_IDS.has(config.id)) return 'PUFFER_BUOYANT';
-  if (RIGID_PROPULSION_IDS.has(config.id) || config.isHazard) {
+  if (
+    PREY_140_SHARK_LIKE_IDS.has(config.id) ||
+    config.id === 'cyber_mecha_shark_boss'
+  ) {
+    return 'SHARK_APEX';
+  }
+  if (
+    PREY_140_ELONGATED_IDS.has(config.id) ||
+    ANGUILLIFORM_IDS.has(config.id)
+  ) {
+    return 'ANGUILLIFORM';
+  }
+  if (MEDUSOID_JET_IDS.has(config.id)) {
+    return 'MEDUSOID_JET';
+  }
+  if (
+    PREY_140_PUFFER_IDS.has(config.id) ||
+    PUFFER_BUOYANT_IDS.has(config.id) ||
+    config.behavior === 'PUFFER_INFLATE'
+  ) {
+    return 'PUFFER_BUOYANT';
+  }
+  if (
+    PREY_140_RIGID_IDS.has(config.id) ||
+    RIGID_PROPULSION_IDS.has(config.id) ||
+    config.isHazard
+  ) {
     return 'RIGID_PROPULSION';
   }
   return 'CARANGIFORM';
@@ -574,7 +602,7 @@ export interface PreyEntity {
 }
 
 /**
- * Draw any of the 33 Ocean Prey / Hazard / Boss species using the sliced sprites from SpriteSheetManager,
+ * Draw any of the 140 Ocean Prey species + Cyber Mine using sprites from SpriteSheetManager,
  * preserving each species' authentic aspect ratio, upright dorsal orientation, and species-specific biomechanical swimming gait.
  */
 export function drawPreyEntity(

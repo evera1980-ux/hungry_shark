@@ -1,8 +1,8 @@
 # 03. 核心数值策划与系统公式圣经 (Game Balance & Numerical Design)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-10-26
-> **关联约束**：修改 `src/game/rules.ts`、`src/game/sharkEvolutionConfig.ts`、`src/game/config.ts` 或 `src/game/infiniteProgressionManager.ts` 中的任何数值参数或公式时，**必须在同一次提交中更新本文档对应的章节与表格**（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
+> **最后更新**：2026-11-15
+> **关联约束**：修改 `src/game/rules.ts`、`src/game/sharkEvolutionConfig.ts`、`src/game/config.ts`、`src/game/preyDatabase140.ts` 或 `src/game/infiniteProgressionManager.ts` 中的任何数值参数或公式时，**必须在同一次提交中更新本文档对应的章节与表格**（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
 
@@ -52,7 +52,7 @@
 
 ## 2. 咬合阶位（`T1 ~ T8`）计算规则与克制法则
 
-`T`（Bite Tier，咬合阶位，显示为琥珀色徽章 `T1 ~ T8`）是决定**食物链吞噬关系**的核心指标。海洋中全部 32 种生物划分为 `T1` 至 `T8` 共 8 个生态位阶。
+`T`（Bite Tier，咬合阶位，显示为琥珀色徽章 `T1 ~ T8`）是决定**食物链吞噬关系**的核心指标。海洋中全部 140 种生物（外加 1 种深海水雷 `cyber_mine`，共计 141 项生态配置）划分为 `T1` 至 `T8` 共 8 个生态位阶。
 
 ### 2.1 鲨鱼当前咬合阶位 `T` 的完整合成公式
 位于 `src/game/rules.ts` ➔ `computeEvolvedSharkStats()`：
@@ -192,7 +192,7 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 ### 5.1 金币 `🪙` 与基因 `🧬` 的获取/消耗平衡（~4:1 产出比）
 - **金币 `🪙`（高频养成与战术货币）**：
-  - **获取**：全部 33 种猎物的 `coinValue` 与 `geneValue` 按约 **4:1 ~ 4.5:1** 黄金比例配置；普通猎物死亡爆出的拾取球中 **75% 为金币球 `COIN`**、25% 为基因结晶；此外包含黄金变异鱼 `3.0x` 金币倍率与悬赏目标鱼丰厚金币奖励。
+  - **获取**：全部 141 项猎物与障碍配置（140 种海洋生物 + `cyber_mine`）的 `coinValue` 与 `geneValue` 按约 **4:1 ~ 4.5:1** 黄金比例配置；普通猎物死亡爆出的拾取球中 **75% 为金币球 `COIN`**、25% 为基因结晶；此外包含黄金变异鱼 `3.0x` 金币倍率与悬赏目标鱼丰厚金币奖励。
   - **消耗**：① 强化当前鲨鱼躯体等级（`Lv.1 -> Lv.10`）；② 破茧进化解锁新鲨鱼形态；③ 局内释放 `🪙 黄金狂暴` 战术爆发技能。
 - **基因碎片 `🧬`（高价值突破与质变货币）**：
   - **获取**：浅海普通小鱼仅少量产出基因（`geneValue = 1~2`），高浓度基因产出来自：**🎯 悬赏目标鱼**（完成悬赏奖励 `18 + 4 * tier` 基因及必掉额外基因结晶）、**深渊巨兽变异体 (`ABYSS_BEHEMOTH`, `2.5x` 基因)** 与 **`T4+` 深海大型猎物**。
@@ -218,33 +218,43 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 ---
 
-## 6. 海洋深度生态分布规则（3 大生态带 + 5 大《v1.0 规范》深度带 × 32 种生物，最大深度 `20000m`）
+## 6. 海洋深度生态分布规则（140 种真实水深生物 + `cyber_mine`，`0m ~ 20000m` 体大优先深海分层）
 
-### 6.1 海洋垂直生态带 (`GAME_CONFIG.zones` & `DEPTH_BAND_CONFIGS`)
-1. **阳光珊瑚浅海 (`sunlit`，`0m ~ 520m`，对应规范 `Epipelagic 0~2000m` 上层)**：明亮蔚蓝，透射动态丁达尔阳光束，栖息 `T1 ~ T3` 珊瑚礁热带鱼群。
-2. **暮光温跃层 (`twilight`，`520m ~ 1150m`，过渡至规范 `Mesopelagic 2000~6000m`)**：靛蓝幽暗，栖息 `T3 ~ T5` 中大型远洋洄游鱼类、海龟、蝠鲼与大白鲨。
-3. **午夜与超深渊海沟 (`abyss`，`1150m ~ 20000m`，涵盖规范 `Bathypelagic 6000~10000m` / `Abyssopelagic 10000~16000m` / `Hadal-like 16000~20000m`)**：紫黑超深渊，海床最深可达 `19800m`（世界深度上限 `20000m`），布满发光灯笼鱼（`T3`）、深海巨型水雷（`T3`）、秘鲁巨型赤鱿（`T4`）、深渊水滴鱼（`T5`）、核废料变异粘液（`T6`）以及 `T7 ~ T8` 史前巨齿鲨、邓氏鱼、深渊沧龙与利维坦（所有深渊代表物种 `maxDepth: 99999`，确保下潜至 `20000m` 全程具备完整 `T3 ~ T8` 生态链）。
+### 6.1 双因子映射算法 (`computeMappedPrey140Config` in `src/game/preyDatabase140.ts`) 与五大深海生态带
+游戏生态库 `GAME_CONFIG.preyTiers` 由 `buildPrey140TiersWithMines()` 生成，包含 `docs/06-PREY_DATABASE_140.md` 中的 **140 种真实海洋生物（`PREY-001 ~ PREY-100` 普通鱼、`PREY-101 ~ PREY-130` 大型海洋生物、`PREY-201 ~ PREY-210` 巨型海洋生物）** 与 **1 种保留的爆破障碍（`cyber_mine`：`T6`，`560m ~ 20000m`）**，总计 **141 项**（旧版 32 种混合生物、潜艇、辐射粘液及海底遗物全部移除）。
+
+由于现实鱼类真实水深多集中在 `0~300m`、最深 `2000m`，而游戏世界深度为 `0m ~ 20000m`，系统采用 **「真实生存水深对数分位数 `depthFactor` + 尺寸级别 `sizeClass` 深海偏移」** 双因子纯函数映射到 5 大深度区间：
+- **对数水深基准**：$\text{depthFactor} = \min\big(1,\; \ln(1 + \text{realMaxDepth}) / \ln(1 + 1200)\big)$。
+- **同水层“体大优先靠近深海”递增映射**（针对 `realMinDepth < 50m` 物种）：
+  - `XS`（`5~15cm`）：`T1`，覆盖 `25m ~ 530m`（阳光浅滩珊瑚鱼主体，如 `PREY-001` 小丑鱼、`PREY-003` 黄尾蓝雀鲷）。
+  - `S`（`10~30cm`）：`T1 ~ T2`，覆盖 `45m ~ 760m`（如 `PREY-002` 蓝倒吊、`PREY-044` 沙丁鱼）。
+  - `M`（`15~70cm`）：`T2 ~ T3`，覆盖 `115m ~ 1860m`（跨越浅海礁盘外缘至上暮光带）。
+  - `L`（`40~300cm`）：`T3 ~ T4`，覆盖 `320m ~ 5450m`（`T4` 物种钳制 `minDepth >= 540m` 不侵扰浅滩）。
+  - `XL`（`100~400cm`）：`T5 ~ T6`，覆盖 `640m ~ 12800m`（远洋中型鲨、海龟、海豚与大枪鱼）。
+  - `XXL`（`250~800cm`）：`T6 ~ T7`，覆盖 `1650m ~ 20000m`（深海远洋虎鲨、鲸鲨、大白鲨、大旗鱼与深潜巨头）。
+  - `巨型`（`400~2500cm`）：`T8`（含 `PREY-201/204/205/206` 深渊 Apex Boss），覆盖 `4200m ~ 20000m` 直达海沟底部。
+- **深海基础食物链保底机制（`realMinDepth >= 50m`）**：灯笼鱼、银斧鱼、蝰鱼、尖牙鱼、深海龙鱼、斧头龙鱼等真实中深海小型生物（`PREY-041/042/079~088`）统一从 `minDepth >= 540m` 向下铺设至 `3600m ~ 20000m`（`realMaxDepth >= 2000` 直达 `20000m`），赋予 `T2 ~ T4` 阶位，确保玩家下潜至万米海沟时始终有发光小鱼群可吞噬续航。
 
 ### 6.2 85% 原生栖息地刷怪保护（严禁浅水鱼进深渊 / 深海鱼进浅滩）
 在 `src/game/ecosystemSpawner.ts` 与 `src/App.tsx` 的 `createPreyEntity()` 中强制执行：
-1. **深度优先筛选**：根据刷新点目标深度 `targetDepth`，85% 概率严格从满足 `minDepth <= targetDepth <= maxDepth` 的原生鱼种池中抽取，15% 概率允许在栖息地边界 `±140m` 过渡带抽取。
+1. **深度优先筛选**：根据刷新点目标深度 `targetDepth`，85% 概率严格从满足 `minDepth <= targetDepth <= maxDepth` 的原生鱼种池中抽取，15% 概率允许在栖息地边界 `±140m` 过渡带抽取（兜底池按 `targetDepth <= 520m ? minDepth <= 520 : maxDepth >= 1150` 分流）。
 2. **出生坐标硬钳制（Hard Depth Clamp）**：任何鱼种生成后，其最终 Y 坐标强制执行：
    $$y = \text{clamp}\big(y,\; \max(55,\; \text{chosenTier.minDepth}),\; \text{chosenTier.maxDepth}\big)$$
-   从而在数学上 **100% 杜绝浅水鱼刷到深海或深海鱼刷到浅水区**。
+   且在阳光浅滩伴游成簇生成（`schoolClusterAnchor`）时额外执行 `shallowMateCap = sharkY <= 430 ? 515 : anchor.config.maxDepth`，数学上 **100% 杜绝浅水鱼刷到深海或深海鱼越界至浅水区**。
 
-### 6.3 浅滩安全区与咬合阶位感知刷新权重（Early-Run Sanctuary & Bite-Tier-Aware Spawning）
-为了保证阳光珊瑚浅海（`0~520m`）全程拥有畅快解压的捕猎体验，严禁出现海鳝/电鳗等主动冲刺攻击鱼类干扰浅滩游弋，在 `src/game/config.ts`、`src/game/ecosystemSpawner.ts` 与 `src/App.tsx` 中实施四项生态保护机制：
-1. **浅海零主动攻击鱼类栖息（Zero Active Chargers in Shallow Reef）**：
-   - 将剧毒海鳝（`green_moray_eel`，`EEL_CHARGER`）的原生栖息深度迁移至暮光礁坡带（`560m ~ 1180m`），使 `0m ~ 520m` 阳光浅海仅栖息 `T1 ~ T3` 温顺或受惊逃逸/膨胀防御的珊瑚礁鱼群（`DRIFT_SWARM` / `SCHOOL_FLEE` / `PUFFER_INFLATE`）。
-   - `pickPreyConfigForDepth` 在 `depth <= 520m` 时**全程永久过滤** `EEL_CHARGER`、`SUB_PATROL`、`MINE_HAZARD`、`HEAVY_CRUISER` 与 `KRAKEN_BOSS`；同时 `App.tsx` 的 AI 状态机在 `shark.y <= 520m` 或 `prey.y <= 520m` 时强制禁用 `EEL_CHARGER` 蓄力锁定冲刺。
-2. **浅滩下界预刷新永久钳制**：当玩家在阳光浅海活动（`sharkY <= 430m`）时，屏幕外预生成鱼群的深度上限被钳制在浅水区内（新手保护期 `<= 440m`，常态期 `<= 495m`），彻底防止 `520m+` 暮光带鳗鱼/掠食者在浅海玩家正下方刷出并上浮。
-3. **浅海动态阶位权重（全程仅刷 `T1 ~ T3` 珊瑚礁鱼群）**：
-   - 新手保护期（`isEarlySanctuary`）：`T1: 84% / T2: 16% / T3+: 0%`
-   - 常规 `T1` 鲨鱼浅海期：`T1: 76% / T2: 18% / T3: 6% / T4+: 0%`
-   - `T2+` 鲨鱼浅海期：`T1: 58% / T2: 28% / T3: 14% / T4+: 0%`
+### 6.3 浅滩安全区与全深度分层刷新权重（Early-Run Sanctuary & 0~20000m Stratified Weights）
+为保证阳光珊瑚浅海（`0~520m`）清爽解压且深海梯度平滑递增，实施四项保护与分层权重：
+1. **浅海零主动攻击鱼类与水雷（Zero Active Chargers / Hazards in Shallow Reef）**：
+   - `pickPreyConfigForDepth` 与 `spawnOnePrey` 在 `depth <= 520m` 时**全程永久过滤** `isHazard`（`cyber_mine`）、`isBoss`、`EEL_CHARGER` 与 `SUB_PATROL`；浅海区仅栖息 `T1 ~ T3` 珊瑚礁鱼群与小中型群游鱼。
+2. **浅滩下界预刷新永久钳制**：当玩家在阳光浅海活动（`sharkY <= 430m`）时，屏幕外预生成目标深度钳制在 `<= 495m`（新手保护期 `<= 440m`），集群伴游鱼钳制在 `<= 515m`。
+3. **全深度五段动态阶位权重 (`T1 ~ T8`)**：
+   - `0 ~ 520m`（阳光浅滩）：新手保护期 `T1:84 / T2:16`；`T1` 常态 `T1:76 / T2:18 / T3:6`；`T2+` 浅滩 `T1:58 / T2:28 / T3:14`。
+   - `520m ~ 1150m`（暮光陆架）：`T2:10 / T3:26 / T4:28 / T5:22 / T6:14`。
+   - `1150m ~ 3500m`（上中层远洋）：`T2:10 / T3:14 / T4:18 / T5:20 / T6:18 / T7:14 / T8:6`。
+   - `3500m ~ 8000m`（午夜深渊）：`T2:8 / T3:12 / T4:16 / T5:16 / T6:18 / T7:18 / T8:12`。
+   - `8000m ~ 20000m`（超深渊海沟）：`T2:6 / T3:10 / T4:12 / T5:10 / T6:16 / T7:22 / T8:24`。
 4. **同屏鱼群呼吸感与密度控制（`maxActivePreys = 20`，`debugPreySizeMultiplier = 0.8`）**：
-   - 同屏活跃猎物数量默认配置为 `20` 条，生成环半径扩展至 `640px ~ 1650px`，猎物全局显示与碰撞尺寸缩放倍率默认配置为 `0.8`；
-   - `T1` 小型鱼成簇触发率由 `55%`（3 条紧凑扎堆）下调至 `28%`（仅 1 条伴游鱼结成双鱼对，间距扩大至 `96px × 64px`），开局前方迎宾鱼群由 `10` 条精简至 `5` 条，使浅海与深海视野更疏朗自然。
+   - 同屏活跃猎物数量默认配置为 `20` 条（iOS 端 `22` 条），生成环半径扩展至 `640px ~ 1650px`，猎物全局显示与碰撞尺寸缩放倍率默认 `0.8`；开局迎宾鱼群使用 `['PREY-001', 'PREY-003', 'PREY-015', 'PREY-002', 'PREY-044']`。
 5. **新手引导第 3 步实操补给礼包**：首次完成新手引导第 2 步（按住冲刺 `0.7s`）时，一次性发放 **`+80 🪙 +20 🧬` 新手补给礼包**，确保玩家在引导第 3 步 100% 立即点亮并亲手体验 `强化`（60🪙）或 `突破`（12🧬）。
 
 ---
@@ -266,6 +276,7 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-15 | **全平台（Web + iOS 原生）猎物体系全面替换为 140 种新海洋生物（`PREY-001 ~ PREY-210`）+ 保留深海水雷 `cyber_mine`（共 141 项），按真实水深 + 体型加权分层铺满 `0m ~ 20000m`**：① 新增 `src/game/preyDatabase140.ts` 收录 140 种生物元数据、中英双语字典与 `computeMappedPrey140Config` 双因子映射公式（按 `realMinDepth/realMaxDepth` 与 `XS -> 巨型` 尺寸级别优先向深海偏移，同时为 `realMinDepth >= 50m` 的深海发光小鱼保留直达 `20000m` 的基础补给链）；② 替换 `GAME_CONFIG.preyTiers`、更新 `ecosystemSpawner.ts`（含 `shallowMateCap = 515m` 伴游钳制与五段 `0~20000m` 阶位权重）、`App.tsx` 开局迎宾鱼群及 `i18n.ts`；③ 升级 `spriteSheetManager.ts` 与 `canvasRenderer.ts`（分批/按需加载 `@3x.png` 透明资产并执行 420px 限宽与紧致透明边界裁切，新增 `SHARK_APEX` 步态）；④ 同步更新 `scripts/build-ios-native.ts`（唯一 `spriteKey`、`@3x` 打包、五步态分类与深海分层刷新）与 `rules.test.ts`（41/41 通过） | `src/game/preyDatabase140.ts`, `src/game/config.ts`, `src/game/i18n.ts`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/06-PREY_DATABASE_140.md` |
 | 2026-11-15 | **修复 9 层阶梯海床洞口悬崖与大陆坡嫁接山根（~633m）穿墙穿模 Bug（Web + iOS 原生双端同步）**：① 将 `getSeabedTerraceAt` 实体碰撞激活由 `graftedEdgeWeight > 0.02` 改为 `graftT > 0.03`，彻底清除洞口唇边 `0~22m` 碰撞盲区；② 在 `resolveSeabedCollision` 中识别无洞下走廊的实心嫁接山根楔块（`floorEngineY - bottomArchY <= radius * 1.25`），防止误判 `hitAtollUnderside` 反向压入地下；③ 在 `resolveSeabedKineticStep` 中新增 `hitsTerraceVerticalWallHorizontally` 二维水平悬崖阻挡（含 6 次二分精定位与狭窄山根楔形区防挤入） | `src/game/worldGenerationSystem.ts`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-12 | **世界海洋深度上限扩展至 `20000m`（`1m = 1 worldPx`）并补齐 `T3 ~ T6` 超深海原生鱼种覆盖（`maxDepth: 99999`）**：将 `WorldConfig.bounds.maxDepth` 统一为 `20000m`（海床深度范围 `[420m, 19800m]`），并将 `cyber_mine`（`T3`）、`glowing_lanternfish`（`T3`）、`giant_humboldt_squid`（`T4`）、`trench_blobfish`（`T5`）、`radioactive_slime_hazard`（`T6`）的栖息深度上限设为 `99999`，与原本即为 `maxDepth: 99999` 的 `T7 ~ T8` 深渊巨兽共同构成直达 `20000m` 海沟底部的完整食物链 | `src/game/config.ts`, `src/game/worldGenerationSystem.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-10 | **新增第 3.6 节“跨深度带景深错峰 $C^2$ 五次曲线与空间涌现过渡算法 (`computeParallaxBiomeTransitionState`)”**：在 `src/game/rules.ts` 中新增 `quinticSmoothstep`（$6t^5 - 15t^4 + 10t^3$）、`compensateUnderLayerAlpha` 与 `computeParallaxBiomeTransitionState(depthMeters)`，实现 `Water -> Far -> Mid -> Near` 按光学景深距离错峰过渡、非负垂直空间涌现/沉降位移（`OffsetY >= 0`）与三生态带连续粒子权重插值 | `src/game/rules.ts`, `src/game/parallaxBackground.ts`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |

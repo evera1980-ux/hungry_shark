@@ -321,7 +321,7 @@ export default function App() {
       biteTier: activeForm.baseBiteTier,
       frenzyTimer: 0,
       trialActive: false,
-      targetFishNameKey: 'prey_blue_tang_name',
+      targetFishNameKey: 'prey_140_PREY-002',
       targetFishProgress: 0,
       targetFishRequired: 2,
       activeSynergy: null as FactionId | null,
@@ -562,7 +562,7 @@ export default function App() {
     lastHudSyncTime: 0,
     targetBounty: {
       preyConfig:
-        GAME_CONFIG.preyTiers.find((p) => p.id === 'regal_blue_tang') ??
+        GAME_CONFIG.preyTiers.find((p) => p.id === 'PREY-002') ??
         GAME_CONFIG.preyTiers[1],
       progress: 0,
       required: 2,
@@ -752,20 +752,24 @@ export default function App() {
     []
   );
 
-  // Spawn a single prey entity across all 32 marine species in GAME_CONFIG.preyTiers
+  // Spawn a single prey entity across all 140 marine species + cyber_mine in GAME_CONFIG.preyTiers
   const createPreyEntity = useCallback(
     (nearSharkX?: number, nearSharkY?: number): PreyEntity => {
       const sim = simRef.current;
       const halfW = infiniteWorldManager.worldWidth / 2;
       const refDepth = typeof nearSharkY === 'number' ? Math.max(0, nearSharkY) : 220;
 
-      // Weight lower tiers higher in shallow water (T1~T3 only, zero active attackers); shift toward deep abyssal tiers past 1200m+
+      // Weight lower tiers higher in shallow water (T1~T3 only, zero active attackers); shift toward abyssal/hadal tiers down to 20,000m
       const tierWeights =
-        refDepth > 1250
-          ? [12, 12, 14, 16, 16, 12, 12, 6]
+        refDepth > 8000
+          ? [0, 6, 10, 12, 10, 16, 22, 24]
+          : refDepth > 3500
+          ? [0, 8, 12, 16, 16, 18, 18, 12]
+          : refDepth > 1250
+          ? [0, 10, 14, 18, 20, 18, 14, 6]
           : refDepth > 520
-          ? [0, 0, 32, 30, 24, 14, 0, 0]
-          : [58, 28, 14, 0, 0, 0, 0, 0];
+          ? [0, 10, 26, 28, 22, 14, 0, 0]
+          : [54, 30, 16, 0, 0, 0, 0, 0];
       const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
       let roll = Math.random() * totalWeight;
       let chosenTierNum = 1;
@@ -777,26 +781,33 @@ export default function App() {
         }
       }
 
-      const tierCandidates = GAME_CONFIG.preyTiers.filter(
+      const depthMatched = GAME_CONFIG.preyTiers.filter(
         (p) =>
-          p.tier === chosenTierNum &&
+          refDepth >= p.minDepth - 140 &&
+          refDepth <= p.maxDepth + 140 &&
           (refDepth > 520 ||
-            (p.maxDepth <= 520 &&
-              !p.isHazard &&
+            (!p.isHazard &&
               p.behavior !== 'EEL_CHARGER' &&
               p.behavior !== 'SUB_PATROL'))
       );
-      const chosenTier: PreyTierConfig =
+      const tierCandidates = depthMatched.filter((p) => p.tier === chosenTierNum);
+      const pool =
         tierCandidates.length > 0
-          ? tierCandidates[Math.floor(Math.random() * tierCandidates.length)]
-          : GAME_CONFIG.preyTiers[0];
+          ? tierCandidates
+          : depthMatched.length > 0
+          ? depthMatched
+          : GAME_CONFIG.preyTiers;
+      const chosenTier: PreyTierConfig =
+        pool[Math.floor(Math.random() * pool.length)];
 
       let y =
         chosenTier.minDepth +
-        Math.random() * (chosenTier.maxDepth - chosenTier.minDepth);
-      // In infinite downward depth mode, if shark dives deeper than 1400m, spawn around the shark's current abyssal depth
+        Math.random() * Math.max(40, chosenTier.maxDepth - chosenTier.minDepth);
       if (refDepth > 1400) {
-        y = Math.max(1150, refDepth + (Math.random() - 0.45) * 900);
+        y = Math.max(
+          Math.max(1150, chosenTier.minDepth),
+          Math.min(chosenTier.maxDepth, refDepth + (Math.random() - 0.45) * 900)
+        );
       }
 
       let x = (Math.random() - 0.5) * (infiniteWorldManager.worldWidth - 100);
@@ -996,11 +1007,11 @@ export default function App() {
       ecosystemSpawner.reset(sim.preyList);
       const targetMaxPreys = Math.max(4, ecosystemSpawner.maxActivePreys);
       const starterShowcaseIds = [
-        'coral_clownfish',
-        'neon_tetra_school',
-        'gene_jelly',
-        'coral_clownfish',
-        'neon_tetra_school',
+        'PREY-001',
+        'PREY-003',
+        'PREY-015',
+        'PREY-002',
+        'PREY-044',
       ];
       const showcaseCount = Math.min(starterShowcaseIds.length, targetMaxPreys);
       const initialSpawnCount = Math.max(0, targetMaxPreys - showcaseCount);

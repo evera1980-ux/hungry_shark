@@ -13,6 +13,7 @@
 | **已生成透明 PNG 数量** | **140 / 140**（完成率 `100.0%`） |
 | **当前已生成到（最后完成）** | **PREY-210（蓝鲸幼体/亚成体，1200×317 @3x）** |
 | **下次继续生成起点（断点续传）** | **🎉 全部 140 条已生成完毕** |
+| **双端游戏实装状态（2026-11-15）** | **✅ 已全量接入 Web + iOS 原生游戏逻辑**：`src/game/preyDatabase140.ts`（140 种 + 保留 `cyber_mine` = 141 项，真实水深 + 体型深海映射 `0m ~ 20,000m`）、`spriteSheetManager.ts` / `canvasRenderer.ts` / `ecosystemSpawner.ts` 与 `scripts/build-ios-native.ts`（41/41 单元测试通过） |
 | **资产输出目录** | `/public/assets/prey_140/PREY-XXX.png`（原图去底） & `/public/assets/prey_140/PREY-XXX@3x.png`（iPhone `@3x` Retina 216 DPI） |
 | **进度 JSON 索引** | `/public/assets/prey_140/progress.json` |
 

@@ -90,11 +90,17 @@ function generateSwiftConfigFile(): string {
   };
 
   const preyEntries = GAME_CONFIG.preyTiers.map((p) => {
-    const spKey = p.spriteKey ?? 'FISH2_CLOWNFISH';
+    const spKey = p.spriteKey ?? p.id;
+    const isPrey140 = p.id.startsWith('PREY-');
     const isFish2 = spKey.startsWith('FISH2_');
-    const bounds = allPreyBounds[spKey] ?? [0, 0, 0.2, 0.16];
+    const bounds = allPreyBounds[spKey] ?? [0, 0, 1, 1];
     const nameZh = (I18N.zh as Record<string, string>)[p.nameKey] ?? p.id;
     const nameEn = (I18N.en as Record<string, string>)[p.nameKey] ?? p.id;
+    const sheetName = isPrey140
+      ? 'prey_140'
+      : isFish2
+      ? 'fish2_fc857cfa'
+      : 'fish_24bdaa5a';
     return `        PreyTierConfig(
             tier: ${p.tier},
             id: "${escapeSwiftString(p.id)}",
@@ -102,7 +108,7 @@ function generateSwiftConfigFile(): string {
             nameZh: "${escapeSwiftString(nameZh)}",
             nameEn: "${escapeSwiftString(nameEn)}",
             spriteKey: "${escapeSwiftString(spKey)}",
-            sheetName: "${isFish2 ? 'fish2_fc857cfa' : 'fish_24bdaa5a'}",
+            sheetName: "${sheetName}",
             minDepth: ${p.minDepth},
             maxDepth: ${p.maxDepth},
             radius: ${p.radius},
@@ -2604,7 +2610,10 @@ public final class SpriteAtlasManager: ObservableObject {
 
             for (idx, prey) in allPreys.enumerated() {
                 if localPreyTex[prey.spriteKey] != nil { continue }
-                if let raw3x = Self.loadBundledImage(named: "prey_\\(prey.id)@3x") ?? Self.loadBundledImage(named: "prey_\\(prey.id)"),
+                if let raw3x = Self.loadBundledImage(named: "\\(prey.id)@3x")
+                    ?? Self.loadBundledImage(named: prey.id)
+                    ?? Self.loadBundledImage(named: "prey_\\(prey.id)@3x")
+                    ?? Self.loadBundledImage(named: "prey_\\(prey.id)"),
                    let cg3x = raw3x.cgImage {
                     let img3x = UIImage(cgImage: cg3x, scale: 3.0, orientation: .up)
                     localPreyUI[prey.spriteKey] = img3x
@@ -2837,11 +2846,31 @@ public final class SpriteAtlasManager: ObservableObject {
         return sharkUIImages[spriteKey]
     }
 
+    private func loadSinglePreyOnDemand(for spriteKey: String) {
+        guard preyTextures[spriteKey] == nil else { return }
+        guard let prey = GameConfigGenerated.preyTiers.first(where: { $0.id == spriteKey || $0.spriteKey == spriteKey }) else { return }
+        if let raw3x = Self.loadBundledImage(named: "\\(prey.id)@3x")
+            ?? Self.loadBundledImage(named: prey.id)
+            ?? Self.loadBundledImage(named: "prey_\\(prey.id)@3x")
+            ?? Self.loadBundledImage(named: "prey_\\(prey.id)"),
+           let cg3x = raw3x.cgImage {
+            let img3x = UIImage(cgImage: cg3x, scale: 3.0, orientation: .up)
+            preyUIImages[prey.spriteKey] = img3x
+            let tex = SKTexture(image: img3x)
+            tex.filteringMode = .linear
+            preyTextures[prey.spriteKey] = tex
+        }
+    }
+
     public func preyTexture(for spriteKey: String) -> SKTexture? {
+        if let tex = preyTextures[spriteKey] { return tex }
+        loadSinglePreyOnDemand(for: spriteKey)
         return preyTextures[spriteKey]
     }
 
     public func preyUIImage(for spriteKey: String) -> UIImage? {
+        if let img = preyUIImages[spriteKey] { return img }
+        loadSinglePreyOnDemand(for: spriteKey)
         return preyUIImages[spriteKey]
     }
 
@@ -5088,7 +5117,7 @@ public final class GameViewModel: ObservableObject {
     @Published public var geneSurgeUseCount: Int = 0
 
     // Target Bounty & Golden Mutant Charge
-    @Published public var targetBountyPreyId: String = "clownfish"
+    @Published public var targetBountyPreyId: String = "PREY-001"
     @Published public var targetBountyCaptured: Int = 0
     @Published public var goldenMutantCharge: Int = 0
     public let goldenMutantNeed: Int = 5
@@ -5242,7 +5271,7 @@ public final class GameViewModel: ObservableObject {
         if let picked = candidates.randomElement() {
             targetBountyPreyId = picked.id
         } else {
-            targetBountyPreyId = "clownfish"
+            targetBountyPreyId = "PREY-001"
         }
         targetBountyCaptured = 0
     }
@@ -5582,6 +5611,7 @@ public final class OceanGameScene: SKScene {
     private let sharkNode = SKSpriteNode()
 
     private enum PreySwimGait {
+        case SHARK_APEX
         case CARANGIFORM
         case ANGUILLIFORM
         case MEDUSOID_JET
@@ -6192,17 +6222,32 @@ public final class OceanGameScene: SKScene {
         node.warpGeometry = SKWarpGeometryGrid(columns: cols, rows: 1, sourcePositions: src, destinationPositions: dst)
     }
 
+    private static let prey140SharkLikeIds: Set<String> = [
+        "PREY-089", "PREY-090", "PREY-091", "PREY-092", "PREY-093",
+        "PREY-094", "PREY-095", "PREY-096", "PREY-097", "PREY-098",
+        "PREY-111", "PREY-112", "PREY-113"
+    ]
+    private static let prey140ElongatedIds: Set<String> = [
+        "PREY-079", "PREY-081", "PREY-083", "PREY-127", "PREY-128", "PREY-129"
+    ]
+    private static let prey140PufferIds: Set<String> = [
+        "PREY-050", "PREY-051", "PREY-052", "PREY-053", "PREY-054",
+        "PREY-069", "PREY-070", "PREY-071", "PREY-072", "PREY-073",
+        "PREY-099", "PREY-103"
+    ]
+    private static let prey140RigidIds: Set<String> = [
+        "PREY-114", "PREY-115", "PREY-116",
+        "PREY-122", "PREY-123", "PREY-124", "PREY-125", "PREY-126", "PREY-209"
+    ]
+
     private func classifyPreySwimGait(_ p: PreyTierConfig) -> PreySwimGait {
-        if p.isHazard && p.baseSpeed < 12 { return .RIGID_PROPULSION }
-        if p.behavior == .SUB_PATROL { return .RIGID_PROPULSION }
-        if p.behavior == .EEL_CHARGER || p.id.contains("eel") || p.id.contains("oarfish") || p.id.contains("worm") {
+        if Self.prey140SharkLikeIds.contains(p.id) { return .SHARK_APEX }
+        if p.isHazard || Self.prey140RigidIds.contains(p.id) { return .RIGID_PROPULSION }
+        if p.behavior == .EEL_CHARGER || Self.prey140ElongatedIds.contains(p.id) {
             return .ANGUILLIFORM
         }
-        if p.behavior == .PUFFER_INFLATE || p.id.contains("puffer") || p.id.contains("crab") || p.id.contains("isopod") || p.id.contains("starfish") {
+        if p.behavior == .PUFFER_INFLATE || Self.prey140PufferIds.contains(p.id) {
             return .PUFFER_BUOYANT
-        }
-        if p.id.contains("jelly") || p.id.contains("squid") || p.id.contains("octopus") || p.id.contains("nautilus") || p.behavior == .KRAKEN_BOSS {
-            return .MEDUSOID_JET
         }
         return .CARANGIFORM
     }
@@ -6229,6 +6274,8 @@ public final class OceanGameScene: SKScene {
                 let sharkLikeEnv = 0.015 * tailProgress + 0.985 * pow(tailProgress, 2.25)
                 let dy: Double
                 switch gait {
+                case .SHARK_APEX:
+                    dy = sin(prey.phase - tailProgress * 2.15 * .pi) * 0.088 * sharkLikeEnv
                 case .CARANGIFORM:
                     dy = sin(prey.phase - tailProgress * 2.15 * .pi) * 0.068 * sharkLikeEnv
                 case .ANGUILLIFORM:
@@ -7399,14 +7446,44 @@ public final class OceanGameScene: SKScene {
     }
 
     private func spawnOnePrey(nearShark: Bool) {
-        let targetDepth = max(60.0, sharkY + Double.random(in: -260...260))
-        let candidates = GameConfigGenerated.preyTiers.filter { p in
-            if targetDepth <= 520 && (p.behavior == .EEL_CHARGER || p.isHazard || p.isBoss) {
+        var targetDepth = max(45.0, sharkY + Double.random(in: -260...260))
+        if sharkY <= 430.0 {
+            targetDepth = min(495.0, targetDepth)
+        }
+        let habitatPool = GameConfigGenerated.preyTiers.filter { p in
+            if targetDepth <= 520.0 && (p.isHazard || p.isBoss || p.behavior == .EEL_CHARGER || p.behavior == .SUB_PATROL) {
                 return false
             }
             return targetDepth >= p.minDepth && targetDepth <= p.maxDepth
         }
-        let chosen = candidates.randomElement() ?? GameConfigGenerated.preyTiers[0]
+        let candidates = habitatPool.isEmpty
+            ? GameConfigGenerated.preyTiers.filter { targetDepth <= 520.0 ? $0.minDepth <= 520.0 : $0.maxDepth >= 1150.0 }
+            : habitatPool
+        let tierWeights: [Double]
+        if targetDepth > 8000.0 {
+            tierWeights = [0, 6, 10, 12, 10, 16, 22, 24]
+        } else if targetDepth > 3500.0 {
+            tierWeights = [0, 8, 12, 16, 16, 18, 18, 12]
+        } else if targetDepth > 1150.0 {
+            tierWeights = [0, 10, 14, 18, 20, 18, 14, 6]
+        } else if targetDepth > 520.0 {
+            tierWeights = [0, 10, 26, 28, 22, 14, 0, 0]
+        } else {
+            tierWeights = [58, 28, 14, 0, 0, 0, 0, 0]
+        }
+        let totalW = tierWeights.reduce(0, +)
+        var roll = Double.random(in: 0..<max(1.0, totalW))
+        var chosenTierNum = 1
+        for (idx, w) in tierWeights.enumerated() {
+            roll -= w
+            if roll <= 0 {
+                chosenTierNum = idx + 1
+                break
+            }
+        }
+        let tierMatches = candidates.filter { $0.tier == chosenTierNum }
+        let finalPool = tierMatches.isEmpty ? candidates : tierMatches
+        let chosen = finalPool.randomElement() ?? GameConfigGenerated.preyTiers[0]
         let dist = nearShark ? Double.random(in: 220...480) : Double.random(in: 580...1400)
         let ang = Double.random(in: 0...(Double.pi * 2))
         let px = sharkX + cos(ang) * dist
@@ -11899,7 +11976,7 @@ function main() {
   const srcPrey140Dir = path.join(ROOT_DIR, 'public', 'assets', 'prey_140');
   if (fs.existsSync(srcPrey140Dir)) {
     for (const file of fs.readdirSync(srcPrey140Dir)) {
-      if (file.endsWith('.png')) {
+      if (file.endsWith('@3x.png')) {
         fs.copyFileSync(
           path.join(srcPrey140Dir, file),
           path.join(assetsDst, file)
