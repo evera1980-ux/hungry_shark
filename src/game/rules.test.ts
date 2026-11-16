@@ -3070,6 +3070,12 @@ test('Undulating Mountain Range Seabed (Zero Flat or Diagonal Straight Lines), U
         step.effectiveSpeed2D <= targetSpeed * 1.001,
         `Cave underside wall frame ${frame} at X=${x.toFixed(1)}: effectiveSpeed2D (${step.effectiveSpeed2D.toFixed(2)}) must NEVER exceed targetSpeed (${targetSpeed})`
       );
+      if (step.collided) {
+        assert.ok(
+          step.effectiveSpeed2D <= targetSpeed * 0.901,
+          `Collided underside wall frame ${frame}: 2D arc speed (${step.effectiveSpeed2D.toFixed(2)}) must be damped <= 90% of targetSpeed (${targetSpeed})`
+        );
+      }
       const postMag = Math.hypot(step.vx, step.vy);
       assert.ok(
         postMag <= targetSpeed * 1.001,
@@ -3109,11 +3115,41 @@ test('Undulating Mountain Range Seabed (Zero Flat or Diagonal Straight Lines), U
         step.effectiveSpeed2D <= targetSpeed * 1.001,
         `Cave top rim slope frame ${frame} at X=${x.toFixed(1)}: effectiveSpeed2D (${step.effectiveSpeed2D.toFixed(2)}) must NEVER exceed targetSpeed (${targetSpeed})`
       );
+      if (step.collided) {
+        assert.ok(
+          step.effectiveSpeed2D <= targetSpeed * 0.901,
+          `Collided top rim slope frame ${frame}: 2D arc speed (${step.effectiveSpeed2D.toFixed(2)}) must be damped <= 90% of targetSpeed (${targetSpeed})`
+        );
+      }
       x = step.engineX;
       y = step.engineY;
       vx = step.vx;
       vy = step.vy;
     }
   }
+
+  // 8C: Horizontal movement toward the cave mouth down the left cave shoulder slope (X = 2780 -> 2960)
+  {
+    const targetSpeed = 240;
+    const dt = 1 / 60;
+    let x = 3200 - 420;
+    const startSample = getShallowCoralAtollAt(x, WorldConfig);
+    let y = startSample.topFloorY - sharkRadius + 1;
+    let vx = targetSpeed;
+    let vy = 20;
+
+    for (let frame = 0; frame < 60; frame++) {
+      vx = targetSpeed;
+      vy = 20;
+      const step = resolveSeabedKineticStep(x, y, vx, vy, dt, sharkRadius, WorldConfig);
+      assert.ok(
+        step.effectiveSpeed2D <= targetSpeed * 1.02,
+        `Left cave downward slope frame ${frame} at X=${x.toFixed(1)}: effectiveSpeed2D (${step.effectiveSpeed2D.toFixed(2)}) must not stack`
+      );
+      x = step.engineX;
+      y = step.engineY;
+    }
+  }
 });
+
 

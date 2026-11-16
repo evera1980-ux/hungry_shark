@@ -1851,8 +1851,8 @@ public final class SpriteAtlasManager: ObservableObject {
         )
     }
 
-    /// Slices one of the 4 horizontal seabed surface bands from world_seabed_strips_1794473245165.jpg,
-    /// removes the top #FFFFFF background via top-edge BFS flood-fill, grounds the base, and cross-fades horizontally.
+    /// Prepares a standalone 2048x1152 realistic transparent seabed surface strip (seabed_strip_*.png):
+    /// crops to the tight vertical opaque rock band, applies a smooth cosine bottom alpha fade, and cross-fades horizontally (ZERO vertical column smearing!).
     nonisolated private static func sliceSeabedStrip(from image: UIImage, y0Ratio: Double, y1Ratio: Double) -> UIImage? {
         guard let cgImg = image.cgImage else { return nil }
         let fullW = cgImg.width
@@ -1867,8 +1867,10 @@ public final class SpriteAtlasManager: ObservableObject {
             return nil
         }
 
-        let w = rawW
-        let h = rawH
+        let targetW = min(1024, rawW)
+        let scale = Double(targetW) / Double(rawW)
+        let w = max(64, targetW)
+        let h = max(32, Int((Double(rawH) * scale).rounded()))
         var rgba = [UInt8](repeating: 0, count: w * h * 4)
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
@@ -1884,113 +1886,14 @@ public final class SpriteAtlasManager: ObservableObject {
         ctx.interpolationQuality = .high
         ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
 
-        var visited = [UInt8](repeating: 0, count: w * h)
-        var queue = [Int](repeating: 0, count: w * h)
-        var qHead = 0
-        var qTail = 0
-
-        func isBg(_ i: Int) -> Bool {
-            let p = i * 4
-            let r = Int(rgba[p])
-            let g = Int(rgba[p + 1])
-            let b = Int(rgba[p + 2])
-            let minC = min(r, min(g, b))
-            let maxC = max(r, max(g, b))
-            return minC >= 205 && (maxC - minC) <= 42
-        }
-
-        func push(_ x: Int, _ y: Int) {
-            if x < 0 || x >= w || y < 0 || y >= Int(Double(h) * 0.82) { return }
-            let i = y * w + x
-            if visited[i] != 0 || !isBg(i) { return }
-            visited[i] = 1
-            queue[qTail] = i
-            qTail += 1
-        }
-
-        for x in 0..<w {
-            push(x, 0)
-            push(x, 1)
-        }
-        for y in 0..<Int(Double(h) * 0.45) {
-            push(0, y)
-            push(w - 1, y)
-        }
-
-        while qHead < qTail {
-            let curr = queue[qHead]
-            qHead += 1
-            let cx = curr % w
-            let cy = (curr - cx) / w
-            if cx > 0 { push(cx - 1, cy) }
-            if cx + 1 < w { push(cx + 1, cy) }
-            if cy > 0 { push(cx, cy - 1) }
-            if cy + 1 < h { push(cx, cy + 1) }
-        }
-
-        for i in 0..<(w * h) where visited[i] != 0 {
-            let p = i * 4
-            rgba[p] = 0; rgba[p + 1] = 0; rgba[p + 2] = 0; rgba[p + 3] = 0
-        }
-
-        // Feather top silhouette edge (2px despill)
-        if h > 2 && w > 2 {
-            for y in 1..<(h - 1) {
-                let rowOff = y * w
-                for x in 1..<(w - 1) {
-                    let i = rowOff + x
-                    if visited[i] != 0 { continue }
-                    let hasTrans = visited[i - 1] != 0 || visited[i + 1] != 0 || visited[i - w] != 0 || visited[i + w] != 0
-                    if hasTrans {
-                        let p = i * 4
-                        let r = Double(rgba[p])
-                        let g = Double(rgba[p + 1])
-                        let b = Double(rgba[p + 2])
-                        let minC = min(r, min(g, b))
-                        if minC > 165.0 {
-                            let keep = max(0.0, min(1.0, (235.0 - minC) / 70.0))
-                            rgba[p] = UInt8((r * 0.72 * keep).rounded())
-                            rgba[p + 1] = UInt8((g * 0.76 * keep).rounded())
-                            rgba[p + 2] = UInt8((b * 0.82 * keep).rounded())
-                            rgba[p + 3] = UInt8((Double(rgba[p + 3]) * keep).rounded())
-                        }
-                    }
-                }
-            }
-        }
-
-        // Ground lower 42% of each column so seabed base is 100% solid
-        let minSearchY = max(4, Int(Double(h) * 0.58))
-        for x in 0..<w {
-            var lastSolidY = -1
-            for y in stride(from: h - 1, through: minSearchY, by: -1) {
-                let p = (y * w + x) * 4
-                let r = Int(rgba[p]), g = Int(rgba[p + 1]), b = Int(rgba[p + 2])
-                let minC = min(r, min(g, b))
-                let maxC = max(r, max(g, b))
-                if rgba[p + 3] > 200 && !(minC >= 205 && (maxC - minC) <= 40) {
-                    lastSolidY = y
-                    break
-                }
-            }
-            if lastSolidY >= minSearchY && lastSolidY < h - 1 {
-                let srcY = max(0, lastSolidY - 2)
-                let sp = (srcY * w + x) * 4
-                let sr = rgba[sp], sg = rgba[sp + 1], sb = rgba[sp + 2]
-                for y in lastSolidY..<h {
-                    let dp = (y * w + x) * 4
-                    rgba[dp] = sr; rgba[dp + 1] = sg; rgba[dp + 2] = sb; rgba[dp + 3] = 255
-                }
-            }
-        }
-
+        // Find tight vertical opaque bounding box [minY, maxY] without any vertical column smearing
         var minY = h - 1
         var maxY = 0
         for y in 0..<h {
             var opaqueCount = 0
             let rowOff = y * w
             for x in stride(from: 0, to: w, by: 2) {
-                if rgba[(rowOff + x) * 4 + 3] > 32 {
+                if rgba[(rowOff + x) * 4 + 3] > 28 {
                     opaqueCount += 1
                 }
             }
@@ -2003,24 +1906,35 @@ public final class SpriteAtlasManager: ObservableObject {
             minY = 0; maxY = h - 1
         } else {
             minY = max(0, minY - 2)
-            maxY = min(h - 1, max(minY + 24, maxY - 2))
+            maxY = min(h - 1, max(minY + 24, maxY))
         }
 
         let cropH = maxY - minY + 1
+        let bottomFeatherStart = Int(Double(cropH) * 0.72)
         var croppedRgba = [UInt8](repeating: 0, count: w * cropH * 4)
         for y in 0..<cropH {
+            var bottomFade = 1.0
+            if y >= bottomFeatherStart {
+                let ft = Double(y - bottomFeatherStart) / Double(max(1, cropH - 1 - bottomFeatherStart))
+                bottomFade = 0.5 * (1.0 + cos(.pi * min(1.0, ft)))
+            }
             let srcOff = (minY + y) * w * 4
             let dstOff = y * w * 4
-            for byteIdx in 0..<(w * 4) {
-                croppedRgba[dstOff + byteIdx] = rgba[srcOff + byteIdx]
+            for x in 0..<w {
+                let sp = srcOff + x * 4
+                let dp = dstOff + x * 4
+                croppedRgba[dp] = UInt8((Double(rgba[sp]) * bottomFade).rounded())
+                croppedRgba[dp + 1] = UInt8((Double(rgba[sp + 1]) * bottomFade).rounded())
+                croppedRgba[dp + 2] = UInt8((Double(rgba[sp + 2]) * bottomFade).rounded())
+                croppedRgba[dp + 3] = UInt8((Double(rgba[sp + 3]) * bottomFade).rounded())
             }
         }
 
-        return makeHorizontallySeamlessImage(rgba: croppedRgba, width: w, height: cropH, seamRatio: 0.14)
+        return makeHorizontallySeamlessImage(rgba: croppedRgba, width: w, height: cropH, seamRatio: 0.12)
     }
 
-    /// Builds a 100% opaque, horizontally & vertically seamless subsurface bedrock stratum tile
-    /// from the lower 58% of each seabed band in world_seabed_strips_1794473245165.jpg (1:1 parity with Web sliceSeabedSubStratum).
+    /// Builds a 2D-continuous, horizontally & vertically feathered subsurface bedrock stratum tile
+    /// by sampling each column's smoothed interior opaque rock band from the standalone 2048x1152 seabed PNG (ZERO 1D vertical stripe repetition!).
     nonisolated private static func sliceSeabedSubStratum(
         from image: UIImage,
         stripId: String,
@@ -2030,106 +1944,116 @@ public final class SpriteAtlasManager: ObservableObject {
         guard let cgImg = image.cgImage else { return nil }
         let fullW = cgImg.width
         let fullH = cgImg.height
-        let bandSpan = y1Ratio - y0Ratio
-        let subY0 = y0Ratio + bandSpan * 0.42
-        let subY1 = y1Ratio - bandSpan * 0.02
-        let sy = max(0, Int((Double(fullH) * subY0).rounded()))
-        let ey = min(fullH, Int((Double(fullH) * subY1).rounded()))
-        let rawH = max(32, ey - sy)
-        let padX = max(2, Int((Double(fullW) * 0.01).rounded()))
+        let padX = max(2, Int((Double(fullW) * 0.008).rounded()))
         let rawW = max(64, fullW - padX * 2)
 
-        guard let croppedCG = cgImg.cropping(to: CGRect(x: padX, y: sy, width: rawW, height: rawH)) else {
+        guard let croppedCG = cgImg.cropping(to: CGRect(x: padX, y: 0, width: rawW, height: fullH)) else {
             return nil
         }
 
-        let w = rawW
-        let h = rawH
-        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let w = 960
+        let workH = 540
+        let outH = 240
+        var srcRgba = [UInt8](repeating: 0, count: w * workH * 4)
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
         guard let ctx = CGContext(
-            data: &rgba,
+            data: &srcRgba,
             width: w,
-            height: h,
+            height: workH,
             bitsPerComponent: 8,
             bytesPerRow: w * 4,
             space: colorSpace,
             bitmapInfo: bitmapInfo
         ) else { return nil }
         ctx.interpolationQuality = .high
-        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.draw(croppedCG, in: CGRect(x: 0, y: 0, width: w, height: workH))
 
-        let fallbackRGB: (Double, Double, Double)
-        switch stripId {
-        case "coral_reef": fallbackRGB = (42.0, 36.0, 48.0)
-        case "rocky_shelf": fallbackRGB = (28.0, 38.0, 54.0)
-        case "underwater_canyon": fallbackRGB = (34.0, 26.0, 44.0)
-        default: fallbackRGB = (18.0, 16.0, 28.0)
-        }
-
+        // 1. Detect per-column opaque rock span [rawTopY, rawBotY] and smooth horizontally across a 65px window
+        var rawTopY = [Double](repeating: Double(workH) * 0.25, count: w)
+        var rawBotY = [Double](repeating: Double(workH) * 0.72, count: w)
         for x in 0..<w {
-            var validR = fallbackRGB.0
-            var validG = fallbackRGB.1
-            var validB = fallbackRGB.2
-            for y in stride(from: h - 1, through: 0, by: -1) {
-                let p = (y * w + x) * 4
-                let r = Double(rgba[p]), g = Double(rgba[p + 1]), b = Double(rgba[p + 2])
-                let minC = min(r, min(g, b))
-                let maxC = max(r, min(g, b))
-                if rgba[p + 3] > 210 && !(minC >= 185.0 && (maxC - minC) <= 45.0) {
-                    validR = r * 0.72
-                    validG = g * 0.74
-                    validB = b * 0.78
+            var top = Int(Double(workH) * 0.25)
+            var bot = Int(Double(workH) * 0.72)
+            for y in 0..<workH {
+                if srcRgba[(y * w + x) * 4 + 3] > 200 {
+                    top = y
                     break
                 }
             }
+            for y in stride(from: workH - 1, through: top, by: -1) {
+                if srcRgba[(y * w + x) * 4 + 3] > 200 {
+                    bot = y
+                    break
+                }
+            }
+            if bot <= top + 16 {
+                top = Int(Double(workH) * 0.25)
+                bot = Int(Double(workH) * 0.72)
+            }
+            rawTopY[x] = Double(top)
+            rawBotY[x] = Double(bot)
+        }
 
-            for y in 0..<h {
-                let p = (y * w + x) * 4
-                var r = Double(rgba[p]), g = Double(rgba[p + 1]), b = Double(rgba[p + 2])
-                let minC = min(r, min(g, b))
-                let maxC = max(r, max(g, b))
-                if rgba[p + 3] < 220 || (minC >= 180.0 && (maxC - minC) <= 48.0) {
-                    r = validR
-                    g = validG
-                    b = validB
-                } else {
-                    validR = r * 0.85 + validR * 0.15
-                    validG = g * 0.85 + validG * 0.15
-                    validB = b * 0.85 + validB * 0.15
+        var colTopY = [Double](repeating: 0.0, count: w)
+        var colBotY = [Double](repeating: 0.0, count: w)
+        let smoothRadius = 32
+        for x in 0..<w {
+            var sumT = 0.0
+            var sumB = 0.0
+            var cnt = 0.0
+            for dx in -smoothRadius...smoothRadius {
+                let sx = (x + dx + w) % w
+                sumT += rawTopY[sx]
+                sumB += rawBotY[sx]
+                cnt += 1.0
+            }
+            colTopY[x] = sumT / cnt
+            colBotY[x] = max(colTopY[x] + 24.0, sumB / cnt)
+        }
+
+        // 2. Sample true 2D interior rock band [top + 0.24*span, bot - 0.08*span] with cosine top/bottom feathering
+        var outRgba = [UInt8](repeating: 0, count: w * outH * 4)
+        let topFeatherEnd = Int(Double(outH) * 0.20)
+        let bottomFeatherStart = Int(Double(outH) * 0.76)
+
+        for y in 0..<outH {
+            var vAlpha = 1.0
+            if y < topFeatherEnd {
+                let ft = Double(y) / Double(max(1, topFeatherEnd))
+                vAlpha = 0.5 * (1.0 - cos(.pi * ft))
+            } else if y >= bottomFeatherStart {
+                let ft = Double(y - bottomFeatherStart) / Double(max(1, outH - 1 - bottomFeatherStart))
+                vAlpha = 0.5 * (1.0 + cos(.pi * min(1.0, ft)))
+            }
+            let v = Double(y) / Double(max(1, outH - 1))
+            let shade = (0.88 - v * 0.18) * vAlpha
+
+            for x in 0..<w {
+                let cTop = colTopY[x]
+                let cBot = colBotY[x]
+                let span = max(24.0, cBot - cTop)
+                let inTop = cTop + span * 0.24
+                let inBot = max(inTop + 12.0, cBot - span * 0.08)
+                let inSpan = max(12.0, inBot - inTop)
+
+                let sy = min(workH - 1, max(0, Int((inTop + v * inSpan).rounded())))
+                var sIdx = (sy * w + x) * 4
+                if srcRgba[sIdx + 3] < 190 {
+                    let altOffset = Double((y * 17 + x * 3) % max(8, Int(span * 0.25)))
+                    let altY = min(workH - 1, max(0, Int((cTop + span * 0.42 + altOffset).rounded())))
+                    sIdx = (altY * w + x) * 4
                 }
 
-                let vRatio = Double(y) / Double(max(1, h - 1))
-                let strataWave = sin(vRatio * .pi * 6.0 + Double(x) * 0.035) * 0.06
-                    + cos(vRatio * .pi * 14.0 - Double(x) * 0.02) * 0.035
-                let depthShade = 0.86 - vRatio * 0.24 + strataWave
-
-                rgba[p] = UInt8(max(6.0, min(255.0, (r * depthShade).rounded())))
-                rgba[p + 1] = UInt8(max(6.0, min(255.0, (g * depthShade).rounded())))
-                rgba[p + 2] = UInt8(max(8.0, min(255.0, (b * depthShade).rounded())))
-                rgba[p + 3] = 255
+                let dIdx = (y * w + x) * 4
+                outRgba[dIdx] = UInt8(max(0.0, min(255.0, (Double(srcRgba[sIdx]) * shade).rounded())))
+                outRgba[dIdx + 1] = UInt8(max(0.0, min(255.0, (Double(srcRgba[sIdx + 1]) * shade).rounded())))
+                outRgba[dIdx + 2] = UInt8(max(0.0, min(255.0, (Double(srcRgba[sIdx + 2]) * shade).rounded())))
+                outRgba[dIdx + 3] = UInt8(max(0.0, min(255.0, (255.0 * vAlpha).rounded())))
             }
         }
 
-        // Cross-fade top and bottom 16% rows so vertical strata stack seamlessly
-        let vOverlap = max(4, Int((Double(h) * 0.16).rounded()))
-        for y in 0..<vOverlap {
-            let t = (Double(y) + 0.5) / Double(vOverlap)
-            let wTop = 0.5 - 0.5 * cos(.pi * t)
-            let wBot = 1.0 - wTop
-            let botY = h - vOverlap + y
-            for x in 0..<w {
-                let pTop = (y * w + x) * 4
-                let pBot = (botY * w + x) * 4
-                let rMix = UInt8(max(0.0, min(255.0, (Double(rgba[pTop]) * wTop + Double(rgba[pBot]) * wBot).rounded())))
-                let gMix = UInt8(max(0.0, min(255.0, (Double(rgba[pTop + 1]) * wTop + Double(rgba[pBot + 1]) * wBot).rounded())))
-                let bMix = UInt8(max(0.0, min(255.0, (Double(rgba[pTop + 2]) * wTop + Double(rgba[pBot + 2]) * wBot).rounded())))
-                rgba[pTop] = rMix; rgba[pTop + 1] = gMix; rgba[pTop + 2] = bMix
-            }
-        }
-
-        return makeHorizontallySeamlessImage(rgba: rgba, width: w, height: h, seamRatio: 0.16)
+        return makeHorizontallySeamlessImage(rgba: outRgba, width: w, height: outH, seamRatio: 0.12)
     }
 
     /// Slices the 4x4 World Ecology Atlas (world_ecology_atlas_1794473252524.jpg) into 16 transparent SKTextures

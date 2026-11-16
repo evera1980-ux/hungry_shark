@@ -2926,17 +2926,17 @@ export function resolveSeabedKineticStep(
     const hitTierIdx = initialCol.terraceTierIndex ?? 0;
     const bSlope = initialCol.slope;
     const bTangentScale = initialCol.tangentScale; // 1 / sqrt(1 + bSlope^2)
-    // 当水平移动挤压向下倾斜的洞壁 (vx * bSlope > 0) 时，严格按切向水平分量缩放水平步长，防止水平位移与垂直下推位移叠加
+    // 当水平移动挤压向下倾斜的洞壁 (vx * bSlope > 0) 时，将速度矢量正交投影到洞壁单位切向量 T = (bTangentScale, bSlope * bTangentScale)，防止水平位移与垂直下推位移叠加
+    const vParallelUnder = (vx + Math.max(0, vy) * bSlope) * bTangentScale;
     const tangentSpeed =
       vx * bSlope > 0
-        ? Math.max(
-            -intendedSpeed * 0.92,
-            Math.min(
-              intendedSpeed * 0.92,
-              (vx + Math.max(0, vy) * bSlope) * bTangentScale * 0.92
+        ? vx * vParallelUnder <= 0
+          ? 0
+          : Math.max(
+              -intendedSpeed * 0.88,
+              Math.min(intendedSpeed * 0.88, vParallelUnder * 0.88)
             )
-          )
-        : vx * 0.92;
+        : vx * 0.88;
     let adjustedDx = tangentSpeed * bTangentScale * dt;
     let finalX = prevEngineX + adjustedDx;
 
@@ -2967,13 +2967,20 @@ export function resolveSeabedKineticStep(
       ? secondCol.engineY
       : Math.max(rawNextY, initialCol.engineY);
 
-    // 二维步长守恒二分钳制：若沿洞口向下斜线滑行或跨越洞唇边界导致 2D 步长超过 maxAllowedStepDist，
-    // 通过二分收缩水平推进量 finalX，确保在不穿透洞顶 (finalY >= bottomArchY + radius) 的前提下 2D 合速度绝不超标
-    let actualStepDist = Math.hypot(finalX - prevEngineX, finalY - prevEngineY);
+    // 二维步长守恒二分钳制：若沿洞口向下斜线滑行或跨越洞唇边界导致 2D 步长超过切向步长预算 maxUnderStepDist，
+    // 通过 8 次二分收缩水平推进量 finalX，确保在不穿透洞顶 (finalY >= bottomArchY + radius) 的前提下 2D 合速度绝不超标
+    const maxUnderStepDist =
+      vx * bSlope > 0
+        ? Math.min(
+            maxAllowedStepDist * 0.88,
+            Math.max(maxAllowedStepDist * 0.25, Math.abs(tangentSpeed) * dt)
+          )
+        : maxAllowedStepDist * 0.90;
+    const actualStepDist = Math.hypot(finalX - prevEngineX, finalY - prevEngineY);
     if (
-      actualStepDist > maxAllowedStepDist &&
+      actualStepDist > maxUnderStepDist &&
       actualStepDist > 1e-6 &&
-      maxAllowedStepDist > 1e-6
+      maxUnderStepDist > 1e-6
     ) {
       const prevColAtStart = resolveSeabedCollision(
         prevEngineX,
@@ -2990,11 +2997,11 @@ export function resolveSeabedKineticStep(
       let bestX = prevEngineX;
       let bestY = Math.max(
         startMinY,
-        Math.min(finalY, prevEngineY + maxAllowedStepDist)
+        Math.min(finalY, prevEngineY + maxUnderStepDist * 0.35)
       );
       let bestCol = prevColAtStart;
 
-      for (let iter = 0; iter < 6; iter++) {
+      for (let iter = 0; iter < 8; iter++) {
         const mid = (lo + hi) * 0.5;
         const candX = prevEngineX + (finalX - prevEngineX) * mid;
         const candRawY = prevEngineY + vy * dt * mid;
@@ -3008,7 +3015,7 @@ export function resolveSeabedKineticStep(
         );
         const candY = candCol.collided ? candCol.engineY : candRawY;
         const candDist = Math.hypot(candX - prevEngineX, candY - prevEngineY);
-        if (candDist <= maxAllowedStepDist * 1.0005) {
+        if (candDist <= maxUnderStepDist * 1.0005) {
           lo = mid;
           bestX = candX;
           bestY = candY;
@@ -3016,15 +3023,6 @@ export function resolveSeabedKineticStep(
         } else {
           hi = mid;
         }
-      }
-
-      // 若在 bestX 处仍处于洞口外侧自由水域，可将剩余步长预算用于沿洞唇向下平滑贴合，避免卡死在洞唇外侧
-      if (!bestCol.collided && finalY > bestY) {
-        const usedDx = bestX - prevEngineX;
-        const remDyBudget = Math.sqrt(
-          Math.max(0, maxAllowedStepDist * maxAllowedStepDist - usedDx * usedDx)
-        );
-        bestY = Math.min(finalY, prevEngineY + remDyBudget);
       }
 
       finalX = bestX;
@@ -3037,12 +3035,12 @@ export function resolveSeabedKineticStep(
       adjustedDx === 0
         ? vx * 0.35
         : vx * bSlope > 0
-        ? vx * bTangentScale * 0.92
-        : vx * 0.92;
-    let nextVy = vy < 0 ? 0 : vy * bTangentScale * 0.92;
+        ? tangentSpeed * bTangentScale
+        : vx * 0.88;
+    let nextVy = vy < 0 ? 0 : vy * bTangentScale * 0.88;
     const nextSpeed = Math.hypot(nextVx, nextVy);
-    if (nextSpeed > intendedSpeed && nextSpeed > 1e-6) {
-      const scale = intendedSpeed / nextSpeed;
+    if (nextSpeed > intendedSpeed * 0.88 && nextSpeed > 1e-6) {
+      const scale = (intendedSpeed * 0.88) / nextSpeed;
       nextVx *= scale;
       nextVy *= scale;
     }
@@ -3059,28 +3057,42 @@ export function resolveSeabedKineticStep(
     };
   }
 
-  // 分支 B：实体与海床顶面（含洞口向下的弧形斜坡顶面）发生接触，根据局部斜率 slope 的单位切向量归一化步长
+  // 分支 B：实体与海床顶面（含洞口向下的弧形斜坡顶面）发生接触，根据局部斜率 slope 的单位切向量 T = (tangentScale, slope * tangentScale) 正交投影步长
   const slope = initialCol.slope;
   const tangentScale = initialCol.tangentScale; // 1 / sqrt(1 + slope^2)
   const isMovingUphill = vx * slope < -1e-4;
 
   let adjustedDx = vx * dt;
   let nextVx = vx;
-  let nextVy = vy > 0 ? 0 : vy * tangentScale * 0.92;
+  let nextVy = vy > 0 ? 0 : vy * tangentScale * 0.88;
+  let maxArcDist = maxAllowedStepDist * 0.88;
 
   if (isMovingUphill) {
-    // 顺着斜坡上坡游动：将水平步长严格缩放为 cos(theta) * 0.90，使斜向二维合成弧长 <= 0.90 * intendedSpeed * dt
-    const uphillScale = tangentScale * 0.90;
-    adjustedDx = vx * dt * uphillScale;
-    nextVx = vx * uphillScale;
-  } else {
-    // 下坡或贴底滑行：将速度矢量 (vx, vy) 投影到海床切向 T = (tangentScale, slope * tangentScale)，并限制切向速率 <= intendedSpeed
-    const tangentSpeed = Math.max(
-      -intendedSpeed,
-      Math.min(intendedSpeed, (vx + Math.max(0, vy) * slope) * tangentScale)
+    // 顺着斜坡上坡游动：将速度正交投影到斜坡单位切向量并乘以 0.88 阻尼，使水平分量为 cos^2(theta) * 0.88，斜向 2D 合成弧长 <= cos(theta) * 0.88 * intendedSpeed * dt
+    const vParallelUp = (vx + Math.min(0, vy) * slope) * tangentScale;
+    const uphillTangentSpeed =
+      vx * vParallelUp <= 0
+        ? 0
+        : Math.max(-intendedSpeed * 0.88, Math.min(intendedSpeed * 0.88, vParallelUp * 0.88));
+    adjustedDx = uphillTangentSpeed * tangentScale * dt;
+    nextVx = uphillTangentSpeed * tangentScale;
+    maxArcDist = Math.min(
+      maxAllowedStepDist * 0.88,
+      Math.max(maxAllowedStepDist * 0.25, Math.abs(uphillTangentSpeed) * dt)
     );
-    adjustedDx = tangentSpeed * tangentScale * dt;
-    nextVx = vx * tangentScale * 0.92;
+  } else {
+    // 下坡或贴底滑行：将速度矢量 (vx, vy) 投影到海床单位切向量 T = (tangentScale, slope * tangentScale)
+    const vParallelDown = (vx + Math.max(0, vy) * slope) * tangentScale;
+    const downhillTangentSpeed =
+      vx * vParallelDown <= 0
+        ? 0
+        : Math.max(-intendedSpeed * 0.90, Math.min(intendedSpeed * 0.90, vParallelDown * 0.90));
+    adjustedDx = downhillTangentSpeed * tangentScale * dt;
+    nextVx = downhillTangentSpeed * tangentScale;
+    maxArcDist = Math.min(
+      maxAllowedStepDist * 0.90,
+      Math.max(maxAllowedStepDist * 0.25, Math.abs(downhillTangentSpeed) * dt)
+    );
   }
 
   let finalX = prevEngineX + adjustedDx;
@@ -3094,9 +3106,8 @@ export function resolveSeabedKineticStep(
   );
   let finalY = secondCol.collided ? secondCol.engineY : rawNextY;
 
-  // 二维弧长终极守恒钳制：通过二分收缩确保任何斜坡贴地步进的 2D 总位移绝不超过平水位移上限（上坡最高 0.92x，下坡最高 1.0x）
-  const speedCapRatio = isMovingUphill ? 0.92 : 1.0;
-  const maxArcDist = maxAllowedStepDist * speedCapRatio;
+  // 二维弧长终极守恒钳制：通过 8 次二分收缩确保任何斜坡贴地步进的 2D 总位移绝不超过切向投影上限 maxArcDist
+  const speedCapRatio = isMovingUphill ? 0.88 : 0.90;
   const actualStepDist = Math.hypot(finalX - prevEngineX, finalY - prevEngineY);
 
   if (actualStepDist > maxArcDist && actualStepDist > 1e-6 && maxAllowedStepDist > 1e-6) {
@@ -3113,10 +3124,10 @@ export function resolveSeabedKineticStep(
     let lo = 0;
     let hi = 1;
     let bestX = prevEngineX;
-    let bestY = Math.min(startMaxY, Math.max(finalY, prevEngineY - maxArcDist));
+    let bestY = Math.min(startMaxY, Math.max(finalY, prevEngineY - maxArcDist * 0.35));
     let bestCol = prevColAtStart;
 
-    for (let iter = 0; iter < 6; iter++) {
+    for (let iter = 0; iter < 8; iter++) {
       const mid = (lo + hi) * 0.5;
       const candX = prevEngineX + (finalX - prevEngineX) * mid;
       const candRawY = prevEngineY + vy * dt * mid;
@@ -3138,12 +3149,6 @@ export function resolveSeabedKineticStep(
       } else {
         hi = mid;
       }
-    }
-
-    if (!bestCol.collided && finalY < bestY) {
-      const usedDx = bestX - prevEngineX;
-      const remDyBudget = Math.sqrt(Math.max(0, maxArcDist * maxArcDist - usedDx * usedDx));
-      bestY = Math.max(finalY, prevEngineY - remDyBudget);
     }
 
     finalX = bestX;
@@ -7350,7 +7355,7 @@ function prepareStandaloneSeabedSurfaceCanvas(
 
 /**
  * 从独立的 2048x1152 写实透明背景海床 PNG 直接构建高分辨率「表层以下」无缝地质基岩条带
- * （直接取每张独立写实海床图下半部真实的石灰岩/页岩/发光青脉玄武岩/熔岩裂隙岩壁）
+ * （自动检测每列真实不透明岩体上下界并从内部 2D 岩层采样，彻底杜绝透明空洞或 1D 纵向拉伸条纹）
  */
 function prepareStandaloneSeabedSubsurfaceCanvas(
   sourceImg: HTMLImageElement
@@ -7361,26 +7366,99 @@ function prepareStandaloneSeabedSubsurfaceCanvas(
   if (natW <= 0 || natH <= 0) return null;
 
   const w = 960;
-  const h = 240;
-  const sy0 = Math.floor(natH * 0.48);
-  const sh = Math.max(1, Math.floor(natH * 0.40));
+  const fullH = 540;
+  const outH = 240;
 
   const work = document.createElement('canvas');
   work.width = w;
-  work.height = h;
+  work.height = fullH;
   const ctx = work.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(sourceImg, 0, sy0, natW, sh, 0, 0, w, h);
+  ctx.drawImage(sourceImg, 0, 0, natW, natH, 0, 0, w, fullH);
 
-  const srcData = ctx.getImageData(0, 0, w, h).data;
+  const srcData = ctx.getImageData(0, 0, w, fullH).data;
+
+  // 1. 逐列检测真实不透明岩层上下边界 [rawTopY, rawBotY] 并进行宽窗口水平平滑（保留 2D 纹理连续性）
+  const rawTopY = new Float64Array(w);
+  const rawBotY = new Float64Array(w);
+  for (let x = 0; x < w; x++) {
+    let top = Math.floor(fullH * 0.25);
+    let bot = Math.floor(fullH * 0.72);
+    for (let y = 0; y < fullH; y++) {
+      if (srcData[(y * w + x) * 4 + 3] > 200) {
+        top = y;
+        break;
+      }
+    }
+    for (let y = fullH - 1; y >= top; y--) {
+      if (srcData[(y * w + x) * 4 + 3] > 200) {
+        bot = y;
+        break;
+      }
+    }
+    if (bot <= top + 16) {
+      top = Math.floor(fullH * 0.25);
+      bot = Math.floor(fullH * 0.72);
+    }
+    rawTopY[x] = top;
+    rawBotY[x] = bot;
+  }
+
+  const colTopY = new Float64Array(w);
+  const colBotY = new Float64Array(w);
+  const smoothRadius = 32;
+  for (let x = 0; x < w; x++) {
+    let sumT = 0;
+    let sumB = 0;
+    let cnt = 0;
+    for (let dx = -smoothRadius; dx <= smoothRadius; dx++) {
+      const sx = (x + dx + w) % w;
+      sumT += rawTopY[sx];
+      sumB += rawBotY[sx];
+      cnt++;
+    }
+    colTopY[x] = sumT / cnt;
+    colBotY[x] = Math.max(colTopY[x] + 24, sumB / cnt);
+  }
+
+  // 2. 从每列真实内部 2D 岩层区间 [top + 0.24*span, bot - 0.08*span] 采样构建 w x outH 基岩条带
+  const bandRgba = new Uint8ClampedArray(w * outH * 4);
+  for (let x = 0; x < w; x++) {
+    const cTop = colTopY[x];
+    const cBot = colBotY[x];
+    const span = Math.max(24, cBot - cTop);
+    const inTop = cTop + span * 0.24;
+    const inBot = Math.max(inTop + 12, cBot - span * 0.08);
+    const inSpan = Math.max(12, inBot - inTop);
+
+    for (let y = 0; y < outH; y++) {
+      const v = y / Math.max(1, outH - 1);
+      let sy = Math.min(fullH - 1, Math.max(0, Math.round(inTop + v * inSpan)));
+      let sIdx = (sy * w + x) * 4;
+      if (srcData[sIdx + 3] < 190) {
+        const altY = Math.min(
+          fullH - 1,
+          Math.max(0, Math.round(cTop + span * 0.42 + ((y * 17 + x * 3) % Math.max(8, Math.floor(span * 0.25)))))
+        );
+        sIdx = (altY * w + x) * 4;
+      }
+      const shade = 0.88 - v * 0.18;
+      const dIdx = (y * w + x) * 4;
+      bandRgba[dIdx] = Math.round(srcData[sIdx] * shade);
+      bandRgba[dIdx + 1] = Math.round(srcData[sIdx + 1] * shade);
+      bandRgba[dIdx + 2] = Math.round(srcData[sIdx + 2] * shade);
+      bandRgba[dIdx + 3] = 255;
+    }
+  }
+
   const overlap = Math.max(32, Math.floor(w * 0.12));
   const outW = w - overlap;
 
   const outCanvas = document.createElement('canvas');
   outCanvas.width = outW;
-  outCanvas.height = h;
+  outCanvas.height = outH;
   const outCtx = outCanvas.getContext('2d', { willReadFrequently: true });
   if (!outCtx) {
     work.width = 0;
@@ -7388,18 +7466,18 @@ function prepareStandaloneSeabedSubsurfaceCanvas(
     return null;
   }
 
-  const outImg = outCtx.createImageData(outW, h);
+  const outImg = outCtx.createImageData(outW, outH);
   const oData = outImg.data;
-  const topFeatherEnd = Math.floor(h * 0.20);
-  const bottomFeatherStart = Math.floor(h * 0.76);
+  const topFeatherEnd = Math.floor(outH * 0.20);
+  const bottomFeatherStart = Math.floor(outH * 0.76);
 
-  for (let y = 0; y < h; y++) {
+  for (let y = 0; y < outH; y++) {
     let vAlpha = 1.0;
     if (y < topFeatherEnd) {
       const ft = y / Math.max(1, topFeatherEnd);
       vAlpha = 0.5 * (1 - Math.cos(Math.PI * ft));
     } else if (y >= bottomFeatherStart) {
-      const ft = (y - bottomFeatherStart) / Math.max(1, h - 1 - bottomFeatherStart);
+      const ft = (y - bottomFeatherStart) / Math.max(1, outH - 1 - bottomFeatherStart);
       vAlpha = 0.5 * (1 + Math.cos(Math.PI * Math.min(1, ft)));
     }
 
@@ -7411,15 +7489,15 @@ function prepareStandaloneSeabedSubsurfaceCanvas(
         const wB = 1 - wA;
         const idxA = (y * w + x) * 4;
         const idxB = (y * w + (x + outW)) * 4;
-        oData[dstIdx] = Math.round(srcData[idxA] * wA + srcData[idxB] * wB);
-        oData[dstIdx + 1] = Math.round(srcData[idxA + 1] * wA + srcData[idxB + 1] * wB);
-        oData[dstIdx + 2] = Math.round(srcData[idxA + 2] * wA + srcData[idxB + 2] * wB);
+        oData[dstIdx] = Math.round(bandRgba[idxA] * wA + bandRgba[idxB] * wB);
+        oData[dstIdx + 1] = Math.round(bandRgba[idxA + 1] * wA + bandRgba[idxB + 1] * wB);
+        oData[dstIdx + 2] = Math.round(bandRgba[idxA + 2] * wA + bandRgba[idxB + 2] * wB);
         oData[dstIdx + 3] = Math.round(255 * vAlpha);
       } else {
         const idxA = (y * w + x) * 4;
-        oData[dstIdx] = srcData[idxA];
-        oData[dstIdx + 1] = srcData[idxA + 1];
-        oData[dstIdx + 2] = srcData[idxA + 2];
+        oData[dstIdx] = bandRgba[idxA];
+        oData[dstIdx + 1] = bandRgba[idxA + 1];
+        oData[dstIdx + 2] = bandRgba[idxA + 2];
         oData[dstIdx + 3] = Math.round(255 * vAlpha);
       }
     }
