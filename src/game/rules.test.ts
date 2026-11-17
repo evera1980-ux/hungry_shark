@@ -3371,6 +3371,10 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
   );
 
   const publicDir = path.resolve(process.cwd(), 'public');
+  const iosAssetsDir = path.resolve(
+    process.cwd(),
+    'ios-native/HungrySharkEvolution/Resources/Assets'
+  );
   const allUrls = [
     ...Object.values(WORLD_SEABED_STRIP_URLS),
     ...Object.values(WORLD_ECOLOGY_SPRITE_URLS),
@@ -3379,7 +3383,21 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
   for (const url of allUrls) {
     const diskPath = path.join(publicDir, url.replace(/^\//, ''));
     assert.ok(fs.existsSync(diskPath), `Missing world asset file on disk: ${url}`);
+    const baseName = path.basename(url);
+    assert.ok(
+      fs.existsSync(path.join(iosAssetsDir, baseName)),
+      `Missing world asset file in iOS Resources/Assets: ${baseName}`
+    );
   }
+
+  // Ensure all 48 @3x sharks, 134 @3x prey, and UI/loading PNGs are present in ios-native/HungrySharkEvolution/Resources/Assets
+  const iosFiles = fs
+    .readdirSync(iosAssetsDir)
+    .filter((f) => f.endsWith('.png') || f.endsWith('.jpg'));
+  assert.ok(
+    iosFiles.length >= 220,
+    `Expected at least 220 bundled PNG/JPG assets in iOS Resources/Assets, found ${iosFiles.length}`
+  );
 });
 
 

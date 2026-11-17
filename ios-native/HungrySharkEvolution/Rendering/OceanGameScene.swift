@@ -1959,10 +1959,11 @@ public final class OceanGameScene: SKScene {
             viewH * 0.5 - (wy - self.cameraY) * zoom
         }
 
+        let seabedScale = max(0.40, min(1.0, smoothedRelativePreyScale))
         let tileWorldW = 680.0
-        // 1:1 visual-to-physical alignment with Web renderPhysicalSeabed (crestLift = 20m, stripWorldH = 148m)
-        let mainCrestLift = 20.0
-        let mainStripWorldH = 148.0
+        // 1:1 visual-to-physical alignment with Web renderPhysicalSeabed, scaled proportionally by seabedScale
+        let mainCrestLift = 20.0 * seabedScale
+        let mainStripWorldH = 148.0 * seabedScale
 
         // 1A. Main Floor Underfill Polygon (prevents any sub-pixel gap below subsurface strata)
         let firstTile = Int(floor(startWorldX / tileWorldW))
@@ -1994,7 +1995,7 @@ public final class OceanGameScene: SKScene {
             var wx = firstX
             while wx <= endWorldX + stepW {
                 let fy = GameRules.getFloorDepthAt(worldX: wx)
-                let sy = toScreenY(fy + 22.0)
+                let sy = toScreenY(fy + 22.0 * seabedScale)
                 path.addLine(to: CGPoint(x: toScreenX(wx), y: sy))
                 wx += stepW
             }
@@ -2006,9 +2007,9 @@ public final class OceanGameScene: SKScene {
             // 1B. Main Floor Multi-Tier Subsurface Bedrock Strata + Top Surface Strip
             // Uses terrain-locked depth blending (resolveSeabedStripPairForDepth) & world-locked UVs (zero cameraY pop!)
             let subLayerSpecs: [(yStartWorld: Double, subWorldH: Double, uPhase: Double, alpha: Double, shade: Double, zOff: CGFloat)] = [
-                (34.0,  210.0, 0.37, 0.95, 0.18, 2.8),
-                (185.0, 250.0, 0.74, 0.92, 0.38, 2.7),
-                (375.0, 290.0, 0.19, 0.88, 0.56, 2.65)
+                (34.0 * seabedScale,  210.0 * seabedScale, 0.37, 0.95, 0.18, 2.8),
+                (185.0 * seabedScale, 250.0 * seabedScale, 0.74, 0.92, 0.38, 2.7),
+                (375.0 * seabedScale, 290.0 * seabedScale, 0.19, 0.88, 0.56, 2.65)
             ]
 
             for tIdx in firstTile...lastTile {
@@ -2123,12 +2124,12 @@ public final class OceanGameScene: SKScene {
         }
 
         // 2. Render 9 Non-Uniformly Spaced Continuous Seabed Terraces (414m down to 16,900m)
-        let terraceCrestLift = 18.0
-        let terraceStripWorldH = 124.0
+        let terraceCrestLift = 18.0 * seabedScale
+        let terraceStripWorldH = 124.0 * seabedScale
         let terracePeriodW = 540.0
         let terraceSubLayers: [(yStartWorld: Double, subWorldH: Double, uPhase: Double, alpha: Double, shade: Double, zOff: CGFloat)] = [
-            (28.0,  118.0, 0.37, 0.94, 0.16, 3.52),
-            (102.0, 144.0, 0.74, 0.90, 0.34, 3.46)
+            (28.0 * seabedScale,  118.0 * seabedScale, 0.37, 0.94, 0.16, 3.52),
+            (102.0 * seabedScale, 144.0 * seabedScale, 0.74, 0.90, 0.34, 3.46)
         ]
 
         for (tierIdx, tier) in GameRules.seabedTerraceTiers.enumerated() {
@@ -2267,10 +2268,10 @@ public final class OceanGameScene: SKScene {
                 let leftRockPrimary = (seamHash % 2 == 0) ? "rock_2" : "rock_1"
                 let rightRockPrimary = (seamHash % 2 == 0) ? "rock_1" : "rock_2"
                 let lipShoulders: [(wx: Double, dy: Double, lipH: Double, tiltSign: Double, rockId: String, shade: Double, zPos: CGFloat)] = [
-                    (openLeftWX - 6.0,  22.0, 74.0, -1.0, leftRockPrimary,  0.14, 3.70),
-                    (openLeftWX - 12.0, 58.0, 62.0, -1.0, rightRockPrimary, 0.28, 3.67),
-                    (openRightWX + 6.0, 22.0, 74.0,  1.0, rightRockPrimary, 0.14, 3.70),
-                    (openRightWX + 12.0,58.0, 62.0,  1.0, leftRockPrimary,  0.28, 3.67)
+                    (openLeftWX - 6.0,  22.0 * seabedScale, 74.0 * seabedScale, -1.0, leftRockPrimary,  0.14, 3.70),
+                    (openLeftWX - 12.0, 58.0 * seabedScale, 62.0 * seabedScale, -1.0, rightRockPrimary, 0.28, 3.67),
+                    (openRightWX + 6.0, 22.0 * seabedScale, 74.0 * seabedScale,  1.0, rightRockPrimary, 0.14, 3.70),
+                    (openRightWX + 12.0,58.0 * seabedScale, 62.0 * seabedScale,  1.0, leftRockPrimary,  0.28, 3.67)
                 ]
                 for shoulder in lipShoulders {
                     let mainAtShoulder = GameRules.getFloorDepthAt(worldX: shoulder.wx)
@@ -2597,8 +2598,8 @@ public final class OceanGameScene: SKScene {
             for outcrop in outcrops {
                 let sx = toScreenX(outcrop.worldX)
                 let sy = toScreenY(outcrop.baseY)
-                let drawBaseW = outcrop.width * zoom
-                let drawBaseH = outcrop.height * zoom
+                let drawBaseW = outcrop.width * seabedScale * zoom
+                let drawBaseH = outcrop.height * seabedScale * zoom
                 if sx + drawBaseW * 2.0 < -100.0 || sx - drawBaseW * 2.0 > viewW + 100.0 { continue }
                 if sy + drawBaseH * 2.0 < -100.0 || sy - drawBaseH * 2.0 > viewH + 100.0 { continue }
 

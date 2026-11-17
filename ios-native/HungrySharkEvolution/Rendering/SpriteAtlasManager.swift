@@ -296,11 +296,8 @@ public final class SpriteAtlasManager: ObservableObject {
                 self.loadingProgress = max(self.loadingProgress, 0.85)
             }
 
-            // Load 16 Distinct Ecology Sprites from world_ecology_atlas_1794473252524 + 4 Cleaned/Feathered Standalone @3x Clusters (as _5 variants) & 10 POI Sprites
+            // Load 4 Cleaned/Feathered Standalone @3x Ecology Clusters (without 4x4 slicing) & 10 POI Sprites
             var localEcologyTex: [String: SKTexture] = [:]
-            if let ecoSheet = Self.loadBundledImage(named: "world_ecology_atlas_1794473252524") {
-                localEcologyTex = Self.sliceWorldEcologyAtlas(from: ecoSheet)
-            }
             let standaloneEcologyDefs: [(prefix: String, assetName: String, removeSmoke: Bool)] = [
                 ("coral", "ecology_coral_reef_cluster", false),
                 ("rock", "ecology_rocky_outcrop", false),

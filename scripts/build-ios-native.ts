@@ -12098,12 +12098,21 @@ function main() {
     fs.rmSync(xcuserState, { recursive: true, force: true });
   }
 
+  // Touch Resources/Assets folder timestamp so Xcode's incremental CpResource phase always refreshes the bundled Assets folder
+  try {
+    const now = new Date();
+    fs.utimesSync(assetsDst, now, now);
+  } catch {
+    // ignore utimes errors on read-only mounts
+  }
+
   console.log(
     `[build:ios] Native iOS project (SwiftUI + SpriteKit/Metal, ZERO WebView) generated at ./ios-native/`
   );
   console.log(
     `[build:ios] Exported ${SHARK_EVOLUTION_FORMS.length} shark forms, ${GAME_CONFIG.preyTiers.length} prey species, and copied ${copiedCount} PNG/JPG assets.`
   );
+  process.exit(0);
 }
 
 main();
