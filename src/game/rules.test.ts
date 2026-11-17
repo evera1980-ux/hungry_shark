@@ -3390,14 +3390,37 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
     );
   }
 
-  // Ensure all 48 @3x sharks, 134 @3x prey, and UI/loading PNGs are present in ios-native/HungrySharkEvolution/Resources/Assets
+  // Ensure all 48 @3x sharks, 135 @3x prey (including cyber_mine@3x.png), and UI/loading PNGs are present in ios-native/HungrySharkEvolution/Resources/Assets
   const iosFiles = fs
     .readdirSync(iosAssetsDir)
     .filter((f) => f.endsWith('.png') || f.endsWith('.jpg'));
   assert.ok(
-    iosFiles.length >= 220,
-    `Expected at least 220 bundled PNG/JPG assets in iOS Resources/Assets, found ${iosFiles.length}`
+    iosFiles.length >= 228,
+    `Expected at least 228 bundled PNG/JPG assets in iOS Resources/Assets, found ${iosFiles.length}`
   );
+  assert.ok(
+    fs.existsSync(path.join(iosAssetsDir, 'cyber_mine@3x.png')),
+    'Missing cyber_mine@3x.png in iOS Resources/Assets'
+  );
+
+  const pbxprojPath = path.resolve(
+    process.cwd(),
+    'ios-native/HungrySharkEvolution.xcodeproj/project.pbxproj'
+  );
+  const pbxContent = fs.readFileSync(pbxprojPath, 'utf8');
+  for (const file of iosFiles) {
+    const header = fs.readFileSync(path.join(iosAssetsDir, file)).subarray(0, 4);
+    if (file.endsWith('.png')) {
+      assert.ok(
+        header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47,
+        `File ${file} has .png extension but is not a valid PNG (magic bytes: ${header.toString('hex')})`
+      );
+    }
+    assert.ok(
+      pbxContent.includes(`/* ${file} in Resources */`),
+      `Asset ${file} is not registered in project.pbxproj PBXResourcesBuildPhase`
+    );
+  }
 });
 
 

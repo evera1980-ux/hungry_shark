@@ -33,9 +33,11 @@ extension Color {
 public struct UiAtlasIconView: View {
     public let iconKey: String
     public var size: CGFloat = 28
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public var body: some View {
-        if let img = SpriteAtlasManager.shared.uiIconImage(for: iconKey) {
+        let _ = atlasManager.atlasRevision
+        if let img = atlasManager.uiIconImage(for: iconKey) {
             Image(uiImage: img)
                 .resizable()
                 .interpolation(.high)
@@ -54,9 +56,11 @@ public struct SharkPreviewView: View {
     public var width: CGFloat = 120
     public var height: CGFloat = 68
     public var locked: Bool = false
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public var body: some View {
-        if let img = SpriteAtlasManager.shared.sharkUIImage(for: form.spriteKey) {
+        let _ = atlasManager.atlasRevision
+        if let img = atlasManager.sharkUIImage(for: form.spriteKey) {
             Image(uiImage: img)
                 .resizable()
                 .interpolation(.high)
@@ -83,6 +87,7 @@ public struct UiBannerButtonView<LeftContent: View>: View {
     public var height: CGFloat = 60
     public let leftContent: () -> LeftContent
     public let action: () -> Void
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public init(
         bannerKey: String,
@@ -105,9 +110,10 @@ public struct UiBannerButtonView<LeftContent: View>: View {
     }
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         Button(action: action) {
             ZStack {
-                if let bgImg = SpriteAtlasManager.shared.uiBannerImage(for: bannerKey) {
+                if let bgImg = atlasManager.uiBannerImage(for: bannerKey) {
                     Image(uiImage: bgImg)
                         .resizable()
                         .interpolation(.high)
@@ -169,10 +175,12 @@ public struct UiBannerButtonView<LeftContent: View>: View {
 /// Top-Left Frameless Avatar & Angled HP/Boost Bar (`buttons_16e3a0cf.png`: UI_PLATE_AVATAR_BAR)
 public struct UiAvatarDataBarView: View {
     @ObservedObject var vm: GameViewModel
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
     public var height: CGFloat = 68
 
     public var body: some View {
-        let metrics = SpriteAtlasManager.shared.avatarBarHollowMetrics
+        let _ = atlasManager.atlasRevision
+        let metrics = atlasManager.avatarBarHollowMetrics
         let width = height * metrics.aspectRatio
         let holeCx = width * (metrics.cxPct / 100.0)
         let holeCy = height * (metrics.cyPct / 100.0)
@@ -211,7 +219,7 @@ public struct UiAvatarDataBarView: View {
                     .position(x: holeCx, y: holeCy)
 
                 // Layer 2: Sliced Metallic Plate Frame (UI_PLATE_AVATAR_BAR)
-                if let plateImg = SpriteAtlasManager.shared.uiBannerImage(for: "UI_PLATE_AVATAR_BAR") {
+                if let plateImg = atlasManager.uiBannerImage(for: "UI_PLATE_AVATAR_BAR") {
                     Image(uiImage: plateImg)
                         .resizable()
                         .interpolation(.high)
@@ -364,13 +372,15 @@ public struct UiSettingButtonView: View {
     public var height: CGFloat = 46
     public var disabled: Bool = false
     public let action: () -> Void
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         Button {
             if !disabled { action() }
         } label: {
             ZStack {
-                if let bg = SpriteAtlasManager.shared.uiSettingImage(for: variantKey) {
+                if let bg = atlasManager.uiSettingImage(for: variantKey) {
                     Image(uiImage: bg)
                         .resizable()
                         .interpolation(.high)
@@ -386,7 +396,7 @@ public struct UiSettingButtonView: View {
                     if let custom = customIconText {
                         Text(custom)
                             .font(.system(size: height * 0.38))
-                    } else if let iconImg = SpriteAtlasManager.shared.uiSettingIconImage(for: variantKey) {
+                    } else if let iconImg = atlasManager.uiSettingIconImage(for: variantKey) {
                         Image(uiImage: iconImg)
                             .resizable()
                             .interpolation(.high)
@@ -442,6 +452,7 @@ public struct UiSettingSharkCardView<RightContent: View>: View {
     public var width: CGFloat = 390
     public var height: CGFloat = 68
     public let rightContent: () -> RightContent
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public init(
         form: SharkFormConfig,
@@ -456,8 +467,9 @@ public struct UiSettingSharkCardView<RightContent: View>: View {
     }
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         ZStack {
-            if let cardImg = SpriteAtlasManager.shared.uiSettingImage(for: "SETTING_SHARK_CARD") {
+            if let cardImg = atlasManager.uiSettingImage(for: "SETTING_SHARK_CARD") {
                 Image(uiImage: cardImg)
                     .resizable()
                     .interpolation(.high)
@@ -492,6 +504,7 @@ public struct UiSettingModalFrameView<Content: View>: View {
     public var frameHeight: CGFloat = 335
     public let onClose: (() -> Void)?
     public let content: () -> Content
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public init(
         title: String,
@@ -512,6 +525,7 @@ public struct UiSettingModalFrameView<Content: View>: View {
     }
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         let key = hideMedallion ? "SETTING_MODAL_FRAME_CLEAN" : "SETTING_MODAL_FRAME"
         ZStack {
             // Inner frosted dark ocean backdrop
@@ -527,8 +541,8 @@ public struct UiSettingModalFrameView<Content: View>: View {
                 .position(x: frameWidth * 0.50, y: frameHeight * 0.545)
 
             // Sliced Sci-Fi Metallic Frame Overlay
-            if let frameImg = SpriteAtlasManager.shared.uiSettingImage(for: key)
-                ?? SpriteAtlasManager.shared.uiSettingImage(for: "SETTING_MODAL_FRAME") {
+            if let frameImg = atlasManager.uiSettingImage(for: key)
+                ?? atlasManager.uiSettingImage(for: "SETTING_MODAL_FRAME") {
                 Image(uiImage: frameImg)
                     .resizable()
                     .interpolation(.high)
@@ -1410,9 +1424,11 @@ public struct ContentView: View {
 
 public struct FixedEvolutionHudButton: View {
     @ObservedObject var vm: GameViewModel
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
     @State private var isPulsing: Bool = false
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         let nextTarget = GameRules.getNextEvolutionTarget(save: vm.save)
         let evoReady = nextTarget?.check.canUnlockNow ?? false
         let targetForm = nextTarget?.form
@@ -1484,7 +1500,7 @@ public struct FixedEvolutionHudButton: View {
 
                 // 3. 中心图标：满足条件时换成最近一条可进化的鲨鱼！不满足时显示进化图鉴图标
                 if evoReady, let target = targetForm {
-                    if let img = SpriteAtlasManager.shared.sharkUIImage(for: target.spriteKey) {
+                    if let img = atlasManager.sharkUIImage(for: target.spriteKey) {
                         Image(uiImage: img)
                             .resizable()
                             .scaledToFit()
@@ -2108,6 +2124,7 @@ public struct FixedEvolutionHudButton: View {
 
 public struct EvolutionAtlasSheetView: View {
     @ObservedObject var vm: GameViewModel
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
     @State private var inspectedIndex: Int = 0
     @State private var wheelPosition: Double = 0.0
     @State private var wheelVelocity: Double = 0.0 // slots per second

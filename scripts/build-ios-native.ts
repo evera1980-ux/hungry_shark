@@ -2473,6 +2473,7 @@ public final class SpriteAtlasManager: ObservableObject {
     @Published public private(set) var loadingStageZh: String = "正在潜入深海基因库..."
     @Published public private(set) var loadingStageEn: String = "Diving into Abyssal Gene Bank..."
     @Published public private(set) var isReady: Bool = false
+    @Published public private(set) var atlasRevision: Int = 0
 
     private var sharkTextures: [String: SKTexture] = [:]
     private var sharkUIImages: [String: UIImage] = [:]
@@ -2596,6 +2597,7 @@ public final class SpriteAtlasManager: ObservableObject {
             await MainActor.run {
                 self.sharkUIImages.merge(committedSharkUI) { _, new in new }
                 self.sharkTextures.merge(committedSharkTex) { _, new in new }
+                self.atlasRevision &+= 1
                 self.loadingProgress = 0.38
                 self.loadingStageZh = "正在演化深海生态鱼群..."
                 self.loadingStageEn = "Spawning Marine Ecosystem..."
@@ -2646,8 +2648,9 @@ public final class SpriteAtlasManager: ObservableObject {
             let committedPreyUI = localPreyUI
             let committedPreyTex = localPreyTex
             await MainActor.run {
-                self.preyUIImages = committedPreyUI
-                self.preyTextures = committedPreyTex
+                self.preyUIImages.merge(committedPreyUI) { _, new in new }
+                self.preyTextures.merge(committedPreyTex) { _, new in new }
+                self.atlasRevision &+= 1
                 self.loadingProgress = 0.56
                 self.loadingStageZh = "正在校准深海声呐与装甲界面..."
                 self.loadingStageEn = "Calibrating Sonar & HUD..."
@@ -2661,7 +2664,8 @@ public final class SpriteAtlasManager: ObservableObject {
                 localIcons = [:]
             }
             await MainActor.run {
-                self.uiIconImages = localIcons
+                self.uiIconImages.merge(localIcons) { _, new in new }
+                self.atlasRevision &+= 1
                 self.loadingProgress = 0.62
             }
 
@@ -2672,10 +2676,11 @@ public final class SpriteAtlasManager: ObservableObject {
                 bannerResult = ([:], nil)
             }
             await MainActor.run {
-                self.uiBannerImages = bannerResult.images
+                self.uiBannerImages.merge(bannerResult.images) { _, new in new }
                 if let m = bannerResult.metrics {
                     self.avatarBarHollowMetrics = m
                 }
+                self.atlasRevision &+= 1
                 self.loadingProgress = 0.67
             }
 
@@ -2686,8 +2691,9 @@ public final class SpriteAtlasManager: ObservableObject {
                 settingResult = ([:], [:])
             }
             await MainActor.run {
-                self.uiSettingImages = settingResult.images
-                self.uiSettingIconImages = settingResult.icons
+                self.uiSettingImages.merge(settingResult.images) { _, new in new }
+                self.uiSettingIconImages.merge(settingResult.icons) { _, new in new }
+                self.atlasRevision &+= 1
                 self.loadingProgress = 0.72
                 self.loadingStageZh = "正在构建 9 阶深海海床与珊瑚地貌..."
                 self.loadingStageEn = "Building 9-Tier Seabed & Coral Reefs..."
@@ -2710,7 +2716,7 @@ public final class SpriteAtlasManager: ObservableObject {
                 let prog = 0.72 + (Double(idx + 1) / Double(waterCanopies.count)) * 0.06
                 let partialOcean = localOceanTex
                 await MainActor.run {
-                    self.oceanLayerTextures = partialOcean
+                    self.oceanLayerTextures.merge(partialOcean) { _, new in new }
                     self.loadingProgress = max(self.loadingProgress, prog)
                 }
             }
@@ -2741,13 +2747,17 @@ public final class SpriteAtlasManager: ObservableObject {
             let committedStrips = localSeabedStrips
             let committedSubStrata = localSeabedSubStrata
             await MainActor.run {
-                self.seabedStripTextures = committedStrips
-                self.seabedSubStratumTextures = committedSubStrata
+                self.seabedStripTextures.merge(committedStrips) { _, new in new }
+                self.seabedSubStratumTextures.merge(committedSubStrata) { _, new in new }
+                self.atlasRevision &+= 1
                 self.loadingProgress = max(self.loadingProgress, 0.85)
             }
 
-            // Load 4 Cleaned/Feathered Standalone @3x Ecology Clusters (without 4x4 slicing) & 10 POI Sprites
+            // Load 16 Keyed Ecology Sprites (coral_1..4, rock_1..4, kelp_1..4, vent_1..4, debris_1) + 4 Standalone @3x Composite Clusters (coral_5, rock_5, kelp_5, vent_5) & 10 POI Sprites
             var localEcologyTex: [String: SKTexture] = [:]
+            if let ecoSheet = Self.loadBundledImage(named: "world_ecology_atlas_1794473252524") {
+                localEcologyTex = Self.sliceWorldEcologyAtlas(from: ecoSheet)
+            }
             let standaloneEcologyDefs: [(prefix: String, assetName: String, removeSmoke: Bool)] = [
                 ("coral", "ecology_coral_reef_cluster", false),
                 ("rock", "ecology_rocky_outcrop", false),
@@ -2776,9 +2786,10 @@ public final class SpriteAtlasManager: ObservableObject {
             let committedEco = localEcologyTex
             let committedPoi = localPoiTex
             await MainActor.run {
-                self.ecologySpriteTextures = committedEco
-                self.poiSpriteTextures = committedPoi
+                self.ecologySpriteTextures.merge(committedEco) { _, new in new }
+                self.poiSpriteTextures.merge(committedPoi) { _, new in new }
                 self.cavePortalShadowTex = portalShadow
+                self.atlasRevision &+= 1
                 self.loadingProgress = max(self.loadingProgress, 0.94)
             }
 
@@ -2803,9 +2814,11 @@ public final class SpriteAtlasManager: ObservableObject {
                         self.loadingStageEn = "Abyssal Hunting Grounds Ready!"
                         self.isPreloaded = true
                         self.isPreloading = false
+                        self.atlasRevision &+= 1
                         try? await Task.sleep(nanoseconds: 140_000_000)
                         withAnimation(.easeInOut(duration: 0.45)) {
                             self.isReady = true
+                            self.atlasRevision &+= 1
                         }
                     }
                 }
@@ -2827,6 +2840,16 @@ public final class SpriteAtlasManager: ObservableObject {
             let img3x = UIImage(cgImage: cg, scale: 3.0, orientation: .up)
             sharkUIImages[form.spriteKey] = img3x
             let tex = SKTexture(image: img3x)
+            tex.filteringMode = .linear
+            sharkTextures[form.spriteKey] = tex
+        } else if let sharkSheet = Self.loadBundledImage(named: "sharks_ec921c3b"),
+                  let sliced = Self.sliceAndKeyNormalizedCell(
+                      from: sharkSheet,
+                      bounds: form.normalizedBounds,
+                      preserveInteriorWhite: true
+                  ) {
+            sharkUIImages[form.spriteKey] = sliced
+            let tex = SKTexture(image: sliced)
             tex.filteringMode = .linear
             sharkTextures[form.spriteKey] = tex
         }
@@ -2857,6 +2880,19 @@ public final class SpriteAtlasManager: ObservableObject {
             let tex = SKTexture(image: img3x)
             tex.filteringMode = .linear
             preyTextures[prey.spriteKey] = tex
+        } else {
+            let sheetName = prey.sheetName == "fish2_fc857cfa" ? "fish2_fc857cfa" : "fish_24bdaa5a"
+            if let sheetImg = Self.loadBundledImage(named: sheetName),
+               let sliced = Self.sliceAndKeyNormalizedCell(
+                   from: sheetImg,
+                   bounds: prey.normalizedBounds,
+                   preserveInteriorWhite: false
+               ) {
+                preyUIImages[prey.spriteKey] = sliced
+                let tex = SKTexture(image: sliced)
+                tex.filteringMode = .linear
+                preyTextures[prey.spriteKey] = tex
+            }
         }
     }
 
@@ -2873,18 +2909,42 @@ public final class SpriteAtlasManager: ObservableObject {
     }
 
     public func uiIconImage(for key: String) -> UIImage? {
+        if let img = uiIconImages[key] { return img }
+        if uiIconImages.isEmpty, let iconSheet = Self.loadBundledImage(named: "icons_f5128c12") {
+            uiIconImages = Self.sliceUiIconSheet(iconSheet)
+        }
         return uiIconImages[key]
     }
 
     public func uiBannerImage(for key: String) -> UIImage? {
+        if let img = uiBannerImages[key] { return img }
+        if uiBannerImages.isEmpty, let bannerSheet = Self.loadBundledImage(named: "buttons_16e3a0cf") {
+            let result = Self.sliceUiBannerSheet(bannerSheet)
+            uiBannerImages = result.images
+            if let m = result.metrics {
+                avatarBarHollowMetrics = m
+            }
+        }
         return uiBannerImages[key]
     }
 
     public func uiSettingImage(for key: String) -> UIImage? {
+        if let img = uiSettingImages[key] { return img }
+        if uiSettingImages.isEmpty, let settingSheet = Self.loadBundledImage(named: "setting_83a7a273") {
+            let result = Self.sliceUiSettingSheet(settingSheet)
+            uiSettingImages = result.images
+            uiSettingIconImages = result.icons
+        }
         return uiSettingImages[key]
     }
 
     public func uiSettingIconImage(for key: String) -> UIImage? {
+        if let img = uiSettingIconImages[key] { return img }
+        if uiSettingIconImages.isEmpty, let settingSheet = Self.loadBundledImage(named: "setting_83a7a273") {
+            let result = Self.sliceUiSettingSheet(settingSheet)
+            uiSettingImages = result.images
+            uiSettingIconImages = result.icons
+        }
         return uiSettingIconImages[key]
     }
 
@@ -2895,22 +2955,96 @@ public final class SpriteAtlasManager: ObservableObject {
     }
 
     public func oceanParallaxTexture(named assetName: String, isWaterCanopy: Bool = false) -> SKTexture? {
-        return oceanLayerTextures[assetName]
+        if let tex = oceanLayerTextures[assetName] { return tex }
+        if let rawImg = Self.loadBundledImage(named: assetName) {
+            let processed = Self.processWaterLayerToSeamlessTile(rawImg, assetName: assetName) ?? rawImg
+            let tex = SKTexture(image: processed)
+            tex.filteringMode = .linear
+            oceanLayerTextures[assetName] = tex
+            return tex
+        }
+        return nil
+    }
+
+    private func loadSeabedTextureOnDemand(for stripId: String) {
+        let assetMap: [String: String] = [
+            "coral_reef": "seabed_strip_coral_reef",
+            "rocky_shelf": "seabed_strip_rocky_shelf",
+            "underwater_canyon": "seabed_strip_underwater_canyon",
+            "deep_abyss": "seabed_strip_deep_abyss"
+        ]
+        guard let assetName = assetMap[stripId],
+              let standaloneImg = Self.loadBundledImage(named: assetName) else { return }
+        if seabedStripTextures[stripId] == nil,
+           let stripImg = Self.sliceSeabedStrip(from: standaloneImg, y0Ratio: 0.0, y1Ratio: 1.0) {
+            let tex = SKTexture(image: stripImg)
+            tex.filteringMode = .linear
+            seabedStripTextures[stripId] = tex
+        }
+        if seabedSubStratumTextures[stripId] == nil,
+           let subImg = Self.sliceSeabedSubStratum(from: standaloneImg, stripId: stripId, y0Ratio: 0.0, y1Ratio: 1.0) {
+            let subTex = SKTexture(image: subImg)
+            subTex.filteringMode = .linear
+            seabedSubStratumTextures[stripId] = subTex
+        }
     }
 
     public func seabedStripTexture(for stripId: String) -> SKTexture? {
-        return seabedStripTextures[stripId] ?? seabedStripTextures["coral_reef"]
+        if let tex = seabedStripTextures[stripId] { return tex }
+        loadSeabedTextureOnDemand(for: stripId)
+        if let tex = seabedStripTextures[stripId] { return tex }
+        if seabedStripTextures["coral_reef"] == nil {
+            loadSeabedTextureOnDemand(for: "coral_reef")
+        }
+        return seabedStripTextures["coral_reef"]
     }
 
     public func seabedSubStratumTexture(for stripId: String) -> SKTexture? {
-        return seabedSubStratumTextures[stripId] ?? seabedSubStratumTextures["coral_reef"]
+        if let tex = seabedSubStratumTextures[stripId] { return tex }
+        loadSeabedTextureOnDemand(for: stripId)
+        if let tex = seabedSubStratumTextures[stripId] { return tex }
+        if seabedSubStratumTextures["coral_reef"] == nil {
+            loadSeabedTextureOnDemand(for: "coral_reef")
+        }
+        return seabedSubStratumTextures["coral_reef"]
     }
 
     public func ecologySpriteTexture(for id: String) -> SKTexture? {
+        if let tex = ecologySpriteTextures[id] { return tex }
+        if ecologySpriteTextures.isEmpty {
+            if let ecoSheet = Self.loadBundledImage(named: "world_ecology_atlas_1794473252524") {
+                ecologySpriteTextures = Self.sliceWorldEcologyAtlas(from: ecoSheet)
+            }
+            let standaloneEcologyDefs: [(prefix: String, assetName: String, removeSmoke: Bool)] = [
+                ("coral", "ecology_coral_reef_cluster", false),
+                ("rock", "ecology_rocky_outcrop", false),
+                ("kelp", "ecology_kelp_forest_cluster", false),
+                ("vent", "ecology_abyssal_vent_debris", true)
+            ]
+            for def in standaloneEcologyDefs {
+                if let rawEcoImg = Self.loadBundledImage(named: def.assetName) {
+                    let cleanedImg = Self.prepareStandaloneEcologyImage(from: rawEcoImg, removeTopWhiteSmoke: def.removeSmoke) ?? rawEcoImg
+                    let tex = SKTexture(image: cleanedImg)
+                    tex.filteringMode = .linear
+                    ecologySpriteTextures["\\(def.prefix)_5"] = tex
+                    ecologySpriteTextures[def.prefix] = tex
+                    for idx in 1...4 {
+                        if ecologySpriteTextures["\\(def.prefix)_\\(idx)"] == nil {
+                            ecologySpriteTextures["\\(def.prefix)_\\(idx)"] = tex
+                        }
+                    }
+                }
+            }
+        }
         return ecologySpriteTextures[id]
     }
 
     public func poiSpriteTexture(for id: String) -> SKTexture? {
+        if let tex = poiSpriteTextures[id] { return tex }
+        if poiSpriteTextures.isEmpty,
+           let poiSheet = Self.loadBundledImage(named: "world_pois_atlas_1794473250443") {
+            poiSpriteTextures = Self.sliceWorldPoisAtlas(from: poiSheet)
+        }
         return poiSpriteTextures[id]
     }
 
@@ -2930,45 +3064,49 @@ public final class SpriteAtlasManager: ObservableObject {
         } else if cleanBase.hasSuffix(".jpeg") {
             cleanBase = String(cleanBase.dropLast(5))
         }
+        let baseWithoutScale: String
+        if cleanBase.hasSuffix("@3x") || cleanBase.hasSuffix("@2x") {
+            baseWithoutScale = String(cleanBase.dropLast(3))
+        } else {
+            baseWithoutScale = cleanBase
+        }
         let exts = ["png", "jpg", "jpeg"]
         let roots: [URL] = [Bundle.main.resourceURL, Bundle.main.bundleURL].compactMap { $0 }
+        let baseVariants = Array(NSOrderedSet(array: [cleanBase, "\\(baseWithoutScale)@3x", baseWithoutScale])) as? [String] ?? [cleanBase]
         for root in roots {
             for ext in exts {
-                let candidates = [
-                    root.appendingPathComponent("Assets/\\(cleanBase).\\(ext)"),
-                    root.appendingPathComponent("Assets/\\(cleanBase)@3x.\\(ext)"),
-                    root.appendingPathComponent("Resources/Assets/\\(cleanBase).\\(ext)"),
-                    root.appendingPathComponent("Resources/Assets/\\(cleanBase)@3x.\\(ext)"),
-                    root.appendingPathComponent("\\(cleanBase).\\(ext)"),
-                    root.appendingPathComponent("\\(cleanBase)@3x.\\(ext)")
-                ]
-                for url in candidates {
-                    if FileManager.default.fileExists(atPath: url.path),
-                       let img = UIImage(contentsOfFile: url.path) {
-                        return img
+                for variant in baseVariants {
+                    let candidates = [
+                        root.appendingPathComponent("Assets/\\(variant).\\(ext)"),
+                        root.appendingPathComponent("Resources/Assets/\\(variant).\\(ext)"),
+                        root.appendingPathComponent("\\(variant).\\(ext)")
+                    ]
+                    for url in candidates {
+                        if FileManager.default.fileExists(atPath: url.path),
+                           let img = UIImage(contentsOfFile: url.path) {
+                            return img
+                        }
                     }
                 }
             }
         }
         for ext in exts {
-            if let path = Bundle.main.path(forResource: cleanBase, ofType: ext),
-               let img = UIImage(contentsOfFile: path) {
-                return img
-            }
-            if let path = Bundle.main.path(forResource: cleanBase, ofType: ext, inDirectory: "Assets"),
-               let img = UIImage(contentsOfFile: path) {
-                return img
-            }
-            if let path = Bundle.main.path(forResource: "\\(cleanBase)@3x", ofType: ext),
-               let img = UIImage(contentsOfFile: path) {
-                return img
-            }
-            if let path = Bundle.main.path(forResource: "\\(cleanBase)@3x", ofType: ext, inDirectory: "Assets"),
-               let img = UIImage(contentsOfFile: path) {
-                return img
+            for variant in baseVariants {
+                if let path = Bundle.main.path(forResource: variant, ofType: ext),
+                   let img = UIImage(contentsOfFile: path) {
+                    return img
+                }
+                if let path = Bundle.main.path(forResource: variant, ofType: ext, inDirectory: "Assets"),
+                   let img = UIImage(contentsOfFile: path) {
+                    return img
+                }
+                if let path = Bundle.main.path(forResource: variant, ofType: ext, inDirectory: "Resources/Assets"),
+                   let img = UIImage(contentsOfFile: path) {
+                    return img
+                }
             }
         }
-        if let img = UIImage(named: cleanBase) { return img }
+        if let img = UIImage(named: cleanBase) ?? UIImage(named: baseWithoutScale) { return img }
         return nil
     }
 
@@ -8192,9 +8330,11 @@ extension Color {
 public struct UiAtlasIconView: View {
     public let iconKey: String
     public var size: CGFloat = 28
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public var body: some View {
-        if let img = SpriteAtlasManager.shared.uiIconImage(for: iconKey) {
+        let _ = atlasManager.atlasRevision
+        if let img = atlasManager.uiIconImage(for: iconKey) {
             Image(uiImage: img)
                 .resizable()
                 .interpolation(.high)
@@ -8213,9 +8353,11 @@ public struct SharkPreviewView: View {
     public var width: CGFloat = 120
     public var height: CGFloat = 68
     public var locked: Bool = false
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public var body: some View {
-        if let img = SpriteAtlasManager.shared.sharkUIImage(for: form.spriteKey) {
+        let _ = atlasManager.atlasRevision
+        if let img = atlasManager.sharkUIImage(for: form.spriteKey) {
             Image(uiImage: img)
                 .resizable()
                 .interpolation(.high)
@@ -8242,6 +8384,7 @@ public struct UiBannerButtonView<LeftContent: View>: View {
     public var height: CGFloat = 60
     public let leftContent: () -> LeftContent
     public let action: () -> Void
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public init(
         bannerKey: String,
@@ -8264,9 +8407,10 @@ public struct UiBannerButtonView<LeftContent: View>: View {
     }
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         Button(action: action) {
             ZStack {
-                if let bgImg = SpriteAtlasManager.shared.uiBannerImage(for: bannerKey) {
+                if let bgImg = atlasManager.uiBannerImage(for: bannerKey) {
                     Image(uiImage: bgImg)
                         .resizable()
                         .interpolation(.high)
@@ -8328,10 +8472,12 @@ public struct UiBannerButtonView<LeftContent: View>: View {
 /// Top-Left Frameless Avatar & Angled HP/Boost Bar (\`buttons_16e3a0cf.png\`: UI_PLATE_AVATAR_BAR)
 public struct UiAvatarDataBarView: View {
     @ObservedObject var vm: GameViewModel
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
     public var height: CGFloat = 68
 
     public var body: some View {
-        let metrics = SpriteAtlasManager.shared.avatarBarHollowMetrics
+        let _ = atlasManager.atlasRevision
+        let metrics = atlasManager.avatarBarHollowMetrics
         let width = height * metrics.aspectRatio
         let holeCx = width * (metrics.cxPct / 100.0)
         let holeCy = height * (metrics.cyPct / 100.0)
@@ -8370,7 +8516,7 @@ public struct UiAvatarDataBarView: View {
                     .position(x: holeCx, y: holeCy)
 
                 // Layer 2: Sliced Metallic Plate Frame (UI_PLATE_AVATAR_BAR)
-                if let plateImg = SpriteAtlasManager.shared.uiBannerImage(for: "UI_PLATE_AVATAR_BAR") {
+                if let plateImg = atlasManager.uiBannerImage(for: "UI_PLATE_AVATAR_BAR") {
                     Image(uiImage: plateImg)
                         .resizable()
                         .interpolation(.high)
@@ -8523,13 +8669,15 @@ public struct UiSettingButtonView: View {
     public var height: CGFloat = 46
     public var disabled: Bool = false
     public let action: () -> Void
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         Button {
             if !disabled { action() }
         } label: {
             ZStack {
-                if let bg = SpriteAtlasManager.shared.uiSettingImage(for: variantKey) {
+                if let bg = atlasManager.uiSettingImage(for: variantKey) {
                     Image(uiImage: bg)
                         .resizable()
                         .interpolation(.high)
@@ -8545,7 +8693,7 @@ public struct UiSettingButtonView: View {
                     if let custom = customIconText {
                         Text(custom)
                             .font(.system(size: height * 0.38))
-                    } else if let iconImg = SpriteAtlasManager.shared.uiSettingIconImage(for: variantKey) {
+                    } else if let iconImg = atlasManager.uiSettingIconImage(for: variantKey) {
                         Image(uiImage: iconImg)
                             .resizable()
                             .interpolation(.high)
@@ -8601,6 +8749,7 @@ public struct UiSettingSharkCardView<RightContent: View>: View {
     public var width: CGFloat = 390
     public var height: CGFloat = 68
     public let rightContent: () -> RightContent
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public init(
         form: SharkFormConfig,
@@ -8615,8 +8764,9 @@ public struct UiSettingSharkCardView<RightContent: View>: View {
     }
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         ZStack {
-            if let cardImg = SpriteAtlasManager.shared.uiSettingImage(for: "SETTING_SHARK_CARD") {
+            if let cardImg = atlasManager.uiSettingImage(for: "SETTING_SHARK_CARD") {
                 Image(uiImage: cardImg)
                     .resizable()
                     .interpolation(.high)
@@ -8651,6 +8801,7 @@ public struct UiSettingModalFrameView<Content: View>: View {
     public var frameHeight: CGFloat = 335
     public let onClose: (() -> Void)?
     public let content: () -> Content
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
 
     public init(
         title: String,
@@ -8671,6 +8822,7 @@ public struct UiSettingModalFrameView<Content: View>: View {
     }
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         let key = hideMedallion ? "SETTING_MODAL_FRAME_CLEAN" : "SETTING_MODAL_FRAME"
         ZStack {
             // Inner frosted dark ocean backdrop
@@ -8686,8 +8838,8 @@ public struct UiSettingModalFrameView<Content: View>: View {
                 .position(x: frameWidth * 0.50, y: frameHeight * 0.545)
 
             // Sliced Sci-Fi Metallic Frame Overlay
-            if let frameImg = SpriteAtlasManager.shared.uiSettingImage(for: key)
-                ?? SpriteAtlasManager.shared.uiSettingImage(for: "SETTING_MODAL_FRAME") {
+            if let frameImg = atlasManager.uiSettingImage(for: key)
+                ?? atlasManager.uiSettingImage(for: "SETTING_MODAL_FRAME") {
                 Image(uiImage: frameImg)
                     .resizable()
                     .interpolation(.high)
@@ -9569,9 +9721,11 @@ public struct ContentView: View {
 
 public struct FixedEvolutionHudButton: View {
     @ObservedObject var vm: GameViewModel
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
     @State private var isPulsing: Bool = false
 
     public var body: some View {
+        let _ = atlasManager.atlasRevision
         let nextTarget = GameRules.getNextEvolutionTarget(save: vm.save)
         let evoReady = nextTarget?.check.canUnlockNow ?? false
         let targetForm = nextTarget?.form
@@ -9643,7 +9797,7 @@ public struct FixedEvolutionHudButton: View {
 
                 // 3. 中心图标：满足条件时换成最近一条可进化的鲨鱼！不满足时显示进化图鉴图标
                 if evoReady, let target = targetForm {
-                    if let img = SpriteAtlasManager.shared.sharkUIImage(for: target.spriteKey) {
+                    if let img = atlasManager.sharkUIImage(for: target.spriteKey) {
                         Image(uiImage: img)
                             .resizable()
                             .scaledToFit()
@@ -10267,6 +10421,7 @@ public struct FixedEvolutionHudButton: View {
 
 public struct EvolutionAtlasSheetView: View {
     @ObservedObject var vm: GameViewModel
+    @ObservedObject private var atlasManager = SpriteAtlasManager.shared
     @State private var inspectedIndex: Int = 0
     @State private var wheelPosition: Double = 0.0
     @State private var wheelVelocity: Double = 0.0 // slots per second
@@ -11637,8 +11792,11 @@ ${assetResourceEntries}
 		A90000032B00000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
+				COMPRESS_PNG_FILES = NO;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "HungrySharkEvolution/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
@@ -11654,6 +11812,7 @@ ${assetResourceEntries}
 				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolution";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRIP_PNG_TEXT = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = "5.0";
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -11663,8 +11822,11 @@ ${assetResourceEntries}
 		A90000042B00000000000001 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
+				COMPRESS_PNG_FILES = NO;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "HungrySharkEvolution/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
@@ -11680,6 +11842,7 @@ ${assetResourceEntries}
 				OTHER_LDFLAGS = "-ObjC";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolution";
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRIP_PNG_TEXT = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = "5.0";
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -12035,8 +12198,6 @@ function main() {
   if (fs.existsSync(srcPrey140Dir)) {
     for (const file of fs.readdirSync(srcPrey140Dir)) {
       if (file.endsWith('@3x.png')) {
-        const preyId = file.replace(/@3x\.png$/, '');
-        if (!PREY_140_RECORD_BY_ID[preyId]) continue;
         copyIfChanged(
           path.join(srcPrey140Dir, file),
           path.join(assetsDst, file)
@@ -12046,7 +12207,7 @@ function main() {
     }
   }
 
-  // 3. Write XcodeGen spec (project.yml) & Package.swift, then generate or preserve project.pbxproj
+  // 3. Write XcodeGen spec (project.yml) & Package.swift, then generate project.pbxproj with all individual assets registered in PBXResourcesBuildPhase
   fs.writeFileSync(
     path.join(IOS_ROOT, 'project.yml'),
     generateXcodeGenProjectYml(),
@@ -12059,33 +12220,15 @@ function main() {
   );
 
   const pbxprojPath = path.join(xcodeprojDir, 'project.pbxproj');
-  const existingPbxproj = fs.existsSync(pbxprojPath)
-    ? fs.readFileSync(pbxprojPath, 'utf8')
-    : '';
-
-  // Generate 100% Apple-compliant project.pbxproj via XcodeGen if available
-  let xcodegenSuccess = false;
-  try {
-    child_process.execSync('xcodegen generate', { cwd: IOS_ROOT, stdio: 'pipe' });
-    xcodegenSuccess = true;
-    console.log('[build:ios] ✅ Generated Xcode project via XcodeGen (100% Apple native format).');
-  } catch {
-    if (existingPbxproj.includes('objectVersion = 77')) {
-      xcodegenSuccess = true;
-      console.log('[build:ios] ℹ️ Preserved existing XcodeGen project.pbxproj (objectVersion = 77).');
-    } else {
-      console.warn('[build:ios] ⚠️ XcodeGen not available, falling back to built-in OpenStep template.');
-    }
-  }
-
-  if (!xcodegenSuccess) {
-    const allBundledAssetFiles = fs
-      .readdirSync(assetsDst)
-      .filter((f) => f.endsWith('.png') || f.endsWith('.jpg'));
-    const pbxprojContent = generatePbxproj(allBundledAssetFiles);
-    validateOpenStepPbxproj(pbxprojContent);
-    fs.writeFileSync(pbxprojPath, pbxprojContent, 'utf8');
-  }
+  const allBundledAssetFiles = fs
+    .readdirSync(assetsDst)
+    .filter((f) => f.endsWith('.png') || f.endsWith('.jpg'));
+  const pbxprojContent = generatePbxproj(allBundledAssetFiles);
+  validateOpenStepPbxproj(pbxprojContent);
+  fs.writeFileSync(pbxprojPath, pbxprojContent, 'utf8');
+  console.log(
+    `[build:ios] ✅ Generated project.pbxproj with Assets folder reference + ${allBundledAssetFiles.length} individual resource entries.`
+  );
 
   // Clean stale UI session state so Xcode opens fresh without "InitialEditorMissingFile" or corrupted cache
   const xcuserState = path.join(
