@@ -1568,6 +1568,10 @@ export class ParallaxBackground {
     ctx.restore();
   }
 
+  public getSmoothedRelativePreyScale(): number {
+    return this.smoothedRelativePreyScale;
+  }
+
   /**
    * Renders the complete 5-layer depth-continuous AI-illustrated ocean environment,
    * using staggered C2 quintic per-plane transitions, vertical spatial emergence/subduction,

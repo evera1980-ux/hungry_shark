@@ -299,7 +299,7 @@ export class EcosystemSpawner {
     );
     const clusterTriggerProb = 0.28 * (0.75 + macroEval.schoolClusterProbability * 0.45);
     if (
-      chosenTier.tier === 1 &&
+      chosenTier.tier <= 6 &&
       !chosenTier.isHazard &&
       rng() < clusterTriggerProb
     ) {
@@ -354,12 +354,12 @@ export class EcosystemSpawner {
   public activeTargetPreyId: string | null = null;
 
   /**
-   * 当前玩家鲨鱼的实时常态咬合阶位（用于浅海动态配比，确保 T1 幼鲨开局有充足可吞噬猎物）
+   * 当前玩家鲨鱼的实时常态咬合阶位（保留字段兼容外部引用，但刷新权重纯按水深固定分配）
    */
   public activeSharkBiteTier: number = 1;
 
   /**
-   * 首局新手引导保护开关（开启时浅海仅刷 T1~T2 温顺小鱼）
+   * 首局新手引导保护开关（开启时浅海前 3 条引导鱼仅刷 T1~T2 温顺小鱼）
    */
   public tutorialProtectionActive: boolean = false;
 
@@ -367,17 +367,16 @@ export class EcosystemSpawner {
     targetDepthY: number,
     rng: () => number
   ): PreyTierConfig {
-    const allPreys = GAME_CONFIG.preyTiers;
+    // 100% 仅使用 134 种独立 @3x 真实海洋生物（剔除旧图集猎物与水雷）
+    const allPreys = GAME_CONFIG.preyTiers.filter(
+      (p) => !p.isHazard && Boolean(p.externalPngUrl)
+    );
     if (allPreys.length === 0) {
-      throw new Error('GAME_CONFIG.preyTiers is empty');
+      throw new Error('GAME_CONFIG.preyTiers has no @3x marine species');
     }
 
     const depth = Math.max(25, targetDepthY);
     const isShallowZone = depth <= 520;
-    const isEarlySanctuary =
-      isShallowZone &&
-      (this.tutorialProtectionActive ||
-        (this.activeSharkBiteTier <= 1 && this.gameTime < 20));
 
     // 严格筛选当前水深落在该鱼种真实自然栖息带 [minDepth, maxDepth] 内的物种（绝不让浅水鱼刷到深海，也绝不让深水鱼刷到浅海）
     const habitatPool = allPreys.filter(
@@ -392,7 +391,7 @@ export class EcosystemSpawner {
         ? allPreys.filter((p) => p.maxDepth >= 1150)
         : allPreys.filter((p) => p.minDepth >= 500 || p.maxDepth >= 800);
 
-    // 整个阳光珊瑚浅水区 (0m ~ 520m) 全程永久禁止刷出鳗鱼等主动冲刺攻击型掠食者（EEL_CHARGER / SUB_PATROL / HEAVY_CRUISER / KRAKEN_BOSS）与水雷
+    // 整个阳光珊瑚浅水区 (0m ~ 520m) 全程永久禁止刷出鳗鱼等主动冲刺攻击型掠食者（EEL_CHARGER / SUB_PATROL / HEAVY_CRUISER / KRAKEN_BOSS）
     const sanctuaryFilteredPool = isShallowZone
       ? rawActivePool.filter(
           (p) =>
@@ -407,51 +406,81 @@ export class EcosystemSpawner {
     const activePool =
       sanctuaryFilteredPool.length > 0 ? sanctuaryFilteredPool : rawActivePool;
 
-    // 若存在当前悬赏目标鱼，仅当该目标鱼确实属于当前水深栖息群落时，才以 26% 概率优先刷新（杜绝跨水深强行刷出浅水/深水目标鱼）
+    // 新手教学第1步保护：确保前3条教学引导鱼是 T1~T2 可直吞小鱼
+    if (isShallowZone && this.tutorialProtectionActive) {
+      const tutorialPool = activePool.filter((p) => p.tier <= 2);
+      if (tutorialPool.length > 0) {
+        const idx = Math.min(
+          tutorialPool.length - 1,
+          Math.floor(rng() * tutorialPool.length)
+        );
+        return tutorialPool[idx];
+      }
+    }
+
+    // 若存在当前悬赏目标鱼，仅当该目标鱼确实属于当前水深栖息群落时，才以 26% 概率优先刷新
     if (this.activeTargetPreyId && rng() < 0.26) {
-      const targetConfig = activePool.find((p) => p.id === this.activeTargetPreyId);
+      const targetConfig = activePool.find(
+        (p) => p.id === this.activeTargetPreyId
+      );
       if (targetConfig) {
         return targetConfig;
       }
     }
 
-    // 根据真实海洋生态垂直分层与玩家当前咬合阶位动态分配 Tier 1..8 阶位权重（覆盖 0m ~ 20,000m 五大生态带）：
-    // - 浅海新手/T1开局保护期：82% T1 可吞噬小鱼 + 18% 温顺 T2 鱼（零主动攻击掠食者）
-    // - 浅海 T1 常态期：72% T1 + 20% T2 + 8% T3（保证 >75% 鱼可直接吞噬）
-    // - 浅海 T2+ 进阶期：54% T1 + 30% T2 + 16% T3（浅海仅栖息 T1~T3 珊瑚礁鱼群，0% T4+ 掠食者）
-    // - 暮光带 (520~1150m)：T2~T6 远洋礁坡鱼、海龟、礁鲨与感应水雷
-    // - 午夜/深渊带 (1150~8000m)：深海发光小鱼补给 (T2~T4) + 大型远洋捕食者 (T5~T8)
-    // - 海沟终极深渊带 (8000~20000m)：深海龙鱼/灯笼鱼群 + 抹香鲸/蓝鲸/虎鲸等巨型海兽 (T6~T8)
-    const tierWeights =
-      depth > 8000
-        ? [0, 6, 10, 12, 10, 16, 22, 24]
-        : depth > 3500
-        ? [0, 8, 12, 16, 16, 18, 18, 12]
-        : depth > 1150
-        ? [0, 10, 14, 18, 20, 18, 14, 6]
-        : depth > 520
-        ? [0, 10, 26, 28, 22, 14, 0, 0]
-        : isEarlySanctuary
-        ? [82, 18, 0, 0, 0, 0, 0, 0]
-        : this.activeSharkBiteTier <= 1
-        ? [72, 20, 8, 0, 0, 0, 0, 0]
-        : [54, 30, 16, 0, 0, 0, 0, 0];
-
-    const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
-    let roll = rng() * totalWeight;
-    let chosenTierNum = 1;
-    for (let t = 0; t < tierWeights.length; t++) {
-      roll -= tierWeights[t];
-      if (roll <= 0) {
-        chosenTierNum = t + 1;
-        break;
+    // 深海 18% 发光伴生口粮鱼保障：在 520m+ 中深海与深渊，保持 18% 概率刷新同水深栖息的小型伴生发光鱼（T11~T14 灯笼鱼/银斧鱼等），保障深海续航
+    if (!isShallowZone && rng() < 0.18) {
+      const companionPool = activePool.filter((p) => p.tier <= 14);
+      if (companionPool.length > 0) {
+        const idx = Math.min(
+          companionPool.length - 1,
+          Math.floor(rng() * companionPool.length)
+        );
+        return companionPool[idx];
       }
     }
 
-    const tierMatches = activePool.filter((p) => p.tier === chosenTierNum);
-    const finalPool = tierMatches.length > 0 ? tierMatches : activePool;
-    const idx = Math.min(finalPool.length - 1, Math.floor(rng() * finalPool.length));
-    return finalPool[idx];
+    // 纯按水深 (0m ~ 20,000m) 固定计算生态目标阶位 T_center(depth)，不随玩家鲨鱼当前 T 阶动态调整
+    let targetTier = 2;
+    if (depth <= 520) {
+      // 0m ~ 520m 阳光浅海：自然分布 T1 ~ T10 珊瑚礁鱼群（在 120~240m 出生带自然产出 T1~T2 口粮、T3~T4 可破甲鱼、T5~T8 巡游大鱼）
+      targetTier = 1 + ((depth - 25) / 495) * 8.5;
+    } else if (depth <= 1150) {
+      // 520m ~ 1150m 暮光带：自然分布 T11 ~ T24
+      targetTier = 11 + ((depth - 520) / 630) * 13;
+    } else if (depth <= 3500) {
+      // 1150m ~ 3500m 午夜热液带：自然分布 T24 ~ T35
+      targetTier = 24 + ((depth - 1150) / 2350) * 11;
+    } else if (depth <= 9500) {
+      // 3500m ~ 9500m 深渊海沟带：自然分布 T35 ~ T43
+      targetTier = 35 + ((depth - 3500) / 6000) * 8;
+    } else {
+      // 9500m ~ 20000m 超深渊与巨鲸带：自然分布 T43 ~ T48
+      targetTier = 43 + Math.min(1, (depth - 9500) / 9000) * 5;
+    }
+
+    // 12% 概率在该水深生成高出当前层均值 +4T ~ +7T 的巡游天敌（让每个水深都有需要走位躲避的大家伙）
+    const predatorRoll = rng();
+    if (predatorRoll < 0.12) {
+      targetTier = Math.min(48, targetTier + 4.5);
+    } else if (predatorRoll < 0.36) {
+      // 24% 概率微幅上浮 +1.5T ~ +3T（提供丰富的可冲刺破甲目标）
+      targetTier = Math.min(48, targetTier + 2.0);
+    }
+
+    const weights = activePool.map((p) => {
+      const diff = (p.tier - targetTier) / 3.0;
+      return 1 / (1 + diff * diff);
+    });
+    const totalWeight = weights.reduce((a, b) => a + b, 0);
+    let roll = rng() * totalWeight;
+    for (let i = 0; i < activePool.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) {
+        return activePool[i];
+      }
+    }
+    return activePool[activePool.length - 1];
   }
 }
 

@@ -43,57 +43,57 @@
   - **游动与冲刺移速**：`+2.2% / 级`（满级 `Lv.10` 为 `+19.8%` 移速）。
   - **饥饿掉血减免**：`+1.5% / 级`（满级 `Lv.10` 为 `-13.5%` 饥饿衰减）。
   - **冲刺耗能减免**：`+1.8% / 级`（满级 `Lv.10` 为 `-16.2%` 冲刺耗能）。
-  - **咬合阶位 `T` 突破奖励**：
-    - 强化达到 **`Lv.5`** 时：该鲨鱼永久获得 **`+1 咬合阶位 (T+1)`**！
-    - 强化达到 **`Lv.10`（满级）** 时：该鲨鱼永久获得 **`+2 咬合阶位 (T+2)`**！
+  - **咬合阶位 `T` 突破奖励（最多 `+3T`）**：
+    - 强化达到 **`Lv.3`** 时：该鲨鱼永久获得 **`+1 咬合阶位 (T+1)`**！
+    - 强化达到 **`Lv.6`** 时：该鲨鱼永久获得 **`+2 咬合阶位 (T+2)`**！
+    - 强化达到 **`Lv.10`（满级）** 时：该鲨鱼永久获得 **`+3 咬合阶位 (T+3)`**！
   - **解锁下一阶鲨鱼的前置条件**：强化当前鲨鱼至指定等级（`Lv.2 ~ Lv.9`），是破茧进化解锁下一只鲨鱼形态的第一道门禁。
 
 ---
 
-## 2. 咬合阶位（`T1 ~ T8`）计算规则与克制法则
+## 2. 咬合阶位（`T1 ~ T48`）计算规则与三级克制法则
 
-`T`（Bite Tier，咬合阶位，显示为琥珀色徽章 `T1 ~ T8`）是决定**食物链吞噬关系**的核心指标。海洋中全部 134 种现役海洋生物（已剔除海狮/海象/海牛/儒艮等 6 种非鱼形态哺乳类，外加 1 种深海水雷 `cyber_mine`，共计 135 项生态配置）划分为 `T1` 至 `T8` 共 8 个生态位阶。
+`T`（Bite Tier，咬合阶位，显示为琥珀色徽章 `T1 ~ T48`）是决定**食物链吞噬关系**的核心指标。48 只进化鲨鱼（`#01 ~ #48`）一一对应 `T1 ~ T48` 基础咬合阶位；海洋中全部 134 种现役独立 `@3x` 海洋生物（`PREY-001 ~ PREY-210`）均匀细分至 `T1 ~ T48`（`T1 ~ T38` 每阶 3 种鱼，`T39 ~ T48` 每阶 2 种鱼，严禁使用旧图集 `fish_24bdaa5a.png` / `fish2_fc857cfa.png` 猎物）。
 
 ### 2.1 鲨鱼当前咬合阶位 `T` 的完整合成公式
 位于 `src/game/rules.ts` ➔ `computeEvolvedSharkStats()`：
 
-$$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenzy Active)} \\ \min\Big(8,\; \min\big(T_{\text{genMax}},\; T_{\text{base}} + \Delta T_{\text{upgrade}} + \Delta T_{\text{inRun}}\big)\Big), & \text{常规状态} \end{cases}$$
+$$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Frenzy Active)} \\ \min\Big(48,\; \min\big(T_{\text{genMax}},\; T_{\text{base}} + \Delta T_{\text{upgrade}} + \Delta T_{\text{inRun}}\big)\Big), & \text{常规状态} \end{cases}$$
 
 其中各项含义如下：
 1. **形态基础咬合阶位 $T_{\text{base}}$（`form.baseBiteTier`）**：
-   - 由当前出战鲨鱼所属的代际（Row 0~5）与列数（Col 0~7）决定：
-     - **第一代·幼体期 (`#01 ~ #08`)**：`#01 ~ #03` 为 `T1`；`#04 ~ #06` 为 `T2`；`#07 ~ #08` 为 `T3`。
-     - **第二代·猎手期 (`#09 ~ #16`)**：`#09 ~ #12` 为 `T3`；`#13 ~ #16` 为 `T4`。
-     - **第三代·装甲期 (`#17 ~ #24`)**：`#17 ~ #20` 为 `T5`；`#21 ~ #24` 为 `T6`。
-     - **第四代·霸主期 (`#25 ~ #32`)**：`#25 ~ #29` 为 `T6`；`#30 ~ #32` 为 `T7`。
-     - **第五代·泰坦期 (`#33 ~ #40`)**：`#33 ~ #35` 为 `T7`；`#36 ~ #40` 为 `T8`。
-     - **第六代·神明期 (`#41 ~ #48`)**：全员天生即为满阶 **`T8`**（且第六代深渊系与机甲系自带直接吞噬深水雷特权 `canEatMines = true`）。
-2. **躯体强化咬合加成 $\Delta T_{\text{upgrade}}$（`upgradeBiteBonus`）**：
-   $$\Delta T_{\text{upgrade}} = \begin{cases} 2, & \text{当躯体强化等级 } L_{\text{upg}} = 10 \\ 1, & \text{当躯体强化等级 } 5 \le L_{\text{upg}} \le 9 \\ 0, & \text{当躯体强化等级 } 1 \le L_{\text{upg}} \le 4 \end{cases}$$
-3. **局内等级咬合加成 $\Delta T_{\text{inRun}}$（`inRunBiteBonus`）**：
-   - 初始 `#01 小丑幼鲨`（`form.index === 0`）在局内升至 `Lv.2` 时立即获得 `+1` 咬合阶位（从 `T1` 升为 `T2`），之后每升 3 级再 `+1`：
-     $$\Delta T_{\text{inRun}} = \begin{cases} 1 + \lfloor (L_{\text{inRun}} - 2) / 3 \rfloor, & \text{若为 \#01 小丑幼鲨 且 } L_{\text{inRun}} \ge 2 \\ \lfloor (L_{\text{inRun}} - 1) / 3 \rfloor, & \text{其他情况} \end{cases}$$
-4. **代际咬合天花板 $T_{\text{genMax}}$（`genMaxBiteTier`）**：
-   $$T_{\text{genMax}} = \min(8,\; T_{\text{base}} + 2)$$
-   - **设计意图（为什么要有代际天花板？）**：每只鲨鱼通过局内升级与躯体强化，最多可在其天生基础阶位 $T_{\text{base}}$ 上提升 **`+2 阶`**（例如 `T1` 的 `#01 小丑幼鲨` 最高可成长至 `T3`）。若想吞噬 `T4 ~ T8` 的深海巨怪，玩家**必须破茧进化到更高代际的鲨鱼形态**，从而赋予 48 阶进化图谱强大的长期目标感！
+   - 48 只鲨鱼按序号 `index = 0..47` 严格一一对应 $T_{\text{base}} = \text{index} + 1 \in [1, 48]$：
+     - **第一代·幼体期 (`#01 ~ #08`)**：`T1 ~ T8`。
+     - **第二代·猎手期 (`#09 ~ #16`)**：`T9 ~ T16`。
+     - **第三代·装甲期 (`#17 ~ #24`)**：`T17 ~ T24`。
+     - **第四代·霸主期 (`#25 ~ #32`)**：`T25 ~ T32`。
+     - **第五代·泰坦期 (`#33 ~ #40`)**：`T33 ~ T40`。
+     - **第六代·神明期 (`#41 ~ #48`)**：`T41 ~ T48`（且第六代深渊系与机甲系自带直接吞噬深水雷特权 `canEatMines = true`）。
+2. **躯体强化咬合加成 $\Delta T_{\text{upgrade}}$（`upgradeBiteBonus`，最高 `+3T`）**：
+   $$\Delta T_{\text{upgrade}} = \begin{cases} 3, & \text{当躯体强化等级 } L_{\text{upg}} = 10 \\ 2, & \text{当躯体强化等级 } 6 \le L_{\text{upg}} \le 9 \\ 1, & \text{当躯体强化等级 } 3 \le L_{\text{upg}} \le 5 \\ 0, & \text{当躯体强化等级 } 1 \le L_{\text{upg}} \le 2 \end{cases}$$
+3. **局内等级咬合加成 $\Delta T_{\text{inRun}}$（`inRunBiteBonus`，最高 `+3T`）**：
+   $$\Delta T_{\text{inRun}} = \begin{cases} 3, & L_{\text{inRun}} \ge 9 \\ 2, & 5 \le L_{\text{inRun}} \le 8 \\ 1, & 2 \le L_{\text{inRun}} \le 4 \\ 0, & L_{\text{inRun}} \le 1 \end{cases}$$
+4. **单鲨鱼跨阶成长上限 $T_{\text{genMax}}$（`genMaxBiteTier`）**：
+   $$T_{\text{genMax}} = \min(48,\; T_{\text{base}} + 6)$$
+   - 每只鲨鱼通过局外躯体强化（`+3T`）与局内吞噬升级（`+3T`），最多可在其天生基础阶位 $T_{\text{base}}$ 上提升 **`+6 阶`**，支持满配鲨鱼跨代狩猎。
 
-### 2.2 咬合阶位 `T` 的实战克制与碰撞判定规则
+### 2.2 咬合阶位 `T` 的三级实战克制与碰撞判定规则
 位于 `src/game/rules.ts` ➔ `resolvePreyEncounter()`：
 
-设猎物的有效阶位为 $T_{\text{prey}}$（普通猎物为 `prey.tier`，若带有 `ABYSS_BEHEMOTH` 深渊巨兽变异词缀则为 $\min(8, \text{prey.tier} + 1)$）：
+设猎物的有效阶位为 $T_{\text{prey}}$（普通猎物为 `prey.tier`，若带有 `ABYSS_BEHEMOTH` 深渊巨兽变异词缀则为 $\min(50, \text{prey.tier} + 1)$）：
 
 | 阶位对比条件 | 屏幕视觉体型表现 | 触碰结果 (`resolvePreyEncounter`) |
 | :--- | :--- | :--- |
 | **$T_{\text{shark}} \ge T_{\text{prey}}$**<br>（或处于黄金狂暴 `Frenzy`） | **猎物体型严格小于玩家鲨鱼**（`16% ~ 64%` 鲨鱼大小） | **直接一口吞噬 (`DEVOUR`)**：恢复生命值，获得 XP、分数、金币与基因碎片，叠加连击 `Combo` |
-| **$T_{\text{prey}} = T_{\text{shark}} + 1$**<br>且玩家**正在按住冲刺 (`isBoosting === true`)** | **猎物体型大于玩家鲨鱼**（约 `118%` 鲨鱼大小），外圈带**琥珀色虚线破甲提示环** | **冲刺破甲撕咬 (`ARMOR_CRUSH`)**：每口扣除猎物 `1 点` 护甲血量，玩家获得 `0.45s` 短暂无敌并弹开；咬碎最后一格血时直接吞噬并爆出 **1.5 倍经验与双倍基因**！ |
-| **$T_{\text{prey}} = T_{\text{shark}} + 1$**<br>但玩家**未按冲刺 (`isBoosting === false`)** | **猎物体型大于玩家鲨鱼**（约 `118%` 鲨鱼大小） | **受击反伤 (`DAMAGE`)**：玩家受到该猎物 `damage` 数值的伤害并被击退 |
-| **$T_{\text{prey}} \ge T_{\text{shark}} + 2$**<br>（或触碰深水雷且无吞雷特权） | **猎物体型显著大于玩家鲨鱼**（`135% ~ 195%` 鲨鱼大小），外圈带**红色脉冲警报环** | **越级重创 (`DAMAGE`)**：即使按住冲刺也无法破甲，玩家直接受到伤害并触发受击震屏与无敌帧 |
+| **$T_{\text{shark}} + 1 \le T_{\text{prey}} \le T_{\text{shark}} + 3$**<br>且玩家**正在按住冲刺 (`isBoosting === true`)** | **猎物体型略大于玩家鲨鱼**（`118% ~ 130%` 鲨鱼大小，无外圈圆环） | **冲刺破甲撕咬 (`ARMOR_CRUSH`)**：按住冲刺直接咬穿护甲吞噬，爆出 **1.35 倍分数/经验/金币暴击奖励**（飘字 `破甲撕咬! / ARMOR CRUSH!`） |
+| **$T_{\text{shark}} + 1 \le T_{\text{prey}} \le T_{\text{shark}} + 3$**<br>但玩家**未按冲刺 (`isBoosting === false`)** | **猎物体型略大于玩家鲨鱼**（`118% ~ 130%` 鲨鱼大小，无外圈圆环） | **未冲刺弹开 (`NEED_BOOST`)**：玩家受到 `0.85x` 阻尼反噬伤害并弹开（飘字提示 `冲刺可破甲! / BOOST TO CRUSH!`） |
+| **$T_{\text{prey}} \ge T_{\text{shark}} + 4$**<br>（或触碰深水雷且无吞雷特权） | **猎物体型显著大于玩家鲨鱼**（`138% ~ 195%` 鲨鱼大小，无外圈圆环） | **致命天敌重创 (`DEADLY_PREDATOR`)**：即使按住冲刺也无法破甲，必须走位躲避（仅黄金狂暴可吞） |
 
 ---
 
 ## 3. 猎物屏幕相对体型动态算法 (`getPreyRelativeVisualScale`)
 
-为了确保玩家在任何时候都能通过**“比我小的鱼一定能直接吃，和我一样大或比我大的鱼一定会伤我”**这一直觉进行游戏，`src/game/rules.ts` 中的 `getPreyRelativeVisualScale()` 实施了严格的数学映射：
+为了确保玩家在任何时候都能通过**“比我小的鱼一定能直接吃，略大于我的鱼可冲刺破甲，远大于我的巨兽必须躲避”**这一纯粹视觉体型直觉进行游戏，`src/game/rules.ts` 中的 `getPreyRelativeVisualScale()` 实施了严格的数学映射（猎物全身保持纯净自然渲染，不绘制任何人工外圈圆环）：
 
 ### 3.1 1:1 视觉等大基准线 (`sharkParityScale`)
 - 玩家鲨鱼的基础绘制尺寸为 `SHARK_BASE_DRAW_SIZE = 96 px`，猎物半径转绘制尺寸系数为 `PREY_RADIUS_TO_DRAW_SIZE = 2.25`，因此鲨鱼等效半径为：
@@ -102,21 +102,20 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
   $$\text{Scale}_{\text{parity}} = \frac{R_{\text{sharkEq}} \times S_{\text{shark}}}{\max(1,\; R_{\text{prey}})}$$
 
 ### 3.2 可直接吞噬猎物的体型缩小公式（严格 `<= 64%` 鲨鱼大小）
-当 `canDevourDirectly === true` 时：
-1. **阶位差缩小因子**：阶位差 $\Delta T = \max(0, T_{\text{shark}} - T_{\text{prey}})$ 越大，该猎物显得越小：
-   $$\text{Ratio}_{\text{tier}} = \max\left(0.18,\; 0.64 \times 0.79^{\Delta T}\right)$$
+当 `canDevourNormally === true` 时：
+1. **48阶平滑阶位差缩小因子**：阶位差 $\Delta T = \max(0, T_{\text{shark}} - T_{\text{prey}})$ 越大，该猎物按 `0.955` 指数平滑变小：
+   $$\text{Ratio}_{\text{tier}} = \max\left(0.18,\; 0.64 \times 0.955^{\Delta T}\right)$$
 2. **局内成长缩小因子**：随着局内等级 `Lv` 与代际提升，`relativePreyScale`（范围 `1.0 -> 0.40`）平滑下降：
    $$\text{Shrink}_{\text{level}} = 0.64 + 0.36 \times \text{relativePreyScale}$$
 3. **最终相对鲨鱼尺寸比例**（严格限制在 `[0.16, 0.64]` 区间内）：
    $$\text{TargetRatio}_{\text{edible}} = \text{clamp}\left(\text{Ratio}_{\text{tier}} \times \text{Shrink}_{\text{level}},\; 0.16,\; 0.64\right)$$
    $$\text{VisualScale} = \text{Scale}_{\text{parity}} \times \text{TargetRatio}_{\text{edible}}$$
 
-### 3.3 不可直接吞噬/危险猎物的体型放大公式（严格 `>= 118%` 鲨鱼大小）
-当常态下不可直接吞噬（`canDevourNormally === false`）时：
-- 设超阶数 $\Delta T_{\text{over}} = \max(1, T_{\text{prey}} - T_{\text{normalShark}})$：
-  $$\text{TargetRatio}_{\text{danger}} = \min\left(1.95,\; 1.18 + (\Delta T_{\text{over}} - 1) \times 0.17 + \text{Bonus}_{\text{behemoth}}(0.12) + \text{Bonus}_{\text{boss}}(0.14)\right)$$
-  $$\text{VisualScale} = \text{Scale}_{\text{parity}} \times \text{TargetRatio}_{\text{danger}}$$
-- **效果验证**：任何常态下会伤害玩家的猎物在屏幕上至少是玩家鲨鱼体型的 **1.18 倍**以上，玩家绝不可能误以为它比自己小而撞上去。
+### 3.3 可破甲猎物（`+1T ~ +3T`）与致命天敌（`>= +4T`）的体型放大公式（严格 `>= 118%` 鲨鱼大小）
+当常态下不可直接吞噬（`canDevourNormally === false`）时，设超阶数 $\Delta T_{\text{over}} = \max(1, T_{\text{prey}} - T_{\text{normalShark}})$：
+- **可冲刺破甲档（$1 \le \Delta T_{\text{over}} \le 3$）**：基础比例为 $1.18 + (\Delta T_{\text{over}} - 1) \times 0.06$（即 `118% ~ 130%` 鲨鱼大小）；
+- **致命天敌档（$\Delta T_{\text{over}} \ge 4$）**：基础比例为 $1.38 + (\Delta T_{\text{over}} - 4) \times 0.045$（上限钳制为 `195%` 鲨鱼大小）。
+- **效果验证**：任何常态下不可直吞的猎物在屏幕上至少是玩家鲨鱼体型的 **1.18 倍**以上。
 
 ### 3.4 黄金狂暴阶段体型保持特例（Gold Frenzy Size-Preservation Exception）
 - **设计初衷**：当玩家进入黄金狂暴（`frenzyActive === true`）时，虽然咬合能力临时跃升至最高阶 `T8`（可吞噬一切猎物与水雷），但如果此时把全屏原本巨大的潜艇、巨型电鳗与克苏鲁章鱼王缩小成小鱼，会严重削弱“黄金狂暴正面生吞庞然大物”的视觉冲击力与猎杀成就感。
@@ -161,12 +160,12 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 代际 (Generation) | 图谱行号 | 编号范围 | 基础咬合 $T_{\text{base}}$ | 进化阶段定位 | 解锁所需前置躯体等级 | 解锁所需历史最高局内 `Lv` | 解锁所需历史最深下潜 `m` |
 | :--- | :---: | :---: | :---: | :--- | :---: | :---: | :---: |
-| **第一代·礁石幼体期** | Row 0 | `#01 ~ #08` | `T1 ~ T3` | 新手破局期（1~3 局解锁新形态） | `Lv.2 ~ Lv.4` | `Lv.1 ~ Lv.4` | `0m ~ 435m` |
-| **第二代·远洋猎手期** | Row 1 | `#09 ~ #16` | `T3 ~ T4` | 进军暮光温跃层 | `Lv.4` | `Lv.4 ~ Lv.6` | `320m ~ 670m` |
-| **第三代·重装异变期** | Row 2 | `#17 ~ #24` | `T5 ~ T6` | 装甲猎杀与中深海统治 | `Lv.5` | `Lv.7 ~ Lv.9` | `560m ~ 945m` |
-| **第四代·深海霸主期** | Row 3 | `#25 ~ #32` | `T6 ~ T7` | 突破 850m~1270m 深渊交界（首阶为 `#25 远古霸主巨齿鲨`） | `Lv.6` | `Lv.10 ~ Lv.12` | `850m ~ 1270m` |
-| **第五代·深渊泰坦期** | Row 4 | `#33 ~ #40` | `T7 ~ T8` | 猎杀巨型乌贼与沧龙级巨怪 | `Lv.8` | `Lv.13 ~ Lv.15` | `1180m ~ 1635m` |
-| **第六代·创世神明期** | Row 5 | `#41 ~ #48` | `T8 (满阶)` | 终极神明形态（可吞水雷） | `Lv.9` | `Lv.16 ~ Lv.18` | `1500m ~ 1990m` |
+| **第一代·礁石幼体期** | Row 0 | `#01 ~ #08` | `T1 ~ T8` | 新手破局期（1~3 局解锁新形态） | `Lv.2 ~ Lv.4` | `Lv.1 ~ Lv.4` | `0m ~ 435m` |
+| **第二代·远洋猎手期** | Row 1 | `#09 ~ #16` | `T9 ~ T16` | 进军暮光温跃层 | `Lv.4` | `Lv.4 ~ Lv.6` | `320m ~ 670m` |
+| **第三代·重装异变期** | Row 2 | `#17 ~ #24` | `T17 ~ T24` | 装甲猎杀与中深海统治 | `Lv.5` | `Lv.7 ~ Lv.9` | `560m ~ 945m` |
+| **第四代·深海霸主期** | Row 3 | `#25 ~ #32` | `T25 ~ T32` | 突破 850m~1270m 深渊交界（首阶为 `#25 远古霸主巨齿鲨`） | `Lv.6` | `Lv.10 ~ Lv.12` | `850m ~ 1270m` |
+| **第五代·深渊泰坦期** | Row 4 | `#33 ~ #40` | `T33 ~ T40` | 猎杀大型远洋鲨与巨型海怪 | `Lv.8` | `Lv.13 ~ Lv.15` | `1180m ~ 1635m` |
+| **第六代·创世神明期** | Row 5 | `#41 ~ #48` | `T41 ~ T48` | 终极神明形态（猎杀巨鲸霸主、可吞水雷） | `Lv.9` | `Lv.16 ~ Lv.18` | `1500m ~ 1990m` |
 
 ### 4.2 四大进化血统分支（Lineages）与专属特性乘数
 每只鲨鱼归属于四大血统之一，在 `src/game/sharkEvolutionConfig.ts` 与 `src/game/rules.ts` (`computeEvolvedSharkStats`) 中拥有完整落地的被动与专属特性乘数：
@@ -247,12 +246,9 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 1. **浅海零主动攻击鱼类与水雷（Zero Active Chargers / Hazards in Shallow Reef）**：
    - `pickPreyConfigForDepth` 与 `spawnOnePrey` 在 `depth <= 520m` 时**全程永久过滤** `isHazard`（`cyber_mine`）、`isBoss`、`EEL_CHARGER` 与 `SUB_PATROL`；浅海区仅栖息 `T1 ~ T3` 珊瑚礁鱼群与小中型群游鱼。
 2. **浅滩下界预刷新永久钳制**：当玩家在阳光浅海活动（`sharkY <= 430m`）时，屏幕外预生成目标深度钳制在 `<= 495m`（新手保护期 `<= 440m`），集群伴游鱼钳制在 `<= 515m`。
-3. **全深度五段动态阶位权重 (`T1 ~ T8`)**：
-   - `0 ~ 520m`（阳光浅滩）：新手保护期 `T1:84 / T2:16`；`T1` 常态 `T1:76 / T2:18 / T3:6`；`T2+` 浅滩 `T1:58 / T2:28 / T3:14`。
-   - `520m ~ 1150m`（暮光陆架）：`T2:10 / T3:26 / T4:28 / T5:22 / T6:14`。
-   - `1150m ~ 3500m`（上中层远洋）：`T2:10 / T3:14 / T4:18 / T5:20 / T6:18 / T7:14 / T8:6`。
-   - `3500m ~ 8000m`（午夜深渊）：`T2:8 / T3:12 / T4:16 / T5:16 / T6:18 / T7:18 / T8:12`。
-   - `8000m ~ 20000m`（超深渊海沟）：`T2:6 / T3:10 / T4:12 / T5:10 / T6:16 / T7:22 / T8:24`。
+3. **纯按水深固定生态刷新 (`T1 ~ T48`，禁用旧图集猎物)**：
+   - 刷新器严格过滤 `!p.isHazard && Boolean(p.externalPngUrl)`，100% 仅刷新 134 种 `@3x` 真实海洋生物（`PREY-001 ~ PREY-210`），不随玩家当前鲨鱼 `T` 阶改变刷新权重。
+   - 在 `> 520m` 中深海与深渊区域，固定保留 `18%` 的深海发光伴生小鱼群（`T11 ~ T14`，如灯笼鱼、银斧鱼、闪光灯笼鱼、深海银鱼等），确保玩家下潜深渊时始终有基础口粮续航。
 4. **同屏鱼群呼吸感与密度控制（`maxActivePreys = 20`，`debugPreySizeMultiplier = 0.8`）**：
    - 同屏活跃猎物数量默认配置为 `20` 条（iOS 端 `22` 条），生成环半径扩展至 `640px ~ 1650px`，猎物全局显示与碰撞尺寸缩放倍率默认 `0.8`；开局迎宾鱼群使用 `['PREY-001', 'PREY-003', 'PREY-015', 'PREY-002', 'PREY-044']`。
 5. **新手引导第 3 步实操补给礼包**：首次完成新手引导第 2 步（按住冲刺 `0.7s`）时，一次性发放 **`+80 🪙 +20 🧬` 新手补给礼包**，确保玩家在引导第 3 步 100% 立即点亮并亲手体验 `强化`（60🪙）或 `突破`（12🧬）。
@@ -276,6 +272,7 @@ $$T_{\text{shark}} = \begin{cases} 8, & \text{若处于黄金狂暴状态 (Frenz
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-16 | **咬合阶位与猎物生态重构为 `T1 ~ T48`（48阶渐进式进化 + 134种独立 `@3x` 真实海洋生物细分 + 三级破甲/天敌机制）**：① 48只鲨鱼 `#01 ~ #48` 基础咬合阶位一一对应 `T1 ~ T48`，单鲨鱼通过躯体强化（`Lv.3/6/10` 获 `+1/+2/+3T`）与局内升级（`Lv.2/5/9` 获 `+1/+2/+3T`）最多可提升 `+6T` 实现跨代狩猎；② 134种 `@3x` 真实海洋生物（`PREY-001 ~ PREY-210`）按体型、体长与水深均匀细分至 `T1 ~ T48`（每阶 2~3 种）并应用 48 阶连续属性曲线，彻底禁用旧图集猎物与回退贴图；③ 实装三级碰撞判定（`<= T` 直接吞噬、`+1T ~ +3T` 冲刺破甲撕咬获 `1.35x` 暴击奖励、`>= +4T` 致命天敌必须躲避），保持猎物纯净无外圈圆环、完全依赖体型比例直观区分；④ `EcosystemSpawner` 改为 100% 纯按水深固定刷新 | `src/game/sharkEvolutionConfig.ts`, `src/game/preyDatabase140.ts`, `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts`, `src/game/i18n.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-16 | **剔除 6 种非鱼形态海洋哺乳类（海狮/海象/海牛/儒艮）并修正 `PREY-203` 灰鲸与 `PREY-110` 蝠鲼方向**：从 `preyDatabase140.ts` 中移除 `PREY-122` 海牛、`PREY-123` 儒艮、`PREY-124` 海象、`PREY-125` 北海狮、`PREY-126` 南美海狮、`PREY-209` 北极海象（现役调整为 134 种海洋生物 + `cyber_mine` = 135 项），并更新 `rules.test.ts` 校验及 `PREY-203`、`PREY-110` 右朝向贴图 | `src/game/preyDatabase140.ts`, `src/game/rules.test.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-15 | **全平台（Web + iOS 原生）猎物体系全面替换为 140 种新海洋生物（`PREY-001 ~ PREY-210`）+ 保留深海水雷 `cyber_mine`（共 141 项），按真实水深 + 体型加权分层铺满 `0m ~ 20000m`**：① 新增 `src/game/preyDatabase140.ts` 收录 140 种生物元数据、中英双语字典与 `computeMappedPrey140Config` 双因子映射公式（按 `realMinDepth/realMaxDepth` 与 `XS -> 巨型` 尺寸级别优先向深海偏移，同时为 `realMinDepth >= 50m` 的深海发光小鱼保留直达 `20000m` 的基础补给链）；② 替换 `GAME_CONFIG.preyTiers`、更新 `ecosystemSpawner.ts`（含 `shallowMateCap = 515m` 伴游钳制与五段 `0~20000m` 阶位权重）、`App.tsx` 开局迎宾鱼群及 `i18n.ts`；③ 升级 `spriteSheetManager.ts` 与 `canvasRenderer.ts`（分批/按需加载 `@3x.png` 透明资产并执行 420px 限宽与紧致透明边界裁切，新增 `SHARK_APEX` 步态）；④ 同步更新 `scripts/build-ios-native.ts`（唯一 `spriteKey`、`@3x` 打包、五步态分类与深海分层刷新）与 `rules.test.ts`（41/41 通过） | `src/game/preyDatabase140.ts`, `src/game/config.ts`, `src/game/i18n.ts`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/06-PREY_DATABASE_140.md` |
 | 2026-11-15 | **修复 9 层阶梯海床洞口悬崖与大陆坡嫁接山根（~633m）穿墙穿模 Bug（Web + iOS 原生双端同步）**：① 将 `getSeabedTerraceAt` 实体碰撞激活由 `graftedEdgeWeight > 0.02` 改为 `graftT > 0.03`，彻底清除洞口唇边 `0~22m` 碰撞盲区；② 在 `resolveSeabedCollision` 中识别无洞下走廊的实心嫁接山根楔块（`floorEngineY - bottomArchY <= radius * 1.25`），防止误判 `hitAtollUnderside` 反向压入地下；③ 在 `resolveSeabedKineticStep` 中新增 `hitsTerraceVerticalWallHorizontally` 二维水平悬崖阻挡（含 6 次二分精定位与狭窄山根楔形区防挤入） | `src/game/worldGenerationSystem.ts`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |

@@ -2189,6 +2189,9 @@ export class SpriteSheetManager {
     }
     if (config.externalPngUrl && config.id) {
       this.ensurePrey140Loaded(config.id, config.externalPngUrl);
+      // Never fall back to legacy sprite-atlas fish (fish_24bdaa5a / fish2_fc857cfa) for 134 @3x species
+      const loadedPrey140 = Object.values(this.prey140Frames);
+      return loadedPrey140.length > 0 ? loadedPrey140[0] : undefined;
     }
     if (config.spriteKey && this.frames[config.spriteKey]) {
       return this.frames[config.spriteKey];

@@ -3323,6 +3323,8 @@ export function resolveSeabedKineticStep(
  * 2) 连续主海床 (`getTerrainSamples(chunkX)`) 及 4 条手绘海床轮廓材质带 (`coral_reef` / `rocky_shelf` / `underwater_canyon` / `deep_abyss`)。
  */
 const scratchSeabedRenderPoints: TerrainSamplePoint[] = [];
+let lastSeabedRelativeScale = 1.0;
+let seabedRelativeScalePhaseOffset = 0.0;
 
 export function renderPhysicalSeabed(
   ctx: CanvasRenderingContext2D,
@@ -3332,11 +3334,15 @@ export function renderPhysicalSeabed(
     viewW: number;
     viewH: number;
     renderZoom: number;
+    relativePreyScale?: number;
     config?: WorldConfigType;
   }
 ): void {
   const config = params.config ?? WorldConfig;
   const zoom = Math.max(0.25, params.renderZoom);
+  const seabedScale = Number.isFinite(params.relativePreyScale)
+    ? Math.max(0.4, Math.min(1.0, params.relativePreyScale!))
+    : 1.0;
   const halfSpanEngineX = params.viewW / (2 * zoom) + 180;
   const halfSpanEngineY = params.viewH / (2 * zoom) + 180;
   const minEngineY = params.cameraEngineY - halfSpanEngineY;
@@ -3371,9 +3377,18 @@ export function renderPhysicalSeabed(
   const rockBoulder = worldAssetRegistry.getSpriteCanvas('eco_seabed_rock', 'basalt_boulder');
   const rockSpire = worldAssetRegistry.getSpriteCanvas('eco_seabed_rock', 'jagged_spire');
 
-  const stripDrawH = 124;
-  const crestLift = 22;
-  const tileSpanEngineX = 520;
+  // 随鲨鱼等级/进化成长（relativePreyScale: 1.00 -> 0.40），海床表层厚度、循环周期与地下岩层同步按比例缩小，展现巨鲨俯瞰微缩海床的真实体型参照感
+  if (Math.abs(seabedScale - lastSeabedRelativeScale) > 1e-5) {
+    const oldSpan = 520 * lastSeabedRelativeScale;
+    const newSpan = 520 * seabedScale;
+    seabedRelativeScalePhaseOffset =
+      ((((seabedRelativeScalePhaseOffset + params.cameraEngineX / oldSpan - params.cameraEngineX / newSpan) % 1) + 1) % 1);
+    lastSeabedRelativeScale = seabedScale;
+  }
+
+  const stripDrawH = 124 * seabedScale;
+  const crestLift = 22 * seabedScale;
+  const tileSpanEngineX = 520 * seabedScale;
 
   /**
    * 沿斜率切变绘制无缝水平循环条带（支持跨 u=1.0 循环边界自动双段无缝拼接，彻底消除边界像素拉伸）
@@ -3394,7 +3409,7 @@ export function renderPhysicalSeabed(
     const sh = stripCanvas.height;
     if (sw <= 2 || sh <= 2) return;
 
-    const u0 = ((((ex0 / tileSpan) + uPhaseOffset) % 1) + 1) % 1;
+    const u0 = ((((ex0 / tileSpan) + seabedRelativeScalePhaseOffset + uPhaseOffset) % 1) + 1) % 1;
     const uSpan = Math.min(0.95, segW / tileSpan);
     const sx = Math.min(sw - 1, Math.floor(u0 * sw));
     const totalSw = Math.max(2, Math.round(uSpan * sw));
@@ -3613,36 +3628,27 @@ export function renderPhysicalSeabed(
             const w = p1.x - p0.x;
             if (w <= 0) continue;
             const sl = (p1.rimY - p0.rimY) / w;
-            drawSeamlessShearedStrip(
-              archSubPrimary,
-              p0.x,
-              p0.rimY + 22,
-              w,
-              152,
-              sl * 0.92,
-              0.84,
-              0.21 + seamIdx * 0.13 + tIdx * 0.19
-            );
-            drawSeamlessShearedStrip(
-              archSubSecondary ?? archSubPrimary,
-              p0.x,
-              p0.rimY + 104,
-              w,
-              162,
-              sl * 0.74,
-              0.68,
-              0.59 + seamIdx * 0.27 + tIdx * 0.31
-            );
-            drawSeamlessShearedStrip(
-              archSubSecondary ?? archSubPrimary,
-              p0.x,
-              p0.rimY + 188,
-              w,
-              166,
-              sl * 0.56,
-              0.52,
-              0.14 + seamIdx * 0.39 + tIdx * 0.43
-            );
+            const backWallThick = Math.max(p0.botY - p0.rimY, p1.botY - p1.rimY);
+            const bwStepY = 82 * seabedScale;
+            const bwDrawH = 162 * seabedScale;
+            for (let bTier = 0; bTier < 6; bTier++) {
+              const offsetY = 22 * seabedScale + bTier * bwStepY;
+              if (offsetY > backWallThick + 20) break;
+              const tierTex = bTier === 0 ? archSubPrimary : (archSubSecondary ?? archSubPrimary);
+              const slopeFactor = Math.max(0.38, 0.92 - bTier * 0.16);
+              const alphaFactor = Math.max(0.34, 0.84 - bTier * 0.14);
+              const phase = (0.21 + bTier * 0.37 + seamIdx * (0.13 + bTier * 0.07) + tIdx * 0.19) % 1;
+              drawSeamlessShearedStrip(
+                tierTex,
+                p0.x,
+                p0.rimY + offsetY,
+                w,
+                bwDrawH,
+                sl * slopeFactor,
+                alphaFactor,
+                phase
+              );
+            }
           }
         }
 
@@ -3833,8 +3839,8 @@ export function renderPhysicalSeabed(
             runStart = -1;
             if (topPts.length < 2) continue;
 
-            // 1. 绘制前景海床实心岩体与表层以下 3 阶层状地质断面 + 镶嵌岩块
-            const archTopInset = 18;
+            // 1. 绘制前景海床实心岩体与表层以下多层地质断面 + 镶嵌岩块（随 seabedScale 同步缩放地层粒度）
+            const archTopInset = 18 * seabedScale;
             ctx.save();
             ctx.beginPath();
             for (let i = 0; i < topPts.length; i++) {
@@ -3881,6 +3887,8 @@ export function renderPhysicalSeabed(
 
             ctx.clip();
             if (archSubPrimary) {
+              const subStepY = 82 * seabedScale;
+              const subDrawH = 164 * seabedScale;
               for (let i = 0; i < topPts.length - 1; i++) {
                 const p0 = topPts[i];
                 const p1 = topPts[i + 1];
@@ -3892,43 +3900,27 @@ export function renderPhysicalSeabed(
                   p1.bottomY - p1.topY
                 );
 
-                drawSeamlessShearedStrip(
-                  archSubPrimary,
-                  p0.x,
-                  p0.topY + 24,
-                  w,
-                  156,
-                  sl * 0.95,
-                  0.98,
-                  0.37 + cellIdx * 0.17 + tIdx * 0.23
-                );
-                if (archThick > 88) {
+                for (let sTier = 0; sTier < 8; sTier++) {
+                  const offsetY = 24 * seabedScale + sTier * subStepY;
+                  if (sTier > 0 && offsetY > archThick + 12) break;
+                  const tierTex = sTier <= 1 ? archSubPrimary : (archSubSecondary ?? archSubPrimary);
+                  const slopeFactor = Math.max(0.45, 0.95 - sTier * 0.13);
+                  const alphaFactor = Math.max(0.78, 0.98 - sTier * 0.04);
+                  const phase = (0.37 + sTier * 0.37 + cellIdx * (0.17 + sTier * 0.09) + tIdx * 0.23) % 1;
                   drawSeamlessShearedStrip(
-                    archSubPrimary,
+                    tierTex,
                     p0.x,
-                    p0.topY + 106,
+                    p0.topY + offsetY,
                     w,
-                    164,
-                    sl * 0.82,
-                    0.94,
-                    0.74 + cellIdx * 0.29 + tIdx * 0.31
-                  );
-                }
-                if (archThick > 168) {
-                  drawSeamlessShearedStrip(
-                    archSubSecondary ?? archSubPrimary,
-                    p0.x,
-                    p0.topY + 190,
-                    w,
-                    168,
-                    sl * 0.68,
-                    0.90,
-                    0.19 + cellIdx * 0.41 + tIdx * 0.47
+                    subDrawH,
+                    sl * slopeFactor,
+                    alphaFactor,
+                    phase
                   );
                 }
 
                 // 在海床断面内按确定性哈希镶嵌阶梯砂岩与巨石 (`mossy_slab` / `basalt_boulder` / `jagged_spire`)
-                if (archThick > 155 && (i & 1) === 0 && (rockSlab || rockBoulder || rockSpire)) {
+                if (archThick > 155 * seabedScale && (i & 1) === 0 && (rockSlab || rockBoulder || rockSpire)) {
                   const rHash = mixSubsystemSeed(
                     config.worldSeed,
                     config.generatorVersion,
@@ -3948,11 +3940,11 @@ export function renderPhysicalSeabed(
                         ? (rockBoulder ?? rockSlab)
                         : (rockSpire ?? rockBoulder);
                     if (rockImg) {
-                      const rScale = 0.35 + (((rHash >>> 8) % 18) / 100);
+                      const rScale = (0.35 + (((rHash >>> 8) % 18) / 100)) * seabedScale;
                       const rw = rockImg.width * rScale;
                       const rh = rockImg.height * rScale;
                       const rx = p0.x + w * 0.5;
-                      const ry = p0.topY + 132 + (((rHash >>> 14) % 48) - 20);
+                      const ry = p0.topY + (132 + (((rHash >>> 14) % 48) - 20)) * seabedScale;
                       ctx.save();
                       ctx.translate(rx, ry);
                       ctx.rotate(Math.max(-0.32, Math.min(0.32, sl * 0.45)));
@@ -4017,11 +4009,11 @@ export function renderPhysicalSeabed(
               ];
               for (const cand of lipCandidates) {
                 if (cand.pt.mainFloorY <= cand.pt.bottomY + 14) continue; // 山体根部交汇端无须洞唇石
-                const rScale = 0.44;
+                const rScale = 0.44 * seabedScale;
                 const rw = lipRock.width * rScale;
                 const rh = lipRock.height * rScale;
                 ctx.save();
-                ctx.translate(cand.pt.x, cand.pt.topY + 28);
+                ctx.translate(cand.pt.x, cand.pt.topY + 28 * seabedScale);
                 ctx.rotate(cand.isLeft ? -0.32 : 0.32);
                 ctx.scale(cand.isLeft ? 1 : -1, 1);
                 ctx.globalAlpha = 0.90;
@@ -4171,8 +4163,8 @@ export function renderPhysicalSeabed(
 
   ctx.save();
 
-  // 1. 构建 1.0x 世界层主海床多边形路径（沿 25m 曲线细分点绘制，顶边下沉 18px 以完全藏于表层金沙核心之后），填充地质基底色并开启 Clip 剪裁
-  const subsurfaceTopInset = 18;
+  // 1. 构建 1.0x 世界层主海床多边形路径（沿 25m 曲线细分点绘制，顶边下沉 18px * seabedScale 以完全藏于表层金沙核心之后），填充地质基底色并开启 Clip 剪裁
+  const subsurfaceTopInset = 18 * seabedScale;
   const firstEngineX = samplePoints[0].worldX / WORLD_UNITS_PER_METER;
   const lastEngineX = samplePoints[samplePoints.length - 1].worldX / WORLD_UNITS_PER_METER;
   const gradTopY = Math.max(minEngineY, minVisFloorEngineY);
@@ -4265,34 +4257,40 @@ export function renderPhysicalSeabed(
         const subSlope = (nextSubY - prevSubY) / subW;
 
         // Tier 0: 紧接表层金沙砂岩唇口下方的第一道断层岩壁（无缝衔接表层底部）
-        if (prevSubY + 20 < maxEngineY + 80) {
+        const t0OffsetY = 24 * seabedScale;
+        const t0DrawH = 156 * seabedScale;
+        if (prevSubY + t0OffsetY < maxEngineY + 80) {
           if (subPri && subSec && subBlend > 0.02) {
-            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + 24, subW, 156, subSlope * 0.96, (1 - subBlend) * 0.98, 0.37);
-            drawSeamlessShearedStrip(subSec, prevSubX, prevSubY + 24, subW, 156, subSlope * 0.96, subBlend * 0.98, 0.37);
+            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + t0OffsetY, subW, t0DrawH, subSlope * 0.96, (1 - subBlend) * 0.98, 0.37);
+            drawSeamlessShearedStrip(subSec, prevSubX, prevSubY + t0OffsetY, subW, t0DrawH, subSlope * 0.96, subBlend * 0.98, 0.37);
           } else if (subPri) {
-            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + 24, subW, 156, subSlope * 0.96, 0.98, 0.37);
+            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + t0OffsetY, subW, t0DrawH, subSlope * 0.96, 0.98, 0.37);
           }
         }
 
-        // Tier 1: 表层以下 106px 处的第二道交错沉积岩层
-        if (prevSubY + 100 < maxEngineY + 80) {
+        // Tier 1: 表层以下 106px * seabedScale 处的第二道交错沉积岩层
+        const t1OffsetY = 106 * seabedScale;
+        const t1DrawH = 164 * seabedScale;
+        if (prevSubY + t1OffsetY < maxEngineY + 80) {
           const t1Slope = subSlope * 0.86;
           if (subPri && subSec && subBlend > 0.02) {
-            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + 106, subW, 164, t1Slope, (1 - subBlend) * 0.95, 0.74);
-            drawSeamlessShearedStrip(subSec, prevSubX, prevSubY + 106, subW, 164, t1Slope, subBlend * 0.95, 0.74);
+            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + t1OffsetY, subW, t1DrawH, t1Slope, (1 - subBlend) * 0.95, 0.74);
+            drawSeamlessShearedStrip(subSec, prevSubX, prevSubY + t1OffsetY, subW, t1DrawH, t1Slope, subBlend * 0.95, 0.74);
           } else if (subPri) {
-            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + 106, subW, 164, t1Slope, 0.95, 0.74);
+            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + t1OffsetY, subW, t1DrawH, t1Slope, 0.95, 0.74);
           }
         }
 
-        // Tier 2: 表层以下 192px 处的第三道交错沉积岩层
-        if (prevSubY + 185 < maxEngineY + 80) {
+        // Tier 2: 表层以下 192px * seabedScale 处的第三道交错沉积岩层
+        const t2OffsetY = 192 * seabedScale;
+        const t2DrawH = 168 * seabedScale;
+        if (prevSubY + t2OffsetY < maxEngineY + 80) {
           const t2Slope = subSlope * 0.75;
           if (subPri && subSec && subBlend > 0.02) {
-            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + 192, subW, 168, t2Slope, (1 - subBlend) * 0.92, 0.19);
-            drawSeamlessShearedStrip(subSec, prevSubX, prevSubY + 192, subW, 168, t2Slope, subBlend * 0.92, 0.19);
+            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + t2OffsetY, subW, t2DrawH, t2Slope, (1 - subBlend) * 0.92, 0.19);
+            drawSeamlessShearedStrip(subSec, prevSubX, prevSubY + t2OffsetY, subW, t2DrawH, t2Slope, subBlend * 0.92, 0.19);
           } else if (subPri) {
-            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + 192, subW, 168, t2Slope, 0.92, 0.19);
+            drawSeamlessShearedStrip(subPri, prevSubX, prevSubY + t2OffsetY, subW, t2DrawH, t2Slope, 0.92, 0.19);
           }
         }
 
@@ -4300,17 +4298,17 @@ export function renderPhysicalSeabed(
         prevSubY = nextSubY;
       }
 
-      // 2.2 深部多层地质基岩层（Tier 3..11，从表层以下 280px 一路无缝叠铺至视野底端 maxEngineY）
+      // 2.2 深部多层地质基岩层（Tier 3..28，从表层以下 280px * seabedScale 一路无缝叠铺至视野底端 maxEngineY）
       // 按 100m 网格段高效绘制，每层水平相位按黄金分割偏移、斜率逐层平缓化，彻底消除山体内部空洞感
-      const tierStepY = 92;
-      const tierDrawH = 168;
-      for (let tier = 3; tier <= 12; tier++) {
-        const tierOffsetY = 280 + (tier - 3) * tierStepY;
+      const tierStepY = 92 * seabedScale;
+      const tierDrawH = 168 * seabedScale;
+      for (let tier = 3; tier <= 28; tier++) {
+        const tierOffsetY = 280 * seabedScale + (tier - 3) * tierStepY;
         if (minSegEy + tierOffsetY > maxEngineY + 80) break;
 
-        const tierSlope = segSlope * Math.pow(0.78, tier);
+        const tierSlope = segSlope * Math.pow(0.78, Math.min(12, tier));
         const uPhase = ((tier * 0.381966) + (tier % 2) * 0.23) % 1;
-        const depthFade = Math.max(0.64, 0.90 - (tier - 3) * 0.035);
+        const depthFade = Math.max(0.64, 0.90 - (tier - 3) * 0.025);
 
         if (subPri && subSec && subBlend > 0.02) {
           drawSeamlessShearedStrip(subPri, ex0, ey0 + tierOffsetY, fullW, tierDrawH, tierSlope, (1 - subBlend) * depthFade, uPhase);
@@ -4320,9 +4318,9 @@ export function renderPhysicalSeabed(
         }
       }
 
-      // 2.3 山体断面内嵌阶梯岩块与巨石露头（当山体在视野内露出高度 > 160px 时，按确定性哈希镶嵌手绘阶梯岩架）
+      // 2.3 山体断面内嵌阶梯岩块与巨石露头（当山体在视野内露出高度 > 160px * seabedScale 时，按确定性哈希镶嵌手绘阶梯岩架）
       const visMountainH = maxEngineY - minSegEy;
-      if (visMountainH > 160 && (rockSlab || rockBoulder || rockSpire)) {
+      if (visMountainH > 160 * seabedScale && (rockSlab || rockBoulder || rockSpire)) {
         const segGridIdx = Math.round(ex0 / 100);
         const segHash = mixSubsystemSeed(
           config.worldSeed,
@@ -4331,7 +4329,7 @@ export function renderPhysicalSeabed(
           313,
           'terrain'
         );
-        const maxOutcropTiers = Math.min(4, Math.floor((visMountainH - 100) / 135));
+        const maxOutcropTiers = Math.min(4, Math.floor((visMountainH - 100 * seabedScale) / (135 * seabedScale)));
         for (let ot = 0; ot < maxOutcropTiers; ot++) {
           const subHash = mixSubsystemSeed(segHash, ot, segGridIdx, 571, 'terrain');
           if ((subHash % 100) >= 65) continue;
@@ -4349,10 +4347,10 @@ export function renderPhysicalSeabed(
           const fracX = 0.18 + (((subHash >>> 8) % 640) / 1000);
           const rx = ex0 + fullW * fracX;
           const baseSurfY = ey0 + (ey1 - ey0) * fracX;
-          const ry = baseSurfY + 125 + ot * 135 + (((subHash >>> 18) % 36) - 18);
+          const ry = baseSurfY + (125 + ot * 135 + (((subHash >>> 18) % 36) - 18)) * seabedScale;
           if (ry > maxEngineY + 70) continue;
 
-          const rScale = 0.34 + (((subHash >>> 12) % 24) / 100);
+          const rScale = (0.34 + (((subHash >>> 12) % 24) / 100)) * seabedScale;
           const drawW = rockSprite.width * rScale;
           const drawH = rockSprite.height * rScale;
           const flipX = (subHash & 2) !== 0 ? -1 : 1;
@@ -7143,7 +7141,7 @@ export const WORLD_ATLAS_ASSET_URLS = {
   seabedStripUnderwaterCanyon: WORLD_SEABED_STRIP_URLS.underwater_canyon,
   seabedStripDeepAbyss: WORLD_SEABED_STRIP_URLS.deep_abyss,
   poisAtlas: '/assets/aistudio/world_pois_atlas_1794473250443.jpg',
-  ecologyAtlas: WORLD_ECOLOGY_SPRITE_URLS.coral_reef_cluster,
+  ecologyAtlas: '/assets/aistudio/world_ecology_atlas_1794473252524.jpg',
   ecologyCoralReefCluster: WORLD_ECOLOGY_SPRITE_URLS.coral_reef_cluster,
   ecologyRockyOutcrop: WORLD_ECOLOGY_SPRITE_URLS.rocky_outcrop,
   ecologyKelpForestCluster: WORLD_ECOLOGY_SPRITE_URLS.kelp_forest_cluster,
@@ -7836,85 +7834,54 @@ export class WorldAssetRegistry {
     };
     poiImg.src = WORLD_ATLAS_ASSET_URLS.poisAtlas;
 
-    // 3A. 加载 4x4 (16种) 独立单体生态图集，确保每种珊瑚/礁石/海草/残骸/喷口拥有截然不同的丰富造型，彻底告别单一素材重复
-    const ecoAtlasImg = new Image();
-    ecoAtlasImg.crossOrigin = 'anonymous';
-    ecoAtlasImg.onload = () => {
-      const cellSlices: Array<{
-        assetKey: string;
-        variant: string;
-        aliasKey?: string;
-        col: number;
-        row: number;
-        cleanHoles: boolean;
-      }> = [
-        // Row 0: 4 种珊瑚
-        { assetKey: 'eco_coral_cluster', variant: 'staghorn', aliasKey: 'flora_coral_cluster', col: 0, row: 0, cleanHoles: true },
-        { assetKey: 'eco_coral_cluster', variant: 'brain_coral', col: 1, row: 0, cleanHoles: false },
-        { assetKey: 'eco_coral_cluster', variant: 'fan_coral', col: 2, row: 0, cleanHoles: true },
-        { assetKey: 'eco_coral_cluster', variant: 'tube_sponge', aliasKey: 'flora_sponge_colony', col: 3, row: 0, cleanHoles: false },
-        // Row 1: 3 种海床礁石 + 1 种黑烟囱喷口
-        { assetKey: 'eco_seabed_rock', variant: 'basalt_boulder', aliasKey: 'ambient_rock_outcrop', col: 0, row: 1, cleanHoles: false },
-        { assetKey: 'eco_seabed_rock', variant: 'mossy_slab', col: 1, row: 1, cleanHoles: false },
-        { assetKey: 'eco_seabed_rock', variant: 'jagged_spire', col: 2, row: 1, cleanHoles: false },
-        { assetKey: 'eco_bubble_stream', variant: 'thermal_micro_vent', aliasKey: 'ambient_hydrothermal_vent', col: 3, row: 1, cleanHoles: false },
-        // Row 2: 3 种海草巨藻 + 1 种蓝光裂隙喷口
-        { assetKey: 'eco_seagrass_bed', variant: 'meadow_tuft', aliasKey: 'flora_kelp_patch', col: 0, row: 2, cleanHoles: true },
-        { assetKey: 'eco_seagrass_bed', variant: 'ribbon_grass', col: 1, row: 2, cleanHoles: true },
-        { assetKey: 'eco_seagrass_bed', variant: 'kelp_sprout', col: 2, row: 2, cleanHoles: true },
-        { assetKey: 'eco_bubble_stream', variant: 'canyon_fissure_vent', col: 3, row: 2, cleanHoles: false },
-        // Row 3: 3 种沉船残骸 + 1 种荧光海葵晶簇
-        { assetKey: 'eco_shipwreck_debris', variant: 'rusted_anchor', aliasKey: 'ambient_sunken_debris', col: 0, row: 3, cleanHoles: true },
-        { assetKey: 'eco_shipwreck_debris', variant: 'broken_mast_timber', col: 1, row: 3, cleanHoles: true },
-        { assetKey: 'eco_shipwreck_debris', variant: 'barnacle_cannon', col: 2, row: 3, cleanHoles: false },
-        { assetKey: 'eco_coral_cluster', variant: 'biolum_anemone', aliasKey: 'flora_sea_anemone', col: 3, row: 3, cleanHoles: false },
-      ];
-
-      for (const spec of cellSlices) {
-        const rect: readonly [number, number, number, number] = [
-          spec.col * 0.25 + 0.015,
-          spec.row * 0.25 + 0.015,
-          (spec.col + 1) * 0.25 - 0.015,
-          (spec.row + 1) * 0.25 - 0.015,
-        ];
-        const canvas = sliceAndCleanWorldSpriteRegion(ecoAtlasImg, rect, spec.cleanHoles, 320);
-        if (canvas) {
-          this.spriteCanvases.set(`${spec.assetKey}:${spec.variant}`, canvas);
-          if (!this.spriteCanvases.has(spec.assetKey)) {
-            this.spriteCanvases.set(spec.assetKey, canvas);
-          }
-          if (spec.aliasKey) {
-            this.spriteCanvases.set(spec.aliasKey, canvas);
-          }
-          if (spec.variant === 'canyon_fissure_vent') {
-            this.spriteCanvases.set('eco_bubble_stream:reef_oxygen_plume', canvas);
-          }
-        }
-      }
-    };
-    ecoAtlasImg.src = WORLD_ATLAS_ASSET_URLS.ecologyAtlas;
-
-    // 3B. 加载 4 张独立的 2048x2048 (@3x) 写实复合生态 PNG 作为稀有主群落变体 (:composite_cluster)，不覆盖 16 种单体变体
+    // 3. 直接加载 4 张独立的 2048x2048 (@3x) 写实透明背景海床生态 PNG（不切图）
     const standaloneEcoSpecs: Array<{
       url: string;
-      assetKey: string;
+      assetKeys: readonly string[];
       removeSmoke: boolean;
     }> = [
-      { url: WORLD_ECOLOGY_SPRITE_URLS.coral_reef_cluster, assetKey: 'eco_coral_cluster', removeSmoke: false },
-      { url: WORLD_ECOLOGY_SPRITE_URLS.rocky_outcrop, assetKey: 'eco_seabed_rock', removeSmoke: false },
-      { url: WORLD_ECOLOGY_SPRITE_URLS.kelp_forest_cluster, assetKey: 'eco_seagrass_bed', removeSmoke: false },
-      { url: WORLD_ECOLOGY_SPRITE_URLS.abyssal_vent_debris, assetKey: 'eco_bubble_stream', removeSmoke: true },
+      {
+        url: WORLD_ECOLOGY_SPRITE_URLS.coral_reef_cluster,
+        assetKeys: [
+          'eco_coral_cluster',
+          'flora_coral_cluster',
+          'flora_sponge_colony',
+          'flora_sea_anemone',
+        ],
+        removeSmoke: false,
+      },
+      {
+        url: WORLD_ECOLOGY_SPRITE_URLS.rocky_outcrop,
+        assetKeys: ['eco_seabed_rock', 'ambient_rock_outcrop'],
+        removeSmoke: false,
+      },
+      {
+        url: WORLD_ECOLOGY_SPRITE_URLS.kelp_forest_cluster,
+        assetKeys: ['eco_seagrass_bed', 'flora_kelp_patch'],
+        removeSmoke: false,
+      },
+      {
+        url: WORLD_ECOLOGY_SPRITE_URLS.abyssal_vent_debris,
+        assetKeys: [
+          'eco_bubble_stream',
+          'eco_shipwreck_debris',
+          'ambient_hydrothermal_vent',
+          'ambient_sunken_debris',
+          'flora_tube_worm_patch',
+        ],
+        removeSmoke: true,
+      },
     ];
 
     for (const spec of standaloneEcoSpecs) {
       const ecoImg = new Image();
       ecoImg.crossOrigin = 'anonymous';
       ecoImg.onload = () => {
-        const canvas = prepareStandaloneEcologySpriteCanvas(ecoImg, 360, spec.removeSmoke);
+        const canvas = prepareStandaloneEcologySpriteCanvas(ecoImg, 380, spec.removeSmoke);
         if (!canvas) return;
-        this.spriteCanvases.set(`${spec.assetKey}:composite_cluster`, canvas);
-        if (!this.spriteCanvases.has(spec.assetKey)) {
-          this.spriteCanvases.set(spec.assetKey, canvas);
+        for (const key of spec.assetKeys) {
+          this.spriteCanvases.set(key, canvas);
+          this.spriteCanvases.set(`${key}:composite_cluster`, canvas);
         }
       };
       ecoImg.src = spec.url;
@@ -8030,9 +7997,8 @@ export class WorldRenderer {
   }
 
   /**
-   * 多样化复合珊瑚礁群落渲染器 (Multi-Variant Coral Reef Outcrop Renderer)
-   * 结合 16 种单体生态变体（鹿角珊瑚、脑珊瑚、海扇、管状海绵、荧光海葵、苔藓石板、巨藻）与低频（~14%）写实复合群落，
-   * 保持自然克制的比例（34m~52m），底部深嵌海床，彻底解决单一写实素材过大、突兀、重复单调的问题。
+   * 写实复合珊瑚礁群落渲染器 (Standalone @3x Coral Reef Cluster Renderer)
+   * 直接使用完整的 `ecology_coral_reef_cluster.png`（自带天然礁石底座、鹿角珊瑚、脑珊瑚、柳珊瑚海扇与管状海绵），不切图。
    */
   private renderCompositeCoralReefMound(
     ctx: CanvasRenderingContext2D,
@@ -8041,12 +8007,11 @@ export class WorldRenderer {
     localSlope: number,
     scale: number,
     seedHash: number,
-    biomeId: BiomeId,
+    _biomeId: BiomeId,
     nowSec: number,
     skipBgAnim: boolean
   ): void {
-    const isDeepAbyss = biomeId === 'deep_abyss';
-    const clampedScale = Math.max(0.68, Math.min(1.12, scale * 0.82));
+    const clampedScale = Math.max(0.24, Math.min(1.12, scale * 0.82));
     const slopeAngle = Math.atan2(localSlope, 1) * 0.68;
     const reefSpanHalfW = 28 * clampedScale;
     const slopeEmbedSink = Math.abs(localSlope) * reefSpanHalfW + 8 * clampedScale;
@@ -8055,29 +8020,7 @@ export class WorldRenderer {
       ? 0
       : Math.sin(nowSec * 1.35 + (seedHash % 97) * 0.065) * 0.025;
 
-    const rockVariants = ['mossy_slab', 'basalt_boulder', 'jagged_spire'] as const;
-    const coralVariants = isDeepAbyss
-      ? (['biolum_anemone', 'tube_sponge', 'brain_coral'] as const)
-      : (['staghorn', 'brain_coral', 'fan_coral', 'tube_sponge', 'biolum_anemone'] as const);
-    const kelpVariants = ['meadow_tuft', 'ribbon_grass', 'kelp_sprout'] as const;
-
-    const baseRockSprite = this.assetRegistry.getSpriteCanvas(
-      'eco_seabed_rock',
-      rockVariants[seedHash % rockVariants.length]
-    );
-    const primaryCoralVar = coralVariants[(seedHash >>> 4) % coralVariants.length];
-    const secondaryCoralVar = coralVariants[(seedHash >>> 8) % coralVariants.length];
-    const useCompositeHero = (seedHash % 7) === 0;
-
-    const mainCoralSprite = useCompositeHero
-      ? (this.assetRegistry.getSpriteCanvas('eco_coral_cluster', 'composite_cluster') ??
-         this.assetRegistry.getSpriteCanvas('eco_coral_cluster', primaryCoralVar))
-      : this.assetRegistry.getSpriteCanvas('eco_coral_cluster', primaryCoralVar);
-    const sideCoralSprite = this.assetRegistry.getSpriteCanvas('eco_coral_cluster', secondaryCoralVar);
-    const sideKelpSprite = this.assetRegistry.getSpriteCanvas(
-      'eco_seagrass_bed',
-      kelpVariants[(seedHash >>> 12) % kelpVariants.length]
-    );
+    const mainCoralSprite = this.assetRegistry.getSpriteCanvas('eco_coral_cluster');
 
     ctx.save();
     ctx.translate(anchorEngineX, anchorFloorEngineY + slopeEmbedSink);
@@ -8089,57 +8032,13 @@ export class WorldRenderer {
     ctx.ellipse(0, 2 * clampedScale, 32 * clampedScale, 6.5 * clampedScale, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 2. 底层护根礁石基座
-    if (!useCompositeHero && baseRockSprite) {
-      this.drawBottomAnchoredSprite(
-        ctx,
-        baseRockSprite,
-        0,
-        4 * clampedScale,
-        24 * clampedScale,
-        0.34,
-        0,
-        (seedHash & 1) !== 0,
-        '#334155'
-      );
-    }
-
-    // 3. 侧翼伴生海草或次级珊瑚簇（错落大小比例，打破单调）
-    const sideSign = (seedHash & 2) === 0 ? -1 : 1;
-    if ((seedHash % 3) !== 0 && sideKelpSprite) {
-      this.drawBottomAnchoredSprite(
-        ctx,
-        sideKelpSprite,
-        sideSign * 18 * clampedScale,
-        3 * clampedScale,
-        28 * clampedScale,
-        0.28,
-        sideSign * 0.12 + sway * 1.4,
-        (seedHash & 4) !== 0,
-        '#10b981'
-      );
-    }
-    if (!useCompositeHero && sideCoralSprite && secondaryCoralVar !== primaryCoralVar) {
-      this.drawBottomAnchoredSprite(
-        ctx,
-        sideCoralSprite,
-        -sideSign * 15 * clampedScale,
-        2 * clampedScale,
-        26 * clampedScale,
-        0.28,
-        -sideSign * 0.10 + sway * 0.6,
-        (seedHash & 16) !== 0,
-        '#f43f5e'
-      );
-    }
-
-    // 4. 主珊瑚簇（严格控制在 38m~46m 自然高度，绝不喧宾夺主）
+    // 2. 完整写实珊瑚礁群落主体（自带礁石基座，底部深嵌海床 28%）
     this.drawBottomAnchoredSprite(
       ctx,
       mainCoralSprite,
       0,
       2 * clampedScale,
-      (useCompositeHero ? 46 : 40) * clampedScale,
+      44 * clampedScale,
       0.28,
       sway * 0.4,
       (seedHash & 8) !== 0,
@@ -8150,9 +8049,8 @@ export class WorldRenderer {
   }
 
   /**
-   * 多样化海底岩礁露头与沉船残骸渲染器 (Multi-Variant Rock Outcrop & Debris Renderer)
-   * 按 variant 精确区分玄武岩巨石、苔藓阶梯岩、裂隙尖塔、铁锚、船舵木板与古炮，仅以 ~12% 低频穿插写实复合礁石，
-   * 尺寸控制在 34m~48m 并深嵌海床 28%。
+   * 写实海底岩礁露头与沉船残骸渲染器 (Standalone @3x Rock Outcrop & Debris Renderer)
+   * 直接使用完整的 `ecology_rocky_outcrop.png` 与 `ecology_abyssal_vent_debris.png`，不切图。
    */
   private renderAnchoredRockOrDebrisWithEpifauna(
     ctx: CanvasRenderingContext2D,
@@ -8163,27 +8061,16 @@ export class WorldRenderer {
     localSlope: number,
     scale: number,
     seedHash: number,
-    biomeId: BiomeId,
-    nowSec: number,
-    skipBgAnim: boolean
+    _biomeId: BiomeId,
+    _nowSec: number,
+    _skipBgAnim: boolean
   ): void {
     const assetKey = objType === 'rock' ? 'eco_seabed_rock' : 'eco_shipwreck_debris';
-    const useCompositeRock = objType === 'rock' && (seedHash % 8) === 0;
-    const mainSprite = useCompositeRock
-      ? (this.assetRegistry.getSpriteCanvas('eco_seabed_rock', 'composite_cluster') ??
-         this.assetRegistry.getSpriteCanvas(assetKey, variant))
-      : this.assetRegistry.getSpriteCanvas(assetKey, variant);
-
-    const epifaunaVariants = ['brain_coral', 'tube_sponge', 'biolum_anemone', 'staghorn'] as const;
-    const coralClusterSprite = this.assetRegistry.getSpriteCanvas(
-      'eco_coral_cluster',
-      epifaunaVariants[(seedHash >>> 5) % epifaunaVariants.length]
-    );
-    const clampedScale = Math.max(0.65, Math.min(1.08, scale * 0.80));
+    const mainSprite = this.assetRegistry.getSpriteCanvas(assetKey, variant);
+    const clampedScale = Math.max(0.24, Math.min(1.08, scale * 0.80));
     const slopeAngle = Math.atan2(localSlope, 1) * 0.65;
-    const baseH = (objType === 'shipwreck_debris' ? 42 : (useCompositeRock ? 46 : 38)) * clampedScale;
+    const baseH = (objType === 'shipwreck_debris' ? 42 : 44) * clampedScale;
     const slopeEmbedSink = Math.abs(localSlope) * (baseH * 0.45) + 7 * clampedScale;
-    const sway = skipBgAnim ? 0 : Math.sin(nowSec * 1.4 + (seedHash % 83) * 0.07) * 0.025;
 
     ctx.save();
     ctx.translate(anchorEngineX, anchorFloorEngineY + slopeEmbedSink);
@@ -8195,7 +8082,7 @@ export class WorldRenderer {
     ctx.ellipse(0, 2 * clampedScale, 28 * clampedScale, 6 * clampedScale, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // 2. 绘制岩石或残骸主体
+    // 2. 绘制完整岩石或残骸主体
     this.drawBottomAnchoredSprite(
       ctx,
       mainSprite,
@@ -8207,22 +8094,6 @@ export class WorldRenderer {
       (seedHash & 2) !== 0,
       '#475569'
     );
-
-    // 3. 在岩石侧麓伴生一簇小型共生珊瑚/海葵
-    if (objType === 'rock' && biomeId !== 'deep_abyss' && (seedHash % 3) === 0 && coralClusterSprite) {
-      const sideSign = (seedHash & 4) === 0 ? -1 : 1;
-      this.drawBottomAnchoredSprite(
-        ctx,
-        coralClusterSprite,
-        sideSign * 15 * clampedScale,
-        2 * clampedScale,
-        24 * clampedScale,
-        0.30,
-        sideSign * 0.14 + sway,
-        (seedHash & 8) !== 0,
-        '#f43f5e'
-      );
-    }
 
     ctx.restore();
   }
@@ -8471,6 +8342,7 @@ export class WorldRenderer {
       viewW: number;
       viewH: number;
       renderZoom: number;
+      relativePreyScale?: number;
       nowMs?: number;
     },
     activeChunks: ReadonlyArray<GeneratedChunkData>
@@ -8479,6 +8351,9 @@ export class WorldRenderer {
     this.assetRegistry.ensureAtlasesLoaded();
 
     const zoom = Math.max(0.25, viewport.renderZoom);
+    const seabedScale = Number.isFinite(viewport.relativePreyScale)
+      ? Math.max(0.4, Math.min(1.0, viewport.relativePreyScale!))
+      : 1.0;
     const halfW = viewport.viewW / (2 * zoom) + 260;
     const halfH = viewport.viewH / (2 * zoom) + 260;
     const minEngineX = viewport.cameraEngineX - halfW;
@@ -8501,7 +8376,6 @@ export class WorldRenderer {
     if (minEngineY <= 18000 && maxEngineY >= 240) {
       const minAtollChunkX = Math.floor((minEngineX * WORLD_UNITS_PER_METER) / WorldConfig.chunk.width);
       const maxAtollChunkX = Math.floor((maxEngineX * WORLD_UNITS_PER_METER) / WorldConfig.chunk.width);
-      const boulderSprite = this.assetRegistry.getSpriteCanvas('eco_seabed_rock', 'basalt_boulder');
 
       for (let cx = minAtollChunkX; cx <= maxAtollChunkX; cx++) {
         const outcrops = getShallowCoralAtollOutcropsForChunk(cx, WorldConfig);
@@ -8525,6 +8399,7 @@ export class WorldRenderer {
             continue;
           }
           renderedIds.add(item.id);
+          const scaledOutcropScale = item.scale * seabedScale;
 
           if (item.type === 'coral') {
             this.renderCompositeCoralReefMound(
@@ -8532,7 +8407,7 @@ export class WorldRenderer {
               ex,
               ey,
               item.slope,
-              item.scale,
+              scaledOutcropScale,
               item.seedHash,
               item.biomeId,
               nowSec,
@@ -8547,7 +8422,7 @@ export class WorldRenderer {
               ex,
               ey,
               item.slope,
-              item.scale,
+              scaledOutcropScale,
               item.seedHash,
               item.biomeId,
               nowSec,
@@ -8560,27 +8435,16 @@ export class WorldRenderer {
             const sway = skipBgAnim
               ? 0
               : Math.sin(nowSec * 1.55 + (item.seedHash % 100) * 0.063) * 0.075;
-            const slopeEmbedSink = Math.abs(item.slope) * (20 * item.scale) + 6 * item.scale;
+            const slopeEmbedSink = Math.abs(item.slope) * (20 * scaledOutcropScale) + 6 * scaledOutcropScale;
             ctx.save();
             ctx.translate(ex, ey + slopeEmbedSink);
             ctx.rotate(slopeAngle);
             this.drawBottomAnchoredSprite(
               ctx,
-              boulderSprite,
-              0,
-              3 * item.scale,
-              18 * item.scale,
-              0.35,
-              0,
-              (item.seedHash & 1) !== 0,
-              '#334155'
-            );
-            this.drawBottomAnchoredSprite(
-              ctx,
               grassSprite,
               0,
               0,
-              44 * item.scale,
+              44 * scaledOutcropScale,
               0.26,
               sway,
               (item.seedHash & 2) !== 0,
@@ -8594,7 +8458,7 @@ export class WorldRenderer {
     }
 
     for (const chunk of activeChunks) {
-      // 1. 绘制海床栖息生态群落（四层复合大珊瑚礁盘、岩石附生珊瑚、海草巨藻、沉船残骸、热液/氧气喷口）
+      // 1. 绘制海床栖息生态群落（写实珊瑚礁群落、海床礁石、海草巨藻、深渊热液喷口与残骸）
       for (const obj of chunk.ecologyObjects) {
         if (renderedIds.has(obj.id)) continue;
         const objCfg = ECOLOGY_OBJECT_CONFIGS[obj.type as EcologyObjectType];
@@ -8625,10 +8489,10 @@ export class WorldRenderer {
 
         renderedIds.add(obj.id);
         const seedHash = hashToUint32(obj.id);
-        const s = Math.max(0.72, Math.min(1.65, obj.scale ?? 1));
+        const s = Math.max(0.72, Math.min(1.65, obj.scale ?? 1)) * seabedScale;
         const biomeId = (obj.biomeId as BiomeId) || 'coral_reef';
 
-        // 1A. 珊瑚节点 -> 渲染「四层结构化复合大珊瑚礁盘」（底层礁石基座 + 中层脑珊瑚/海绵堆叠 + 冠层鹿角珊瑚/海扇 + 礁麓海草）
+        // 1A. 珊瑚节点 -> 渲染完整写实珊瑚礁群落 (`ecology_coral_reef_cluster.png`)
         if (obj.type === 'coral') {
           this.renderCompositeCoralReefMound(
             ctx,
@@ -8645,7 +8509,7 @@ export class WorldRenderer {
           continue;
         }
 
-        // 1B. 海床岩石与沉船残骸 -> 嵌入海床地形，并在岩石/残骸顶部与侧肩附着生长共生珊瑚
+        // 1B. 海床岩石与沉船残骸 -> 渲染完整写实礁石 (`ecology_rocky_outcrop.png`) 或热液残骸 (`ecology_abyssal_vent_debris.png`)
         if (obj.type === 'rock' || obj.type === 'shipwreck_debris') {
           this.renderAnchoredRockOrDebrisWithEpifauna(
             ctx,
@@ -8664,10 +8528,9 @@ export class WorldRenderer {
           continue;
         }
 
-        // 1C. 海草/巨藻与海底热液/裂隙喷口 -> 根部配礁石底座并 100% 嵌入海床 floorEngineY
+        // 1C. 海草/巨藻与海底热液/裂隙喷口 -> 自带天然礁石底座，直接 100% 嵌入海床 floorEngineY
         const assetKey = objCfg.assetKey;
         const spriteCanvas = this.assetRegistry.getSpriteCanvas(assetKey, obj.variant);
-        const boulderSprite = this.assetRegistry.getSpriteCanvas('eco_seabed_rock', 'basalt_boulder');
         const slopeAngle = Math.atan2(localSlope, 1) * 0.62;
         const sway =
           skipBgAnim || obj.type !== 'seagrass'
@@ -8679,19 +8542,7 @@ export class WorldRenderer {
         ctx.translate(ex, floorEngineY + slopeEmbedSink);
         ctx.rotate(slopeAngle);
 
-        // 海草/喷口根部护根礁石
-        this.drawBottomAnchoredSprite(
-          ctx,
-          boulderSprite,
-          0,
-          3 * s,
-          18 * s,
-          0.35,
-          0,
-          (seedHash & 1) !== 0,
-          '#334155'
-        );
-        // 海草群或喷口主体
+        // 海草群或喷口主体（自带天然岩石底座）
         this.drawBottomAnchoredSprite(
           ctx,
           spriteCanvas,
@@ -8731,12 +8582,12 @@ export class WorldRenderer {
         const desc = this.assetRegistry.getAssetOrPlaceholder(poi.assetKey, 'poi');
         const poiSprite = this.assetRegistry.getSpriteCanvas(poi.assetKey, poi.variant);
         const slabSprite = this.assetRegistry.getSpriteCanvas('eco_seabed_rock', 'mossy_slab');
-        const targetWidthEng = Math.max(58, Math.min(126, poi.width * 0.145));
+        const targetWidthEng = Math.max(58, Math.min(126, poi.width * 0.145)) * seabedScale;
         const radiusEng = targetWidthEng * 0.5;
         const poiStatus = poi.poiState ?? (poi.state?.status as string | undefined) ?? 'unvisited';
         const isDepleted = poiStatus === 'depleted' || poiStatus === 'interacted';
         const slopeAngle = Math.atan2(localSlope, 1) * 0.55;
-        const slopeEmbedSink = Math.abs(localSlope) * radiusEng * 0.65 + 8;
+        const slopeEmbedSink = Math.abs(localSlope) * radiusEng * 0.65 + 8 * seabedScale;
 
         ctx.save();
         ctx.translate(ex, floorEngineY + slopeEmbedSink);
@@ -8766,7 +8617,7 @@ export class WorldRenderer {
           ctx,
           slabSprite,
           0,
-          6,
+          6 * seabedScale,
           radiusEng * 0.72,
           0.38,
           0,

@@ -650,7 +650,7 @@ export function drawPreyEntity(
   ctx.save();
   ctx.translate(x, y);
 
-  // Pure natural creature rendering — no artificial outer circles or T{N} text labels!
+  // Pure natural creature rendering — zero artificial outer circles/rings or T{N} text labels!
   // Visual Size === Devourability Contract guarantees edible fish are <= 64% of shark size
   // and dangerous predators/hazards are >= 118% of shark size.
   const gait = getPreySwimGait(config);
@@ -786,7 +786,10 @@ export function drawOffScreenRadarIndicators(
         screenDy,
       });
     } else if (
-      ((!canEat && !prey.config.isHazard && prey.config.tier >= 5) ||
+      ((!frenzyActive &&
+        !prey.config.isHazard &&
+        effectiveTier >= sharkBiteTier + 4 &&
+        prey.config.tier >= 18) ||
         prey.mutationVariant === 'ABYSS_BEHEMOTH') &&
       worldDist < 880
     ) {

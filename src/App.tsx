@@ -716,17 +716,19 @@ export default function App() {
     []
   );
 
-  // Pick an edible Target Fish species strictly native to the current ocean depth zone
+  // Pick an edible Target Fish species strictly native to the current ocean depth zone (exclusively from the 134 @3x real species)
   const rollTargetBountyConfig = useCallback(
     (maxBiteTier: number, currentDepth: number, excludeId?: string): PreyTierConfig => {
       const isShallow = currentDepth <= 520;
       const effectiveMaxTier = isShallow
-        ? Math.min(3, Math.max(1, maxBiteTier))
-        : Math.max(3, maxBiteTier);
-      const edible = GAME_CONFIG.preyTiers.filter(
+        ? Math.min(18, Math.max(1, maxBiteTier))
+        : Math.max(8, maxBiteTier);
+      const realPreyOnly = GAME_CONFIG.preyTiers.filter(
+        (p) => !p.isHazard && Boolean(p.externalPngUrl)
+      );
+      const edible = realPreyOnly.filter(
         (p) =>
           p.tier <= effectiveMaxTier &&
-          !p.isHazard &&
           p.id !== excludeId &&
           (!isShallow ||
             (p.behavior !== 'EEL_CHARGER' &&
@@ -746,57 +748,30 @@ export default function App() {
           : nearNative.length > 0
           ? nearNative
           : edible;
-      if (pool.length === 0) return GAME_CONFIG.preyTiers[0];
+      if (pool.length === 0) return realPreyOnly[0] ?? GAME_CONFIG.preyTiers[0];
       return pool[Math.floor(Math.random() * pool.length)];
     },
     []
   );
 
-  // Spawn a single prey entity across all 140 marine species + cyber_mine in GAME_CONFIG.preyTiers
+  // Spawn a single prey entity exclusively from the 134 @3x marine species in GAME_CONFIG.preyTiers
   const createPreyEntity = useCallback(
     (nearSharkX?: number, nearSharkY?: number): PreyEntity => {
       const sim = simRef.current;
       const halfW = infiniteWorldManager.worldWidth / 2;
       const refDepth = typeof nearSharkY === 'number' ? Math.max(0, nearSharkY) : 220;
 
-      // Weight lower tiers higher in shallow water (T1~T3 only, zero active attackers); shift toward abyssal/hadal tiers down to 20,000m
-      const tierWeights =
-        refDepth > 8000
-          ? [0, 6, 10, 12, 10, 16, 22, 24]
-          : refDepth > 3500
-          ? [0, 8, 12, 16, 16, 18, 18, 12]
-          : refDepth > 1250
-          ? [0, 10, 14, 18, 20, 18, 14, 6]
-          : refDepth > 520
-          ? [0, 10, 26, 28, 22, 14, 0, 0]
-          : [54, 30, 16, 0, 0, 0, 0, 0];
-      const totalWeight = tierWeights.reduce((a, b) => a + b, 0);
-      let roll = Math.random() * totalWeight;
-      let chosenTierNum = 1;
-      for (let t = 0; t < tierWeights.length; t++) {
-        roll -= tierWeights[t];
-        if (roll <= 0) {
-          chosenTierNum = t + 1;
-          break;
-        }
-      }
-
-      const depthMatched = GAME_CONFIG.preyTiers.filter(
+      const realPreyOnly = GAME_CONFIG.preyTiers.filter(
+        (p) => !p.isHazard && Boolean(p.externalPngUrl)
+      );
+      const depthMatched = realPreyOnly.filter(
         (p) =>
           refDepth >= p.minDepth - 140 &&
           refDepth <= p.maxDepth + 140 &&
           (refDepth > 520 ||
-            (!p.isHazard &&
-              p.behavior !== 'EEL_CHARGER' &&
-              p.behavior !== 'SUB_PATROL'))
+            (p.behavior !== 'EEL_CHARGER' && p.behavior !== 'SUB_PATROL'))
       );
-      const tierCandidates = depthMatched.filter((p) => p.tier === chosenTierNum);
-      const pool =
-        tierCandidates.length > 0
-          ? tierCandidates
-          : depthMatched.length > 0
-          ? depthMatched
-          : GAME_CONFIG.preyTiers;
+      const pool = depthMatched.length > 0 ? depthMatched : realPreyOnly;
       const chosenTier: PreyTierConfig =
         pool[Math.floor(Math.random() * pool.length)];
 
@@ -2395,10 +2370,10 @@ export default function App() {
             shark.biteAnim = Math.max(shark.biteAnim, 0.35 * pullRatio);
           }
 
-          // Golden Frenzy Magnet gently pulls nearby small T1~T2 fish
+          // Golden Frenzy Magnet gently pulls nearby small T1~T12 reef fish
           if (
             shark.frenzyTimer > 0 &&
-            prey.config.tier <= 2 &&
+            prey.config.tier <= 12 &&
             !prey.config.isHazard &&
             distToShark < shark.stats.magnetRadius * 0.72
           ) {
@@ -2438,13 +2413,18 @@ export default function App() {
             prey.vy = preySeabedCollision.vy;
           }
 
-          // Check collision with Shark Mouth / Front-Body
+          // Check collision with Shark Mouth / Front-Body (including +1T~+3T Boost Armor-Crush)
+          const canBoostCrushNow =
+            isBoosting &&
+            !prey.config.isHazard &&
+            effectivePreyTier <= shark.stats.biteTier + 3;
+          const canBiteConnect = canEatNow || canBoostCrushNow;
           const distToMouth = Math.hypot(mouthX - prey.x, mouthY - prey.y);
           const distToFrontBody = Math.hypot(frontBodyX - prey.x, frontBodyY - prey.y);
-          const effectiveHitDist = canEatNow
+          const effectiveHitDist = canBiteConnect
             ? Math.min(distToMouth, distToFrontBody * 0.95)
             : distToMouth;
-          const hitThreshold = canEatNow
+          const hitThreshold = canBiteConnect
             ? mouthRadius * 1.18 + eatHitRadius * 1.02
             : mouthRadius * 0.84 + renderedPreyRadius * 0.72;
 
@@ -2470,7 +2450,7 @@ export default function App() {
               );
               const boostRefill =
                 6 +
-                prey.config.tier * 2 +
+                Math.round(prey.config.tier * 0.45) +
                 (shark.stats.killEnergyBonus ?? 0);
               shark.energy = Math.min(
                 shark.stats.maxEnergy,
@@ -2573,15 +2553,19 @@ export default function App() {
                   shark.frenzyTimer = 3.6 + shark.stats.frenzyDurationBonus;
                 }
               }
-              if (prey.config.tier >= 4) {
+              if (
+                prey.config.tier >= 18 ||
+                outcome.encounterState === 'ARMOR_CRUSH'
+              ) {
                 shark.hitstopTimer = 0.045;
                 shark.cameraShakeTrauma = 0.32;
               }
 
-              soundFX.playBite(prey.config.tier);
+              soundFX.playBite(Math.ceil(prey.config.tier / 6));
 
               // Compliant Green Slime Bubbles & DNA Crystals Burst
-              const burstCount = 10 + prey.config.tier * 2;
+              const burstCount =
+                10 + Math.min(24, Math.ceil(prey.config.tier * 0.45));
               for (let b = 0; b < burstCount; b++) {
                 const ang = (b * Math.PI * 2) / burstCount + Math.random() * 0.4;
                 const spd = 60 + Math.random() * 140;
@@ -2597,12 +2581,12 @@ export default function App() {
                 );
               }
 
-              // Spawn Collectible Gold Coins (75%) & DNA Helix Pickups (25% on normal fish; guaranteed bonus DNA on Bounty Target / Abyss Behemoth / T4+)
+              // Spawn Collectible Gold Coins (75%) & DNA Helix Pickups (25% on normal fish; guaranteed bonus DNA on Bounty Target / Abyss Behemoth / T18+)
               const isHighGeneSource =
                 prey.config.id === sim.targetBounty.preyConfig.id ||
                 variant === 'ABYSS_BEHEMOTH' ||
-                prey.config.tier >= 4;
-              const pickupDrops = Math.min(6, Math.ceil(prey.config.tier / 2) + 1);
+                prey.config.tier >= 18;
+              const pickupDrops = Math.min(6, Math.ceil(prey.config.tier / 9) + 1);
               for (let d = 0; d < pickupDrops; d++) {
                 const ang = Math.random() * Math.PI * 2;
                 const dropKind =
@@ -2615,11 +2599,19 @@ export default function App() {
                   dropKind === 'COIN'
                     ? Math.max(
                         3,
-                        Math.round(prey.config.tier * 2.5 * effectiveCoinMult)
+                        Math.round(
+                          Math.max(1, prey.config.tier * 0.45) *
+                            2.5 *
+                            effectiveCoinMult
+                        )
                       )
                     : Math.max(
                         1,
-                        Math.round(prey.config.tier * 1.2 * effectiveGeneMult)
+                        Math.round(
+                          Math.max(1, prey.config.tier * 0.45) *
+                            1.2 *
+                            effectiveGeneMult
+                        )
                       );
                 spawnPickup(
                   prey.x,
@@ -2647,13 +2639,17 @@ export default function App() {
                 sim.targetBounty.progress += 1;
                 if (sim.targetBounty.progress >= sim.targetBounty.required) {
                   const bountyBonusScore = infiniteProgressionManager.getScaledPreyValue(
-                    Math.round(350 * prey.config.tier * bountyPreyScoreBonus)
+                    Math.round(
+                      350 *
+                        Math.max(1, prey.config.tier * 0.35) *
+                        bountyPreyScoreBonus
+                    )
                   );
                   const bountyGenes = Math.round(
-                    (18 + prey.config.tier * 4) * effectiveGeneMult
+                    (18 + prey.config.tier * 0.85) * effectiveGeneMult
                   );
                   const bountyCoins = Math.round(
-                    (48 + prey.config.tier * 12) * effectiveCoinMult
+                    (48 + prey.config.tier * 2.5) * effectiveCoinMult
                   );
                   shark.score += bountyBonusScore;
                   shark.genes += bountyGenes;
@@ -3163,13 +3159,16 @@ export default function App() {
         }
       }
 
-      // 阶段 B：渲染 1.0x 世界层连续可碰撞海床（与 resolveSeabedCollision / getFloorDepthAt 严格同源）
+      // 阶段 B：渲染 1.0x 世界层连续可碰撞海床（与 resolveSeabedCollision / getFloorDepthAt 严格同源，且随鲨鱼成长按 relativePreyScale 同步缩小）
+      const smoothedSeabedScale =
+        parallaxBackground.getSmoothedRelativePreyScale();
       renderPhysicalSeabed(ctx, {
         cameraEngineX: sim.camera.x,
         cameraEngineY: sim.camera.y,
         viewW,
         viewH,
         renderZoom,
+        relativePreyScale: smoothedSeabedScale,
       });
 
       // 阶段 E/F/G：更新 2D Chunk 生命周期窗口（方向性预加载 + 帧预算 2ms + Active 上限 10）并渲染 1.0x 世界层激活态 POI 与海床生态物
@@ -3195,6 +3194,7 @@ export default function App() {
           viewH,
           renderZoom,
           nowMs: now,
+          relativePreyScale: smoothedSeabedScale,
         },
         activeChunks
       );

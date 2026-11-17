@@ -42,7 +42,12 @@ import {
   getPreySwimGait,
 } from './canvasRenderer';
 import { sampleBathymetricWaterColor } from './parallaxBackground';
-import { ProceduralOceanWorldSystem } from './worldGenerationSystem';
+import {
+  ProceduralOceanWorldSystem,
+  WORLD_ATLAS_ASSET_URLS,
+  WORLD_ECOLOGY_SPRITE_URLS,
+  WORLD_SEABED_STRIP_URLS,
+} from './worldGenerationSystem';
 
 test('I18N dictionary has complete and matching keys in both zh and en', () => {
   const zhKeys = Object.keys(I18N.zh).sort();
@@ -113,7 +118,7 @@ test('resolvePreyEncounter distinguishes devourable prey from oversized hazards'
   const baseStats = computeSharkStats(1, {}, false);
   const tier1Prey = GAME_CONFIG.preyTiers.find((p) => p.tier === 1 && !p.isHazard)!;
   const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!;
-  const tier8Boss = GAME_CONFIG.preyTiers.find((p) => p.tier === 8 && p.isBoss)!;
+  const topBoss = GAME_CONFIG.preyTiers.find((p) => p.tier === 48 && p.isBoss)!;
 
   const eatSmall = resolvePreyEncounter(baseStats, tier1Prey, false, false);
   assert.equal(eatSmall.canDevour, true);
@@ -125,7 +130,7 @@ test('resolvePreyEncounter distinguishes devourable prey from oversized hazards'
   assert.ok(hitMine.hpDelta < 0);
   assert.ok(hitMine.knockbackForce > 0);
 
-  const frenzyEatBoss = resolvePreyEncounter(baseStats, tier8Boss, true, true);
+  const frenzyEatBoss = resolvePreyEncounter(baseStats, topBoss, true, true);
   assert.equal(frenzyEatBoss.canDevour, true);
   assert.equal(frenzyEatBoss.floatTextKey, 'float_boss_kill');
 });
@@ -360,12 +365,12 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   assert.equal(mineHitAtMaxLevel.canDevour, false, 'Mines must ALWAYS explode outside of Gold Frenzy even at Bite Tier 8');
   assert.ok(mineHitAtMaxLevel.hpDelta < -80, 'Mines deal lethal flat + maxHP% damage in deep sea');
 
-  // (c) Tier 8 Bosses & Tier 7+ Abyss Behemoths require active Boost outside of Gold Frenzy even at Bite Tier 8
-  const tier8Boss = GAME_CONFIG.preyTiers.find((p) => p.tier === 8 && p.isBoss)!;
-  const bossNoBoost = resolvePreyEncounter(maxShark, tier8Boss, false, false, 'NONE', 1.2);
-  const bossWithBoost = resolvePreyEncounter(maxShark, tier8Boss, false, true, 'NONE', 1.2);
-  assert.equal(bossNoBoost.canDevour, false, 'Tier 8 Boss counter-bites if shark is not actively Boosting');
-  assert.equal(bossWithBoost.canDevour, true, 'Tier 8 Boss can be devoured at Bite Tier 8 when actively Boosting');
+  // (c) Apex Bosses require active Boost outside of Gold Frenzy in legacy organ mode
+  const topBoss = GAME_CONFIG.preyTiers.find((p) => p.tier === 48 && p.isBoss)!;
+  const bossNoBoost = resolvePreyEncounter(maxShark, topBoss, false, false, 'NONE', 1.2);
+  const bossWithBoost = resolvePreyEncounter(maxShark, topBoss, false, true, 'NONE', 1.2);
+  assert.equal(bossNoBoost.canDevour, false, 'Boss counter-bites if shark is not actively Boosting');
+  assert.equal(bossWithBoost.canDevour, true, 'Boss can be devoured when actively Boosting');
 
   // 7. Relative Prey Shrinking: shark scale stays non-obstructive (<= 1.28) while other fish shrink progressively as shark levels up
   const lv1Shark = computeSharkStats(1, {}, false);
@@ -553,18 +558,22 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
   );
 
   const statsLv1 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false, 1.0, 1);
-  const statsLv5 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 5, false, 1.0, 1);
+  const statsLv3 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 3, false, 1.0, 1);
+  const statsLv6 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 6, false, 1.0, 1);
   const statsLv10 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 10, false, 1.0, 1);
+  const statsLv10InRun9 = computeEvolvedSharkStats(9, 'shark_00_clown_fry', 10, false, 1.0, 1);
 
-  assert.ok(statsLv5.maxHp > statsLv1.maxHp, 'Body upgrade Lv.5 increases Max HP');
-  assert.ok(statsLv10.moveSpeed > statsLv5.moveSpeed, 'Body upgrade Lv.10 increases Swim Speed');
-  assert.equal(statsLv5.biteTier, statsLv1.biteTier + 1, 'Body upgrade Lv.5 grants +1 Bite Tier breakthrough');
-  assert.equal(statsLv10.biteTier, statsLv1.biteTier + 2, 'Body upgrade Lv.10 grants +2 total Bite Tier breakthrough');
+  assert.ok(statsLv6.maxHp > statsLv1.maxHp, 'Body upgrade Lv.6 increases Max HP');
+  assert.ok(statsLv10.moveSpeed > statsLv6.moveSpeed, 'Body upgrade Lv.10 increases Swim Speed');
+  assert.equal(statsLv3.biteTier, statsLv1.biteTier + 1, 'Body upgrade Lv.3 grants +1 Bite Tier breakthrough');
+  assert.equal(statsLv6.biteTier, statsLv1.biteTier + 2, 'Body upgrade Lv.6 grants +2 Bite Tier breakthrough');
+  assert.equal(statsLv10.biteTier, statsLv1.biteTier + 3, 'Body upgrade Lv.10 grants +3 total Bite Tier breakthrough');
+  assert.equal(statsLv10InRun9.biteTier, statsLv1.biteTier + 6, 'Body upgrade Lv.10 (+3T) + In-Run Lv.9 (+3T) grants +6T cross-generation hunting');
 
   // 4. Verify Tier VI Cosmic Apex Form (#47 Omega Devourer) has canEatMines and massive stats while keeping relativePreyScale shrinking
   const omegaStats = computeEvolvedSharkStats(8, 'shark_47_omega_devourer', 10, false, 1.0, 48);
   assert.equal(omegaStats.canEatMines, true);
-  assert.equal(omegaStats.biteTier, 8);
+  assert.equal(omegaStats.biteTier, 48);
   assert.ok(omegaStats.maxHp > 1500, 'Tier VI Omega Devourer at Lv.10 has massive HP pool');
   assert.ok(omegaStats.scale <= 1.28, 'Shark screen size stays bounded <= 1.28 so vision is never blocked');
   assert.ok(omegaStats.relativePreyScale < statsLv1.relativePreyScale, 'Higher generation + in-run level shrinks surrounding prey');
@@ -731,9 +740,15 @@ test('Visual Size vs. Devourability Contract + Gold Frenzy Size Preservation Exc
 });
 
 test('Senior QA Audit: 48-Shark Panel Stats, Trait Descriptions, and Gameplay Calculation Consistency', () => {
-  // 1. Verify every shark's traitZh / traitEn numerical claims match its exact SharkFormConfig fields
-  for (const form of SHARK_EVOLUTION_FORMS) {
-    const biteMatch = form.traitEn.match(/Bite Tier T(\d)/);
+  // 1. Verify every shark's traitZh / traitEn numerical claims match its exact SharkFormConfig fields (1-to-1 T1..T48)
+  for (let idx = 0; idx < SHARK_EVOLUTION_FORMS.length; idx++) {
+    const form = SHARK_EVOLUTION_FORMS[idx];
+    assert.equal(
+      form.baseBiteTier,
+      idx + 1,
+      `${form.id} must map 1-to-1 to baseBiteTier=${idx + 1}`
+    );
+    const biteMatch = form.traitEn.match(/Bite Tier T(\d+)/);
     if (biteMatch) {
       assert.equal(
         form.baseBiteTier,
@@ -782,7 +797,7 @@ test('Senior QA Audit: 48-Shark Panel Stats, Trait Descriptions, and Gameplay Ca
 
   // 3. Verify Specific Shark Trait Multipliers & Combat Mitigation in resolvePreyEncounter
   const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!; // Naval Mine hazard
-  const tier8Boss = GAME_CONFIG.preyTiers.find((p) => p.tier === 8 && p.isBoss)!; // Apex Whale Boss
+  const tier8Boss = GAME_CONFIG.preyTiers.find((p) => p.tier === 48 && p.isBoss)!; // Apex Whale Boss
 
   const standardTier2 = computeEvolvedSharkStats(1, 'shark_11_tiger_shark', 1, false, 1.0, 1);
   const bullShark = computeEvolvedSharkStats(1, 'shark_10_bull_shark', 1, false, 1.0, 1);
@@ -3293,11 +3308,77 @@ test('134 Active Marine Prey Species + Cyber Mine: Non-Fish Mammal Exclusion, As
       matching.length >= 6,
       `Depth ${d}m must have rich prey diversity (>= 6 species), got ${matching.length}`
     );
-    const hasEdibleTier = matching.some((p) => !p.isHazard && p.tier <= 4);
+    const hasEdibleTier = matching.some((p) => !p.isHazard && p.tier <= 14);
     assert.ok(
       hasEdibleTier,
-      `Depth ${d}m must retain edible T1~T4 prey so deep-sea food chain never starves`
+      `Depth ${d}m must retain edible T1~T14 companion prey so deep-sea food chain never starves`
     );
+  }
+
+  // 4. Verify 134 real @3x prey species are distributed across all 48 tiers (T1..T48) with at least 2 species per tier
+  const realPreyOnly = GAME_CONFIG.preyTiers.filter((p) => !p.isHazard);
+  assert.equal(realPreyOnly.length, 134);
+  for (let t = 1; t <= 48; t++) {
+    const speciesAtTier = realPreyOnly.filter((p) => p.tier === t);
+    assert.ok(
+      speciesAtTier.length >= 2 && speciesAtTier.length <= 3,
+      `Tier T${t} must have 2..3 real @3x marine species, got ${speciesAtTier.length}`
+    );
+  }
+
+  // 5. Verify 3-State Encounter Mechanics: DEVOUR (<= T), ARMOR_CRUSH (+1T..+3T with Boost) vs NEED_BOOST (without Boost), and DEADLY_PREDATOR (>= +4T even with Boost)
+  const t10Shark = computeEvolvedSharkStats(1, SHARK_EVOLUTION_FORMS[9].id, 1, false, 1.0, 1); // baseBiteTier = 10
+  assert.equal(t10Shark.biteTier, 10);
+
+  const t10Prey = realPreyOnly.find((p) => p.tier === 10)!;
+  const t12Prey = realPreyOnly.find((p) => p.tier === 12 && !p.isBoss)!; // +2T (Armor-Crushable)
+  const t14Prey = realPreyOnly.find((p) => p.tier === 14)!; // +4T (Deadly Predator)
+
+  const devourRes = resolvePreyEncounter(t10Shark, t10Prey, false, false, 'NONE', 1.0);
+  assert.equal(devourRes.canDevour, true);
+  assert.equal(devourRes.encounterState, 'DEVOUR');
+
+  const needBoostRes = resolvePreyEncounter(t10Shark, t12Prey, false, false, 'NONE', 1.0);
+  assert.equal(needBoostRes.canDevour, false);
+  assert.equal(needBoostRes.encounterState, 'NEED_BOOST');
+  assert.equal(needBoostRes.floatTextKey, 'float_need_boost');
+
+  const armorCrushRes = resolvePreyEncounter(t10Shark, t12Prey, false, true, 'NONE', 1.0);
+  assert.equal(armorCrushRes.canDevour, true);
+  assert.equal(armorCrushRes.encounterState, 'ARMOR_CRUSH');
+  assert.equal(armorCrushRes.floatTextKey, 'float_armor_crush');
+  assert.equal(armorCrushRes.isCrit, true);
+  assert.ok(armorCrushRes.scoreGain > t12Prey.scoreValue, 'Boost Armor-Crush grants 1.35x bonus score');
+
+  const deadlyUnboosted = resolvePreyEncounter(t10Shark, t14Prey, false, false, 'NONE', 1.0);
+  const deadlyBoosted = resolvePreyEncounter(t10Shark, t14Prey, false, true, 'NONE', 1.0);
+  assert.equal(deadlyUnboosted.canDevour, false);
+  assert.equal(deadlyUnboosted.encounterState, 'DEADLY_PREDATOR');
+  assert.equal(deadlyBoosted.canDevour, false, '+4T Deadly Predator cannot be crushed even while Boosting');
+  assert.equal(deadlyBoosted.encounterState, 'DEADLY_PREDATOR');
+  assert.equal(deadlyBoosted.floatTextKey, 'float_too_big');
+});
+
+test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster) and all seabed/ecology/POI assets exist on disk', () => {
+  assert.equal(
+    WORLD_ATLAS_ASSET_URLS.ecologyAtlas,
+    '/assets/aistudio/world_ecology_atlas_1794473252524.jpg',
+    '4x4 ecology atlas must load world_ecology_atlas_1794473252524.jpg so 4x4 grid cells never slice solid squares from a standalone cluster PNG'
+  );
+  assert.notEqual(
+    WORLD_ATLAS_ASSET_URLS.ecologyAtlas,
+    WORLD_ECOLOGY_SPRITE_URLS.coral_reef_cluster
+  );
+
+  const publicDir = path.resolve(process.cwd(), 'public');
+  const allUrls = [
+    ...Object.values(WORLD_SEABED_STRIP_URLS),
+    ...Object.values(WORLD_ECOLOGY_SPRITE_URLS),
+    ...Object.values(WORLD_ATLAS_ASSET_URLS),
+  ];
+  for (const url of allUrls) {
+    const diskPath = path.join(publicDir, url.replace(/^\//, ''));
+    assert.ok(fs.existsSync(diskPath), `Missing world asset file on disk: ${url}`);
   }
 });
 

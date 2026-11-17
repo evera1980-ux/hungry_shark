@@ -752,31 +752,8 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
     const generation = row + 1; // 1..6
     const spriteKey = `SHARK_FORM_${String(index).padStart(2, '0')}` as SharkSpriteKey;
 
-    // Base Bite Tier progression across the 48 forms
-    const baseBiteTier =
-      index === 0
-        ? 1
-        : row === 0
-        ? col >= 7
-          ? 3
-          : 2
-        : row === 1
-        ? col >= 3
-          ? 4
-          : 3
-        : row === 2
-        ? col >= 1
-          ? 5
-          : 4
-        : row === 3
-        ? col >= 5
-          ? 7
-          : 6
-        : row === 4
-        ? col >= 3
-          ? 8
-          : 7
-        : 8;
+    // 48-Tier 1-to-1 Base Bite Tier progression across the 48 shark forms (T1 .. T48)
+    const baseBiteTier = index + 1;
 
     const isBio = seed.lineage === 'APEX_BIO';
     const isMecha = seed.lineage === 'CYBER_MECHA';
@@ -886,6 +863,8 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
     const baseUpgradeCoinCost = [22, 68, 185, 440, 1020, 2200][row] + col * [4, 10, 25, 55, 125, 270][row];
 
     const sprite3xUrl = `/assets/sharks_3x/shark_form_${String(index).padStart(2, '0')}@3x.png`;
+    const traitZh = seed.traitZh.replace(/T\d+/g, `T${baseBiteTier}`);
+    const traitEn = seed.traitEn.replace(/Bite Tier T\d+/g, `Bite Tier T${baseBiteTier}`);
 
     return {
       index,
@@ -900,8 +879,8 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
       nameEn: seed.nameEn,
       titleZh: seed.titleZh,
       titleEn: seed.titleEn,
-      traitZh: seed.traitZh,
-      traitEn: seed.traitEn,
+      traitZh,
+      traitEn,
       primaryColor: seed.colors[0],
       secondaryColor: seed.colors[1],
       glowColor: seed.colors[2],

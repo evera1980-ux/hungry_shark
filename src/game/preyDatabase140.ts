@@ -252,9 +252,76 @@ export const PREY_140_RIGID_IDS = new Set<string>([
 export const PREY_140_PUFFER_IDS = PUFFER_LIKE_IDS;
 
 /**
- * Computes proportional game depth [minDepth, maxDepth] across 0m..20000m,
- * strictly respecting each species' biological survival depth while shifting
- * larger body sizes progressively deeper ("按比例分开，体大的优先靠近深海").
+ * Exact 48-Tier (T1 .. T48) ecological assignment for all 134 real @3x marine species (PREY-001 .. PREY-210).
+ * Ordered by biological sizeClass (XS -> S -> M -> L -> XL -> XXL -> 巨型), maxLengthCm, and habitat depth.
+ * T1..T38 each host 3 species (114 species); T39..T48 each host 2 apex species (20 species) = 134 total.
+ */
+const PREY_140_TIER_GROUPS: string[][] = [
+  /* T1  */ ['PREY-009', 'PREY-003', 'PREY-010'],
+  /* T2  */ ['PREY-014', 'PREY-015', 'PREY-053'],
+  /* T3  */ ['PREY-001', 'PREY-004', 'PREY-059'],
+  /* T4  */ ['PREY-035', 'PREY-008', 'PREY-034'],
+  /* T5  */ ['PREY-045', 'PREY-005', 'PREY-055'],
+  /* T6  */ ['PREY-056', 'PREY-070', 'PREY-044'],
+  /* T7  */ ['PREY-006', 'PREY-007', 'PREY-022'],
+  /* T8  */ ['PREY-050', 'PREY-058', 'PREY-071'],
+  /* T9  */ ['PREY-033', 'PREY-057', 'PREY-002'],
+  /* T10 */ ['PREY-054', 'PREY-072', 'PREY-073'],
+  /* T11 */ ['PREY-075', 'PREY-037', 'PREY-041'],
+  /* T12 */ ['PREY-042', 'PREY-084', 'PREY-087'],
+  /* T13 */ ['PREY-069', 'PREY-046', 'PREY-013'],
+  /* T14 */ ['PREY-036', 'PREY-039', 'PREY-043'],
+  /* T15 */ ['PREY-011', 'PREY-012', 'PREY-051'],
+  /* T16 */ ['PREY-026', 'PREY-025', 'PREY-024'],
+  /* T17 */ ['PREY-052', 'PREY-023', 'PREY-078'],
+  /* T18 */ ['PREY-047', 'PREY-049', 'PREY-032'],
+  /* T19 */ ['PREY-021', 'PREY-027', 'PREY-028'],
+  /* T20 */ ['PREY-040', 'PREY-074', 'PREY-077'],
+  /* T21 */ ['PREY-030', 'PREY-031', 'PREY-038'],
+  /* T22 */ ['PREY-016', 'PREY-019', 'PREY-068'],
+  /* T23 */ ['PREY-099', 'PREY-017', 'PREY-018'],
+  /* T24 */ ['PREY-048', 'PREY-020', 'PREY-065'],
+  /* T25 */ ['PREY-080', 'PREY-082', 'PREY-085'],
+  /* T26 */ ['PREY-086', 'PREY-079', 'PREY-081'],
+  /* T27 */ ['PREY-083', 'PREY-088', 'PREY-076'],
+  /* T28 */ ['PREY-062', 'PREY-060', 'PREY-064'],
+  /* T29 */ ['PREY-066', 'PREY-100', 'PREY-029'],
+  /* T30 */ ['PREY-089', 'PREY-061', 'PREY-116'],
+  /* T31 */ ['PREY-115', 'PREY-098', 'PREY-119'],
+  /* T32 */ ['PREY-130', 'PREY-092', 'PREY-121'],
+  /* T33 */ ['PREY-067', 'PREY-114', 'PREY-094'],
+  /* T34 */ ['PREY-105', 'PREY-108', 'PREY-118'],
+  /* T35 */ ['PREY-129', 'PREY-063', 'PREY-102'],
+  /* T36 */ ['PREY-090', 'PREY-093', 'PREY-095'],
+  /* T37 */ ['PREY-101', 'PREY-091', 'PREY-097'],
+  /* T38 */ ['PREY-103', 'PREY-104', 'PREY-109'],
+  /* T39 */ ['PREY-117', 'PREY-127'],
+  /* T40 */ ['PREY-096', 'PREY-120'],
+  /* T41 */ ['PREY-106', 'PREY-107'],
+  /* T42 */ ['PREY-128', 'PREY-112'],
+  /* T43 */ ['PREY-113', 'PREY-207'],
+  /* T44 */ ['PREY-208', 'PREY-110'],
+  /* T45 */ ['PREY-111', 'PREY-206'],
+  /* T46 */ ['PREY-202', 'PREY-203'],
+  /* T47 */ ['PREY-210', 'PREY-201'],
+  /* T48 */ ['PREY-205', 'PREY-204'],
+];
+
+export const PREY_140_TIER_BY_ID: Record<string, number> = (() => {
+  const map: Record<string, number> = {};
+  PREY_140_TIER_GROUPS.forEach((group, idx) => {
+    const tierNum = idx + 1;
+    for (const id of group) {
+      map[id] = tierNum;
+    }
+  });
+  return map;
+})();
+
+/**
+ * Computes proportional game depth [minDepth, maxDepth] across 0m..20000m and continuous 48-tier stats,
+ * strictly respecting each species' biological survival depth while shifting larger body sizes
+ * progressively deeper ("按比例分开，体大的优先靠近深海").
  */
 export function computeMappedPrey140Config(
   rec: Prey140RawRecord
@@ -264,71 +331,59 @@ export function computeMappedPrey140Config(
     Math.log1p(rec.realMaxDepth) / Math.log1p(1200)
   );
 
+  const tier = PREY_140_TIER_BY_ID[rec.id] ?? 1;
   let minDepth = 25;
   let maxDepth = 400;
-  let tier = 1;
 
   if (rec.realMinDepth >= 50) {
-    // Mesopelagic / Bathypelagic true deep-sea species: never spawn in <= 520m shallow coral sanctuary
+    // Mesopelagic / Bathypelagic true deep-sea species: never spawn in <= 520m shallow coral sanctuary.
+    // Small bioluminescent companion species (XS/S/M) span down to 20,000m to sustain the deep-sea food chain.
     const sizeWeight =
       rec.sizeClass === 'XS'
         ? 0
         : rec.sizeClass === 'S'
-        ? 0.25
+        ? 0.22
         : rec.sizeClass === 'M'
-        ? 0.55
-        : 0.85;
+        ? 0.48
+        : 0.78;
     const minNorm = Math.min(1, (rec.realMinDepth - 50) / 450);
-    const maxNorm = Math.min(1, Math.max(0, (rec.realMaxDepth - 500) / 1500));
-    minDepth = Math.round(540 + minNorm * 1650 + sizeWeight * 850);
-    maxDepth =
-      rec.realMaxDepth >= 2000
-        ? 20000
-        : Math.round(
-            Math.min(20000, 3600 + maxNorm * 13000 + sizeWeight * 3400)
-          );
-    tier = rec.sizeClass === 'XS' ? 2 : rec.sizeClass === 'S' ? 3 : 4;
+    minDepth = Math.round(540 + minNorm * 950 + sizeWeight * 650);
+    maxDepth = 20000;
   } else {
     switch (rec.sizeClass) {
       case 'XS': {
         const lenNorm = Math.min(1, rec.maxLengthCm / 15);
         minDepth = Math.round(25 + depthFactor * 30 + lenNorm * 15);
         maxDepth = Math.round(330 + depthFactor * 160 + lenNorm * 40);
-        tier = 1;
         break;
       }
       case 'S': {
         const lenNorm = Math.min(1, rec.maxLengthCm / 30);
-        minDepth = Math.round(45 + depthFactor * 110 + lenNorm * 40);
-        maxDepth = Math.round(430 + depthFactor * 240 + lenNorm * 90);
-        tier = rec.maxLengthCm <= 20 && rec.realMaxDepth <= 50 ? 1 : 2;
+        minDepth = Math.round(95 + depthFactor * 180 + lenNorm * 70);
+        maxDepth = Math.round(880 + depthFactor * 850 + lenNorm * 320);
         break;
       }
       case 'M': {
         const lenNorm = Math.min(1, rec.maxLengthCm / 70);
         minDepth = Math.round(115 + depthFactor * 230 + lenNorm * 90);
         maxDepth = Math.round(490 + depthFactor * 1050 + lenNorm * 320);
-        tier = rec.realMaxDepth <= 100 && rec.maxLengthCm <= 45 ? 2 : 3;
         break;
       }
       case 'L': {
         const lenNorm = Math.min(1, rec.maxLengthCm / 300);
         const rawMin = Math.round(320 + depthFactor * 420 + lenNorm * 220);
-        tier = rec.realMaxDepth <= 200 && rec.maxLengthCm < 120 ? 3 : 4;
-        minDepth = tier >= 4 ? Math.max(540, rawMin) : rawMin;
+        minDepth = tier >= 30 ? Math.max(540, rawMin) : rawMin;
         maxDepth = Math.round(1350 + depthFactor * 2900 + lenNorm * 1200);
         break;
       }
       case 'XL': {
         const lenNorm = Math.min(1, rec.maxLengthCm / 400);
-        tier = rec.maxLengthCm >= 250 || rec.realMaxDepth >= 300 ? 6 : 5;
         minDepth = Math.round(640 + depthFactor * 950 + lenNorm * 580);
         maxDepth = Math.round(2800 + depthFactor * 7200 + lenNorm * 2800);
         break;
       }
       case 'XXL': {
         const lenNorm = Math.min(1, rec.maxLengthCm / 800);
-        tier = rec.maxLengthCm >= 400 || rec.realMaxDepth >= 250 ? 7 : 6;
         minDepth = Math.round(1650 + depthFactor * 2500 + lenNorm * 1150);
         maxDepth =
           rec.realMaxDepth >= 1000
@@ -340,7 +395,6 @@ export function computeMappedPrey140Config(
       }
       case '巨型': {
         const lenNorm = Math.min(1, rec.maxLengthCm / 2500);
-        tier = 8;
         minDepth = Math.round(4200 + depthFactor * 2300 + lenNorm * 2100);
         maxDepth =
           rec.maxLengthCm >= 1500 || rec.realMaxDepth >= 1000
@@ -354,7 +408,7 @@ export function computeMappedPrey140Config(
   }
 
   const isApexGiantBoss =
-    tier === 8 &&
+    tier >= 45 &&
     (rec.id === 'PREY-201' ||
       rec.id === 'PREY-204' ||
       rec.id === 'PREY-205' ||
@@ -365,27 +419,29 @@ export function computeMappedPrey140Config(
     behavior = 'PUFFER_INFLATE';
   } else if (isApexGiantBoss) {
     behavior = 'KRAKEN_BOSS';
-  } else if (tier >= 5) {
+  } else if (tier >= 29 && minDepth >= 540) {
     behavior = 'HEAVY_CRUISER';
-  } else if (tier === 4 && minDepth >= 540) {
-    behavior =
-      rec.id === 'PREY-079' || rec.id === 'PREY-081' || rec.id === 'PREY-083'
-        ? 'EEL_CHARGER'
-        : 'SUB_PATROL';
-  } else if (tier === 4) {
+  } else if (
+    minDepth >= 540 &&
+    (rec.id === 'PREY-079' || rec.id === 'PREY-081' || rec.id === 'PREY-083')
+  ) {
+    behavior = 'EEL_CHARGER';
+  } else if (tier >= 20 && minDepth >= 540) {
     behavior = 'SUB_PATROL';
   }
 
-  const radiusByTier = [17, 20, 25, 31, 39, 47, 56, 68];
-  const speedByTier = [64, 72, 78, 84, 92, 102, 108, 114];
-  const hpByTier = [9, 12, 16, 22, 30, 42, 65, 110];
-  const xpByTier = [15, 22, 34, 52, 82, 125, 220, 480];
-  const scoreByTier = [55, 90, 165, 290, 480, 760, 1350, 3200];
-  const geneByTier = [1, 1, 2, 4, 7, 11, 18, 30];
-  const coinByTier = [3, 5, 10, 16, 26, 40, 68, 125];
-  const dmgByTier = [0, 5, 10, 15, 22, 30, 40, 52];
+  // Continuous 48-Tier (T1 .. T48) attribute progression curves
+  const u = Math.max(0, Math.min(1, (tier - 1) / 47));
+  const radius = Math.round(14 + 48 * Math.pow(u, 1.12));
+  const baseSpeed = Math.round(64 + 54 * Math.pow(u, 0.78));
+  const hpRestore = Math.round(6 + 68 * Math.pow(u, 1.25));
+  const xpValue = Math.round(7 + 420 * Math.pow(u, 1.65));
+  const scoreValue = Math.round(15 + 2800 * Math.pow(u, 1.85));
+  const coinValue = Math.round(1 + 95 * Math.pow(u, 1.55));
+  const geneValue = Math.max(1, Math.round(1 + 28 * Math.pow(u, 1.6)));
+  const damageOnFail =
+    tier === 1 ? 0 : Math.round(7 + 88 * Math.pow(u, 1.35));
 
-  const idx = Math.max(0, Math.min(7, tier - 1));
   const palette = getPaletteForSizeAndDepth(rec.sizeClass, minDepth);
 
   return {
@@ -394,14 +450,14 @@ export function computeMappedPrey140Config(
     nameKey: `prey_140_${rec.id}`,
     minDepth,
     maxDepth,
-    radius: radiusByTier[idx],
-    baseSpeed: speedByTier[idx],
-    hpRestore: hpByTier[idx],
-    xpValue: xpByTier[idx],
-    scoreValue: scoreByTier[idx],
-    geneValue: geneByTier[idx],
-    coinValue: coinByTier[idx],
-    damageOnFail: dmgByTier[idx],
+    radius,
+    baseSpeed,
+    hpRestore,
+    xpValue,
+    scoreValue,
+    geneValue,
+    coinValue,
+    damageOnFail,
     behavior,
     primaryColor: palette.primary,
     secondaryColor: palette.secondary,
@@ -434,7 +490,7 @@ function getPaletteForSizeAndDepth(
 export function buildPrey140TiersWithMines(): PreyTierConfig[] {
   const mapped140 = PREY_140_RECORDS.map(computeMappedPrey140Config);
   const cyberMine: PreyTierConfig = {
-    tier: 6,
+    tier: 36,
     id: 'cyber_mine',
     nameKey: 'prey_tier6_name',
     spriteKey: 'PREY_MINE',
@@ -447,7 +503,7 @@ export function buildPrey140TiersWithMines(): PreyTierConfig[] {
     scoreValue: 550,
     geneValue: 6,
     coinValue: 22,
-    damageOnFail: 28,
+    damageOnFail: 35,
     behavior: 'MINE_HAZARD',
     primaryColor: '#475569',
     secondaryColor: '#ef4444',

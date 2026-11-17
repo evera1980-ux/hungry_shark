@@ -94,7 +94,7 @@ export function getEffectivePreyTier(
   mutationVariant: PreyMutationVariant = 'NONE'
 ): number {
   if (mutationVariant === 'ABYSS_BEHEMOTH') {
-    return Math.min(8, prey.tier + 1);
+    return Math.min(50, prey.tier + 1);
   }
   return prey.tier;
 }
@@ -151,8 +151,9 @@ export function getPreyRelativeVisualScale(
 
   if (canDevourNormally) {
     // Edible fish: strictly smaller than the player's shark (<= 64% of shark's linear size)
+    // Smooth 48-tier decay (0.955^tierDiff) so lower-tier fish shrink gradually across T1..T48
     const tierDiff = Math.max(0, visualBiteTier - effectiveTier);
-    const tierRatio = Math.max(0.18, 0.64 * Math.pow(0.79, tierDiff));
+    const tierRatio = Math.max(0.18, 0.64 * Math.pow(0.955, tierDiff));
     const levelShrink = 0.64 + 0.36 * baseRel;
     const targetSharkRatio = Math.max(
       0.16,
@@ -163,13 +164,19 @@ export function getPreyRelativeVisualScale(
     );
   }
 
-  // Inedible / dangerous fish (or giant prey during Gold Frenzy): strictly >= 118% of shark's linear size
+  // Inedible / armor-crushable / deadly predator fish: strictly >= 118% of shark's linear size
   const overTier = Math.max(1, effectiveTier - visualBiteTier);
-  const behemothExtra = mutationVariant === 'ABYSS_BEHEMOTH' ? 0.12 : 0;
-  const bossExtra = prey.isBoss ? 0.14 : 0;
+  const behemothExtra = mutationVariant === 'ABYSS_BEHEMOTH' ? 0.08 : 0;
+  const bossExtra = prey.isBoss ? 0.12 : 0;
+  // +1T..+3T (Boost Armor-Crushable): 118% .. 130% of shark size
+  // >= +4T (Deadly Apex Predator): 138% .. 195% of shark size
+  const baseDangerRatio =
+    !prey.isHazard && overTier <= 3
+      ? 1.18 + (overTier - 1) * 0.06
+      : 1.38 + Math.max(0, overTier - 4) * 0.045;
   const targetDangerRatio = Math.min(
     1.95,
-    1.18 + (overTier - 1) * 0.17 + behemothExtra + bossExtra
+    baseDangerRatio + behemothExtra + bossExtra
   );
   return Number(
     (sharkParityScale * targetDangerRatio * debugPreySizeMultiplier).toFixed(3)
@@ -545,20 +552,21 @@ export function computeEvolvedSharkStats(
   const upgradeSpeedBonus = (upLv - 1) * 0.022;
   const upgradeDrainRed = (upLv - 1) * 0.015;
   const upgradeBoostRed = (upLv - 1) * 0.018;
-  const upgradeBiteBonus = upLv >= 10 ? 2 : upLv >= 5 ? 1 : 0;
+  // Body upgrade (Lv.1..10) grants up to +3 Bite Tiers (+1T at Lv.3, +2T at Lv.6, +3T at Lv.10)
+  const upgradeBiteBonus =
+    upLv >= 10 ? 3 : upLv >= 6 ? 2 : upLv >= 3 ? 1 : 0;
 
-  // In-run level Bite Tier growth (capped by generation ceiling so evolving to higher generations unlocks higher prey tiers!)
+  // In-run level grants up to +3 Bite Tiers (+1T at Lv.2, +2T at Lv.5, +3T at Lv.9)
+  // Combined with upgradeBiteBonus (0..3), a single shark can grow by up to +6 Bite Tiers (cross-generation hunting!)
   const inRunBiteBonus =
-    form.index === 0 && inRunLevel >= 2
-      ? 1 + Math.floor((inRunLevel - 2) / 3)
-      : Math.floor((inRunLevel - 1) / 3);
-  const genMaxBiteTier = Math.min(8, form.baseBiteTier + 2);
+    inRunLevel >= 9 ? 3 : inRunLevel >= 5 ? 2 : inRunLevel >= 2 ? 1 : 0;
+  const genMaxBiteTier = Math.min(48, form.baseBiteTier + 6);
   const rawBiteTier = Math.min(
     genMaxBiteTier,
     form.baseBiteTier + upgradeBiteBonus + inRunBiteBonus
   );
-  const normalBiteTier = Math.min(8, rawBiteTier);
-  const biteTier = frenzyActive ? 8 : normalBiteTier;
+  const normalBiteTier = Math.min(48, rawBiteTier);
+  const biteTier = frenzyActive ? 48 : normalBiteTier;
 
   // Non-obstructive shark scale (1.0 -> 1.28) + progressive relative prey shrinking (1.0 -> 0.40)
   const scale = Number(
@@ -768,6 +776,8 @@ export function computeEvolvedSharkStats(
 
 export interface EncounterOutcome {
   canDevour: boolean;
+  isArmorCrush?: boolean;
+  encounterState?: 'DEVOUR' | 'ARMOR_CRUSH' | 'NEED_BOOST' | 'DEADLY_PREDATOR';
   hpDelta: number;
   xpGain: number;
   scoreGain: number;
@@ -787,33 +797,55 @@ export function resolvePreyEncounter(
   globalDifficultyMultiplier: number = 1.0
 ): EncounterOutcome {
   const effectiveTier = getEffectivePreyTier(prey, mutationVariant);
+  const tierDiff = effectiveTier - sharkStats.biteTier;
 
-  // In 48-Shark Evolution mode (sharkFormId defined), any fish smaller than the shark (effectiveTier <= biteTier) is directly devourable on contact.
-  // Legacy organ mode (!sharkFormId) retains the boost armor-break requirement for unit test compatibility.
-  const requiresBoostArmorBreak =
-    !sharkStats.sharkFormId &&
-    ((mutationVariant === 'ABYSS_BEHEMOTH' && prey.tier >= 7) || Boolean(prey.isBoss));
-  const predatorGate = requiresBoostArmorBreak
-    ? frenzyActive || (sharkStats.biteTier >= Math.min(8, effectiveTier) && isBoosting)
-    : sharkStats.biteTier >= effectiveTier;
+  // In 48-Shark Evolution mode (sharkFormId defined):
+  // - tierDiff <= 0: Direct Devour (DEVOUR)
+  // - 1 <= tierDiff <= 3: Boost Armor-Crush (ARMOR_CRUSH when isBoosting, NEED_BOOST when not boosting)
+  // - tierDiff >= 4: Deadly Apex Predator (DEADLY_PREDATOR — unbreakable even when boosting, must evade!)
+  const is48SharkMode = Boolean(sharkStats.sharkFormId);
+  const isArmorCrushBand =
+    !prey.isHazard && tierDiff >= 1 && tierDiff <= 3;
 
-  // Deep-sea hazards (Naval Mines, Toxic Slime, Plasma Core) ALWAYS explode on contact unless Gold Frenzy is active or shark has Bio-Venom / Elder God Mine Immunity!
+  let predatorGate = false;
+  let isArmorCrush = false;
+  if (is48SharkMode) {
+    if (tierDiff <= 0) {
+      predatorGate = true;
+    } else if (isArmorCrushBand && isBoosting) {
+      predatorGate = true;
+      isArmorCrush = true;
+    }
+  } else {
+    // Legacy organ mode (!sharkFormId) retains boss/behemoth boost armor-break requirement for unit test compatibility
+    const requiresBoostArmorBreak =
+      (mutationVariant === 'ABYSS_BEHEMOTH' && prey.tier >= 7) ||
+      Boolean(prey.isBoss);
+    predatorGate = requiresBoostArmorBreak
+      ? frenzyActive || (sharkStats.biteTier >= Math.min(8, effectiveTier) && isBoosting)
+      : sharkStats.biteTier >= effectiveTier;
+  }
+
+  // Deep-sea hazards (Naval Mines) ALWAYS explode on contact unless Gold Frenzy is active or shark has Bio-Venom / Elder God Mine Immunity!
   const canDevour = prey.isHazard
     ? frenzyActive || Boolean(sharkStats.canEatMines)
     : frenzyActive || predatorGate;
 
   if (canDevour) {
     const isCrit =
-      frenzyActive || isBoosting || prey.tier >= 3 || mutationVariant !== 'NONE';
+      frenzyActive ||
+      isBoosting ||
+      isArmorCrush ||
+      prey.tier >= 10 ||
+      mutationVariant !== 'NONE';
     const mult = frenzyActive ? 2 : 1;
+    const armorCrushMult = isArmorCrush && !frenzyActive ? 1.35 : 1.0;
+
     let floatTextKey = 'float_devour';
     if (prey.isBoss) floatTextKey = 'float_boss_kill';
     else if (prey.isHazard) floatTextKey = 'float_mine_crunch';
-    else if (
-      prey.tier === 3 ||
-      frenzyActive ||
-      mutationVariant === 'GOLDEN_MUTANT'
-    )
+    else if (isArmorCrush) floatTextKey = 'float_armor_crush';
+    else if (frenzyActive || mutationVariant === 'GOLDEN_MUTANT')
       floatTextKey = 'float_gold_rush';
     else if (isCrit) floatTextKey = 'float_crit';
 
@@ -821,7 +853,7 @@ export function resolvePreyEncounter(
     // Scale normal hunting XP to 55% and Gold Frenzy XP to 22% so level-ups are well-paced and never spam the player
     const dampedXpGain = frenzyActive
       ? Math.max(2, Math.round(prey.xpValue * 0.22))
-      : Math.max(3, Math.round(prey.xpValue * 0.55));
+      : Math.max(3, Math.round(prey.xpValue * 0.55 * armorCrushMult));
 
     const scoreMult = sharkStats.scoreMultiplier ?? 1.0;
     const bossBonus = prey.isBoss ? sharkStats.bossRewardMultiplier ?? 1.0 : 1.0;
@@ -832,13 +864,22 @@ export function resolvePreyEncounter(
 
     return {
       canDevour: true,
+      isArmorCrush,
+      encounterState: isArmorCrush ? 'ARMOR_CRUSH' : 'DEVOUR',
       hpDelta: Math.round(prey.hpRestore * healMult),
       xpGain: dampedXpGain,
       scoreGain: Math.round(
-        prey.scoreValue * mult * scoreMult * bossBonus * goldenSpecialBonus
+        prey.scoreValue *
+          mult *
+          armorCrushMult *
+          scoreMult *
+          bossBonus *
+          goldenSpecialBonus
       ),
       geneGain: Math.round(prey.geneValue * mult * bossBonus),
-      coinGain: Math.round(prey.coinValue * mult * bossBonus),
+      coinGain: Math.round(
+        prey.coinValue * mult * armorCrushMult * bossBonus
+      ),
       knockbackForce: 0,
       floatTextKey,
       isCrit,
@@ -849,12 +890,14 @@ export function resolvePreyEncounter(
   const behemothDamageMult = mutationVariant === 'ABYSS_BEHEMOTH' ? 1.35 : 1.0;
   const maxHpPercentPenalty = prey.isHazard
     ? Math.round(sharkStats.maxHp * 0.14)
-    : prey.tier >= 6 || mutationVariant === 'ABYSS_BEHEMOTH'
+    : prey.tier >= 30 || mutationVariant === 'ABYSS_BEHEMOTH'
     ? Math.round(sharkStats.maxHp * 0.08)
     : 0;
+  const needBoostDamping = is48SharkMode && isArmorCrushBand ? 0.85 : 1.0;
   const rawFailDamage =
     Math.round(
       prey.damageOnFail *
+        needBoostDamping *
         behemothDamageMult *
         Math.max(1.0, globalDifficultyMultiplier)
     ) + maxHpPercentPenalty;
@@ -866,18 +909,26 @@ export function resolvePreyEncounter(
     Math.round(rawFailDamage * armorMitigation)
   );
   const knockbackForce = Math.round(
-    (prey.isHazard ? 440 : 300) * (sharkStats.knockbackMultiplier ?? 1.0)
+    (prey.isHazard ? 440 : is48SharkMode && isArmorCrushBand ? 260 : 320) *
+      (sharkStats.knockbackMultiplier ?? 1.0)
   );
 
   return {
     canDevour: false,
+    isArmorCrush: false,
+    encounterState:
+      is48SharkMode && isArmorCrushBand ? 'NEED_BOOST' : 'DEADLY_PREDATOR',
     hpDelta: -scaledFailDamage,
     xpGain: 0,
     scoreGain: 0,
     geneGain: 0,
     coinGain: 0,
     knockbackForce,
-    floatTextKey: prey.isHazard ? 'float_mine_hit' : 'float_too_big',
+    floatTextKey: prey.isHazard
+      ? 'float_mine_hit'
+      : is48SharkMode && isArmorCrushBand
+      ? 'float_need_boost'
+      : 'float_too_big',
     isCrit: false,
   };
 }
