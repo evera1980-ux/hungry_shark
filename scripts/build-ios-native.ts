@@ -11570,7 +11570,14 @@ function generatePbxproj(assetFiles: string[] = []): string {
     .map((f, i) => {
       const idxHex = String(i + 1).padStart(4, '0');
       const fileType = f.endsWith('.jpg') ? 'image.jpeg' : 'image.png';
-      return `\t\tB200${idxHex}2B00000000000001 /* ${f} */ = {isa = PBXFileReference; lastKnownFileType = ${fileType}; name = "${f}"; path = "Resources/Assets/${f}"; sourceTree = "<group>"; };`;
+      return `\t\tB200${idxHex}2B00000000000001 /* ${f} */ = {isa = PBXFileReference; lastKnownFileType = ${fileType}; name = "${f}"; path = "HungrySharkEvolution/Resources/Assets/${f}"; sourceTree = SOURCE_ROOT; };`;
+    })
+    .join('\n');
+
+  const assetGroupChildren = sortedAssets
+    .map((f, i) => {
+      const idxHex = String(i + 1).padStart(4, '0');
+      return `\t\t\t\tB200${idxHex}2B00000000000001 /* ${f} */,`;
     })
     .join('\n');
 
@@ -11647,9 +11654,18 @@ ${assetFileRefs}
 				A20000062B00000000000001 /* ContentView.swift */,
 				A20000102B00000000000001 /* Assets.xcassets */,
 				A20000072B00000000000001 /* Assets */,
+				A40000042B00000000000001 /* BundledAssets */,
 				A20000082B00000000000001 /* Info.plist */,
 			);
 			path = HungrySharkEvolution;
+			sourceTree = "<group>";
+		};
+		A40000042B00000000000001 /* BundledAssets */ = {
+			isa = PBXGroup;
+			children = (
+${assetGroupChildren}
+			);
+			name = BundledAssets;
 			sourceTree = "<group>";
 		};
 		A40000032B00000000000001 /* Products */ = {

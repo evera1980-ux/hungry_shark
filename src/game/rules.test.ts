@@ -3420,6 +3420,10 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
       pbxContent.includes(`/* ${file} in Resources */`),
       `Asset ${file} is not registered in project.pbxproj PBXResourcesBuildPhase`
     );
+    assert.ok(
+      pbxContent.includes(`path = "HungrySharkEvolution/Resources/Assets/${file}"; sourceTree = SOURCE_ROOT;`),
+      `Asset ${file} PBXFileReference must resolve to HungrySharkEvolution/Resources/Assets/${file} via SOURCE_ROOT`
+    );
   }
 });
 
