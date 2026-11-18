@@ -38,6 +38,8 @@ targets:
         INFOPLIST_FILE: HungrySharkEvolution/Info.plist
         DEVELOPMENT_TEAM: 3N2FUK7M23
         CODE_SIGN_STYLE: Automatic
+        COMPRESS_PNG_FILES: NO
+        STRIP_PNG_TEXT: NO
         INFOPLIST_KEY_CFBundleDisplayName: "deepsea:evolution"
         INFOPLIST_KEY_GADApplicationIdentifier: "ca-app-pub-9273669553362347~9016886171"
         INFOPLIST_KEY_GADIsAdManagerApp: YES
