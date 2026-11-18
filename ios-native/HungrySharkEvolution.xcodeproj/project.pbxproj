@@ -238,12 +238,10 @@
 		B10002202B00000000000001 /* shark_form_46@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20002202B00000000000001 /* shark_form_46@3x.png */; };
 		B10002212B00000000000001 /* shark_form_47@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20002212B00000000000001 /* shark_form_47@3x.png */; };
 		B10002222B00000000000001 /* sharks_ec921c3b.png in Resources */ = {isa = PBXBuildFile; fileRef = B20002222B00000000000001 /* sharks_ec921c3b.png */; };
-		B10002232B00000000000001 /* title2_dbfd9f83.png in Resources */ = {isa = PBXBuildFile; fileRef = B20002232B00000000000001 /* title2_dbfd9f83.png */; };
-		B10002242B00000000000001 /* title3_cae0290c.png in Resources */ = {isa = PBXBuildFile; fileRef = B20002242B00000000000001 /* title3_cae0290c.png */; };
-		B10002252B00000000000001 /* title_11de9fff.png in Resources */ = {isa = PBXBuildFile; fileRef = B20002252B00000000000001 /* title_11de9fff.png */; };
-		B10002262B00000000000001 /* world_ecology_atlas_1794473252524.jpg in Resources */ = {isa = PBXBuildFile; fileRef = B20002262B00000000000001 /* world_ecology_atlas_1794473252524.jpg */; };
-		B10002272B00000000000001 /* world_pois_atlas_1794473250443.jpg in Resources */ = {isa = PBXBuildFile; fileRef = B20002272B00000000000001 /* world_pois_atlas_1794473250443.jpg */; };
-		B10002282B00000000000001 /* world_seabed_strips_1794473245165.jpg in Resources */ = {isa = PBXBuildFile; fileRef = B20002282B00000000000001 /* world_seabed_strips_1794473245165.jpg */; };
+		B10002232B00000000000001 /* title3_cae0290c.png in Resources */ = {isa = PBXBuildFile; fileRef = B20002232B00000000000001 /* title3_cae0290c.png */; };
+		B10002242B00000000000001 /* world_ecology_atlas_1794473252524.jpg in Resources */ = {isa = PBXBuildFile; fileRef = B20002242B00000000000001 /* world_ecology_atlas_1794473252524.jpg */; };
+		B10002252B00000000000001 /* world_pois_atlas_1794473250443.jpg in Resources */ = {isa = PBXBuildFile; fileRef = B20002252B00000000000001 /* world_pois_atlas_1794473250443.jpg */; };
+		B10002262B00000000000001 /* world_seabed_strips_1794473245165.jpg in Resources */ = {isa = PBXBuildFile; fileRef = B20002262B00000000000001 /* world_seabed_strips_1794473245165.jpg */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -479,12 +477,10 @@
 		B20002202B00000000000001 /* shark_form_46@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "shark_form_46@3x.png"; path = "HungrySharkEvolution/Resources/Assets/shark_form_46@3x.png"; sourceTree = SOURCE_ROOT; };
 		B20002212B00000000000001 /* shark_form_47@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "shark_form_47@3x.png"; path = "HungrySharkEvolution/Resources/Assets/shark_form_47@3x.png"; sourceTree = SOURCE_ROOT; };
 		B20002222B00000000000001 /* sharks_ec921c3b.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "sharks_ec921c3b.png"; path = "HungrySharkEvolution/Resources/Assets/sharks_ec921c3b.png"; sourceTree = SOURCE_ROOT; };
-		B20002232B00000000000001 /* title2_dbfd9f83.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "title2_dbfd9f83.png"; path = "HungrySharkEvolution/Resources/Assets/title2_dbfd9f83.png"; sourceTree = SOURCE_ROOT; };
-		B20002242B00000000000001 /* title3_cae0290c.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "title3_cae0290c.png"; path = "HungrySharkEvolution/Resources/Assets/title3_cae0290c.png"; sourceTree = SOURCE_ROOT; };
-		B20002252B00000000000001 /* title_11de9fff.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "title_11de9fff.png"; path = "HungrySharkEvolution/Resources/Assets/title_11de9fff.png"; sourceTree = SOURCE_ROOT; };
-		B20002262B00000000000001 /* world_ecology_atlas_1794473252524.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; name = "world_ecology_atlas_1794473252524.jpg"; path = "HungrySharkEvolution/Resources/Assets/world_ecology_atlas_1794473252524.jpg"; sourceTree = SOURCE_ROOT; };
-		B20002272B00000000000001 /* world_pois_atlas_1794473250443.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; name = "world_pois_atlas_1794473250443.jpg"; path = "HungrySharkEvolution/Resources/Assets/world_pois_atlas_1794473250443.jpg"; sourceTree = SOURCE_ROOT; };
-		B20002282B00000000000001 /* world_seabed_strips_1794473245165.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; name = "world_seabed_strips_1794473245165.jpg"; path = "HungrySharkEvolution/Resources/Assets/world_seabed_strips_1794473245165.jpg"; sourceTree = SOURCE_ROOT; };
+		B20002232B00000000000001 /* title3_cae0290c.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "title3_cae0290c.png"; path = "HungrySharkEvolution/Resources/Assets/title3_cae0290c.png"; sourceTree = SOURCE_ROOT; };
+		B20002242B00000000000001 /* world_ecology_atlas_1794473252524.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; name = "world_ecology_atlas_1794473252524.jpg"; path = "HungrySharkEvolution/Resources/Assets/world_ecology_atlas_1794473252524.jpg"; sourceTree = SOURCE_ROOT; };
+		B20002252B00000000000001 /* world_pois_atlas_1794473250443.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; name = "world_pois_atlas_1794473250443.jpg"; path = "HungrySharkEvolution/Resources/Assets/world_pois_atlas_1794473250443.jpg"; sourceTree = SOURCE_ROOT; };
+		B20002262B00000000000001 /* world_seabed_strips_1794473245165.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; name = "world_seabed_strips_1794473245165.jpg"; path = "HungrySharkEvolution/Resources/Assets/world_seabed_strips_1794473245165.jpg"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -749,12 +745,10 @@
 				B20002202B00000000000001 /* shark_form_46@3x.png */,
 				B20002212B00000000000001 /* shark_form_47@3x.png */,
 				B20002222B00000000000001 /* sharks_ec921c3b.png */,
-				B20002232B00000000000001 /* title2_dbfd9f83.png */,
-				B20002242B00000000000001 /* title3_cae0290c.png */,
-				B20002252B00000000000001 /* title_11de9fff.png */,
-				B20002262B00000000000001 /* world_ecology_atlas_1794473252524.jpg */,
-				B20002272B00000000000001 /* world_pois_atlas_1794473250443.jpg */,
-				B20002282B00000000000001 /* world_seabed_strips_1794473245165.jpg */,
+				B20002232B00000000000001 /* title3_cae0290c.png */,
+				B20002242B00000000000001 /* world_ecology_atlas_1794473252524.jpg */,
+				B20002252B00000000000001 /* world_pois_atlas_1794473250443.jpg */,
+				B20002262B00000000000001 /* world_seabed_strips_1794473245165.jpg */,
 			);
 			name = BundledAssets;
 			sourceTree = "<group>";
@@ -1051,12 +1045,10 @@
 				B10002202B00000000000001 /* shark_form_46@3x.png in Resources */,
 				B10002212B00000000000001 /* shark_form_47@3x.png in Resources */,
 				B10002222B00000000000001 /* sharks_ec921c3b.png in Resources */,
-				B10002232B00000000000001 /* title2_dbfd9f83.png in Resources */,
-				B10002242B00000000000001 /* title3_cae0290c.png in Resources */,
-				B10002252B00000000000001 /* title_11de9fff.png in Resources */,
-				B10002262B00000000000001 /* world_ecology_atlas_1794473252524.jpg in Resources */,
-				B10002272B00000000000001 /* world_pois_atlas_1794473250443.jpg in Resources */,
-				B10002282B00000000000001 /* world_seabed_strips_1794473245165.jpg in Resources */,
+				B10002232B00000000000001 /* title3_cae0290c.png in Resources */,
+				B10002242B00000000000001 /* world_ecology_atlas_1794473252524.jpg in Resources */,
+				B10002252B00000000000001 /* world_pois_atlas_1794473250443.jpg in Resources */,
+				B10002262B00000000000001 /* world_seabed_strips_1794473245165.jpg in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

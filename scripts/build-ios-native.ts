@@ -316,6 +316,7 @@ public enum PreyMutationVariant: String, Codable, Sendable {
 public enum EncounterOutcome: String, Sendable {
     case DEVOUR
     case ARMOR_CRUSH
+    case NEED_BOOST
     case DAMAGE
 }
 
@@ -2287,19 +2288,14 @@ public enum GameRules {
         let upgradeSpeedBonus = Double(upLv - 1) * 0.022
         let upgradeDrainRed = Double(upLv - 1) * 0.015
         let upgradeBoostRed = Double(upLv - 1) * 0.018
-        let upgradeBiteBonus = upLv >= 10 ? 2 : (upLv >= 5 ? 1 : 0)
+        let upgradeBiteBonus = upLv >= 10 ? 3 : (upLv >= 6 ? 2 : (upLv >= 3 ? 1 : 0))
 
-        let inRunBiteBonus: Int
-        if form.index == 0 && inRunLevel >= 2 {
-            inRunBiteBonus = 1 + (inRunLevel - 2) / 3
-        } else {
-            inRunBiteBonus = max(0, (inRunLevel - 1) / 3)
-        }
+        let inRunBiteBonus = inRunLevel >= 9 ? 3 : (inRunLevel >= 5 ? 2 : (inRunLevel >= 2 ? 1 : 0))
 
-        let genMaxBiteTier = min(8, form.baseBiteTier + 2)
+        let genMaxBiteTier = min(48, form.baseBiteTier + 6)
         let rawBiteTier = min(genMaxBiteTier, form.baseBiteTier + upgradeBiteBonus + inRunBiteBonus)
-        let normalBiteTier = min(8, rawBiteTier)
-        let biteTier = frenzyActive ? 8 : normalBiteTier
+        let normalBiteTier = min(48, rawBiteTier)
+        let biteTier = frenzyActive ? 48 : normalBiteTier
 
         let scale = min(
             1.28,
@@ -2327,9 +2323,13 @@ public enum GameRules {
         let maxHp = (form.baseHp + Double(inRunLevel - 1) * 16.0) * upgradeHpMult * collectionHpMult
         let maxEnergy = form.baseEnergy + Double(upLv - 1) * 5.0 + Double(inRunLevel - 1) * 4.0
 
-        let jawSuctionMultiplier: Double = form.lineage == .APEX_BIO ? 1.18 : 1.0
+        let jawSuctionMultiplier: Double = form.id == "shark_34_dark_matter" ? 2.0
+            : (form.id == "shark_20_goblin_jaw" ? 1.4
+            : (form.id == "shark_12_starry_whale" ? 1.35
+            : (form.id == "shark_19_thresher_shark" || form.id == "shark_15_abyss_tentacle" ? 1.25
+            : (form.lineage == .APEX_BIO ? 1.18 : 1.0))))
         let baseRewardMult = collectionRewardMult * (1.0 + Double(form.row) * 0.12)
-        let canEatMines = form.row >= 5 && (form.lineage == .CYBER_MECHA || form.lineage == .ELDER_ABYSS || form.id == "shark_47_omega_devourer")
+        let canEatMines = form.id == "shark_25_bio_venom" || form.generation >= 6
 
         return ComputedSharkStats(
             level: inRunLevel,
@@ -2362,27 +2362,30 @@ public enum GameRules {
         sharkStats: ComputedSharkStats,
         mutationVariant: PreyMutationVariant = .NONE
     ) -> Double {
-        let effectiveTier = mutationVariant == .ABYSS_BEHEMOTH ? min(8, prey.tier + 1) : prey.tier
+        let effectiveTier = mutationVariant == .ABYSS_BEHEMOTH ? min(50, prey.tier + 1) : prey.tier
         let visualBiteTier = sharkStats.normalBiteTier
         let canDevourNormally = prey.isHazard ? sharkStats.canEatMines : (visualBiteTier >= effectiveTier)
         let sharkParityScale = (sharkEquivalentRadius * sharkStats.scale) / max(1.0, prey.radius)
 
         if canDevourNormally {
             let tierDiff = Double(max(0, visualBiteTier - effectiveTier))
-            let tierRatio = max(0.18, 0.64 * pow(0.79, tierDiff))
+            let tierRatio = max(0.18, 0.64 * pow(0.955, tierDiff))
             let levelShrink = 0.64 + 0.36 * sharkStats.relativePreyScale
             let targetSharkRatio = max(0.16, min(0.64, tierRatio * levelShrink))
             return sharkParityScale * targetSharkRatio * defaultPreySizeMultiplier
         } else {
             let overTier = Double(max(1, effectiveTier - visualBiteTier))
-            let behemothExtra = mutationVariant == .ABYSS_BEHEMOTH ? 0.12 : 0.0
-            let bossExtra = prey.isBoss ? 0.14 : 0.0
-            let targetDangerRatio = min(1.95, 1.18 + (overTier - 1.0) * 0.17 + behemothExtra + bossExtra)
+            let behemothExtra = mutationVariant == .ABYSS_BEHEMOTH ? 0.08 : 0.0
+            let bossExtra = prey.isBoss ? 0.12 : 0.0
+            let baseDangerRatio = !prey.isHazard && overTier <= 3.0
+                ? 1.18 + (overTier - 1.0) * 0.06
+                : 1.38 + max(0.0, overTier - 4.0) * 0.045
+            let targetDangerRatio = min(1.95, baseDangerRatio + behemothExtra + bossExtra)
             return sharkParityScale * targetDangerRatio * defaultPreySizeMultiplier
         }
     }
 
-    /// Collision encounter resolution (DEVOUR vs ARMOR_CRUSH vs DAMAGE)
+    /// Collision encounter resolution (DEVOUR vs ARMOR_CRUSH vs NEED_BOOST vs DAMAGE)
     public static func resolvePreyEncounter(
         prey: PreyTierConfig,
         sharkStats: ComputedSharkStats,
@@ -2394,12 +2397,13 @@ public enum GameRules {
         if prey.isHazard {
             return sharkStats.canEatMines ? .DEVOUR : .DAMAGE
         }
-        let effectiveTier = mutationVariant == .ABYSS_BEHEMOTH ? min(8, prey.tier + 1) : prey.tier
-        if sharkStats.biteTier >= effectiveTier {
+        let effectiveTier = mutationVariant == .ABYSS_BEHEMOTH ? min(50, prey.tier + 1) : prey.tier
+        let tierDiff = effectiveTier - sharkStats.biteTier
+        if tierDiff <= 0 {
             return .DEVOUR
         }
-        if effectiveTier == sharkStats.biteTier + 1 && isBoosting {
-            return .ARMOR_CRUSH
+        if tierDiff >= 1 && tierDiff <= 3 {
+            return isBoosting ? .ARMOR_CRUSH : .NEED_BOOST
         }
         return .DAMAGE
     }
@@ -2950,8 +2954,6 @@ public final class SpriteAtlasManager: ObservableObject {
 
     public func titleLogoImage() -> UIImage? {
         return Self.loadBundledImage(named: "title3_cae0290c")
-            ?? Self.loadBundledImage(named: "title2_dbfd9f83")
-            ?? Self.loadBundledImage(named: "title_11de9fff")
     }
 
     public func oceanParallaxTexture(named assetName: String, isWaterCanopy: Bool = false) -> SKTexture? {
@@ -7644,31 +7646,42 @@ public final class OceanGameScene: SKScene {
         let candidates = habitatPool.isEmpty
             ? GameConfigGenerated.preyTiers.filter { targetDepth <= 520.0 ? $0.minDepth <= 520.0 : $0.maxDepth >= 1150.0 }
             : habitatPool
-        let tierWeights: [Double]
-        if targetDepth > 8000.0 {
-            tierWeights = [0, 6, 10, 12, 10, 16, 22, 24]
-        } else if targetDepth > 3500.0 {
-            tierWeights = [0, 8, 12, 16, 16, 18, 18, 12]
-        } else if targetDepth > 1150.0 {
-            tierWeights = [0, 10, 14, 18, 20, 18, 14, 6]
-        } else if targetDepth > 520.0 {
-            tierWeights = [0, 10, 26, 28, 22, 14, 0, 0]
+
+        // Continuous Depth Target Tier (0m ~ 20,000m) + Lorentzian Distribution (1:1 with Web ecosystemSpawner.ts)
+        var targetTier: Double = 2.0
+        if targetDepth <= 520.0 {
+            targetTier = 1.0 + ((targetDepth - 25.0) / 495.0) * 8.5
+        } else if targetDepth <= 1150.0 {
+            targetTier = 11.0 + ((targetDepth - 520.0) / 630.0) * 13.0
+        } else if targetDepth <= 3500.0 {
+            targetTier = 24.0 + ((targetDepth - 1150.0) / 2350.0) * 11.0
+        } else if targetDepth <= 9500.0 {
+            targetTier = 35.0 + ((targetDepth - 3500.0) / 6000.0) * 8.0
         } else {
-            tierWeights = [58, 28, 14, 0, 0, 0, 0, 0]
+            targetTier = 43.0 + min(1.0, (targetDepth - 9500.0) / 9000.0) * 5.0
         }
-        let totalW = tierWeights.reduce(0, +)
-        var roll = Double.random(in: 0..<max(1.0, totalW))
-        var chosenTierNum = 1
-        for (idx, w) in tierWeights.enumerated() {
-            roll -= w
+
+        let predatorRoll = Double.random(in: 0...1)
+        if predatorRoll < 0.12 {
+            targetTier = min(48.0, targetTier + 4.5)
+        } else if predatorRoll < 0.36 {
+            targetTier = min(48.0, targetTier + 2.0)
+        }
+
+        let weights = candidates.map { p -> Double in
+            let diff = (Double(p.tier) - targetTier) / 3.0
+            return 1.0 / (1.0 + diff * diff)
+        }
+        let totalW = weights.reduce(0.0, +)
+        var roll = Double.random(in: 0..<max(0.001, totalW))
+        var chosen = candidates.last ?? GameConfigGenerated.preyTiers[0]
+        for (i, p) in candidates.enumerated() {
+            roll -= weights[i]
             if roll <= 0 {
-                chosenTierNum = idx + 1
+                chosen = p
                 break
             }
         }
-        let tierMatches = candidates.filter { $0.tier == chosenTierNum }
-        let finalPool = tierMatches.isEmpty ? candidates : tierMatches
-        let chosen = finalPool.randomElement() ?? GameConfigGenerated.preyTiers[0]
         let dist = nearShark ? Double.random(in: 220...480) : Double.random(in: 580...1400)
         let ang = Double.random(in: 0...(Double.pi * 2))
         let px = sharkX + cos(ang) * dist
@@ -8232,6 +8245,21 @@ public final class OceanGameScene: SKScene {
                         )
                         p.x += (postDx / max(1.0, postDist)) * 65.0
                     }
+                } else if encounterPreview == .NEED_BOOST {
+                    if invulnTimer <= 0 {
+                        vm.hp = max(0, vm.hp - p.config.damageOnFail * 0.85 * stats.damageTakenMultiplier)
+                        invulnTimer = 0.65
+                        cameraShakeTrauma = min(1.0, cameraShakeTrauma + 0.35)
+                        spawnFloatingText(
+                            x: sharkX,
+                            y: sharkY - 26,
+                            text: vm.lang == "zh" ? "⚠️ 按住冲刺破甲!" : "⚠️ BOOST TO CRUSH!",
+                            color: UIColor.orange,
+                            fontSize: 14
+                        )
+                        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                        p.x += (postDx / max(1.0, postDist)) * 45.0
+                    }
                 } else if invulnTimer <= 0 {
                     vm.hp = max(0, vm.hp - p.config.damageOnFail * stats.damageTakenMultiplier)
                     invulnTimer = 0.85
@@ -8239,11 +8267,11 @@ public final class OceanGameScene: SKScene {
                     spawnFloatingText(
                         x: sharkX,
                         y: sharkY - 26,
-                        text: vm.lang == "zh" ? "⚠️ 体型过大! 需T\\(p.config.tier)" : "⚠️ NEED T\\(p.config.tier)!",
+                        text: vm.lang == "zh" ? "⚠️ 致命天敌! 需T\\(p.config.tier)" : "⚠️ DEADLY! NEED T\\(p.config.tier)",
                         color: UIColor(red: 248/255, green: 113/255, blue: 113/255, alpha: 1.0),
                         fontSize: 14
                     )
-                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
                 }
             }
 
@@ -11082,7 +11110,7 @@ public struct EvolutionAtlasSheetView: View {
                 deckStatItem(
                     label: vm.lang == "zh" ? "咬合阶位" : "BITE TIER",
                     value: "T\\(stats.normalBiteTier)",
-                    sub: "Max T\\(min(8, form.baseBiteTier + 2))",
+                    sub: "Max T\\(min(48, form.baseBiteTier + 6))",
                     color: .yellow
                 )
                 deckStatItem(

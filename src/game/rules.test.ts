@@ -3390,13 +3390,13 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
     );
   }
 
-  // Ensure all 48 @3x sharks, 135 @3x prey (including cyber_mine@3x.png), and UI/loading PNGs are present in ios-native/HungrySharkEvolution/Resources/Assets
+  // Ensure all 48 @3x sharks, 135 @3x prey (including cyber_mine@3x.png), single wide title (title3_cae0290c.png), and UI/loading PNGs are present in ios-native/HungrySharkEvolution/Resources/Assets
   const iosFiles = fs
     .readdirSync(iosAssetsDir)
     .filter((f) => f.endsWith('.png') || f.endsWith('.jpg'));
   assert.ok(
-    iosFiles.length >= 228,
-    `Expected at least 228 bundled PNG/JPG assets in iOS Resources/Assets, found ${iosFiles.length}`
+    iosFiles.length >= 226,
+    `Expected at least 226 bundled PNG/JPG assets in iOS Resources/Assets, found ${iosFiles.length}`
   );
   assert.ok(
     fs.existsSync(path.join(iosAssetsDir, 'cyber_mine@3x.png')),

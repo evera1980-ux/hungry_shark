@@ -2785,7 +2785,7 @@ public struct EvolutionAtlasSheetView: View {
                 deckStatItem(
                     label: vm.lang == "zh" ? "咬合阶位" : "BITE TIER",
                     value: "T\(stats.normalBiteTier)",
-                    sub: "Max T\(min(8, form.baseBiteTier + 2))",
+                    sub: "Max T\(min(48, form.baseBiteTier + 6))",
                     color: .yellow
                 )
                 deckStatItem(

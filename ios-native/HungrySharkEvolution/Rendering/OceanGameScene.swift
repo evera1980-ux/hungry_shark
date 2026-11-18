@@ -2735,31 +2735,42 @@ public final class OceanGameScene: SKScene {
         let candidates = habitatPool.isEmpty
             ? GameConfigGenerated.preyTiers.filter { targetDepth <= 520.0 ? $0.minDepth <= 520.0 : $0.maxDepth >= 1150.0 }
             : habitatPool
-        let tierWeights: [Double]
-        if targetDepth > 8000.0 {
-            tierWeights = [0, 6, 10, 12, 10, 16, 22, 24]
-        } else if targetDepth > 3500.0 {
-            tierWeights = [0, 8, 12, 16, 16, 18, 18, 12]
-        } else if targetDepth > 1150.0 {
-            tierWeights = [0, 10, 14, 18, 20, 18, 14, 6]
-        } else if targetDepth > 520.0 {
-            tierWeights = [0, 10, 26, 28, 22, 14, 0, 0]
+
+        // Continuous Depth Target Tier (0m ~ 20,000m) + Lorentzian Distribution (1:1 with Web ecosystemSpawner.ts)
+        var targetTier: Double = 2.0
+        if targetDepth <= 520.0 {
+            targetTier = 1.0 + ((targetDepth - 25.0) / 495.0) * 8.5
+        } else if targetDepth <= 1150.0 {
+            targetTier = 11.0 + ((targetDepth - 520.0) / 630.0) * 13.0
+        } else if targetDepth <= 3500.0 {
+            targetTier = 24.0 + ((targetDepth - 1150.0) / 2350.0) * 11.0
+        } else if targetDepth <= 9500.0 {
+            targetTier = 35.0 + ((targetDepth - 3500.0) / 6000.0) * 8.0
         } else {
-            tierWeights = [58, 28, 14, 0, 0, 0, 0, 0]
+            targetTier = 43.0 + min(1.0, (targetDepth - 9500.0) / 9000.0) * 5.0
         }
-        let totalW = tierWeights.reduce(0, +)
-        var roll = Double.random(in: 0..<max(1.0, totalW))
-        var chosenTierNum = 1
-        for (idx, w) in tierWeights.enumerated() {
-            roll -= w
+
+        let predatorRoll = Double.random(in: 0...1)
+        if predatorRoll < 0.12 {
+            targetTier = min(48.0, targetTier + 4.5)
+        } else if predatorRoll < 0.36 {
+            targetTier = min(48.0, targetTier + 2.0)
+        }
+
+        let weights = candidates.map { p -> Double in
+            let diff = (Double(p.tier) - targetTier) / 3.0
+            return 1.0 / (1.0 + diff * diff)
+        }
+        let totalW = weights.reduce(0.0, +)
+        var roll = Double.random(in: 0..<max(0.001, totalW))
+        var chosen = candidates.last ?? GameConfigGenerated.preyTiers[0]
+        for (i, p) in candidates.enumerated() {
+            roll -= weights[i]
             if roll <= 0 {
-                chosenTierNum = idx + 1
+                chosen = p
                 break
             }
         }
-        let tierMatches = candidates.filter { $0.tier == chosenTierNum }
-        let finalPool = tierMatches.isEmpty ? candidates : tierMatches
-        let chosen = finalPool.randomElement() ?? GameConfigGenerated.preyTiers[0]
         let dist = nearShark ? Double.random(in: 220...480) : Double.random(in: 580...1400)
         let ang = Double.random(in: 0...(Double.pi * 2))
         let px = sharkX + cos(ang) * dist
@@ -3323,6 +3334,21 @@ public final class OceanGameScene: SKScene {
                         )
                         p.x += (postDx / max(1.0, postDist)) * 65.0
                     }
+                } else if encounterPreview == .NEED_BOOST {
+                    if invulnTimer <= 0 {
+                        vm.hp = max(0, vm.hp - p.config.damageOnFail * 0.85 * stats.damageTakenMultiplier)
+                        invulnTimer = 0.65
+                        cameraShakeTrauma = min(1.0, cameraShakeTrauma + 0.35)
+                        spawnFloatingText(
+                            x: sharkX,
+                            y: sharkY - 26,
+                            text: vm.lang == "zh" ? "⚠️ 按住冲刺破甲!" : "⚠️ BOOST TO CRUSH!",
+                            color: UIColor.orange,
+                            fontSize: 14
+                        )
+                        UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                        p.x += (postDx / max(1.0, postDist)) * 45.0
+                    }
                 } else if invulnTimer <= 0 {
                     vm.hp = max(0, vm.hp - p.config.damageOnFail * stats.damageTakenMultiplier)
                     invulnTimer = 0.85
@@ -3330,11 +3356,11 @@ public final class OceanGameScene: SKScene {
                     spawnFloatingText(
                         x: sharkX,
                         y: sharkY - 26,
-                        text: vm.lang == "zh" ? "⚠️ 体型过大! 需T\(p.config.tier)" : "⚠️ NEED T\(p.config.tier)!",
+                        text: vm.lang == "zh" ? "⚠️ 致命天敌! 需T\(p.config.tier)" : "⚠️ DEADLY! NEED T\(p.config.tier)",
                         color: UIColor(red: 248/255, green: 113/255, blue: 113/255, alpha: 1.0),
                         fontSize: 14
                     )
-                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                    UINotificationFeedbackGenerator().notificationOccurred(.error)
                 }
             }
 

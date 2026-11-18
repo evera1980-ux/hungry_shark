@@ -481,7 +481,7 @@ export const SharkEvolutionAtlasModal: React.FC<
     1.0,
     atlasBonuses.unlockedCount
   );
-  const maxGenBiteTier = Math.min(8, inspectedForm.baseBiteTier + 2);
+  const maxGenBiteTier = Math.min(48, inspectedForm.baseBiteTier + 6);
   const effectiveSpeedBonusPct = Math.round(
     (inspectedForm.speedBonus +
       (inspectedUpgradeLv - 1) * 0.022 +

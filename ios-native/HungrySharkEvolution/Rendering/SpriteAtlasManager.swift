@@ -500,8 +500,6 @@ public final class SpriteAtlasManager: ObservableObject {
 
     public func titleLogoImage() -> UIImage? {
         return Self.loadBundledImage(named: "title3_cae0290c")
-            ?? Self.loadBundledImage(named: "title2_dbfd9f83")
-            ?? Self.loadBundledImage(named: "title_11de9fff")
     }
 
     public func oceanParallaxTexture(named assetName: String, isWaterCanopy: Bool = false) -> SKTexture? {
