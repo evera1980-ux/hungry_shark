@@ -11512,12 +11512,19 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: HungrySharkEvolution
-        excludes:
-          - "Resources/Assets/*.png"
-          - "Resources/Assets/*.jpg"
-      - path: HungrySharkEvolution/Resources/Assets
-        type: folder
+      - path: ../public/assets/aistudio
         buildPhase: resources
+        includes:
+          - "*.png"
+          - "*.jpg"
+      - path: ../public/assets/sharks_3x
+        buildPhase: resources
+        includes:
+          - "*.png"
+      - path: ../public/assets/prey_140
+        buildPhase: resources
+        includes:
+          - "*@3x.png"
     dependencies:
       - package: GoogleMobileAds
         product: GoogleMobileAds
@@ -11535,6 +11542,8 @@ targets:
         INFOPLIST_FILE: HungrySharkEvolution/Info.plist
         DEVELOPMENT_TEAM: 3N2FUK7M23
         CODE_SIGN_STYLE: Automatic
+        COMPRESS_PNG_FILES: NO
+        STRIP_PNG_TEXT: NO
         INFOPLIST_KEY_CFBundleDisplayName: "deepsea:evolution"
         INFOPLIST_KEY_GADApplicationIdentifier: "${GOOGLE_ADS_CONFIG.admobAppId}"
         INFOPLIST_KEY_GADIsAdManagerApp: YES
@@ -11578,41 +11587,45 @@ let package = Package(
 `;
 }
 
-function generatePbxproj(assetFiles: string[] = []): string {
-  // Valid Xcode 15/16 project.pbxproj referencing all 6 Swift files, Assets.xcassets, the bundled Assets folder,
+interface PbxAssetEntry {
+  name: string;
+  relPath: string;
+}
+
+function generatePbxproj(assetEntries: PbxAssetEntry[] = []): string {
+  // Valid Xcode 15/16 project.pbxproj referencing all 6 Swift files, Assets.xcassets,
   // GoogleMobileAds Swift Package (with strictly quoted minimumVersion = "11.2.0"),
-  // AND every individual PNG/JPG asset (including shark_form_00@3x.png .. shark_form_47@3x.png, prey_140 @3x PNGs, and world seabed/ecology/POI JPG atlases).
-  const sortedAssets = [...assetFiles]
-    .map((f) => f.trim())
-    .filter((f) => f.length > 0 && (f.endsWith('.png') || f.endsWith('.jpg')))
-    .sort();
+  // AND every individual PNG/JPG asset directly from ../public/assets/{aistudio,sharks_3x,prey_140} via SOURCE_ROOT.
+  const sortedAssets = [...assetEntries]
+    .filter((e) => e.name.length > 0 && (e.name.endsWith('.png') || e.name.endsWith('.jpg')))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const assetBuildFiles = sortedAssets
-    .map((f, i) => {
+    .map((e, i) => {
       const idxHex = String(i + 1).padStart(4, '0');
-      return `\t\tB100${idxHex}2B00000000000001 /* ${f} in Resources */ = {isa = PBXBuildFile; fileRef = B200${idxHex}2B00000000000001 /* ${f} */; };`;
+      return `\t\tB100${idxHex}2B00000000000001 /* ${e.name} in Resources */ = {isa = PBXBuildFile; fileRef = B200${idxHex}2B00000000000001 /* ${e.name} */; };`;
     })
     .join('\n');
 
   const assetFileRefs = sortedAssets
-    .map((f, i) => {
+    .map((e, i) => {
       const idxHex = String(i + 1).padStart(4, '0');
-      const fileType = f.endsWith('.jpg') ? 'image.jpeg' : 'image.png';
-      return `\t\tB200${idxHex}2B00000000000001 /* ${f} */ = {isa = PBXFileReference; lastKnownFileType = ${fileType}; name = "${f}"; path = "HungrySharkEvolution/Resources/Assets/${f}"; sourceTree = SOURCE_ROOT; };`;
+      const fileType = e.name.endsWith('.jpg') ? 'image.jpeg' : 'image.png';
+      return `\t\tB200${idxHex}2B00000000000001 /* ${e.name} */ = {isa = PBXFileReference; lastKnownFileType = ${fileType}; name = "${e.name}"; path = "${e.relPath}"; sourceTree = SOURCE_ROOT; };`;
     })
     .join('\n');
 
   const assetGroupChildren = sortedAssets
-    .map((f, i) => {
+    .map((e, i) => {
       const idxHex = String(i + 1).padStart(4, '0');
-      return `\t\t\t\tB200${idxHex}2B00000000000001 /* ${f} */,`;
+      return `\t\t\t\tB200${idxHex}2B00000000000001 /* ${e.name} */,`;
     })
     .join('\n');
 
   const assetResourceEntries = sortedAssets
-    .map((f, i) => {
+    .map((e, i) => {
       const idxHex = String(i + 1).padStart(4, '0');
-      return `\t\t\t\tB100${idxHex}2B00000000000001 /* ${f} in Resources */,`;
+      return `\t\t\t\tB100${idxHex}2B00000000000001 /* ${e.name} in Resources */,`;
     })
     .join('\n');
 
