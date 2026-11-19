@@ -3298,7 +3298,8 @@ export default function App() {
             isBoosting,
             shark.stats.relativePreyScale,
             shark.stats.scale,
-            Boolean(shark.stats.canEatMines)
+            Boolean(shark.stats.canEatMines),
+            shark.stats.realBodyLengthM ?? 1.5
           );
         }
       }

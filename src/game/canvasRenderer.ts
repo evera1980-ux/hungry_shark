@@ -614,7 +614,8 @@ export function drawPreyEntity(
   _isBoosting: boolean = false,
   relativePreyScale: number = 1.0,
   sharkScale: number = 1.0,
-  canEatMines: boolean = false
+  canEatMines: boolean = false,
+  realBodyLengthM: number = 1.5
 ): void {
   const {
     config,
@@ -639,6 +640,7 @@ export function drawPreyEntity(
       relativePreyScale,
       scale: sharkScale,
       canEatMines,
+      realBodyLengthM,
     },
     mutationVariant,
     frenzyActive
