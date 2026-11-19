@@ -53,6 +53,9 @@ function generateSwiftConfigFile(): string {
             primaryColorHex: "${escapeSwiftString(s.primaryColor)}",
             secondaryColorHex: "${escapeSwiftString(s.secondaryColor)}",
             glowColorHex: "${escapeSwiftString(s.glowColor)}",
+            realBodyLengthM: ${s.realBodyLengthM},
+            cruiseSpeedMps: ${s.cruiseSpeedMps},
+            boostSpeedMps: ${s.boostSpeedMps},
             baseBiteTier: ${s.baseBiteTier},
             baseHp: ${s.baseHp},
             baseEnergy: ${s.baseEnergy},
@@ -114,6 +117,9 @@ function generateSwiftConfigFile(): string {
             maxDepth: ${p.maxDepth},
             radius: ${p.radius},
             baseSpeed: ${p.baseSpeed},
+            bodyLengthCm: ${p.bodyLengthCm ?? Math.round(p.radius * 2.5)},
+            minLengthCm: ${p.minLengthCm ?? p.bodyLengthCm ?? Math.round(p.radius * 2.5)},
+            maxLengthCm: ${p.maxLengthCm ?? p.bodyLengthCm ?? Math.round(p.radius * 2.5)},
             hpRestore: ${p.hpRestore},
             xpValue: ${p.xpValue},
             scoreValue: ${p.scoreValue},
@@ -203,6 +209,9 @@ public struct SharkFormConfig: Identifiable, Codable, Sendable, Equatable {
     public let primaryColorHex: String
     public let secondaryColorHex: String
     public let glowColorHex: String
+    public let realBodyLengthM: Double
+    public let cruiseSpeedMps: Double
+    public let boostSpeedMps: Double
     public let baseBiteTier: Int
     public let baseHp: Double
     public let baseEnergy: Double
@@ -233,6 +242,9 @@ public struct PreyTierConfig: Identifiable, Codable, Sendable {
     public let maxDepth: Double
     public let radius: Double
     public let baseSpeed: Double
+    public let bodyLengthCm: Double
+    public let minLengthCm: Double
+    public let maxLengthCm: Double
     public let hpRestore: Double
     public let xpValue: Int
     public let scoreValue: Int
@@ -351,6 +363,11 @@ public struct ComputedSharkStats: Sendable {
     public let geneYieldMultiplier: Double
     public let damageTakenMultiplier: Double
     public let canEatMines: Bool
+    public let realBodyLengthM: Double
+    public let cruiseSpeedMps: Double
+    public let boostSpeedMps: Double
+    public let viewportScale: Double
+    public let minSpawnablePreyLengthM: Double
     public let parallaxScales: ParallaxLayerGrowthScales
 }
 
@@ -494,7 +511,7 @@ public enum GameRules {
     public static let sharkBaseDrawSize: Double = 110.4 // 96.0 * 1.15 mobile viewport presence parity with Web
     public static let preyRadiusToDrawSize: Double = 2.25
     public static let sharkEquivalentRadius: Double = 110.4 / 2.25 // 49.0667 (preserves 1:1 sharkParityScale ratio)
-    public static let defaultPreySizeMultiplier: Double = 0.80
+    public static let defaultPreySizeMultiplier: Double = 1.0
 
     /// XP required to advance from \`level\` to \`level + 1\` (matches src/game/rules.ts)
     public static func getXpRequiredForLevel(_ level: Int) -> Int {
@@ -745,6 +762,48 @@ public enum GameRules {
         if rawWeight <= 0.0001 { return 0.0 }
         if rawWeight >= 0.9999 { return 1.0 }
         return min(1.0, pow(rawWeight, 0.62))
+    }
+
+    // Piecewise Ocean Depth Conversion (World Y pixels <-> Real Ocean Meters)
+    public static let depthStops: [(worldY: Double, meters: Double)] = [
+        (0.0, 0.0),
+        (2000.0, 200.0),
+        (6000.0, 1000.0),
+        (10000.0, 4000.0),
+        (16000.0, 6000.0),
+        (20000.0, 11000.0)
+    ]
+
+    public static func worldYToMeterDepth(_ worldY: Double) -> Double {
+        let y = max(0.0, worldY)
+        for i in 0..<(depthStops.count - 1) {
+            let s0 = depthStops[i]
+            let s1 = depthStops[i + 1]
+            if y <= s1.worldY {
+                let t = (y - s0.worldY) / (s1.worldY - s0.worldY)
+                return (s0.meters + t * (s1.meters - s0.meters)).rounded()
+            }
+        }
+        let last = depthStops[depthStops.count - 1]
+        let prev = depthStops[depthStops.count - 2]
+        let rate = (last.meters - prev.meters) / (last.worldY - prev.worldY)
+        return (last.meters + (y - last.worldY) * rate).rounded()
+    }
+
+    public static func meterDepthToWorldY(_ depthMeters: Double) -> Double {
+        let m = max(0.0, depthMeters)
+        for i in 0..<(depthStops.count - 1) {
+            let s0 = depthStops[i]
+            let s1 = depthStops[i + 1]
+            if m <= s1.meters {
+                let t = (m - s0.meters) / (s1.meters - s0.meters)
+                return (s0.worldY + t * (s1.worldY - s0.worldY)).rounded()
+            }
+        }
+        let last = depthStops[depthStops.count - 1]
+        let prev = depthStops[depthStops.count - 2]
+        let rate = (last.worldY - prev.worldY) / (last.meters - prev.meters)
+        return (last.worldY + (m - last.meters) * rate).rounded()
     }
 
     /// Staggered per-plane C2-smooth biome transition state (1:1 parity with Web src/game/rules.ts)
@@ -2331,6 +2390,12 @@ public enum GameRules {
         let baseRewardMult = collectionRewardMult * (1.0 + Double(form.row) * 0.12)
         let canEatMines = form.id == "shark_25_bio_venom" || form.generation >= 6
 
+        let realBodyLengthM = form.realBodyLengthM * (1.0 + Double(inRunLevel - 1) * 0.025)
+        let cruiseSpeedMps = form.cruiseSpeedMps * (1.0 + totalSpeedBonus)
+        let boostSpeedMps = cruiseSpeedMps * (frenzyActive ? 2.6 : 2.2)
+        let viewportScale = (120.0 * scale) / realBodyLengthM
+        let minSpawnablePreyLengthM = realBodyLengthM * 0.133
+
         return ComputedSharkStats(
             level: inRunLevel,
             scale: scale,
@@ -2352,37 +2417,31 @@ public enum GameRules {
             geneYieldMultiplier: baseRewardMult * (form.lineage == .ELDER_ABYSS ? 1.15 : 1.0),
             damageTakenMultiplier: 1.0,
             canEatMines: canEatMines,
+            realBodyLengthM: realBodyLengthM,
+            cruiseSpeedMps: cruiseSpeedMps,
+            boostSpeedMps: boostSpeedMps,
+            viewportScale: viewportScale,
+            minSpawnablePreyLengthM: minSpawnablePreyLengthM,
             parallaxScales: getParallaxLayerGrowthScales(relativePreyScale: relativePreyScale)
         )
     }
 
-    /// Strict Visual Size === Edible Contract (<= 64% shark size for edible prey, >= 118% for dangerous prey)
+    /// 100% 真实尺寸物理比例：严格按照真实体长比例 (preyLengthM / sharkLengthM) 进行显示
     public static func getPreyRelativeVisualScale(
         prey: PreyTierConfig,
         sharkStats: ComputedSharkStats,
         mutationVariant: PreyMutationVariant = .NONE
     ) -> Double {
-        let effectiveTier = mutationVariant == .ABYSS_BEHEMOTH ? min(50, prey.tier + 1) : prey.tier
-        let visualBiteTier = sharkStats.normalBiteTier
-        let canDevourNormally = prey.isHazard ? sharkStats.canEatMines : (visualBiteTier >= effectiveTier)
         let sharkParityScale = (sharkEquivalentRadius * sharkStats.scale) / max(1.0, prey.radius)
+        let sharkLengthM = max(0.6, sharkStats.realBodyLengthM)
+        let preyLengthM = max(0.05, (prey.bodyLengthCm > 0 ? prey.bodyLengthCm : prey.radius * 2.5) / 100.0)
+        let realRatio = preyLengthM / sharkLengthM
 
-        if canDevourNormally {
-            let tierDiff = Double(max(0, visualBiteTier - effectiveTier))
-            let tierRatio = max(0.18, 0.64 * pow(0.955, tierDiff))
-            let levelShrink = 0.64 + 0.36 * sharkStats.relativePreyScale
-            let targetSharkRatio = max(0.16, min(0.64, tierRatio * levelShrink))
-            return sharkParityScale * targetSharkRatio * defaultPreySizeMultiplier
-        } else {
-            let overTier = Double(max(1, effectiveTier - visualBiteTier))
-            let behemothExtra = mutationVariant == .ABYSS_BEHEMOTH ? 0.08 : 0.0
-            let bossExtra = prey.isBoss ? 0.12 : 0.0
-            let baseDangerRatio = !prey.isHazard && overTier <= 3.0
-                ? 1.18 + (overTier - 1.0) * 0.06
-                : 1.38 + max(0.0, overTier - 4.0) * 0.045
-            let targetDangerRatio = min(1.95, baseDangerRatio + behemothExtra + bossExtra)
-            return sharkParityScale * targetDangerRatio * defaultPreySizeMultiplier
-        }
+        let behemothMult = mutationVariant == .ABYSS_BEHEMOTH ? 1.25 : 1.0
+        let bossMult = prey.isBoss ? 1.2 : 1.0
+        let targetRatio = realRatio * behemothMult * bossMult
+
+        return sharkParityScale * targetRatio * defaultPreySizeMultiplier
     }
 
     /// Collision encounter resolution (DEVOUR vs ARMOR_CRUSH vs NEED_BOOST vs DAMAGE)
@@ -5040,29 +5099,25 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
                 GADSimulatorID,
                 "4599a37a91ce92ab678ffee214ef6819"
             ]
-            let startAds = { [weak self] in
-                GADMobileAds.sharedInstance().start { status in
-                    print("[GoogleAdMob] ✅ SDK initialized. Status: \\(status.adapterStatusesByClassName.keys)")
-                    Task { @MainActor in
-                        self?.preloadRewardedAd()
-                    }
+            print("[GoogleAdMob] ⏳ 即将调用 AdMob start")
+            GADMobileAds.sharedInstance().start { [weak self] status in
+                print("[GoogleAdMob] ✅ AdMob 初始化完成. Status: \\(status.adapterStatusesByClassName.keys)")
+                Task { @MainActor in
+                    self?.preloadRewardedAd()
                 }
             }
+            print("[GoogleAdMob] 🚀 AdMob start 已调用（非阻塞）")
+
             #if canImport(AppTrackingTransparency)
             if #available(iOS 14, *) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    ATTrackingManager.requestTrackingAuthorization { status in
-                        print("[GoogleAdMob] 🔒 ATT Status: \\(status.rawValue)")
-                        Task { @MainActor in
-                            startAds()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    if ATTrackingManager.trackingAuthorizationStatus == .notDetermined {
+                        ATTrackingManager.requestTrackingAuthorization { status in
+                            print("[GoogleAdMob] 🔒 ATT Status: \\(status.rawValue)")
                         }
                     }
                 }
-            } else {
-                startAds()
             }
-            #else
-            startAds()
             #endif
         } else {
             preloadRewardedAd()
@@ -5976,7 +6031,7 @@ public final class OceanGameScene: SKScene {
         worldContainer.addChild(sharkNode)
         refreshSharkTexture()
         initAmbientBubblesIfNeeded(viewW: Double(max(640, size.width)), viewH: Double(max(360, size.height)))
-        syncPreyPopulation()
+        syncPreyPopulationInitial()
     }
 
     public func onAtlasPreloadCompleted() {
@@ -6036,7 +6091,7 @@ public final class OceanGameScene: SKScene {
         activeFloatTexts.removeAll()
 
         refreshSharkTexture()
-        syncPreyPopulation()
+        syncPreyPopulationInitial()
     }
 
     public override func update(_ currentTime: TimeInterval) {
@@ -7626,26 +7681,61 @@ public final class OceanGameScene: SKScene {
         }
     }
 
-    private func syncPreyPopulation() {
-        while activePreys.count < maxActivePreys {
-            spawnOnePrey(nearShark: activePreys.count < 7)
+    private func syncPreyPopulationInitial() {
+        var attempts = 0
+        let maxAttempts = maxActivePreys * 2
+        while activePreys.count < maxActivePreys && attempts < maxAttempts {
+            attempts += 1
+            if !spawnOnePrey(nearShark: activePreys.count < 7) {
+                break
+            }
         }
     }
 
-    private func spawnOnePrey(nearShark: Bool) {
+    private func syncPreyPopulation(maxSpawnPerFrame: Int = 1) {
+        var spawnedCount = 0
+        var attempts = 0
+        let maxAttempts = maxSpawnPerFrame * 3
+        while activePreys.count < maxActivePreys && spawnedCount < maxSpawnPerFrame && attempts < maxAttempts {
+            attempts += 1
+            if spawnOnePrey(nearShark: activePreys.count < 7) {
+                spawnedCount += 1
+            } else {
+                break
+            }
+        }
+    }
+
+    @discardableResult
+    private func spawnOnePrey(nearShark: Bool) -> Bool {
         var targetDepth = max(45.0, sharkY + Double.random(in: -260...260))
         if sharkY <= 430.0 {
             targetDepth = min(495.0, targetDepth)
         }
+        let isShallowZone = targetDepth <= 520.0
         let habitatPool = GameConfigGenerated.preyTiers.filter { p in
-            if targetDepth <= 520.0 && (p.isHazard || p.isBoss || p.behavior == .EEL_CHARGER || p.behavior == .SUB_PATROL) {
+            if isShallowZone && (p.isHazard || p.isBoss || p.behavior == .EEL_CHARGER || p.behavior == .SUB_PATROL) {
                 return false
             }
             return targetDepth >= p.minDepth && targetDepth <= p.maxDepth
         }
-        let candidates = habitatPool.isEmpty
-            ? GameConfigGenerated.preyTiers.filter { targetDepth <= 520.0 ? $0.minDepth <= 520.0 : $0.maxDepth >= 1150.0 }
-            : habitatPool
+        let rawCandidates = !habitatPool.isEmpty
+            ? habitatPool
+            : (isShallowZone
+                ? GameConfigGenerated.preyTiers.filter { $0.minDepth <= 520.0 }
+                : (targetDepth > 1150.0
+                    ? GameConfigGenerated.preyTiers.filter { $0.maxDepth >= 1150.0 }
+                    : GameConfigGenerated.preyTiers.filter { $0.minDepth >= 500.0 || $0.maxDepth >= 800.0 }))
+
+        // Giant shark scale filter: do not spawn tiny fish if shark is too large
+        let minPreyLenCm = (viewModel?.currentStats.minSpawnablePreyLengthM ?? 0.0) * 100.0
+        let candidates = minPreyLenCm > 0
+            ? rawCandidates.filter { ($0.bodyLengthCm > 0 ? $0.bodyLengthCm : $0.radius * 2.5) >= minPreyLenCm }
+            : rawCandidates
+
+        if candidates.isEmpty {
+            return false
+        }
 
         // Continuous Depth Target Tier (0m ~ 20,000m) + Lorentzian Distribution (1:1 with Web ecosystemSpawner.ts)
         var targetTier: Double = 2.0
@@ -7717,6 +7807,7 @@ public final class OceanGameScene: SKScene {
                 mutation: Double.random(in: 0...1) < 0.08 ? .GOLDEN_SWARM : .NONE
             )
         )
+        return true
     }
 
     // MARK: - Devour Particles, Spinning Coin/Gene Pickups & Floating Combat Text
@@ -7957,7 +8048,7 @@ public final class OceanGameScene: SKScene {
 
     private func stepAndRenderPreys(viewW: Double, viewH: Double, stats: ComputedSharkStats, dt: Double, currentTime: TimeInterval) {
         guard let vm = viewModel else { return }
-        syncPreyPopulation()
+        syncPreyPopulation(maxSpawnPerFrame: 1)
         let zoom = stats.cameraZoom
 
         var idx = activePreys.count - 1

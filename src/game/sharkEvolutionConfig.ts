@@ -73,6 +73,12 @@ export interface SharkFormConfig {
   primaryColor: string;
   secondaryColor: string;
   glowColor: string;
+  /** Authentic biological adult body length in meters (0.8m ~ 45.0m) */
+  realBodyLengthM: number;
+  /** Real biological cruising swim speed in m/s (1.2 ~ 7.0 m/s) */
+  cruiseSpeedMps: number;
+  /** Real biological burst boost swim speed in m/s (2.8 ~ 18.0 m/s) */
+  boostSpeedMps: number;
   /** Base bite tier at Lv.1 before in-run level & upgrade bonuses */
   baseBiteTier: number;
   baseHp: number;
@@ -172,6 +178,9 @@ interface RawSharkSeed {
   traitZh: string;
   traitEn: string;
   colors: [string, string, string];
+  realBodyLengthM?: number;
+  cruiseSpeedMps?: number;
+  boostSpeedMps?: number;
   statOverrides?: Partial<
     Pick<
       SharkFormConfig,
@@ -866,6 +875,24 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
     const traitZh = seed.traitZh.replace(/T\d+/g, `T${baseBiteTier}`);
     const traitEn = seed.traitEn.replace(/Bite Tier T\d+/g, `Bite Tier T${baseBiteTier}`);
 
+    // Biological Adult Body Length scaling smoothly across 6 generations (0.8m .. 45.0m)
+    const baseLengths = [
+      [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
+      [1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0],
+      [3.2, 3.5, 3.8, 4.2, 4.6, 5.2, 5.8, 6.5],
+      [7.5, 9.0, 11.0, 13.0, 15.0, 17.0, 18.5, 20.0],
+      [21.5, 23.0, 24.5, 26.0, 27.5, 29.0, 30.5, 32.0],
+      [33.5, 35.0, 36.5, 38.0, 40.0, 42.0, 44.0, 45.0],
+    ];
+    const defaultBodyLengthM = baseLengths[row]?.[col] ?? Number((0.8 + index * 0.94).toFixed(1));
+    const realBodyLengthM = seed.realBodyLengthM ?? defaultBodyLengthM;
+
+    // Real cruising swim speed (1.2m/s ~ 7.0m/s) and burst speed (2.8m/s ~ 18.0m/s)
+    const defaultCruiseSpeedMps = Number((1.2 + (progFactor / 47) * 5.8).toFixed(2));
+    const defaultBoostSpeedMps = Number((defaultCruiseSpeedMps * (2.2 + (isMecha ? 0.35 : 0.2))).toFixed(2));
+    const cruiseSpeedMps = seed.cruiseSpeedMps ?? defaultCruiseSpeedMps;
+    const boostSpeedMps = seed.boostSpeedMps ?? defaultBoostSpeedMps;
+
     return {
       index,
       row,
@@ -884,6 +911,9 @@ export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
       primaryColor: seed.colors[0],
       secondaryColor: seed.colors[1],
       glowColor: seed.colors[2],
+      realBodyLengthM,
+      cruiseSpeedMps,
+      boostSpeedMps,
       baseBiteTier,
       baseHp,
       baseEnergy,

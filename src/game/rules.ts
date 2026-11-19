@@ -30,6 +30,16 @@ export interface ComputedSharkStats {
   devourHealMultiplier: number;
   frenzyDurationBonus: number;
   totalOrganStars: number;
+  /** Current active shark biological body length in meters (0.8m ~ 45.0m, growing with inRunLevel) */
+  realBodyLengthM?: number;
+  /** Real cruising swim speed in m/s */
+  cruiseSpeedMps?: number;
+  /** Real burst boost swim speed in m/s */
+  boostSpeedMps?: number;
+  /** World-to-screen pixel ratio k (px/m) = S_ref / realBodyLengthM */
+  viewportScale?: number;
+  /** Minimum body length (m) for prey to spawn in ecosystem spawner for this shark */
+  minSpawnablePreyLengthM?: number;
   sharkFormId?: string;
   upgradeLevel?: number;
   scoreMultiplier?: number;
@@ -99,7 +109,7 @@ export function getEffectivePreyTier(
   return prey.tier;
 }
 
-let debugPreySizeMultiplier = 0.8;
+let debugPreySizeMultiplier = 1.0;
 
 export function getDebugPreySizeMultiplier(): number {
   return debugPreySizeMultiplier;
@@ -114,72 +124,39 @@ export function setDebugPreySizeMultiplier(multiplier: number): void {
 
 /**
  * Computes the visual & hitbox scale of a prey entity relative to the shark's current on-screen size.
- * Core visual-gameplay contract:
- * 1. Normal State (`frenzyActive === false`):
- *    - Any prey that can be directly swallowed (`canDevourNormally === true`) is rendered STRICTLY SMALLER
- *      than the player's shark on screen (`preyDrawSize <= 0.64 * sharkDrawSize`), and shrinks progressively
- *      as the shark's biteTier and in-run level (`relativePreyScale`) increase.
- *    - Any prey/hazard that deals damage on contact (`canDevourNormally === false`) is rendered EQUAL TO OR
- *      LARGER than the player's shark on screen (`preyDrawSize >= 1.18 * sharkDrawSize`), scaling up with tier gap.
- * 2. Gold Frenzy Special Exception (`frenzyActive === true`):
- *    - Entering Gold Frenzy temporarily boosts bite power to swallow everything (`resolvePreyEncounter` -> DEVOUR),
- *      but DOES NOT shrink other fish! All fish and giant deep-sea monsters preserve their pre-frenzy visual size
- *      (`normalBiteTier`) so hunting and devouring massive predators during Gold Frenzy feels maximally rewarding.
- * 3. Live Debug Multiplier (`debugPreySizeMultiplier`, default `0.8`):
- *    - Scales both visual rendering (`drawPreyEntity`) and collision radius (`App.tsx`) in lockstep when tuned in the Debug UI.
+ * 100% 按照真实尺寸显示：
+ * 任何生物在屏幕上的绘制尺寸与玩家鲨鱼严格保持真实物理比例 (preyLengthM / sharkLengthM)，
+ * 绝不进行人工尺寸扭曲或伪造放大/缩小。
  */
 export function getPreyRelativeVisualScale(
   prey: PreyTierConfig,
   sharkStats: Pick<ComputedSharkStats, 'biteTier' | 'relativePreyScale'> &
-    Partial<Pick<ComputedSharkStats, 'scale' | 'canEatMines' | 'normalBiteTier'>>,
+    Partial<
+      Pick<
+        ComputedSharkStats,
+        'scale' | 'canEatMines' | 'normalBiteTier' | 'realBodyLengthM'
+      >
+    >,
   mutationVariant: PreyMutationVariant = 'NONE',
   _frenzyActive: boolean = false
 ): number {
   const sharkScale = sharkStats.scale ?? 1.0;
-  const baseRel = sharkStats.relativePreyScale ?? 1.0;
-  const effectiveTier = getEffectivePreyTier(prey, mutationVariant);
-  // Always use the shark's pre-frenzy normalBiteTier for visual sizing so Gold Frenzy never shrinks giant prey
-  const visualBiteTier = sharkStats.normalBiteTier ?? sharkStats.biteTier;
-
-  const canDevourNormally = prey.isHazard
-    ? Boolean(sharkStats.canEatMines)
-    : visualBiteTier >= effectiveTier;
-
   // Scale factor at which `prey.radius * visualScale * 2.25 === 96 * sharkScale` (exact 1:1 visual parity with player shark)
   const sharkParityScale =
     (SHARK_EQUIVALENT_RADIUS * sharkScale) / Math.max(1, prey.radius);
 
-  if (canDevourNormally) {
-    // Edible fish: strictly smaller than the player's shark (<= 64% of shark's linear size)
-    // Smooth 48-tier decay (0.955^tierDiff) so lower-tier fish shrink gradually across T1..T48
-    const tierDiff = Math.max(0, visualBiteTier - effectiveTier);
-    const tierRatio = Math.max(0.18, 0.64 * Math.pow(0.955, tierDiff));
-    const levelShrink = 0.64 + 0.36 * baseRel;
-    const targetSharkRatio = Math.max(
-      0.16,
-      Math.min(0.64, tierRatio * levelShrink)
-    );
-    return Number(
-      (sharkParityScale * targetSharkRatio * debugPreySizeMultiplier).toFixed(3)
-    );
-  }
+  const sharkLengthM = Math.max(0.6, sharkStats.realBodyLengthM ?? 1.5);
+  const preyLengthM = (prey.bodyLengthCm ?? prey.radius * 2.5) / 100.0;
+  // 100% 真实生物体长比例 (preyLengthM / sharkLengthM)
+  const realRatio = preyLengthM / sharkLengthM;
 
-  // Inedible / armor-crushable / deadly predator fish: strictly >= 118% of shark's linear size
-  const overTier = Math.max(1, effectiveTier - visualBiteTier);
-  const behemothExtra = mutationVariant === 'ABYSS_BEHEMOTH' ? 0.08 : 0;
-  const bossExtra = prey.isBoss ? 0.12 : 0;
-  // +1T..+3T (Boost Armor-Crushable): 118% .. 130% of shark size
-  // >= +4T (Deadly Apex Predator): 138% .. 195% of shark size
-  const baseDangerRatio =
-    !prey.isHazard && overTier <= 3
-      ? 1.18 + (overTier - 1) * 0.06
-      : 1.38 + Math.max(0, overTier - 4) * 0.045;
-  const targetDangerRatio = Math.min(
-    1.95,
-    baseDangerRatio + behemothExtra + bossExtra
-  );
+  const behemothMult = mutationVariant === 'ABYSS_BEHEMOTH' ? 1.25 : 1.0;
+  const bossMult = prey.isBoss ? 1.2 : 1.0;
+  // 100% 真实生物体长比例：屏幕绘制尺寸比例严格由 (preyLengthM / sharkLengthM) 决定
+  const targetRatio = realRatio * behemothMult * bossMult;
+
   return Number(
-    (sharkParityScale * targetDangerRatio * debugPreySizeMultiplier).toFixed(3)
+    (sharkParityScale * targetRatio * debugPreySizeMultiplier).toFixed(3)
   );
 }
 
@@ -523,6 +500,11 @@ export function computeSharkStats(
     devourHealMultiplier,
     frenzyDurationBonus,
     totalOrganStars,
+    realBodyLengthM: Number((1.5 * (1 + (level - 1) * 0.035)).toFixed(2)),
+    cruiseSpeedMps: Number((1.8 * (1 + speedBonus)).toFixed(2)),
+    boostSpeedMps: Number(((1.8 * (1 + speedBonus)) * 2.2).toFixed(2)),
+    viewportScale: Number(((120 * scale) / (1.5 * (1 + (level - 1) * 0.035))).toFixed(3)),
+    minSpawnablePreyLengthM: Number(((1.5 * (1 + (level - 1) * 0.035)) * 0.133).toFixed(2)),
   };
 }
 
@@ -771,6 +753,21 @@ export function computeEvolvedSharkStats(
     specialPreyScoreMultiplier,
     bossRewardMultiplier,
     canEatMines,
+    realBodyLengthM: Number(
+      (form.realBodyLengthM * (1.0 + (inRunLevel - 1) * 0.025)).toFixed(2)
+    ),
+    cruiseSpeedMps: Number(
+      (form.cruiseSpeedMps * (1 + totalSpeedBonus)).toFixed(2)
+    ),
+    boostSpeedMps: Number(
+      (form.cruiseSpeedMps * (1 + totalSpeedBonus) * (frenzyActive ? 2.6 : 2.2)).toFixed(2)
+    ),
+    viewportScale: Number(
+      ((120 * scale) / (form.realBodyLengthM * (1.0 + (inRunLevel - 1) * 0.025))).toFixed(3)
+    ),
+    minSpawnablePreyLengthM: Number(
+      (form.realBodyLengthM * (1.0 + (inRunLevel - 1) * 0.025) * 0.133).toFixed(2)
+    ),
   };
 }
 
@@ -1013,10 +1010,18 @@ export function getMaxMechaLoadout(): EquippedOrgansMap {
   return loadout;
 }
 
-export function getDepthZone(yWorld: number): OceanZoneConfig {
-  const depthY = Math.max(0, yWorld);
+export {
+  DEPTH_MAPPING_STOPS,
+  meterDepthToWorldY,
+  worldYToMeterDepth,
+} from './depthScale';
+export type { DepthMappingStop } from './depthScale';
+import { worldYToMeterDepth } from './depthScale';
+
+export function getDepthZone(depthMeters: number): OceanZoneConfig {
+  const depth = Math.max(0, depthMeters);
   for (const zone of GAME_CONFIG.zones) {
-    if (depthY >= zone.minDepth && depthY <= zone.maxDepth) {
+    if (depth >= zone.minDepth && depth <= zone.maxDepth) {
       return zone;
     }
   }

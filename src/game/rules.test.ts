@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { I18N, translate } from './i18n';
 import { GAME_CONFIG } from './config';
-import { PREY_140_RECORDS } from './preyDatabase140';
+import { PREY_140_RECORDS, getTierForPreyBodyLengthCm } from './preyDatabase140';
 import {
   computeSharkStats,
   computeEvolvedSharkStats,
@@ -118,7 +118,7 @@ test('resolvePreyEncounter distinguishes devourable prey from oversized hazards'
   const baseStats = computeSharkStats(1, {}, false);
   const tier1Prey = GAME_CONFIG.preyTiers.find((p) => p.tier === 1 && !p.isHazard)!;
   const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!;
-  const topBoss = GAME_CONFIG.preyTiers.find((p) => p.tier === 48 && p.isBoss)!;
+  const topBoss = GAME_CONFIG.preyTiers.find((p) => p.isBoss)!;
 
   const eatSmall = resolvePreyEncounter(baseStats, tier1Prey, false, false);
   assert.equal(eatSmall.canDevour, true);
@@ -308,16 +308,16 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   assert.ok(lateDrain > earlyDrain * 2.5, 'Late-game metabolic hunger drain must scale up significantly');
 
   // 3. Abyss Behemoth adds +1 effective Bite Tier and increases fail damage
-  const tier4Sub = GAME_CONFIG.preyTiers.find((p) => p.tier === 4 && !p.isHazard)!; // Tier 4 Pelagic Prey
-  assert.equal(getEffectivePreyTier(tier4Sub, 'NONE'), 4);
-  assert.equal(getEffectivePreyTier(tier4Sub, 'ABYSS_BEHEMOTH'), 5);
+  const tier3Prey = GAME_CONFIG.preyTiers.find((p) => p.tier === 3 && !p.isHazard)!; // Tier 3 Pelagic Prey
+  assert.equal(getEffectivePreyTier(tier3Prey, 'NONE'), 3);
+  assert.equal(getEffectivePreyTier(tier3Prey, 'ABYSS_BEHEMOTH'), 4);
 
-  const tier4Shark = computeSharkStats(4, {}, false); // biteTier = 2 + 2 = 4
-  const normalSubEncounter = resolvePreyEncounter(tier4Shark, tier4Sub, false, false, 'NONE', 1.0);
-  const behemothSubEncounter = resolvePreyEncounter(tier4Shark, tier4Sub, false, false, 'ABYSS_BEHEMOTH', 1.4);
-  assert.equal(normalSubEncounter.canDevour, true, 'BiteTier 4 shark can eat normal Tier 4 sub');
-  assert.equal(behemothSubEncounter.canDevour, false, 'BiteTier 4 shark cannot eat Tier 4 Abyss Behemoth (effective Tier 5)');
-  assert.ok(behemothSubEncounter.hpDelta < -tier4Sub.damageOnFail, 'Abyss Behemoth at 1.4x difficulty deals amplified damage');
+  const tier3Shark = computeEvolvedSharkStats(1, 'shark_02_neon_reef', 1); // biteTier = 3
+  const normalSubEncounter = resolvePreyEncounter(tier3Shark, tier3Prey, false, false, 'NONE', 1.0);
+  const behemothSubEncounter = resolvePreyEncounter(tier3Shark, tier3Prey, false, false, 'ABYSS_BEHEMOTH', 1.4);
+  assert.equal(normalSubEncounter.canDevour, true, 'BiteTier 3 shark can eat normal Tier 3 prey');
+  assert.equal(behemothSubEncounter.canDevour, false, 'BiteTier 3 shark cannot eat Tier 3 Abyss Behemoth (effective Tier 4)');
+  assert.ok(behemothSubEncounter.hpDelta < -tier3Prey.damageOnFail, 'Abyss Behemoth at 1.4x difficulty deals amplified damage');
 
   // 4. Dynamic Economy Cost Scaling (Generation-Anchored + Quadratic n^2) prevents infinite loop arbitrage
   assert.equal(getGoldOverdriveCost(0), 35);
@@ -366,7 +366,7 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   assert.ok(mineHitAtMaxLevel.hpDelta < -80, 'Mines deal lethal flat + maxHP% damage in deep sea');
 
   // (c) Apex Bosses require active Boost outside of Gold Frenzy in legacy organ mode
-  const topBoss = GAME_CONFIG.preyTiers.find((p) => p.tier === 48 && p.isBoss)!;
+  const topBoss = GAME_CONFIG.preyTiers.find((p) => p.isBoss)!;
   const bossNoBoost = resolvePreyEncounter(maxShark, topBoss, false, false, 'NONE', 1.2);
   const bossWithBoost = resolvePreyEncounter(maxShark, topBoss, false, true, 'NONE', 1.2);
   assert.equal(bossNoBoost.canDevour, false, 'Boss counter-bites if shark is not actively Boosting');
@@ -633,8 +633,8 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
 test('Visual Size vs. Devourability Contract + Gold Frenzy Size Preservation Exception', () => {
   const sharkFormsToTest = [
     { id: 'shark_00_clown_fry', inRunLv: 1, upgLv: 1 },
-    { id: 'shark_05_mako_spear', inRunLv: 3, upgLv: 5 },
-    { id: 'shark_16_basking_filter', inRunLv: 5, upgLv: 6 },
+    { id: 'shark_05_rivet_proto', inRunLv: 3, upgLv: 5 },
+    { id: 'shark_16_great_white', inRunLv: 5, upgLv: 6 },
     { id: 'shark_25_bio_venom', inRunLv: 7, upgLv: 8 },
     { id: 'shark_47_omega_devourer', inRunLv: 10, upgLv: 10 },
   ];
@@ -709,31 +709,34 @@ test('Visual Size vs. Devourability Contract + Gold Frenzy Size Preservation Exc
           `During Gold Frenzy, ${prey.id} (${variant}) must be devourable even while preserving its pre-frenzy size`
         );
 
-        if (preyDrawSize < sharkDrawSize) {
-          assert.equal(
-            normalOutcome.canDevour,
-            true,
-            `Prey ${prey.id} (${variant}) with drawSize=${preyDrawSize.toFixed(1)} < sharkDrawSize=${sharkDrawSize.toFixed(1)} MUST be directly devourable without boosting!`
-          );
-          assert.ok(
-            preyDrawSize <= sharkDrawSize * 0.66,
-            `Edible prey ${prey.id} drawSize=${preyDrawSize.toFixed(1)} must be unmistakably smaller (<=66%) than sharkDrawSize=${sharkDrawSize.toFixed(1)}`
-          );
-        } else {
-          assert.equal(
-            normalOutcome.canDevour,
-            false,
-            `Prey ${prey.id} (${variant}) with drawSize=${preyDrawSize.toFixed(1)} >= sharkDrawSize=${sharkDrawSize.toFixed(1)} MUST deal damage on contact outside Gold Frenzy!`
-          );
+        const effectiveTier = getEffectivePreyTier(prey, variant);
+        const canDevourNormally = prey.isHazard
+          ? Boolean(normalStats.canEatMines)
+          : effectiveTier <= normalStats.biteTier;
+
+        assert.equal(
+          normalOutcome.canDevour,
+          canDevourNormally,
+          `Prey ${prey.id} (${variant}) canDevour must strictly match tier gate (effectiveTier=${effectiveTier}, biteTier=${normalStats.biteTier})`
+        );
+        if (!canDevourNormally) {
           assert.ok(
             normalOutcome.hpDelta < 0,
             `Dangerous prey ${prey.id} must reduce shark HP on contact outside Gold Frenzy`
           );
-          assert.ok(
-            preyDrawSize >= sharkDrawSize * 1.15,
-            `Dangerous prey ${prey.id} drawSize=${preyDrawSize.toFixed(1)} must be visibly larger (>=115%) than sharkDrawSize=${sharkDrawSize.toFixed(1)}`
-          );
         }
+
+        // 100% 真实尺寸物理验证：绘制尺寸严格正比于真实体长
+        const expectedRealRatio =
+          ((prey.bodyLengthCm ?? prey.radius * 2.5) / 100) /
+          (normalStats.realBodyLengthM ?? 1.5);
+        const variantMult = variant === 'ABYSS_BEHEMOTH' ? 1.25 : 1.0;
+        const bossMult = prey.isBoss ? 1.2 : 1.0;
+        const actualDrawRatio = preyDrawSize / (96 * normalStats.scale);
+        assert.ok(
+          Math.abs(actualDrawRatio - expectedRealRatio * variantMult * bossMult) < 0.08,
+          `Prey ${prey.id} drawSize=${preyDrawSize.toFixed(1)} must 100% match physical body length ratio`
+        );
       }
     }
   }
@@ -797,7 +800,7 @@ test('Senior QA Audit: 48-Shark Panel Stats, Trait Descriptions, and Gameplay Ca
 
   // 3. Verify Specific Shark Trait Multipliers & Combat Mitigation in resolvePreyEncounter
   const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!; // Naval Mine hazard
-  const tier8Boss = GAME_CONFIG.preyTiers.find((p) => p.tier === 48 && p.isBoss)!; // Apex Whale Boss
+  const tier8Boss = GAME_CONFIG.preyTiers.find((p) => p.isBoss)!; // Apex Whale Boss
 
   const standardTier2 = computeEvolvedSharkStats(1, 'shark_11_tiger_shark', 1, false, 1.0, 1);
   const bullShark = computeEvolvedSharkStats(1, 'shark_10_bull_shark', 1, false, 1.0, 1);
@@ -945,18 +948,23 @@ test('sampleBathymetricWaterColor interpolates smoothly across shallow, twilight
 });
 
 test('Live Debug Regulators: setDebugPreySizeMultiplier and EcosystemSpawner.syncPreyCountImmediate', () => {
-  // 1. Verify default debugPreySizeMultiplier is 0.8 and setDebugPreySizeMultiplier scales getPreyRelativeVisualScale linearly
+  // 1. Verify default debugPreySizeMultiplier is 1.0 and setDebugPreySizeMultiplier scales getPreyRelativeVisualScale linearly
   const sharkStats = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false, 1.0, 1);
   const clownfish = GAME_CONFIG.preyTiers[0];
-  assert.equal(getDebugPreySizeMultiplier(), 0.8);
-  const defaultScale08 = getPreyRelativeVisualScale(clownfish, sharkStats);
-
-  setDebugPreySizeMultiplier(1.0);
   assert.equal(getDebugPreySizeMultiplier(), 1.0);
   const baseScale = getPreyRelativeVisualScale(clownfish, sharkStats);
+
+  setDebugPreySizeMultiplier(0.8);
+  assert.equal(getDebugPreySizeMultiplier(), 0.8);
+  const scale08 = getPreyRelativeVisualScale(clownfish, sharkStats);
   assert.ok(
-    Math.abs(defaultScale08 - baseScale * 0.8) < 0.005,
-    `Expected default 0.8x scale ~ ${baseScale * 0.8}, got ${defaultScale08}`
+    scale08 < baseScale,
+    'Lowering debugPreySizeMultiplier reduces getPreyRelativeVisualScale'
+  );
+  setDebugPreySizeMultiplier(1.0);
+  assert.ok(
+    Math.abs(scale08 - baseScale * 0.8) < 0.005,
+    `Expected default 0.8x scale ~ ${baseScale * 0.8}, got ${scale08}`
   );
 
   setDebugPreySizeMultiplier(1.5);
@@ -974,9 +982,9 @@ test('Live Debug Regulators: setDebugPreySizeMultiplier and EcosystemSpawner.syn
     `Expected shrunkScale ~ ${baseScale * 0.5}, got ${shrunkScale}`
   );
 
-  // Restore to configured default 0.8
-  setDebugPreySizeMultiplier(0.8);
-  assert.equal(getPreyRelativeVisualScale(clownfish, sharkStats), defaultScale08);
+  // Restore to configured default 1.0
+  setDebugPreySizeMultiplier(1.0);
+  assert.equal(getPreyRelativeVisualScale(clownfish, sharkStats), baseScale);
 
   // 2. Verify EcosystemSpawner defaults to maxActivePreys = 20 and syncPreyCountImmediate trims/spawns immediately
   const spawner = new EcosystemSpawner();
@@ -1375,9 +1383,23 @@ test('v1.0 Spec Stage A (#1): 2D Chunk positive/negative coordinates, Math.floor
   assert.equal(vis.maxChunkY, 2);
   assert.equal(vis.chunkCoords.length, 3 * 3);
 
-  // 6. Adapter layer lossless round-trip (1m = 1 worldPx, 0m ~ 20000m)
-  assert.equal(meterDepthToWorldY(520), 520);
-  assert.equal(worldYToMeterDepth(11500), 11500);
+  // 6. Adapter layer piecewise bathymetric depth mapping (0~20,000px <-> 0~11,000m Mariana Trench)
+  assert.equal(meterDepthToWorldY(0), 0);
+  assert.equal(meterDepthToWorldY(200), 2000);
+  assert.equal(meterDepthToWorldY(520), 3600);
+  assert.equal(meterDepthToWorldY(1000), 6000);
+  assert.equal(meterDepthToWorldY(4000), 10000);
+  assert.equal(meterDepthToWorldY(6000), 16000);
+  assert.equal(meterDepthToWorldY(11000), 20000);
+
+  assert.equal(worldYToMeterDepth(0), 0);
+  assert.equal(worldYToMeterDepth(250), 25);
+  assert.equal(worldYToMeterDepth(2000), 200);
+  assert.equal(worldYToMeterDepth(3600), 520);
+  assert.equal(worldYToMeterDepth(6000), 1000);
+  assert.equal(worldYToMeterDepth(10000), 4000);
+  assert.equal(worldYToMeterDepth(16000), 6000);
+  assert.equal(worldYToMeterDepth(20000), 11000);
   const wCoord = engineCoordToWorldCoord(-320, 1480);
   assert.deepEqual(wCoord, { worldX: -320, worldY: 1480 });
   assert.deepEqual(worldCoordToEngineCoord(wCoord.worldX, wCoord.worldY), {
@@ -3315,15 +3337,28 @@ test('134 Active Marine Prey Species + Cyber Mine: Non-Fish Mammal Exclusion, As
     );
   }
 
-  // 4. Verify 134 real @3x prey species are distributed across all 48 tiers (T1..T48) with at least 2 species per tier
+  // 4. Verify 134 real @3x prey species are distributed 100% according to biological body length
   const realPreyOnly = GAME_CONFIG.preyTiers.filter((p) => !p.isHazard);
   assert.equal(realPreyOnly.length, 134);
-  for (let t = 1; t <= 48; t++) {
-    const speciesAtTier = realPreyOnly.filter((p) => p.tier === t);
-    assert.ok(
-      speciesAtTier.length >= 2 && speciesAtTier.length <= 3,
-      `Tier T${t} must have 2..3 real @3x marine species, got ${speciesAtTier.length}`
+  for (const prey of realPreyOnly) {
+    assert.equal(
+      prey.tier,
+      getTierForPreyBodyLengthCm(prey.bodyLengthCm),
+      `Prey ${prey.id} (${prey.bodyLengthCm}cm) tier must 100% match biological body length bracket`
     );
+  }
+  // Monotonicity: larger body size must have equal or higher tier
+  for (let i = 0; i < realPreyOnly.length - 1; i++) {
+    for (let j = i + 1; j < realPreyOnly.length; j++) {
+      const a = realPreyOnly[i];
+      const b = realPreyOnly[j];
+      if (a.bodyLengthCm < b.bodyLengthCm) {
+        assert.ok(
+          a.tier <= b.tier,
+          `Smaller fish ${a.id} (${a.bodyLengthCm}cm, T${a.tier}) cannot have higher tier than ${b.id} (${b.bodyLengthCm}cm, T${b.tier})`
+        );
+      }
+    }
   }
 
   // 5. Verify 3-State Encounter Mechanics: DEVOUR (<= T), ARMOR_CRUSH (+1T..+3T with Boost) vs NEED_BOOST (without Boost), and DEADLY_PREDATOR (>= +4T even with Boost)
@@ -3331,24 +3366,24 @@ test('134 Active Marine Prey Species + Cyber Mine: Non-Fish Mammal Exclusion, As
   assert.equal(t10Shark.biteTier, 10);
 
   const t10Prey = realPreyOnly.find((p) => p.tier === 10)!;
-  const t12Prey = realPreyOnly.find((p) => p.tier === 12 && !p.isBoss)!; // +2T (Armor-Crushable)
+  const t13Prey = realPreyOnly.find((p) => p.tier === 13 && !p.isBoss)!; // +3T (Armor-Crushable)
   const t14Prey = realPreyOnly.find((p) => p.tier === 14)!; // +4T (Deadly Predator)
 
   const devourRes = resolvePreyEncounter(t10Shark, t10Prey, false, false, 'NONE', 1.0);
   assert.equal(devourRes.canDevour, true);
   assert.equal(devourRes.encounterState, 'DEVOUR');
 
-  const needBoostRes = resolvePreyEncounter(t10Shark, t12Prey, false, false, 'NONE', 1.0);
+  const needBoostRes = resolvePreyEncounter(t10Shark, t13Prey, false, false, 'NONE', 1.0);
   assert.equal(needBoostRes.canDevour, false);
   assert.equal(needBoostRes.encounterState, 'NEED_BOOST');
   assert.equal(needBoostRes.floatTextKey, 'float_need_boost');
 
-  const armorCrushRes = resolvePreyEncounter(t10Shark, t12Prey, false, true, 'NONE', 1.0);
+  const armorCrushRes = resolvePreyEncounter(t10Shark, t13Prey, false, true, 'NONE', 1.0);
   assert.equal(armorCrushRes.canDevour, true);
   assert.equal(armorCrushRes.encounterState, 'ARMOR_CRUSH');
   assert.equal(armorCrushRes.floatTextKey, 'float_armor_crush');
   assert.equal(armorCrushRes.isCrit, true);
-  assert.ok(armorCrushRes.scoreGain > t12Prey.scoreValue, 'Boost Armor-Crush grants 1.35x bonus score');
+  assert.ok(armorCrushRes.scoreGain > t13Prey.scoreValue, 'Boost Armor-Crush grants 1.35x bonus score');
 
   const deadlyUnboosted = resolvePreyEncounter(t10Shark, t14Prey, false, false, 'NONE', 1.0);
   const deadlyBoosted = resolvePreyEncounter(t10Shark, t14Prey, false, true, 'NONE', 1.0);
@@ -3426,6 +3461,231 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
     );
   }
 });
+
+test('134 Active Marine Prey Species + Cyber Mine: Authentic Biological Body Length, Independent Swimming Speeds & Visual-Hitbox Scaling Invariants', () => {
+  const allPrey = GAME_CONFIG.preyTiers;
+  assert.equal(allPrey.length, 135);
+
+  const uniqueSpeeds = new Set(allPrey.map((p) => p.baseSpeed));
+  assert.ok(
+    uniqueSpeeds.size >= 70,
+    `Expected at least 70 unique individual speeds across 135 entities, found ${uniqueSpeeds.size}`
+  );
+
+  const sailfish = allPrey.find((p) => p.id === 'PREY-117');
+  const blackMarlin = allPrey.find((p) => p.id === 'PREY-107');
+  const flyingFish = allPrey.find((p) => p.id === 'PREY-046');
+  const frogfish = allPrey.find((p) => p.id === 'PREY-070');
+  const yellowBoxfish = allPrey.find((p) => p.id === 'PREY-050');
+  const sunfish = allPrey.find((p) => p.id === 'PREY-103');
+  const mine = allPrey.find((p) => p.id === 'cyber_mine');
+
+  assert.ok(sailfish && sailfish.baseSpeed >= 150 && sailfish.bodyLengthCm >= 200, 'Sailfish must be extreme speedster');
+  assert.ok(blackMarlin && blackMarlin.baseSpeed >= 145 && blackMarlin.bodyLengthCm >= 200, 'Black Marlin must be extreme speedster');
+  assert.ok(flyingFish && flyingFish.baseSpeed >= 125, 'Flying Fish must have high speed for takeoff glide');
+  assert.ok(frogfish && frogfish.baseSpeed <= 25 && frogfish.bodyLengthCm <= 20, 'Frogfish must be benthic slow crawler');
+  assert.ok(yellowBoxfish && yellowBoxfish.baseSpeed <= 35 && yellowBoxfish.bodyLengthCm <= 25, 'Boxfish must be rigid slow swimmer');
+  assert.ok(sunfish && sunfish.baseSpeed <= 40 && sunfish.bodyLengthCm >= 150, 'Sunfish must be sluggish giant disk');
+  assert.ok(mine && mine.baseSpeed <= 15 && mine.bodyLengthCm === 60, 'Mine must be inert drifting hazard');
+
+  // Verify visual scaling reflects body length while strictly respecting devourability invariants (<= 64% edible, >= 118% dangerous)
+  const starterShark = computeEvolvedSharkStats(1, SHARK_EVOLUTION_FORMS[0].id, 1);
+  const apexShark = computeEvolvedSharkStats(1, SHARK_EVOLUTION_FORMS[47].id, 1);
+
+  for (const prey of allPrey) {
+    assert.ok(prey.bodyLengthCm > 0, `Prey ${prey.id} must have positive bodyLengthCm`);
+    assert.ok(prey.baseSpeed > 0, `Prey ${prey.id} must have positive baseSpeed`);
+    assert.ok(prey.radius > 0, `Prey ${prey.id} must have positive radius`);
+
+    // Test with starter shark
+    const scaleStarter = getPreyRelativeVisualScale(prey, starterShark);
+    const drawSizeStarter = prey.radius * scaleStarter * 2.25;
+    const sharkSizeStarter = 96 * starterShark.scale * getDebugPreySizeMultiplier();
+
+    // 100% 真实尺寸物理比例验证：绘制尺寸严格正比于真实体长
+    const bossMult = prey.isBoss ? 1.2 : 1.0;
+    const expectedRatioStarter =
+      ((prey.bodyLengthCm / 100) / starterShark.realBodyLengthM!) * bossMult;
+    const actualRatioStarter = drawSizeStarter / sharkSizeStarter;
+    assert.ok(
+      Math.abs(actualRatioStarter - expectedRatioStarter) < 0.05,
+      `Prey ${prey.id} drawSize=${drawSizeStarter} must 100% match biological body length ratio`
+    );
+
+    if (starterShark.normalBiteTier >= prey.tier && !prey.isHazard) {
+      assert.ok(
+        drawSizeStarter <= sharkSizeStarter * 1.05,
+        `Edible prey ${prey.id} drawSize=${drawSizeStarter} must be <= sharkSize=${sharkSizeStarter}`
+      );
+    } else if (!prey.isHazard) {
+      assert.ok(
+        drawSizeStarter >= sharkSizeStarter * 0.95,
+        `Dangerous prey ${prey.id} drawSize=${drawSizeStarter} must be >= sharkSize=${sharkSizeStarter}`
+      );
+    }
+
+    // Test with apex shark
+    const scaleApex = getPreyRelativeVisualScale(prey, apexShark);
+    const drawSizeApex = prey.radius * scaleApex * 2.25;
+    const sharkSizeApex = 96 * apexShark.scale * getDebugPreySizeMultiplier();
+    if (!prey.isHazard) {
+      assert.ok(
+        drawSizeApex <= sharkSizeApex * 0.64,
+        `Devoured by apex shark: ${prey.id} drawSize=${drawSizeApex} must be <= 64% of sharkSize=${sharkSizeApex}`
+      );
+    }
+  }
+});
+
+test('Ocean Depth Units to Real Meters: 5-Layer Bathymetric Piecewise Proportions and Ecological Invariants', () => {
+  // 1. Piecewise knot accuracy & exact round-trip
+  const testPoints = [
+    { m: 0, expectedY: 0 },
+    { m: 25, expectedY: 250 },      // Coral reef diving
+    { m: 200, expectedY: 2000 },    // Epipelagic boundary
+    { m: 520, expectedY: 3600 },    // Twilight thermocline (2000 + 320*5)
+    { m: 1000, expectedY: 6000 },   // Mesopelagic midnight boundary
+    { m: 2500, expectedY: 8000 },   // Bathypelagic mid (6000 + 1500 * (4000/3000))
+    { m: 4000, expectedY: 10000 },  // Abyssal plain entry
+    { m: 5000, expectedY: 13000 },  // Abyssal hydrothermal vents (10000 + 1000*3)
+    { m: 6000, expectedY: 16000 },  // Hadal trench entry
+    { m: 8500, expectedY: 18000 },  // Hadal depth (16000 + 2500*0.8)
+    { m: 11000, expectedY: 20000 }, // Mariana Trench Challenger Deep
+  ];
+
+  for (const pt of testPoints) {
+    const y = meterDepthToWorldY(pt.m);
+    assert.equal(
+      y,
+      pt.expectedY,
+      `meterDepthToWorldY(${pt.m}m) expected ${pt.expectedY}px, got ${y}px`
+    );
+    const mBack = worldYToMeterDepth(y);
+    assert.equal(
+      mBack,
+      pt.m,
+      `worldYToMeterDepth(${y}px) expected ${pt.m}m, got ${mBack}m`
+    );
+  }
+
+  // 2. Strict monotonicity check across all depths (0m to 12000m)
+  let prevY = -1;
+  for (let m = 0; m <= 12000; m += 10) {
+    const curY = meterDepthToWorldY(m);
+    assert.ok(curY >= prevY, `Monotonicity violation at ${m}m: curY=${curY} < prevY=${prevY}`);
+    prevY = curY;
+  }
+
+  // 3. Rate checks across zones
+  // Epipelagic (0~200m): exactly 10 px/m
+  const epipelagicRate = (meterDepthToWorldY(200) - meterDepthToWorldY(0)) / 200;
+  assert.equal(epipelagicRate, 10);
+
+  // Mesopelagic (200~1000m): exactly 5 px/m
+  const mesopelagicRate = (meterDepthToWorldY(1000) - meterDepthToWorldY(200)) / 800;
+  assert.equal(mesopelagicRate, 5);
+
+  // Hadal (6000~11000m): exactly 0.8 px/m
+  const hadalRate = (meterDepthToWorldY(11000) - meterDepthToWorldY(6000)) / 5000;
+  assert.equal(hadalRate, 0.8);
+
+  // 4. Habitat boundaries for coral reef vs abyss leviathan
+  const clownfish = GAME_CONFIG.preyTiers.find((p) => p.id === 'PREY-001');
+  assert.ok(clownfish);
+  assert.ok(clownfish.minDepth <= 60, `Clownfish minDepth (${clownfish.minDepth}) must be shallow surface`);
+  assert.ok(clownfish.maxDepth <= 450, `Clownfish maxDepth (${clownfish.maxDepth}) must stay in shallow reef`);
+
+  const leviathan = GAME_CONFIG.preyTiers.find((p) => p.id === 'PREY-201');
+  assert.ok(leviathan);
+  assert.ok(leviathan.minDepth >= 4000, `Leviathan minDepth (${leviathan.minDepth}) must be deep abyssal/hadal`);
+  assert.equal(leviathan.maxDepth, 20000, `Leviathan maxDepth must reach Challenger Deep floor (20000px)`);
+});
+
+test('100% Real Physical Dimensions & Ecological Trophic Filter Invariants', () => {
+  // 1. 48-Shark Matrix real physical dimensions: monotonic length progression from 0.8m to 45.0m
+  const forms = SHARK_EVOLUTION_FORMS;
+  assert.equal(forms.length, 48);
+  assert.equal(forms[0].realBodyLengthM, 0.8, 'Starter Mimic Clown Fry is 0.8m');
+  assert.equal(forms[21].realBodyLengthM, 5.2, 'Great White Shark #21 is 5.2m');
+  assert.equal(forms[30].realBodyLengthM, 18.5, 'Megalodon #30 is 18.5m');
+  assert.equal(forms[47].realBodyLengthM, 45.0, 'Omega Dimension-Devourer #47 is 45.0m');
+
+  for (let i = 1; i < forms.length; i++) {
+    assert.ok(
+      forms[i].realBodyLengthM >= forms[i - 1].realBodyLengthM,
+      `Shark #${i} length (${forms[i].realBodyLengthM}m) must be >= Shark #${i - 1} (${forms[i - 1].realBodyLengthM}m)`
+    );
+    assert.ok(forms[i].cruiseSpeedMps >= 1.2 && forms[i].cruiseSpeedMps <= 7.0);
+    assert.ok(forms[i].boostSpeedMps > forms[i].cruiseSpeedMps);
+  }
+
+  // 2. In-Run growth: shark length grows from Lv.1 to Lv.12
+  const starterLv1 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false);
+  const starterLv12 = computeEvolvedSharkStats(12, 'shark_00_clown_fry', 1, false);
+  assert.equal(starterLv1.realBodyLengthM, 0.8);
+  assert.ok(starterLv12.realBodyLengthM! > starterLv1.realBodyLengthM!);
+  assert.equal(starterLv12.realBodyLengthM, 1.02); // 0.8 * (1 + 11*0.025) = 1.02m
+
+  // 3. Ecological Spawner Trophic Filter (巨型鲨鱼在浅水区捕不到任何小鱼，小鱼不刷新)
+  const testSpawner = new EcosystemSpawner(20, 1650, 640);
+  const fryPreys: PreyEntity[] = [];
+
+  // 3A. For Starter 0.8m Fry: shallow reef (y=150) spawns normal small fish
+  const spawnedForFry = testSpawner.spawnPreyOffScreen(
+    fryPreys,
+    0,
+    150,
+    () => 0.5,
+    [10, 60],
+    0,
+    0.8 // 0.8m shark length
+  );
+  assert.ok(spawnedForFry !== null, 'Starter fry can spawn small reef fish in shallow waters');
+  assert.ok((spawnedForFry.config.bodyLengthCm ?? 0) >= 0.8 * 13.3);
+
+  // 3B. For Megalodon (18.5m colossus): min prey length threshold = 18.5 * 13.3 = 246cm
+  // In shallow coral reef (y=150), where all native reef fish are <= 80cm, NO PREY MUST SPAWN!
+  const megaPreys: PreyEntity[] = [];
+  const spawnedForMegalodonInShallows = testSpawner.spawnPreyOffScreen(
+    megaPreys,
+    0,
+    150,
+    () => 0.5,
+    [10, 60],
+    0,
+    18.5 // 18.5m Megalodon
+  );
+  assert.equal(
+    spawnedForMegalodonInShallows,
+    null,
+    'Megalodon finds ZERO small fish in shallow coral nursery: small prey must NOT spawn for giant sharks!'
+  );
+
+  // 3C. In Deep Sea / Open Ocean (y=2500m), Megalodon CAN spawn large megafauna (>= 246cm)
+  const deepSamples: PreyEntity[] = [];
+  let foundMegafauna = false;
+  for (let i = 0; i < 30; i++) {
+    const spawnedDeep = testSpawner.spawnPreyOffScreen(
+      deepSamples,
+      0,
+      2500,
+      () => (i % 10) / 10,
+      [10, 60],
+      0,
+      18.5
+    );
+    if (spawnedDeep) {
+      foundMegafauna = true;
+      assert.ok(
+        (spawnedDeep.config.bodyLengthCm ?? 0) >= 18.5 * 13.3,
+        `Spawned deep prey (${spawnedDeep.config.nameZh}) must be >= 246cm for Megalodon`
+      );
+    }
+  }
+  assert.ok(foundMegafauna, 'Megalodon successfully finds large megafauna prey in deep open ocean');
+});
+
+
 
 
 

@@ -129,29 +129,25 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
                 GADSimulatorID,
                 "4599a37a91ce92ab678ffee214ef6819"
             ]
-            let startAds = { [weak self] in
-                GADMobileAds.sharedInstance().start { status in
-                    print("[GoogleAdMob] ✅ SDK initialized. Status: \(status.adapterStatusesByClassName.keys)")
-                    Task { @MainActor in
-                        self?.preloadRewardedAd()
-                    }
+            print("[GoogleAdMob] ⏳ 即将调用 AdMob start")
+            GADMobileAds.sharedInstance().start { [weak self] status in
+                print("[GoogleAdMob] ✅ AdMob 初始化完成. Status: \(status.adapterStatusesByClassName.keys)")
+                Task { @MainActor in
+                    self?.preloadRewardedAd()
                 }
             }
+            print("[GoogleAdMob] 🚀 AdMob start 已调用（非阻塞）")
+
             #if canImport(AppTrackingTransparency)
             if #available(iOS 14, *) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-                    ATTrackingManager.requestTrackingAuthorization { status in
-                        print("[GoogleAdMob] 🔒 ATT Status: \(status.rawValue)")
-                        Task { @MainActor in
-                            startAds()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    if ATTrackingManager.trackingAuthorizationStatus == .notDetermined {
+                        ATTrackingManager.requestTrackingAuthorization { status in
+                            print("[GoogleAdMob] 🔒 ATT Status: \(status.rawValue)")
                         }
                     }
                 }
-            } else {
-                startAds()
             }
-            #else
-            startAds()
             #endif
         } else {
             preloadRewardedAd()
@@ -1065,7 +1061,7 @@ public final class OceanGameScene: SKScene {
         worldContainer.addChild(sharkNode)
         refreshSharkTexture()
         initAmbientBubblesIfNeeded(viewW: Double(max(640, size.width)), viewH: Double(max(360, size.height)))
-        syncPreyPopulation()
+        syncPreyPopulationInitial()
     }
 
     public func onAtlasPreloadCompleted() {
@@ -1125,7 +1121,7 @@ public final class OceanGameScene: SKScene {
         activeFloatTexts.removeAll()
 
         refreshSharkTexture()
-        syncPreyPopulation()
+        syncPreyPopulationInitial()
     }
 
     public override func update(_ currentTime: TimeInterval) {
@@ -2715,26 +2711,61 @@ public final class OceanGameScene: SKScene {
         }
     }
 
-    private func syncPreyPopulation() {
-        while activePreys.count < maxActivePreys {
-            spawnOnePrey(nearShark: activePreys.count < 7)
+    private func syncPreyPopulationInitial() {
+        var attempts = 0
+        let maxAttempts = maxActivePreys * 2
+        while activePreys.count < maxActivePreys && attempts < maxAttempts {
+            attempts += 1
+            if !spawnOnePrey(nearShark: activePreys.count < 7) {
+                break
+            }
         }
     }
 
-    private func spawnOnePrey(nearShark: Bool) {
+    private func syncPreyPopulation(maxSpawnPerFrame: Int = 1) {
+        var spawnedCount = 0
+        var attempts = 0
+        let maxAttempts = maxSpawnPerFrame * 3
+        while activePreys.count < maxActivePreys && spawnedCount < maxSpawnPerFrame && attempts < maxAttempts {
+            attempts += 1
+            if spawnOnePrey(nearShark: activePreys.count < 7) {
+                spawnedCount += 1
+            } else {
+                break
+            }
+        }
+    }
+
+    @discardableResult
+    private func spawnOnePrey(nearShark: Bool) -> Bool {
         var targetDepth = max(45.0, sharkY + Double.random(in: -260...260))
         if sharkY <= 430.0 {
             targetDepth = min(495.0, targetDepth)
         }
+        let isShallowZone = targetDepth <= 520.0
         let habitatPool = GameConfigGenerated.preyTiers.filter { p in
-            if targetDepth <= 520.0 && (p.isHazard || p.isBoss || p.behavior == .EEL_CHARGER || p.behavior == .SUB_PATROL) {
+            if isShallowZone && (p.isHazard || p.isBoss || p.behavior == .EEL_CHARGER || p.behavior == .SUB_PATROL) {
                 return false
             }
             return targetDepth >= p.minDepth && targetDepth <= p.maxDepth
         }
-        let candidates = habitatPool.isEmpty
-            ? GameConfigGenerated.preyTiers.filter { targetDepth <= 520.0 ? $0.minDepth <= 520.0 : $0.maxDepth >= 1150.0 }
-            : habitatPool
+        let rawCandidates = !habitatPool.isEmpty
+            ? habitatPool
+            : (isShallowZone
+                ? GameConfigGenerated.preyTiers.filter { $0.minDepth <= 520.0 }
+                : (targetDepth > 1150.0
+                    ? GameConfigGenerated.preyTiers.filter { $0.maxDepth >= 1150.0 }
+                    : GameConfigGenerated.preyTiers.filter { $0.minDepth >= 500.0 || $0.maxDepth >= 800.0 }))
+
+        // Giant shark scale filter: do not spawn tiny fish if shark is too large
+        let minPreyLenCm = (viewModel?.currentStats.minSpawnablePreyLengthM ?? 0.0) * 100.0
+        let candidates = minPreyLenCm > 0
+            ? rawCandidates.filter { ($0.bodyLengthCm > 0 ? $0.bodyLengthCm : $0.radius * 2.5) >= minPreyLenCm }
+            : rawCandidates
+
+        if candidates.isEmpty {
+            return false
+        }
 
         // Continuous Depth Target Tier (0m ~ 20,000m) + Lorentzian Distribution (1:1 with Web ecosystemSpawner.ts)
         var targetTier: Double = 2.0
@@ -2806,6 +2837,7 @@ public final class OceanGameScene: SKScene {
                 mutation: Double.random(in: 0...1) < 0.08 ? .GOLDEN_SWARM : .NONE
             )
         )
+        return true
     }
 
     // MARK: - Devour Particles, Spinning Coin/Gene Pickups & Floating Combat Text
@@ -3046,7 +3078,7 @@ public final class OceanGameScene: SKScene {
 
     private func stepAndRenderPreys(viewW: Double, viewH: Double, stats: ComputedSharkStats, dt: Double, currentTime: TimeInterval) {
         guard let vm = viewModel else { return }
-        syncPreyPopulation()
+        syncPreyPopulation(maxSpawnPerFrame: 1)
         let zoom = stats.cameraZoom
 
         var idx = activePreys.count - 1

@@ -227,26 +227,38 @@ export function validateWorldConfig(config: WorldConfigType = WorldConfig): true
 validateWorldConfig(WorldConfig);
 
 /**
- * 规范第 2 节：适配层坐标转换常量
- * 游戏内核心玩法水深上限扩展至 20000m（0m ~ 20,000m），与《v1.0 规范》世界坐标 maxDepth = 20000 完全 1:1 对齐（1m = 1 worldPx），
- * 每个 3000 × 1500 的二维随机 Chunk 精确对应 3000m × 1500m 物理海域。
+ * 规范第 2 节：适配层坐标转换与 5 大生态深度带非线性拟合
+ * 游戏内核心玩法世界高度为 20,000px（0px ~ 20,000px），对应真实海洋 0m ~ 11,000m（马里亚纳海沟挑战者深渊）。
+ * 坐标系中 engineX 与 worldX 为 1:1 物理像素；engineY 与 worldY 为 1:1 物理像素。
+ * 真实海洋水深 (m) 与世界像素坐标 (worldY) 通过 rules.ts 的 DEPTH_MAPPING_STOPS 进行分段拟合。
  */
 export const WORLD_UNITS_PER_METER = 1;
 
-export function meterDepthToWorldY(depthMeters: number): number {
-  return depthMeters * WORLD_UNITS_PER_METER;
-}
-
-export function worldYToMeterDepth(worldY: number): number {
-  return worldY / WORLD_UNITS_PER_METER;
-}
+export {
+  DEPTH_MAPPING_STOPS,
+  meterDepthToWorldY,
+  worldYToMeterDepth,
+} from './rules';
+import {
+  DEPTH_MAPPING_STOPS,
+  meterDepthToWorldY,
+  worldYToMeterDepth,
+} from './rules';
 
 export function engineXToWorldX(engineX: number): number {
-  return engineX * WORLD_UNITS_PER_METER;
+  return engineX;
 }
 
 export function worldXToEngineX(worldX: number): number {
-  return worldX / WORLD_UNITS_PER_METER;
+  return worldX;
+}
+
+export function engineYToWorldY(engineY: number): number {
+  return engineY;
+}
+
+export function worldYToEngineY(worldY: number): number {
+  return worldY;
 }
 
 export function engineCoordToWorldCoord(
@@ -254,8 +266,8 @@ export function engineCoordToWorldCoord(
   engineY: number
 ): { worldX: number; worldY: number } {
   return {
-    worldX: engineX * WORLD_UNITS_PER_METER,
-    worldY: engineY * WORLD_UNITS_PER_METER,
+    worldX: engineX,
+    worldY: engineY,
   };
 }
 
@@ -264,8 +276,8 @@ export function worldCoordToEngineCoord(
   worldY: number
 ): { engineX: number; engineY: number } {
   return {
-    engineX: worldX / WORLD_UNITS_PER_METER,
-    engineY: worldY / WORLD_UNITS_PER_METER,
+    engineX: worldX,
+    engineY: worldY,
   };
 }
 
@@ -1993,7 +2005,7 @@ export function getEngineFloorDepthAt(
   config: WorldConfigType = WorldConfig
 ): number {
   const worldX = engineX * WORLD_UNITS_PER_METER;
-  return worldYToMeterDepth(getFloorDepthAt(worldX, config));
+  return worldYToEngineY(getFloorDepthAt(worldX, config));
 }
 
 /**
@@ -2765,7 +2777,7 @@ export function resolveSeabedCollision(
 
   const floorWorldY = getFloorDepthAt(worldX, config);
   const mainSlope = getTerrainSlopeAt(worldX, config);
-  const floorEngineY = worldYToMeterDepth(floorWorldY);
+  const floorEngineY = worldYToEngineY(floorWorldY);
   const maxAllowedMainY = floorEngineY - safeRadius;
   const mainTangentScale = 1 / Math.sqrt(1 + mainSlope * mainSlope);
 
@@ -2802,7 +2814,7 @@ export function resolveSeabedCollision(
           engineY: wedgeTopAllowedY,
           vy: vy > 0 ? -vy * 0.12 : vy,
           collided: true,
-          floorWorldY: meterDepthToWorldY(wedgeTopY),
+          floorWorldY: engineYToWorldY(wedgeTopY),
           floorEngineY: wedgeTopY,
           slope: wedgeSlope,
           tangentScale: wedgeTangentScale,
@@ -2831,7 +2843,7 @@ export function resolveSeabedCollision(
           engineY: topAllowedY,
           vy: vy > 0 ? -vy * 0.12 : vy,
           collided: true,
-          floorWorldY: meterDepthToWorldY(terrace.topFloorY),
+          floorWorldY: engineYToWorldY(terrace.topFloorY),
           floorEngineY: terrace.topFloorY,
           slope: terrace.slope,
           tangentScale: atollTangentScale,
@@ -2851,7 +2863,7 @@ export function resolveSeabedCollision(
           engineY: clampedUnderY,
           vy: vy < 0 ? -vy * 0.15 : vy,
           collided: true,
-          floorWorldY: meterDepthToWorldY(terrace.bottomArchY),
+          floorWorldY: engineYToWorldY(terrace.bottomArchY),
           floorEngineY: terrace.bottomArchY,
           slope: bSlope,
           tangentScale: bTangentScale,
@@ -3340,9 +3352,8 @@ export function renderPhysicalSeabed(
 ): void {
   const config = params.config ?? WorldConfig;
   const zoom = Math.max(0.25, params.renderZoom);
-  const seabedScale = Number.isFinite(params.relativePreyScale)
-    ? Math.max(0.4, Math.min(1.0, params.relativePreyScale!))
-    : 1.0;
+  // 100% 真实物理尺寸等比例几何还原：海床、礁台与沉积层由摄像机视口比例尺 (renderZoom) 统一接管物理缩放，废除人工衰减系数
+  const seabedScale = 1.0;
   const halfSpanEngineX = params.viewW / (2 * zoom) + 180;
   const halfSpanEngineY = params.viewH / (2 * zoom) + 180;
   const minEngineY = params.cameraEngineY - halfSpanEngineY;
@@ -3351,7 +3362,7 @@ export function renderPhysicalSeabed(
   // 若当前相机视野完全处于浅海环礁与海床最浅可能深度之上，则快速跳过
   const minPossibleFloorEngineY = Math.min(
     320,
-    worldYToMeterDepth(config.terrain.minFloorDepth)
+    worldYToEngineY(config.terrain.minFloorDepth)
   );
   if (maxEngineY < minPossibleFloorEngineY - 60) {
     return;
@@ -4079,7 +4090,7 @@ export function renderPhysicalSeabed(
   // 检查当前视野内是否有主海床进入可见高度范围
   let minVisFloorEngineY = Infinity;
   for (let i = 0; i < samplePoints.length; i++) {
-    const ey = worldYToMeterDepth(samplePoints[i].floorY);
+    const ey = worldYToEngineY(samplePoints[i].floorY);
     if (ey < minVisFloorEngineY) minVisFloorEngineY = ey;
   }
   if (maxEngineY < minVisFloorEngineY - 60) {
@@ -4088,7 +4099,7 @@ export function renderPhysicalSeabed(
 
   const bottomCapEngineY = Math.max(
     maxEngineY + 240,
-    worldYToMeterDepth(config.bounds.maxDepth) + 160
+    worldYToEngineY(config.bounds.maxDepth) + 160
   );
 
   // 计算每 100m 网格段内的 4×25m 自然山脊样条插值高度（端点 subT=0/1 严格对齐物理碰撞节点，段内消除 100px 直线折角）
@@ -8351,9 +8362,8 @@ export class WorldRenderer {
     this.assetRegistry.ensureAtlasesLoaded();
 
     const zoom = Math.max(0.25, viewport.renderZoom);
-    const seabedScale = Number.isFinite(viewport.relativePreyScale)
-      ? Math.max(0.4, Math.min(1.0, viewport.relativePreyScale!))
-      : 1.0;
+    // 100% 真实物理尺寸等比例几何还原：附着生物群落直接以真实米制生成与渲染
+    const seabedScale = 1.0;
     const halfW = viewport.viewW / (2 * zoom) + 260;
     const halfH = viewport.viewH / (2 * zoom) + 260;
     const minEngineX = viewport.cameraEngineX - halfW;

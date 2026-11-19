@@ -68,6 +68,7 @@ import {
   engineXToWorldX,
   getWorldDebugEnabled,
   meterDepthToWorldY,
+  worldYToMeterDepth,
   renderPhysicalSeabed,
   resolveSeabedCollision,
   resolveSeabedKineticStep,
@@ -316,7 +317,7 @@ export default function App() {
       score: 0,
       genes: initialSave.bankedGenes,
       coins: initialSave.bankedCoins,
-      depth: 120,
+      depth: 12,
       zoneKey: 'zone_shallow',
       biteTier: activeForm.baseBiteTier,
       frenzyTimer: 0,
@@ -324,6 +325,8 @@ export default function App() {
       targetFishNameKey: 'prey_140_PREY-002',
       targetFishProgress: 0,
       targetFishRequired: 2,
+      targetFishLengthCm: 23,
+      targetFishSpeed: 68,
       activeSynergy: null as FactionId | null,
       goldOverdriveCost: getGoldOverdriveCost(0, activeForm.row),
       geneSurgeCost: getGeneSurgeCost(1, 0, activeForm.row),
@@ -472,7 +475,7 @@ export default function App() {
       score: 0,
       genes: metaSave.bankedGenes,
       coins: metaSave.bankedCoins,
-      maxDepthReached: 220,
+      maxDepthReached: 22,
       preyEatenCount: 0,
       frenzyTimer: 0,
       hitFlashTimer: 0,
@@ -915,7 +918,7 @@ export default function App() {
         score: 0,
         genes: save.bankedGenes,
         coins: save.bankedCoins,
-        maxDepthReached: 220,
+        maxDepthReached: 22,
         preyEatenCount: 0,
         frenzyTimer: withMaxMechaTrial ? 4.5 : 0,
         hitFlashTimer: 0,
@@ -997,8 +1000,10 @@ export default function App() {
           sim.shark.y,
           Math.random,
           [720, ecosystemSpawner.spawnRadius],
-          0
+          0,
+          sim.shark.stats.realBodyLengthM
         );
+        if (!spawned) break;
         if (i < 2) {
           spawned.config = firstTargetConfig;
           spawned.y = Math.max(
@@ -1058,7 +1063,7 @@ export default function App() {
         score: 0,
         genes: save.bankedGenes,
         coins: save.bankedCoins,
-        depth: 220,
+        depth: 22,
         zoneKey: 'zone_shallow',
         biteTier: stats.biteTier,
         frenzyTimer: withMaxMechaTrial ? 4.5 : 0,
@@ -2097,13 +2102,14 @@ export default function App() {
           sim.camera.y = minSurfaceCameraY;
         }
 
+        const currentDepthMeters = worldYToMeterDepth(shark.y);
         shark.maxDepthReached = Math.max(
           shark.maxDepthReached,
-          Math.round(shark.y)
+          Math.round(currentDepthMeters)
         );
 
-        // Depth Zone Milestone Notifications
-        if (!shark.reachedTwilight && shark.y >= 520) {
+        // Depth Zone Milestone Notifications (in real meters: 520m Twilight, 1150m Abyss)
+        if (!shark.reachedTwilight && currentDepthMeters >= 520) {
           shark.reachedTwilight = true;
           spawnFloatText(
             shark.x,
@@ -2113,7 +2119,7 @@ export default function App() {
             '#38bdf8',
             1.28
           );
-        } else if (!shark.reachedAbyss && shark.y >= 1150) {
+        } else if (!shark.reachedAbyss && currentDepthMeters >= 1150) {
           shark.reachedAbyss = true;
           shark.cameraShakeTrauma = Math.max(shark.cameraShakeTrauma, 0.35);
           spawnFloatText(
@@ -2184,7 +2190,8 @@ export default function App() {
           shark.x,
           shark.y,
           Math.random,
-          shark.score
+          shark.score,
+          shark.stats.realBodyLengthM
         );
 
         // Mouth & Front-Body hitbox world coordinates
@@ -2727,7 +2734,8 @@ export default function App() {
                 shark.x,
                 shark.y,
                 Math.random,
-                shark.score
+                shark.score,
+                shark.stats.realBodyLengthM
               );
             } else {
               // Oversized Prey or Active Mine Hazard -> Respect 0.55s Invulnerability Frames (i-frames)
@@ -2781,7 +2789,8 @@ export default function App() {
                   shark.x,
                   shark.y,
                   Math.random,
-                  shark.score
+                  shark.score,
+                  shark.stats.realBodyLengthM
                 );
               }
             }
@@ -3015,7 +3024,8 @@ export default function App() {
             : null;
           const upgCost = getSharkUpgradeCost(activeForm, activeUpg);
           const upgGeneCost = getSharkUpgradeGeneCost(activeForm, activeUpg);
-          const currentZone = getDepthZone(shark.y);
+          const currentDepthMeters = Math.round(worldYToMeterDepth(shark.y));
+          const currentZone = getDepthZone(currentDepthMeters);
           const hudHeat = computeHuntingHeatBuff(shark.score, activeForm.row);
 
           setHudState({
@@ -3029,7 +3039,7 @@ export default function App() {
             score: Math.round(shark.score),
             genes: shark.genes,
             coins: shark.coins,
-            depth: Math.round(shark.y),
+            depth: currentDepthMeters,
             zoneKey: currentZone.nameKey,
             biteTier: shark.stats.biteTier,
             frenzyTimer: Number(shark.frenzyTimer.toFixed(1)),
@@ -3037,6 +3047,8 @@ export default function App() {
             targetFishNameKey: sim.targetBounty.preyConfig.nameKey,
             targetFishProgress: sim.targetBounty.progress,
             targetFishRequired: sim.targetBounty.required,
+            targetFishLengthCm: sim.targetBounty.preyConfig.bodyLengthCm,
+            targetFishSpeed: sim.targetBounty.preyConfig.baseSpeed,
             activeSynergy: shark.stats.activeSynergy,
             goldOverdriveCost: getGoldOverdriveCost(
               economyUsesRef.current.goldOverdriveCount,
@@ -3174,14 +3186,14 @@ export default function App() {
       // 阶段 E/F/G：更新 2D Chunk 生命周期窗口（方向性预加载 + 帧预算 2ms + Active 上限 10）并渲染 1.0x 世界层激活态 POI 与海床生态物
       worldPersistence.setPlayerPosition(
         engineXToWorldX(shark.x),
-        meterDepthToWorldY(shark.y)
+        shark.y
       );
       const { activeChunks } = worldChunkLifecycleManager.updateForViewport(
         {
           minWorldX: engineXToWorldX(minX),
           maxWorldX: engineXToWorldX(maxX),
-          minWorldY: meterDepthToWorldY(minY),
-          maxWorldY: meterDepthToWorldY(maxY),
+          minWorldY: minY,
+          maxWorldY: maxY,
         },
         shark.vx
       );
@@ -3619,7 +3631,8 @@ export default function App() {
       sim.shark.y,
       Math.random,
       sim.shark.score,
-      [220, Math.min(980, ecosystemSpawner.spawnRadius)]
+      [220, Math.min(980, ecosystemSpawner.spawnRadius)],
+      sim.shark.stats.realBodyLengthM
     );
     setLiveActivePreyCount(sim.preyList.length);
   }, []);
@@ -4190,8 +4203,11 @@ export default function App() {
                   >
                     <UiAtlasIcon iconKey="UI_ICON_BOUNTY_TARGET" size={13} />
                     <span className="font-display font-bold text-[11px] lg:text-xs text-cyan-200 hud-stroke whitespace-nowrap leading-none flex items-center gap-1">
-                      <span className="max-w-[105px] lg:max-w-none truncate">
+                      <span className="max-w-[130px] lg:max-w-none truncate">
                         {t(hudState.targetFishNameKey)}
+                        <span className="text-[10px] text-cyan-300/80 font-normal ml-1">
+                          ({hudState.targetFishLengthCm}cm · {hudState.targetFishSpeed}px/s)
+                        </span>
                       </span>
                       <span className="font-mono-num text-amber-300 shrink-0">
                         {hudState.targetFishProgress}/

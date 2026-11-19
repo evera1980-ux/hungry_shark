@@ -2,6 +2,7 @@ import {
   computeParallaxBiomeTransitionState,
   getParallaxLayerGrowthScales,
   quinticSmoothstep,
+  worldYToMeterDepth,
 } from './rules';
 import {
   WorldConfig,
@@ -1623,14 +1624,15 @@ export class ParallaxBackground {
         (rawDepthY - this.smoothedDepthRefY) * Math.min(1, dt * 5.8);
     }
     const depthRefY = this.smoothedDepthRefY;
-    const transition = computeParallaxBiomeTransitionState(depthRefY);
+    const depthMeters = worldYToMeterDepth(depthRefY);
+    const transition = computeParallaxBiomeTransitionState(depthMeters);
 
     const topWorldY = Math.max(0, cameraY - (viewH * 0.5) / effZoom);
     const midWorldY = Math.max(0, cameraY);
     const botWorldY = Math.max(0, cameraY + (viewH * 0.5) / effZoom);
-    const topWaterSample = sampleBathymetricWaterColor(topWorldY);
-    const midWaterSample = sampleBathymetricWaterColor(midWorldY);
-    const botWaterSample = sampleBathymetricWaterColor(botWorldY);
+    const topWaterSample = sampleBathymetricWaterColor(worldYToMeterDepth(topWorldY));
+    const midWaterSample = sampleBathymetricWaterColor(worldYToMeterDepth(midWorldY));
+    const botWaterSample = sampleBathymetricWaterColor(worldYToMeterDepth(botWorldY));
 
     // ==================== 1. CONTINUOUS WORLD-SPACE WATER COLUMN ====================
     // 1A. Continuous Bathymetric Water Column Base Gradient across full viewport
@@ -1690,7 +1692,7 @@ export class ParallaxBackground {
     // ==================== 2. UNIFIED DEPTH VISUAL PROFILE + VOLUMETRIC GOD RAYS ====================
     // 直接采样轻量纯函数 getDepthVisualProfile，避免每帧调用旧版 proceduralOceanWorld.stepExploration 引发跨深度带 Chunk 缓存反复清空重建！
     const depthVisualProfile = getDepthVisualProfile(
-      meterDepthToWorldY(depthRefY),
+      depthRefY,
       WorldConfig
     );
     const rayVisibility = depthVisualProfile.lightShaftIntensity;

@@ -53,7 +53,13 @@
 
 ## 2. 咬合阶位（`T1 ~ T48`）计算规则与三级克制法则
 
-`T`（Bite Tier，咬合阶位，显示为琥珀色徽章 `T1 ~ T48`）是决定**食物链吞噬关系**的核心指标。48 只进化鲨鱼（`#01 ~ #48`）一一对应 `T1 ~ T48` 基础咬合阶位；海洋中全部 134 种现役独立 `@3x` 海洋生物（`PREY-001 ~ PREY-210`）均匀细分至 `T1 ~ T48`（`T1 ~ T38` 每阶 3 种鱼，`T39 ~ T48` 每阶 2 种鱼，严禁使用旧图集 `fish_24bdaa5a.png` / `fish2_fc857cfa.png` 猎物）。
+`T`（Bite Tier，咬合阶位，显示为琥珀色徽章 `T1 ~ T48`）是决定**食物链吞噬关系**的核心指标。48 只进化鲨鱼（`#01 ~ #48`）一一对应 `T1 ~ T48` 基础咬合阶位；海洋中全部 134 种现役独立 `@3x` 海洋生物（`PREY-001 ~ PREY-210`）按真实生物体长与生态位划分为 6 大自然营养级（Trophic Bands），对应鲨鱼 6 代进化：
+1. **T1 ~ T8（浅海幼体与珊瑚礁小鱼，$\le 40$cm，61 种）**：如小丑鱼（T1）、蓝倒吊（T2）、蝴蝶鱼（T3）、狮子鱼（T5）、箱鲀（T5）、红/绿鹦嘴鱼（T7）、黑斑叉鼻鲀/狗头鲀（T8）等。
+2. **T9 ~ T16（沿海与中层猎物，41 ~ 100cm，28 种）**：如比目鱼（T11）、大西洋黑鲷（T11）、红鲷（T13）、黄尾笛鲷（T14）等。
+3. **T17 ~ T24（远洋掠食鱼与大型底栖生物，101 ~ 250cm，19 种）**：如海鲈（T17）、梭鱼（T18）、金枪鱼（T20）、鲯鳅（T22）等。
+4. **T25 ~ T48（大洋顶极掠食者、剑旗鱼、鲸类与深渊巨兽，$> 250$cm，26 种）**：如旗鱼、大白鲨、虎鲸、抹香鲸、大王乌贼、蓝鲸与克苏鲁利维坦等。
+
+> **彻底解决小鱼异常放大怪象**：以往按每阶固定 3 种鱼生硬平铺的方案，导致体长仅 30cm 的狗头鲀、鹦嘴鱼被错误抬高到 T13~T15，致使 2.4 米的成年公牛鲨（T11）在浅海遇到小河鲀反而提示“⚠️ 致命天敌! 需T15”并被放大成 3 米巨兽。通过 6 大营养级重排，所有小鱼回归 T1~T8，公牛鲨可直接一口吞噬，比例 100% 真实。
 
 ### 2.1 鲨鱼当前咬合阶位 `T` 的完整合成公式
 位于 `src/game/rules.ts` ➔ `computeEvolvedSharkStats()`：
@@ -101,28 +107,41 @@ $$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Fren
 - 任意猎物在屏幕上与当前鲨鱼（缩放倍率为 $S_{\text{shark}}$）**视觉完全一样大（1:1 等大）**时的缩放系数为：
   $$\text{Scale}_{\text{parity}} = \frac{R_{\text{sharkEq}} \times S_{\text{shark}}}{\max(1,\; R_{\text{prey}})}$$
 
-### 3.2 可直接吞噬猎物的体型缩小公式（严格 `<= 64%` 鲨鱼大小）
-当 `canDevourNormally === true` 时：
-1. **48阶平滑阶位差缩小因子**：阶位差 $\Delta T = \max(0, T_{\text{shark}} - T_{\text{prey}})$ 越大，该猎物按 `0.955` 指数平滑变小：
-   $$\text{Ratio}_{\text{tier}} = \max\left(0.18,\; 0.64 \times 0.955^{\Delta T}\right)$$
-2. **局内成长缩小因子**：随着局内等级 `Lv` 与代际提升，`relativePreyScale`（范围 `1.0 -> 0.40`）平滑下降：
-   $$\text{Shrink}_{\text{level}} = 0.64 + 0.36 \times \text{relativePreyScale}$$
-3. **最终相对鲨鱼尺寸比例**（严格限制在 `[0.16, 0.64]` 区间内）：
-   $$\text{TargetRatio}_{\text{edible}} = \text{clamp}\left(\text{Ratio}_{\text{tier}} \times \text{Shrink}_{\text{level}},\; 0.16,\; 0.64\right)$$
-   $$\text{VisualScale} = \text{Scale}_{\text{parity}} \times \text{TargetRatio}_{\text{edible}}$$
+### 3.2 100% 真实生物体长线性物理换算公式（纯线性比例投影）
+在全新架构中，彻底废除所有人造尺寸保底截断与人造阶位膨胀公式，**全屏猎物 100% 按照现实世界生物真实体长与当前出战鲨鱼体长的物理比例进行几何渲染**：
+1. **真实物理比例计算**：
+   $$\text{realRatio} = \frac{L_{\text{prey}}}{L_{\text{shark}}}$$
+2. **变异与 Boss 词缀修正**：
+   $$\text{targetRatio} = \text{realRatio} \times \text{behemothMult} \times \text{bossMult}$$
+   其中：
+   - 普通猎物：$\text{behemothMult} = 1.0, \text{bossMult} = 1.0$
+   - 深渊巨兽变异（`ABYSS_BEHEMOTH`）：$\text{behemothMult} = 1.25$
+   - 关底霸主（`isBoss`）：$\text{bossMult} = 1.20$
+3. **最终屏幕绘制尺寸**：
+   $$\text{VisualScale} = \text{Scale}_{\text{parity}} \times \text{targetRatio} \times \text{debugMultiplier}$$
+   $$\text{preyDrawSize} = R_{\text{prey}} \times \text{VisualScale} \times 2.25 = (96 \times S_{\text{shark}}) \times \text{realRatio} \times \text{behemothMult} \times \text{bossMult}$$
+   $$\frac{\text{preyDrawSize}}{\text{sharkDrawSize}} = \frac{L_{\text{prey}}}{L_{\text{shark}}} \times \text{behemothMult} \times \text{bossMult}$$
+   **结论**：屏幕上猎物与鲨鱼的视觉体型比例，**100% 严格等于猎物与鲨鱼的真实生物体长比例**！绝无任何人造尺寸形变。
 
-### 3.3 可破甲猎物（`+1T ~ +3T`）与致命天敌（`>= +4T`）的体型放大公式（严格 `>= 118%` 鲨鱼大小）
-当常态下不可直接吞噬（`canDevourNormally === false`）时，设超阶数 $\Delta T_{\text{over}} = \max(1, T_{\text{prey}} - T_{\text{normalShark}})$：
-- **可冲刺破甲档（$1 \le \Delta T_{\text{over}} \le 3$）**：基础比例为 $1.18 + (\Delta T_{\text{over}} - 1) \times 0.06$（即 `118% ~ 130%` 鲨鱼大小）；
-- **致命天敌档（$\Delta T_{\text{over}} \ge 4$）**：基础比例为 $1.38 + (\Delta T_{\text{over}} - 4) \times 0.045$（上限钳制为 `195%` 鲨鱼大小）。
-- **效果验证**：任何常态下不可直吞的猎物在屏幕上至少是玩家鲨鱼体型的 **1.18 倍**以上。
+### 3.3 100% 按照体长真实尺寸分布 T 阶位体系（`getTierForPreyBodyLengthCm`）
+为了让“物理体型”与“吞噬阶位”达成 100% 纯逻辑一致性，猎物的咬合阶位分配全面废除固定 3 鱼一阶或人工分档，**改由猎物的真实体长 $L_{\text{prey}}$ 动态匹配 48 阶鲨鱼矩阵的真实体长门槛**：
+- **动态阶位匹配算法**：
+  $$T_{\text{prey}} = \min \left\{ T \in [1, 48] \mid \text{round}(L_{\text{shark}}(T) \times 100) \ge L_{\text{prey}} \right\}$$
+  （若体长超过 48 阶终极鲨鱼 45.0m 或标记为顶级 Boss，则归入 T48）。
+- **自然阶位分布特性**：
+  - 现役 134 种自然海洋生物体长从 2.5cm（微型小丑鱼苗）到 3000cm（蓝鲸），自然且精确地分布在 T1 至 T32 中。
+  - 不强制各阶生物数量均匀分布，部分阶位允许留空（由后续新增物种逐步填充）。
+  - **核心物理不变量保证**：
+    $$L_{\text{prey}} \le L_{\text{shark}} \implies T_{\text{prey}} \le T_{\text{shark}}$$
+    $$L_{\text{prey}} > L_{\text{shark}} \implies T_{\text{prey}} > T_{\text{shark}}$$
+    任何在屏幕上物理尺寸小于玩家鲨鱼的鱼，其咬合阶位必定 $\le$ 玩家鲨鱼阶位（可直接吞噬）；任何在屏幕上物理尺寸大于玩家鲨鱼的鱼，其咬合阶位必定高于玩家鲨鱼阶位。视觉体型与吞噬规则达到自然生物学的大一统！
 
 ### 3.4 黄金狂暴阶段体型保持特例（Gold Frenzy Size-Preservation Exception）
-- **设计初衷**：当玩家进入黄金狂暴（`frenzyActive === true`）时，虽然咬合能力临时跃升至最高阶 `T8`（可吞噬一切猎物与水雷），但如果此时把全屏原本巨大的潜艇、巨型电鳗与克苏鲁章鱼王缩小成小鱼，会严重削弱“黄金狂暴正面生吞庞然大物”的视觉冲击力与猎杀成就感。
-- **实现规则**：`ComputedSharkStats` 始终保留鲨鱼进入黄金阶段前的真实常态咬合阶位 `normalBiteTier`；`getPreyRelativeVisualScale()` 与 `drawPreyEntity()` 在计算猎物屏幕尺寸时**固定使用 `normalBiteTier`（忽略 `frenzyActive`）**。
+- **设计初衷**：当玩家进入黄金狂暴（`frenzyActive === true`）时，虽然咬合能力临时跃升至最高阶 `T48`（可吞噬一切猎物与水雷），但如果此时把全屏原本巨大的鲸鱼、海怪与潜艇缩小成小鱼，会严重削弱“黄金狂暴正面生吞庞然大物”的视觉冲击力与猎杀成就感。
+- **实现规则**：`ComputedSharkStats` 始终保留鲨鱼进入黄金阶段前的真实常态咬合阶位 `normalBiteTier`；`getPreyRelativeVisualScale()` 在计算猎物屏幕尺寸时**不随狂暴改变**。
 - **最终表现**：
-  1. **常态下（`frenzyActive === false`）**：100% 遵守“小于自己即可吞、大于等于自己即受伤”的视觉铁律。
-  2. **黄金狂暴期间（`frenzyActive === true` 特例）**：所有猎物**保持进入黄金阶段前的原始体型大小不变**（巨兽依然庞大，并环绕金色虚线盛宴光环与 `★T{N}` 标记），玩家操控金光鲨鱼直接撞碎并一口生吞比自己还大的深海巨兽！
+  1. **常态下（`frenzyActive === false`）**：100% 遵守“小于自己即可吞、大于等于自己即受伤/需破甲”的真实物理视觉铁律。
+  2. **黄金狂暴期间（`frenzyActive === true` 特例）**：所有猎物**保持进入黄金阶段前的原始体型大小不变**，玩家操控金光鲨鱼直接撞碎并生吞比自己还大的深海巨兽！
 
 ### 3.5 鲨鱼成长驱动的远/中/近景光学分级缩小公式 (`getParallaxLayerGrowthScales`)
 - **设计原理**：当鲨鱼变大时，如果仅缩小猎物而海底礁石、铁锚、珊瑚与沉船保持原尺寸不变，玩家缺乏海底环境参照物的尺度反馈。根据透视光学原理（镜头拉远 $\Delta d$ 时，角直径变化率与景深距离 $d$ 成反比），`src/game/rules.ts` 中的 `getParallaxLayerGrowthScales(relativePreyScale)` 将鲨鱼成长缩小量 $\Delta S = \text{clamp}(1 - \text{relativePreyScale},\; 0,\; 0.60)$ 按景深距离权重分配给各背景层：
@@ -253,6 +272,51 @@ $$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Fren
    - 同屏活跃猎物数量默认配置为 `20` 条（iOS 端 `22` 条），生成环半径扩展至 `640px ~ 1650px`，猎物全局显示与碰撞尺寸缩放倍率默认 `0.8`；开局迎宾鱼群使用 `['PREY-001', 'PREY-003', 'PREY-015', 'PREY-002', 'PREY-044']`。
 5. **新手引导第 3 步实操补给礼包**：首次完成新手引导第 2 步（按住冲刺 `0.7s`）时，一次性发放 **`+80 🪙 +20 🧬` 新手补给礼包**，确保玩家在引导第 3 步 100% 立即点亮并亲手体验 `强化`（60🪙）或 `突破`（12🧬）。
 
+### 6.4 135 种生物独立游动速度与真实体长落地架构
+为彻底消除以往“同阶鱼类同速”的千鱼一面违和感，全部 134 种现役真实海洋生物及 1 种水雷彻底移除全局统一速度与半径曲线，实装独立专属配置：
+1. **独立真实游动航速 (`baseSpeed` in `[10, 154] px/s`)**：
+   - 玩家巡航基准为 `140 px/s`（冲刺为 `280 px/s`）。
+   - **超音速逃逸级（130~154 px/s）**：旗鱼（154）、黑枪鱼（150）、蓝枪鱼（146）、飞鱼（130）等海洋短跑冠军，常态下玩家无法追赶，必须消耗能量按住冲刺才能拦截。
+   - **远洋掠食与高速鱼（100~128 px/s）**：虎鲸（126）、巨型梭鱼（125）、大眼金枪鱼（124）、宽吻海豚（116）、大白鲨（114）等。
+   - **极慢速底栖/铠甲/伪装大师（23~39 px/s）**：躄鱼（23，特化胸鳍海底爬行）、长角牛角鱼（29）、黄箱鲀（31）、翻车鱼（38，无真尾鳍沉重划桨）、比目鱼（38）等，呈现极其逼真的呆萌笨拙步态。
+   - **无动力悬浮水雷（10 px/s）**：随洋流极其缓慢游弋漂浮。
+2. **基于真实体长 (`bodyLengthCm`) 的碰撞与显示半径 (`radius`)**：
+   - 每种生物记录了真实生态体长范围 `[minLengthCm, maxLengthCm]` 与基准体长 `bodyLengthCm`（5cm ~ 2500cm）。
+   - 碰撞物理半径由真实体长对数归一化生成：$R = \text{round}(14 + 48 \times \text{lenNorm}^{0.95}) \in [14, 62]$，使微小珊瑚鱼（14~20px）与深海巨兽（52~62px）具备天然体格差异。
+
+### 6.5 海洋深度米制换算与五大深度带非线性拟合比例 (`meterDepthToWorldY` & `worldYToMeterDepth`)
+游戏世界总垂直高度为 `20,000px`，完全对齐地球海洋最深处马里亚纳海沟挑战者深渊（`11,000m`）。为解决传统 1:1 坐标导致浅海珊瑚鱼群区间被瞬间穿透、下潜比例失真的问题，系统在 `src/game/depthScale.ts` 与 Swift `GameRules.swift` 中实装了分段拟合双向无损换算纯函数：
+
+| 生态深度带 | 游戏世界坐标 ($Y$ 像素) | 真实海洋水深 ($D$ 米) | 比例关系 ($\text{px/m}$) | 生态与交互特征 |
+| :--- | :--- | :--- | :--- | :--- |
+| **阳光表层带 (Epipelagic)** | $0\text{px} \sim 2,000\text{px}$ | $0\text{m} \sim 200\text{m}$ | **$10.0\text{ px/m}$** ($1\text{m} = 10\text{px}$) | 珊瑚礁与阳光水域（$0\sim 30\text{m} = 0\sim 300\text{px}$），小丑鱼与蝴蝶鱼等高密度刷新 |
+| **暮光中层带 (Mesopelagic)** | $2,000\text{px} \sim 6,000\text{px}$ | $200\text{m} \sim 1,000\text{m}$ | **$5.0\text{ px/m}$** ($1\text{m} = 5\text{px}$) | 弱光带，大王乌贼、皇带鱼与吞噬鳗出没，`520m`（$3600\text{px}$）跃温层提示 |
+| **半深海午夜带 (Bathypelagic)** | $6,000\text{px} \sim 10,000\text{px}$ | $1,000\text{m} \sim 4,000\text{m}$ | **$1.33\text{ px/m}$** ($1\text{m} \approx 1.33\text{px}$) | 纯黑午夜海域，黑角安康鱼、发光银斧鱼群与抹香鲸活动带 |
+| **深渊深层带 (Abyssopelagic)** | $10,000\text{px} \sim 16,000\text{px}$ | $4,000\text{m} \sim 6,000\text{m}$ | **$3.0\text{ px/m}$** ($1\text{m} = 3\text{px}$) | 深海平原与热液喷口群，深海巨型等足虫与发光深渊巨兽 |
+| **超深渊海沟带 (Hadal-like)** | $16,000\text{px} \sim 20,000\text{px}$ | $6,000\text{m} \sim 11,000\text{m}$ | **$0.8\text{ px/m}$** ($1\text{m} = 0.8\text{px}$) | 马里亚纳海沟挑战者深渊底界，马里亚纳狮子鱼与超巨海怪栖息 |
+
+**系统全局贯穿契约**：
+1. **HUD 深度显示**：`hudState.depth = Math.round(worldYToMeterDepth(shark.y))`，潜入 $250\text{px}$ 时 HUD 准确显示为 **`25m`**（现实潜水珊瑚深度），直抵 $20,000\text{px}$ 沟底时准确显示为 **`11000m`**。
+2. **进化门禁与成就判定**：鲨鱼 48 阶进化三重门禁中的 `reqMaxDepth`（300m, 540m, 850m, 1180m, 1450m）与 iOS 端 `GameRules.worldYToMeterDepth(sharkY)` 完全基于真实米制深度判断，彻底消除跨平台差异。
+3. **视差水体与光照采样**：`sampleBathymetricWaterColor(depthMeters)` 与 C2 跃温层状态平滑函数统一接收真实米制深度，确保水色从浅蓝到暮光深蓝再到深渊熔岩红平滑演进。
+
+### 6.5 100% 真实物理尺寸体系、海床真实等比还原与生态位刷新过滤架构
+为彻底告别以往任何人为拟合参数的违和感，游戏物理底层全量重构为基于真实米制与物理时间的一致性体验：
+1. **48 阶鲨鱼真实体长与泳速矩阵**：
+   - 从初代拟态小丑幼鲨（`0.8m`，巡航 `1.2m/s`）沿代际单调递增至大白鲨（`5.2m`，巡航 `2.5m/s`）、远古巨齿鲨（`18.5m`，巡航 `4.0m/s`）与终焉奥米茄吞噬者（`45.0m`，巡航 `7.0m/s`）；
+   - 局内成长：从 `Lv.1` 到 `Lv.12`，体长真实线性成长 `+27.5%`（`L_real = L_base * (1 + 0.025 * (Lv - 1))`）。
+2. **基于出战鲨鱼体长的动态视口比例尺 ($k$)**：
+   - 设定基准参考显示尺寸 $S_{\text{ref}} = 120\text{px}$，视口像素比例尺为 $k = (S_{\text{ref}} \times \text{scale}) / L_{\text{shark\_m}}$（单位: `px/m`）；
+   - 屏幕上任意猎物与海床物体尺寸严格按几何比例呈现：$S_{\text{prey}} = L_{\text{prey\_m}} \times k$。
+3. **巨型鲨鱼生态位刷新过滤（Trophic Spawning Filter）**：
+   - 视觉/捕猎感知门限为 $L_{\text{min}} = L_{\text{shark\_m}} \times 0.133$（对应屏幕尺寸 $< 16\text{px}$）；
+   - 当出战鲨鱼体型极大时（如 18.5m 巨齿鲨，$L_{\text{min}} \approx 2.46\text{m}$），在阳光珊瑚浅水区（$0 \sim 35\text{m}$，生物多为 $10\sim 80\text{cm}$），**生态刷新器完全不刷新微型小鱼（`spawnPreyOffScreen` 返回 `null`）**；
+   - 巨型掠食者在浅滩捕不到任何有价值的猎物，也看不到微型小鱼，物理级还原“龙游浅滩”与营养级生态跃迁，驱使巨兽潜入中深海与深渊捕食大型巨鲸与深海巨怪。
+4. **海床 100% 真实尺寸等比几何还原**：
+   - 彻底废除以往用 `relativePreyScale` 伪造的海床缩放假象（`seabedScale` 恒定为 `1.0`）；
+   - 海床珊瑚礁台（$1.5\sim 3\text{m}$）、洞穴拱顶（$5\sim 8\text{m}$）、沉船残骸（$45\sim 55\text{m}$）、热液黑烟囱（$8\sim 15\text{m}$）全量按真实米制生成；
+   - 在统一视口矩阵 $k$ 下，海床随鲨鱼体型自然拉近/拉远，幼鲨穿梭于高耸礁盘，巨齿鲨俯瞰连绵地表，达到 100% 绝对物理与光学同源。
+
 ---
 
 ## 7. 无限成长与深渊难度膨胀系统 (`InfiniteProgressionManager`)
@@ -272,6 +336,11 @@ $$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Fren
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-19 | **100% 真实尺寸显示与 100% 体长动态 T 等级体系全面实装**：① `getPreyRelativeVisualScale` 彻底移除所有人造体型截断保底与非线性人工扭曲，全屏鱼类绘制尺寸与出战鲨鱼当前体长严格保持 1:1 物理比例（$\text{preyDrawSize} / \text{sharkDrawSize} = L_{\text{prey}} / L_{\text{shark}}$）；② 猎物咬合阶位分配废除固定每阶 3 鱼的粗暴分配，改由 `getTierForPreyBodyLengthCm` 纯动态对齐 48 阶鲨鱼真实体长门槛（$0.8\text{m} \sim 45.0\text{m}$），现役 134 种海洋生物纯自然分布于 T1..T32，无需人为均分，后续新增物种将自然填补空阶；③ 核心不变量 $L_{\text{prey}} \le L_{\text{shark}} \iff T_{\text{prey}} \le T_{\text{shark}}$ 得到绝对数学保证（视觉比玩家鲨鱼小的鱼 100% 可直接吞噬）；④ Web 与 iOS 原生 Swift 双端 100% 契约对齐，全量 45 项单元测试与 `xcodebuild` 纯原生工程编译 100% PASS | `src/game/preyDatabase140.ts`, `src/game/rules.ts`, `src/game/rules.test.ts`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/06-PREY_DATABASE_140.md` |
+| 2026-11-18 | **全量实装 100% 真实物理尺寸、海床真实等比还原与生态位刷新过滤架构**：① 48 阶鲨鱼全量实装真实体长（`0.8m ~ 45.0m`）与真实游动速度（巡航 `1.2~7.0 m/s`、冲刺 `2.8~18.0 m/s`），局内升级实装 `+27.5%` 体长线性真实成长；② 视口以出战鲨鱼当前体长为基准动态换算像素比例尺 $k = (S_{\text{ref}} \times \text{scale}) / L_{\text{shark\_m}}$，全屏鱼类与海床以真实物理尺度 1:1 几何投影；③ `EcosystemSpawner` 实装巨兽物理感知过滤门限 $L_{\text{min}} = L_{\text{shark\_m}} \times 0.133$（$< 16\text{px}$ 猎物彻底不予刷新），巨齿鲨/利维坦游入阳光浅海区时微型小鱼 100% 停止刷新（浅海成为巨兽荒芜区，巨兽必须潜入深水捕杀大型巨物）；④ 海床彻底废除人工伪缩放（`seabedScale = 1.0`），珊瑚礁台、洞穴拱门、古代沉船与黑烟囱 100% 还原真实物理尺度，双端视口等比光学缩放；⑤ Web 与 iOS 原生 Swift 引擎 100% 契约对齐，新增第 45 号专项单元测试，全量 45 项测试与 `xcodebuild` 编译 100% PASS | `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `src/game/worldGenerationSystem.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `ios-native/HungrySharkEvolution/Rendering/OceanGameScene.swift`, `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
+| 2026-11-18 | **全量实装海洋深度米制单位与五大深度带非线性拟合比例 (`meterDepthToWorldY` & `worldYToMeterDepth`)**：① 彻底废除以往 1:1 硬编码单位（原 $1\text{m} = 1\text{px}$ 导致浅海珊瑚鱼瞬间被穿透、万米深海比例严重失真），将世界垂直高度 $20,000\text{px}$ 精准非线性拟合至地球海洋最深处马里亚纳海沟挑战者深渊 $11,000\text{m}$；② 确立五大生态深度带非线性物理比例：阳光表层带（$0\sim 2000\text{px} \leftrightarrow 0\sim 200\text{m}$，比例 $10\text{px/m}$，珊瑚礁 $0\sim 30\text{m} = 0\sim 300\text{px}$）、暮光中层带（$2000\sim 6000\text{px} \leftrightarrow 200\sim 1000\text{m}$，比例 $5\text{px/m}$）、半深海午夜带（$6000\sim 10000\text{px} \leftrightarrow 1000\sim 4000\text{m}$，比例 $1.33\text{px/m}$）、深渊深层带（$10000\sim 16000\text{px} \leftrightarrow 4000\sim 6000\text{m}$，比例 $3.0\text{px/m}$）、超深渊海沟带（$16000\sim 20000\text{px} \leftrightarrow 6000\sim 11000\text{m}$，比例 $0.8\text{px/m}$）；③ 在 `src/game/depthScale.ts` 中实现高精度单调且可逆的数学分段拟合纯函数，并在 `rules.ts`、`worldGenerationSystem.ts` 与 Swift `GameRules.swift` 中统一全局复用；④ 局内 HUD 深度仪表直显真实米制水深（游过 $250\text{px}$ 直显 $25\text{m}$，直抵海沟底显 $11000\text{m}$）；⑤ 破茧进化门禁 `reqMaxDepth`（300m, 540m, 850m, 1180m, 1450m）与跨局存档水深全面对接真实米数；⑥ 视差水体渐变与跃温层提示（520m, 1150m）100% 对齐真实深度；⑦ 新增第 44 号单元测试，全量 44 项测试与原生 iOS 编译 100% 通过 | `src/game/depthScale.ts`, `src/game/rules.ts`, `src/game/worldGenerationSystem.ts`, `src/game/preyDatabase140.ts`, `src/game/parallaxBackground.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `ios-native/HungrySharkEvolution/Rendering/OceanGameScene.swift`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
+| 2026-11-18 | **全量实装海洋深度米制单位与五大深度带非线性拟合比例 (`meterDepthToWorldY` & `worldYToMeterDepth`)**：① 彻底废除以往 1:1 硬编码单位（原 $1\text{m} = 1\text{px}$ 导致浅海珊瑚鱼瞬间被穿透、万米深海比例严重失真），将世界垂直高度 $20,000\text{px}$ 精准非线性拟合至地球海洋最深处马里亚纳海沟挑战者深渊 $11,000\text{m}$；② 确立五大生态深度带非线性物理比例：阳光表层带（$0\sim 2000\text{px} \leftrightarrow 0\sim 200\text{m}$，比例 $10\text{px/m}$，珊瑚礁 $0\sim 30\text{m} = 0\sim 300\text{px}$）、暮光中层带（$2000\sim 6000\text{px} \leftrightarrow 200\sim 1000\text{m}$，比例 $5\text{px/m}$）、半深海午夜带（$6000\sim 10000\text{px} \leftrightarrow 1000\sim 4000\text{m}$，比例 $1.33\text{px/m}$）、深渊深层带（$10000\sim 16000\text{px} \leftrightarrow 4000\sim 6000\text{m}$，比例 $3.0\text{px/m}$）、超深渊海沟带（$16000\sim 20000\text{px} \leftrightarrow 6000\sim 11000\text{m}$，比例 $0.8\text{px/m}$）；③ 在 `src/game/depthScale.ts` 中实现高精度单调且可逆的数学分段拟合纯函数，并在 `rules.ts`、`worldGenerationSystem.ts` 与 Swift `GameRules.swift` 中统一全局复用；④ 局内 HUD 深度仪表直显真实米制水深（游过 $250\text{px}$ 直显 $25\text{m}$，直抵海沟底显 $11000\text{m}$）；⑤ 破茧进化门禁 `reqMaxDepth`（300m, 540m, 850m, 1180m, 1450m）与跨局存档水深全面对接真实米数；⑥ 视差水体渐变与跃温层提示（520m, 1150m）100% 对齐真实深度；⑦ 新增第 44 号单元测试，全量 44 项测试与原生 iOS 编译 100% 通过 | `src/game/depthScale.ts`, `src/game/rules.ts`, `src/game/worldGenerationSystem.ts`, `src/game/preyDatabase140.ts`, `src/game/parallaxBackground.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `ios-native/HungrySharkEvolution/Rendering/OceanGameScene.swift`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
+| 2026-11-18 | **全量实装 135 种实体专属独立游速与真实体长体系**：① 彻底摒弃同阶梯级速度公式（原 $64 + 54 \times u^{0.78}$），在 `preyDatabase140.ts` 中为全部 134 种生物与水雷配置独立的真实游速 `baseSpeed`（10~154 px/s，旗鱼 154、虎鲸 126、沙丁鱼 68、小丑鱼 45、翻车鱼 38、躄鱼 23、水雷 10），配合玩家常态 140/冲刺 280 标尺带来超逼真追逐拉扯感；② 为每种生物赋予真实体长 `bodyLengthCm`（5cm~2500cm），并将物理碰撞与渲染基础半径 `radius` 绑定至真实体长对数映射曲线；③ `getPreyRelativeVisualScale` 引入体长调制因子 `lenMod` 与巨兽宏伟加成 `lenDangerBonus`，同时 100% 严格捍卫可吞鱼 `<= 64%`、不可吞鱼 `>= 118%` 绝对铁律；④ 局内 HUD 悬赏信息直显目标鱼真实体长与游速；⑤ Web 与 iOS 原生 Swift 双端 100% 契约对齐并全量通过构建与单元测试 | `src/game/config.ts`, `src/game/preyDatabase140.ts`, `src/game/rules.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-18 | **Web 与 iOS 双端 48 阶咬合阶位与生态生成 100% 契约对齐**：① 修复 iOS 历史遗留的 8 阶咬合上限（`min(8, ...)` 彻底升级为 48 阶全量体系 `genMaxBiteTier = min(48, form.baseBiteTier + 6)`、`biteTier = frenzyActive ? 48 : normalBiteTier`）；② iOS 躯体强化加成与局内加成对齐 Web（`upgradeBiteBonus = upLv >= 10 ? 3 : (upLv >= 6 ? 2 : (upLv >= 3 ? 1 : 0))`，`inRunBiteBonus = inRunLevel >= 9 ? 3 : (inRunLevel >= 5 ? 2 : (inRunLevel >= 2 ? 1 : 0))`）；③ 修复 iOS 猎物视觉缩放 `pow(0.955, tierDiff)` 与深渊变异有效阶位 `min(50, prey.tier + 1)`；④ iOS 碰撞判定补齐 `EncounterOutcome.NEED_BOOST`（`+1T ~ +3T` 未冲刺时提示按住冲刺并减伤 15%）；⑤ iOS `OceanGameScene` 生态刷新彻底移除写死 8 项的 `tierWeights`，完整移植 Web `0m ~ 20000m` 连续深度目标阶位与洛伦兹钟形分布（Lorentzian Distribution），使 T1 ~ T48 全部猎物能在各自天然深度带正常繁衍刷新；⑥ 同步修正 Web `SharkEvolutionAtlasModal.tsx` 图谱中 `maxGenBiteTier` 历史遗留 `Math.min(8, ...)` 为 `Math.min(48, inspectedForm.baseBiteTier + 6)` | `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `ios-native/HungrySharkEvolution/Rendering/OceanGameScene.swift`, `ios-native/HungrySharkEvolution/UI/ContentView.swift`, `src/components/SharkEvolutionAtlasModal.tsx`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-16 | **咬合阶位与猎物生态重构为 `T1 ~ T48`（48阶渐进式进化 + 134种独立 `@3x` 真实海洋生物细分 + 三级破甲/天敌机制）**：① 48只鲨鱼 `#01 ~ #48` 基础咬合阶位一一对应 `T1 ~ T48`，单鲨鱼通过躯体强化（`Lv.3/6/10` 获 `+1/+2/+3T`）与局内升级（`Lv.2/5/9` 获 `+1/+2/+3T`）最多可提升 `+6T` 实现跨代狩猎；② 134种 `@3x` 真实海洋生物（`PREY-001 ~ PREY-210`）按体型、体长与水深均匀细分至 `T1 ~ T48`（每阶 2~3 种）并应用 48 阶连续属性曲线，彻底禁用旧图集猎物与回退贴图；③ 实装三级碰撞判定（`<= T` 直接吞噬、`+1T ~ +3T` 冲刺破甲撕咬获 `1.35x` 暴击奖励、`>= +4T` 致命天敌必须躲避），保持猎物纯净无外圈圆环、完全依赖体型比例直观区分；④ `EcosystemSpawner` 改为 100% 纯按水深固定刷新 | `src/game/sharkEvolutionConfig.ts`, `src/game/preyDatabase140.ts`, `src/game/rules.ts`, `src/game/ecosystemSpawner.ts`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts`, `src/game/i18n.ts`, `src/App.tsx`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-16 | **剔除 6 种非鱼形态海洋哺乳类（海狮/海象/海牛/儒艮）并修正 `PREY-203` 灰鲸与 `PREY-110` 蝠鲼方向**：从 `preyDatabase140.ts` 中移除 `PREY-122` 海牛、`PREY-123` 儒艮、`PREY-124` 海象、`PREY-125` 北海狮、`PREY-126` 南美海狮、`PREY-209` 北极海象（现役调整为 134 种海洋生物 + `cyber_mine` = 135 项），并更新 `rules.test.ts` 校验及 `PREY-203`、`PREY-110` 右朝向贴图 | `src/game/preyDatabase140.ts`, `src/game/rules.test.ts`, `scripts/build-ios-native.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |

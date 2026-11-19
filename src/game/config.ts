@@ -45,6 +45,9 @@ export interface PreyTierConfig {
   maxDepth: number;
   radius: number;
   baseSpeed: number;
+  bodyLengthCm: number;
+  minLengthCm?: number;
+  maxLengthCm?: number;
   hpRestore: number;
   xpValue: number;
   scoreValue: number;

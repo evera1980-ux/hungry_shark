@@ -100,13 +100,22 @@ export class EcosystemSpawner {
     sharkX: number,
     sharkY: number,
     rng: () => number = Math.random,
-    currentScore: number = 0
-  ): PreyEntity {
+    currentScore: number = 0,
+    currentSharkLengthM?: number
+  ): PreyEntity | null {
     const [removed] = activePreys.splice(index, 1);
     if (removed) {
       this.pool.push(removed);
     }
-    return this.spawnPreyOffScreen(activePreys, sharkX, sharkY, rng, undefined, currentScore);
+    return this.spawnPreyOffScreen(
+      activePreys,
+      sharkX,
+      sharkY,
+      rng,
+      undefined,
+      currentScore,
+      currentSharkLengthM
+    );
   }
 
   /**
@@ -120,7 +129,8 @@ export class EcosystemSpawner {
     sharkY: number,
     rng: () => number = Math.random,
     currentScore: number = 0,
-    customDistanceRange?: [number, number]
+    customDistanceRange?: [number, number],
+    currentSharkLengthM?: number
   ): void {
     const targetCount = Math.max(0, Math.round(this.maxActivePreys));
     while (activePreys.length > targetCount) {
@@ -143,14 +153,18 @@ export class EcosystemSpawner {
     }
 
     while (activePreys.length < targetCount) {
-      this.spawnPreyOffScreen(
+      const spawned = this.spawnPreyOffScreen(
         activePreys,
         sharkX,
         sharkY,
         rng,
         customDistanceRange,
-        currentScore
+        currentScore,
+        currentSharkLengthM
       );
+      if (!spawned) {
+        break;
+      }
     }
   }
 
@@ -166,7 +180,8 @@ export class EcosystemSpawner {
     sharkX: number,
     sharkY: number,
     rng: () => number = Math.random,
-    currentScore: number = 0
+    currentScore: number = 0,
+    currentSharkLengthM?: number
   ): void {
     this.gameTime += Math.max(0, deltaTime);
 
@@ -185,7 +200,15 @@ export class EcosystemSpawner {
     }
 
     // 2. 维持同屏鱼群数量 (实时裁剪多余鱼或补齐至 maxActivePreys)
-    this.syncPreyCountImmediate(activePreys, sharkX, sharkY, rng, currentScore);
+    this.syncPreyCountImmediate(
+      activePreys,
+      sharkX,
+      sharkY,
+      rng,
+      currentScore,
+      undefined,
+      currentSharkLengthM
+    );
   }
 
   /**
@@ -198,8 +221,9 @@ export class EcosystemSpawner {
     sharkY: number,
     rng: () => number = Math.random,
     customDistanceRange?: [number, number],
-    currentScore: number = 0
-  ): PreyEntity {
+    currentScore: number = 0,
+    currentSharkLengthM?: number
+  ): PreyEntity | null {
     const scaleMultiplier = this.getScaleMultiplier();
     // 若玩家已快速潜入/上浮离开该鱼群锚点所在水深带，立即清空旧鱼群锚点，防止跨生态层生成伴游鱼
     if (
@@ -272,7 +296,10 @@ export class EcosystemSpawner {
     }
 
     // 根据猎物实际生成的目标水深 spawnY 严格匹配对应生态层的鱼种，并将生成坐标钳制在该物种真实栖息水深内
-    const chosenTier = this.pickPreyConfigForDepth(spawnY, rng);
+    const chosenTier = this.pickPreyConfigForDepth(spawnY, rng, currentSharkLengthM);
+    if (!chosenTier) {
+      return null;
+    }
     spawnY = Math.max(
       Math.max(25, chosenTier.minDepth),
       Math.min(chosenTier.maxDepth, spawnY)
@@ -365,8 +392,9 @@ export class EcosystemSpawner {
 
   private pickPreyConfigForDepth(
     targetDepthY: number,
-    rng: () => number
-  ): PreyTierConfig {
+    rng: () => number,
+    currentSharkLengthM?: number
+  ): PreyTierConfig | null {
     // 100% 仅使用 134 种独立 @3x 真实海洋生物（剔除旧图集猎物与水雷）
     const allPreys = GAME_CONFIG.preyTiers.filter(
       (p) => !p.isHazard && Boolean(p.externalPngUrl)
@@ -403,8 +431,25 @@ export class EcosystemSpawner {
             p.behavior !== 'KRAKEN_BOSS'
         )
       : rawActivePool;
-    const activePool =
+    const baseActivePool =
       sanctuaryFilteredPool.length > 0 ? sanctuaryFilteredPool : rawActivePool;
+
+    // 巨型鲨鱼物理感知过滤门限：若出战鲨鱼体长过大，导致微型小鱼在屏幕上过小（< 16px），则不刷新小鱼
+    // 浅水区对巨齿鲨/利维坦成为无微型猎物的纯净大洋，巨兽必须游向深水
+    const minPreyLengthCm =
+      typeof currentSharkLengthM === 'number' && currentSharkLengthM > 0
+        ? currentSharkLengthM * 13.3
+        : 0;
+    const activePool =
+      minPreyLengthCm > 0
+        ? baseActivePool.filter(
+            (p) => (p.bodyLengthCm ?? p.radius * 2.5) >= minPreyLengthCm
+          )
+        : baseActivePool;
+
+    if (activePool.length === 0) {
+      return null;
+    }
 
     // 新手教学第1步保护：确保前3条教学引导鱼是 T1~T2 可直吞小鱼
     if (isShallowZone && this.tutorialProtectionActive) {
@@ -480,7 +525,7 @@ export class EcosystemSpawner {
         return activePool[i];
       }
     }
-    return activePool[activePool.length - 1];
+    return activePool[activePool.length - 1] ?? null;
   }
 }
 
