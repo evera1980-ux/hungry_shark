@@ -396,6 +396,7 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   for (let i = 0; i < 40; i++) {
     // Spawn near y = 180m (Shallow Coral Reef) with tight radius [10, 60]
     const sPrey = depthSpawner.spawnPreyOffScreen(shallowSamples, 0, 180, () => (i % 10) / 10, [10, 60], 0);
+    assert.ok(sPrey);
     assert.ok(
       sPrey.y >= sPrey.config.minDepth && sPrey.y <= sPrey.config.maxDepth,
       `Shallow spawn ${sPrey.config.id} at y=${sPrey.y} must be within [${sPrey.config.minDepth}, ${sPrey.config.maxDepth}]`
@@ -407,6 +408,7 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
 
     // Spawn near y = 1500m (Deep Abyss) with tight radius [10, 60]
     const dPrey = depthSpawner.spawnPreyOffScreen(deepSamples, 0, 1500, () => (i % 10) / 10, [10, 60], 0);
+    assert.ok(dPrey);
     assert.ok(
       dPrey.y >= dPrey.config.minDepth && dPrey.y <= dPrey.config.maxDepth,
       `Deep spawn ${dPrey.config.id} at y=${dPrey.y} must be within [${dPrey.config.minDepth}, ${dPrey.config.maxDepth}]`
@@ -444,6 +446,7 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
       [520, 1000],
       5000
     );
+    assert.ok(sLate);
     assert.notEqual(
       sLate.config.behavior,
       'EEL_CHARGER',
@@ -3512,7 +3515,7 @@ test('134 Active Marine Prey Species + Cyber Mine: Authentic Biological Body Len
       `Prey ${prey.id} drawSize=${drawSizeStarter} must 100% match biological body length ratio`
     );
 
-    if (starterShark.normalBiteTier >= prey.tier && !prey.isHazard) {
+    if (starterShark.normalBiteTier! >= prey.tier && !prey.isHazard) {
       assert.ok(
         drawSizeStarter <= sharkSizeStarter * 1.05,
         `Edible prey ${prey.id} drawSize=${drawSizeStarter} must be <= sharkSize=${sharkSizeStarter}`
@@ -3678,7 +3681,7 @@ test('100% Real Physical Dimensions & Ecological Trophic Filter Invariants', () 
       foundMegafauna = true;
       assert.ok(
         (spawnedDeep.config.bodyLengthCm ?? 0) >= 18.5 * 13.3,
-        `Spawned deep prey (${spawnedDeep.config.nameZh}) must be >= 246cm for Megalodon`
+        `Spawned deep prey (${spawnedDeep.config.id}) must be >= 246cm for Megalodon`
       );
     }
   }

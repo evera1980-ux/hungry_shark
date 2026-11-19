@@ -281,8 +281,7 @@ export const PREY_140_TIER_BY_ID: Record<string, number> = (() => {
   for (const rec of PREY_140_RECORDS) {
     const bodyLengthCm =
       rec.bodyLengthCm ??
-      (rec.maxLengthCm + rec.minLengthCm) / 2 ??
-      rec.radius * 2.5;
+      (rec.maxLengthCm + rec.minLengthCm) / 2;
     map[rec.id] = getTierForPreyBodyLengthCm(bodyLengthCm);
   }
   return map;

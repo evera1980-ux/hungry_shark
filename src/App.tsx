@@ -1071,6 +1071,8 @@ export default function App() {
         targetFishNameKey: firstTargetConfig.nameKey,
         targetFishProgress: 0,
         targetFishRequired: 2,
+        targetFishLengthCm: firstTargetConfig.bodyLengthCm,
+        targetFishSpeed: firstTargetConfig.baseSpeed,
         activeSynergy: stats.activeSynergy,
         goldOverdriveCost: getGoldOverdriveCost(0, activeForm.row),
         geneSurgeCost: getGeneSurgeCost(initialLevel, 0, activeForm.row),
