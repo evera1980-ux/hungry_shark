@@ -1069,7 +1069,7 @@ test('getParallaxLayerGrowthScales shrinks Near > Ambient > Mid > Far > Water in
   assert.equal(starterScales.nearScale, 1.0);
 
   // Mid-game evolution (Gen 3 #17 Lv.5 upgrade, in-run Lv.6)
-  const midGameStats = computeEvolvedSharkStats(6, 'shark_16_armor_plating', 5, false, 1.0, 17);
+  const midGameStats = computeEvolvedSharkStats(6, 'shark_16_great_white', 5, false, 1.0, 17);
   const midScales = getParallaxLayerGrowthScales(midGameStats.relativePreyScale);
   assert.ok(midScales.growthProgress > 0.5 && midScales.growthProgress < 1.0);
   assert.ok(
@@ -1082,9 +1082,9 @@ test('getParallaxLayerGrowthScales shrinks Near > Ambient > Mid > Far > Water in
     'Background layers must obey strict optical depth shrinking hierarchy: Prey < Near < Ambient < Mid < Far < Water < 1.0'
   );
 
-  // Max leviathan growth (Gen 6 #48 Omega Devourer Lv.10 upgrade, in-run Lv.12 -> relativePreyScale = 0.40)
+  // Max leviathan growth (Gen 6 #48 Omega Devourer Lv.10 upgrade, in-run Lv.12 -> relativePreyScale = 0.015)
   const omegaStats = computeEvolvedSharkStats(12, 'shark_47_omega_devourer', 10, false, 1.0, 48);
-  assert.equal(omegaStats.relativePreyScale, 0.4);
+  assert.equal(omegaStats.relativePreyScale, 0.015);
   const maxScales = getParallaxLayerGrowthScales(omegaStats.relativePreyScale);
   assert.equal(maxScales.growthProgress, 1);
   assert.equal(maxScales.nearScale, 0.58);     // -42.0% shrink (0.70 weight)

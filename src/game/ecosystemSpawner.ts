@@ -8,7 +8,15 @@ import { GAME_CONFIG, PreyTierConfig } from './config';
 import { PreyEntity } from './canvasRenderer';
 import { infiniteWorldManager } from './infiniteWorldManager';
 import { infiniteProgressionManager } from './infiniteProgressionManager';
-import { proceduralOceanWorld } from './worldGenerationSystem';
+import { proceduralOceanWorld, getFloorDepthAt } from './worldGenerationSystem';
+
+export interface ViewportSpawnBounds {
+  halfW: number;
+  halfH: number;
+  cameraX: number;
+  cameraY: number;
+  sharkVx?: number;
+}
 
 export class EcosystemSpawner {
   /**
@@ -22,14 +30,19 @@ export class EcosystemSpawner {
   public spawnRadius: number = 1650;
 
   /**
-   * 视野外生成的内圈最小半径
+   * 视野外生成的内圈最小半径（严格大于屏幕半宽，防止在身边刷出）
    */
-  public minSpawnRadius: number = 640;
+  public minSpawnRadius: number = 880;
 
   /**
    * 累计游戏时长（秒），驱动无限数值膨胀 (Infinite Scaling)
    */
   public gameTime: number = 0;
+
+  /**
+   * 平滑随机刷新计时器（消除一波一波出怪的卡顿波次感，0.35s ~ 0.9s 随机单条涌入）
+   */
+  public spawnTimer: number = 0;
 
   /**
    * 猎物对象回收池（避免频繁 GC 分配）
@@ -55,11 +68,11 @@ export class EcosystemSpawner {
   constructor(
     maxActivePreys: number = 20,
     spawnRadius: number = 1650,
-    minSpawnRadius: number = 640
+    minSpawnRadius: number = 880
   ) {
     this.maxActivePreys = maxActivePreys;
     this.spawnRadius = spawnRadius;
-    this.minSpawnRadius = Math.min(minSpawnRadius, Math.floor(spawnRadius * 0.6));
+    this.minSpawnRadius = Math.max(760, minSpawnRadius);
   }
 
   /**
@@ -67,6 +80,7 @@ export class EcosystemSpawner {
    */
   public reset(activePreys?: PreyEntity[]): void {
     this.gameTime = 0;
+    this.spawnTimer = 0;
     this.schoolClusterAnchor = null;
     if (activePreys) {
       while (activePreys.length > 0) {
@@ -101,7 +115,8 @@ export class EcosystemSpawner {
     sharkY: number,
     rng: () => number = Math.random,
     currentScore: number = 0,
-    currentSharkLengthM?: number
+    currentSharkLengthM?: number,
+    viewportBounds?: ViewportSpawnBounds
   ): PreyEntity | null {
     const [removed] = activePreys.splice(index, 1);
     if (removed) {
@@ -114,7 +129,8 @@ export class EcosystemSpawner {
       rng,
       undefined,
       currentScore,
-      currentSharkLengthM
+      currentSharkLengthM,
+      viewportBounds
     );
   }
 
@@ -130,7 +146,8 @@ export class EcosystemSpawner {
     rng: () => number = Math.random,
     currentScore: number = 0,
     customDistanceRange?: [number, number],
-    currentSharkLengthM?: number
+    currentSharkLengthM?: number,
+    viewportBounds?: ViewportSpawnBounds
   ): void {
     const targetCount = Math.max(0, Math.round(this.maxActivePreys));
     while (activePreys.length > targetCount) {
@@ -160,7 +177,8 @@ export class EcosystemSpawner {
         rng,
         customDistanceRange,
         currentScore,
-        currentSharkLengthM
+        currentSharkLengthM,
+        viewportBounds
       );
       if (!spawned) {
         break;
@@ -181,7 +199,8 @@ export class EcosystemSpawner {
     sharkY: number,
     rng: () => number = Math.random,
     currentScore: number = 0,
-    currentSharkLengthM?: number
+    currentSharkLengthM?: number,
+    viewportBounds?: ViewportSpawnBounds
   ): void {
     this.gameTime += Math.max(0, deltaTime);
 
@@ -199,21 +218,41 @@ export class EcosystemSpawner {
       }
     }
 
-    // 2. 维持同屏鱼群数量 (实时裁剪多余鱼或补齐至 maxActivePreys)
-    this.syncPreyCountImmediate(
-      activePreys,
-      sharkX,
-      sharkY,
-      rng,
-      currentScore,
-      undefined,
-      currentSharkLengthM
-    );
+    // 2. 维持同屏鱼群数量：平滑随机刷新（彻底杜绝一波一波出）
+    if (activePreys.length > this.maxActivePreys) {
+      this.syncPreyCountImmediate(
+        activePreys,
+        sharkX,
+        sharkY,
+        rng,
+        currentScore,
+        undefined,
+        currentSharkLengthM,
+        viewportBounds
+      );
+    } else if (activePreys.length < this.maxActivePreys) {
+      this.spawnTimer -= deltaTime;
+      // 每次 update 消耗累积的 spawnTimer，平滑自然补充猎物
+      while (this.spawnTimer <= 0 && activePreys.length < this.maxActivePreys) {
+        this.spawnPreyOffScreen(
+          activePreys,
+          sharkX,
+          sharkY,
+          rng,
+          undefined,
+          currentScore,
+          currentSharkLengthM,
+          viewportBounds
+        );
+        // 随机下一次刷新间隔 0.35s ~ 0.88s，平滑自然吐出单条或小群，告别集中波次刷怪
+        this.spawnTimer += 0.35 + rng() * 0.53;
+      }
+    }
   }
 
   /**
-   * 在鲨鱼视野外黄金狩猎环 (minSpawnRadius ~ spawnRadius) 生成猎物，
-   * 支持无限向下深渊、Poisson Disk 群居鱼成簇编队，并应用 Infinite Scaling
+   * 屏幕边缘游入刷新系统 (Screen-Edge Inward-Swimming Spawn System)
+   * 绝不在玩家身边瞬移出现，严禁在视口内生成，严格从左边缘或右边缘平滑游入！
    */
   public spawnPreyOffScreen(
     activePreys: PreyEntity[],
@@ -222,7 +261,8 @@ export class EcosystemSpawner {
     rng: () => number = Math.random,
     customDistanceRange?: [number, number],
     currentScore: number = 0,
-    currentSharkLengthM?: number
+    currentSharkLengthM?: number,
+    viewportBounds?: ViewportSpawnBounds
   ): PreyEntity | null {
     const scaleMultiplier = this.getScaleMultiplier();
     // 若玩家已快速潜入/上浮离开该鱼群锚点所在水深带，立即清空旧鱼群锚点，防止跨生态层生成伴游鱼
@@ -236,7 +276,7 @@ export class EcosystemSpawner {
     }
 
     // 若当前存在未生成的同伴鱼群锚点，从 Poisson Disk 采样点中取出与领头鱼保持最小距离 (`>= 56px`) 的伴游坐标
-    // 重要防滚雪球机制：伴游鱼固定为普通个体 ('NONE')，严禁一簇鱼群同时刷出多条黄金变异鱼导致秒触发狂暴
+    // 伴游鱼生成在领头鱼后方（屏幕外侧），保持相同游动方向
     if (this.schoolClusterAnchor && this.schoolClusterAnchor.remainingMates > 0) {
       const anchor = this.schoolClusterAnchor;
       anchor.remainingMates -= 1;
@@ -245,8 +285,9 @@ export class EcosystemSpawner {
         this.schoolClusterAnchor = null;
       }
 
-      const rawMateX = poissonPt ? poissonPt.x : anchor.x + (rng() - 0.5) * 96;
-      const rawMateY = poissonPt ? poissonPt.y : anchor.y + (rng() - 0.5) * 64;
+      const mateOffsetX = anchor.vx > 0 ? -(50 + rng() * 60) : (50 + rng() * 60);
+      const rawMateX = poissonPt ? poissonPt.x : anchor.x + mateOffsetX;
+      const rawMateY = poissonPt ? poissonPt.y : anchor.y + (rng() - 0.5) * 36;
       const mateX = infiniteWorldManager.wrapEntityX(rawMateX);
       const shallowMateCap = sharkY <= 430 ? 515 : anchor.config.maxDepth;
       const mateY = Math.max(
@@ -260,7 +301,7 @@ export class EcosystemSpawner {
       entity.x = mateX;
       entity.y = mateY;
       entity.vx = anchor.vx * (0.94 + rng() * 0.12);
-      entity.vy = anchor.vy + (rng() - 0.5) * 10;
+      entity.vy = anchor.vy + (rng() - 0.5) * 8;
       entity.angle = anchor.angle;
       entity.phase = rng() * Math.PI * 2;
       entity.telegraphTimer = 0;
@@ -272,18 +313,54 @@ export class EcosystemSpawner {
       return entity;
     }
 
-    const angle = rng() * Math.PI * 2;
-    const minD = customDistanceRange ? customDistanceRange[0] : this.minSpawnRadius;
-    const maxD = customDistanceRange ? customDistanceRange[1] : this.spawnRadius;
-    const distance = minD + rng() * Math.max(1, maxD - minD);
+    let spawnX: number;
+    let spawnY: number;
+    let moveDir: number;
+    let headingAngle: number;
 
-    const rawX = sharkX + Math.cos(angle) * distance;
-    const spawnX = infiniteWorldManager.wrapEntityX(rawX);
+    if (customDistanceRange) {
+      const angle = rng() * Math.PI * 2;
+      const minD = customDistanceRange[0];
+      const maxD = customDistanceRange[1];
+      const distance = minD + rng() * Math.max(1, maxD - minD);
+      const rawX = sharkX + Math.cos(angle) * distance;
+      spawnX = infiniteWorldManager.wrapEntityX(rawX);
+      spawnY = sharkY + Math.sin(angle) * distance;
+      moveDir = Math.cos(angle) < 0 ? 1 : -1;
+      headingAngle = moveDir > 0 ? 0 : Math.PI;
+    } else {
+      // 屏幕边缘游入刷新：绝对不在玩家身边瞬移出现，严格从屏幕左/右边缘外侧游入
+      const halfW = Math.max(760, viewportBounds?.halfW ?? 860);
+      const halfH = Math.max(420, viewportBounds?.halfH ?? 480);
+      const camX = viewportBounds?.cameraX ?? sharkX;
+      const camY = viewportBounds?.cameraY ?? sharkY;
+      const sVx = viewportBounds?.sharkVx ?? 0;
 
-    // Canvas 2D 坐标系下 Y=0 为海面，向下为正方向无限延伸（确保不生成在海面上方）
-    let spawnY = sharkY + Math.sin(angle) * distance;
+      let spawnOnLeft: boolean;
+      if (sVx > 45) {
+        // 鲨鱼快速向右游时，65% 在前方屏幕右边缘迎面游来，35% 在后方左边缘游入
+        spawnOnLeft = rng() < 0.35;
+      } else if (sVx < -45) {
+        // 鲨鱼快速向左游时，65% 在前方屏幕左边缘迎面游来，35% 在后方右边缘游入
+        spawnOnLeft = rng() < 0.65;
+      } else {
+        spawnOnLeft = rng() < 0.5;
+      }
+
+      const spawnMarginX = 75 + rng() * 115;
+      const rawX = spawnOnLeft ? camX - halfW - spawnMarginX : camX + halfW + spawnMarginX;
+      spawnX = infiniteWorldManager.wrapEntityX(rawX);
+
+      // 随机游动方向：消除全向鲨鱼游动的刻板感，猎物按自然海洋生物随机朝左或朝右游动
+      moveDir = rng() < 0.5 ? 1 : -1;
+      headingAngle = moveDir > 0 ? 0 : Math.PI;
+
+      // 垂直高度在视口水深范围内自然分布
+      spawnY = camY + (rng() - 0.5) * (halfH * 1.64);
+    }
+
     if (spawnY < 35) {
-      spawnY = 35 + rng() * 220;
+      spawnY = 35 + rng() * 180;
     }
     // 浅海生态保护：当玩家在阳光珊瑚浅海上中层 (sharkY <= 430m) 活动时，防止下方视野外刷怪半径直接伸入 520m+ 暮光带刷出鳗鱼等主动攻击掠食者
     if (sharkY <= 430) {
@@ -304,6 +381,13 @@ export class EcosystemSpawner {
       Math.max(25, chosenTier.minDepth),
       Math.min(chosenTier.maxDepth, spawnY)
     );
+
+    // 确保绝不刷入海床岩体内
+    const floorY = getFloorDepthAt(spawnX);
+    if (spawnY > floorY - chosenTier.radius - 28) {
+      spawnY = Math.max(chosenTier.minDepth, floorY - chosenTier.radius - 28);
+    }
+
     const rolledMutation = infiniteProgressionManager.rollPreyMutation(currentScore, rng);
     // 水雷/核废料等危险物不生成黄金变异，且浅海前 10 秒降低黄金变异出现率
     const mutationVariant =
@@ -314,10 +398,8 @@ export class EcosystemSpawner {
     const speedBoost =
       (mutationVariant === 'ABYSS_BEHEMOTH' ? 1.25 : 1.0) *
       Math.min(1.6, infiniteProgressionManager.globalDifficultyMultiplier);
-    const moveDir = rng() < 0.5 ? -1 : 1;
     const vx = moveDir * chosenTier.baseSpeed * speedBoost;
-    const vy = (rng() - 0.5) * 24;
-    const headingAngle = moveDir > 0 ? 0 : Math.PI;
+    const vy = (rng() - 0.5) * 16;
 
     // 结合宏观区域场 (`BiomeManager.evaluateMacroZone`) 的聚集度与 Poisson Disk Sampling 生成成簇群落伴游鱼
     const macroEval = proceduralOceanWorld.biomeManager.evaluateMacroZone(
@@ -352,8 +434,13 @@ export class EcosystemSpawner {
         vx,
         vy,
         angle: headingAngle,
-        remainingMates: 1,
-        poissonPoints: poissonSamples.map((pt) => ({ x: pt.x, y: pt.y })),
+        remainingMates: 2,
+        poissonPoints: poissonSamples.map((pt, idx) => ({
+          x: infiniteWorldManager.wrapEntityX(
+            moveDir > 0 ? spawnX - (50 + idx * 45 + (rng() - 0.5) * 30) : spawnX + (50 + idx * 45 + (rng() - 0.5) * 30)
+          ),
+          y: Math.max(chosenTier.minDepth, Math.min(chosenTier.maxDepth, spawnY + (rng() - 0.5) * 44)),
+        })),
       };
     }
 

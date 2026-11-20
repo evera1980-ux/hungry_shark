@@ -1009,6 +1009,7 @@ public final class OceanGameScene: SKScene {
     private var activeParticles: [ActiveParticle] = []
     private var activePickups: [ActivePickup] = []
     private var activeFloatTexts: [ActiveFloatText] = []
+    private var preySpawnTimer: Double = 0.0
     private let maxActivePreys = 22
 
     public override func didMove(to view: SKView) {
@@ -1282,8 +1283,10 @@ public final class OceanGameScene: SKScene {
         let targetCamY = vm.gameState == "title"
             ? max(minSurfaceCameraY, sharkY)
             : max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0)
-        cameraX += (targetCamX - cameraX) * min(1.0, dt * 6.5)
-        cameraY += (targetCamY - cameraY) * min(1.0, dt * 6.5)
+        let isBoostingCam = vm.gameState == "playing" && vm.isBoostingHeld && vm.energy > 2.0
+        let effectiveLerp = isBoostingCam ? 12.0 : 6.5
+        cameraX += (targetCamX - cameraX) * min(1.0, dt * effectiveLerp)
+        cameraY += (targetCamY - cameraY) * min(1.0, dt * effectiveLerp)
 
         if cameraShakeTrauma > 0.01 {
             let shakeMag = cameraShakeTrauma * cameraShakeTrauma * 9.0
@@ -1333,7 +1336,7 @@ public final class OceanGameScene: SKScene {
                 turnRate = (diff >= 0 ? 1.0 : -1.0) * 0.92
             }
 
-            let turnSpeed = 6.2
+            let turnSpeed = isBoosting ? 15.0 : 11.2
             let angleStep = diff * min(1.0, dt * turnSpeed)
             sharkAngle += angleStep
             turnRate = turnRate * 0.84 + (angleStep / max(0.001, dt)) * 0.045
@@ -1347,19 +1350,23 @@ public final class OceanGameScene: SKScene {
 
         facingScaleX += (facingDir - facingScaleX) * min(1.0, dt * 11.0)
 
+        let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
+        let cadenceFactor = max(0.42, min(1.0, pow(0.8 / max(0.6, stats.realBodyLengthM), 0.22)))
+
         // When joystick is not moved and not boosting, keep shark stationary in place (zero drift in previous direction!)
         if !hasDirectionInput && !isBoosting {
             sharkVx = 0.0
             sharkVy = 0.0
-            swimPhase += dt * 3.2
+            swimPhase += dt * 3.2 * cadenceFactor
             return
         }
 
         let heatMult = viewModel?.huntingHeatBuff.speedMultiplier ?? 1.0
         let joySpeedFactor = isBoosting ? 1.0 : min(1.0, max(0.55, inputMagnitude))
-        let speed = (isBoosting ? stats.boostSpeed : stats.moveSpeed * joySpeedFactor) * heatMult
-        sharkVx = cos(sharkAngle) * speed
-        sharkVy = sin(sharkAngle) * speed
+        let targetScreenSpeed = (isBoosting ? stats.boostSpeed : stats.moveSpeed * joySpeedFactor) * heatMult
+        let worldSpeed = targetScreenSpeed / seabedScale
+        sharkVx = cos(sharkAngle) * worldSpeed
+        sharkVy = sin(sharkAngle) * worldSpeed
 
         let prevX = sharkX
         let prevY = sharkY
@@ -1367,7 +1374,7 @@ public final class OceanGameScene: SKScene {
         let nextY = max(46.0, min(20000.0, sharkY + sharkVy * dt))
 
         // Enforce 2-way physical seabed & 9-tier terrace collision (top landing + underside anti-penetration!)
-        let sharkHitRadius = 26.0 * stats.scale
+        let sharkHitRadius = (26.0 * stats.scale) / seabedScale
         let stepCol = GameRules.resolveSeabedKineticStep(
             prevX: prevX,
             prevY: prevY,
@@ -1376,13 +1383,13 @@ public final class OceanGameScene: SKScene {
             vx: sharkVx,
             vy: sharkVy,
             entityRadius: sharkHitRadius,
-            clearancePadding: 8.0
+            clearancePadding: 8.0 / seabedScale
         )
         sharkX = stepCol.x
         sharkY = max(46.0, min(20000.0, stepCol.y))
         sharkVx = stepCol.vx
         sharkVy = stepCol.vy
-        swimPhase += dt * (isBoosting ? 12.5 : 7.8)
+        swimPhase += dt * (isBoosting ? 12.5 : 7.8) * cadenceFactor
 
         // Emit swimming bubbles from shark tail (faster during Boost, shimmering Gold during Gold Frenzy!)
         let isFrenzy = viewModel?.frenzyActive ?? false
@@ -1625,7 +1632,7 @@ public final class OceanGameScene: SKScene {
                 b.x = Double.random(in: 0...viewW)
             }
 
-            let rawX = b.x - cameraX * 0.55 * pScale + sin(b.wobblePhase) * 11.0 * pScale
+            let rawX = b.x - cameraX * 0.16 * pScale + sin(b.wobblePhase) * 11.0 * pScale
             let screenX = ((rawX.truncatingRemainder(dividingBy: viewW)) + viewW).truncatingRemainder(dividingBy: viewW)
             b.ringNode.position = CGPoint(x: screenX, y: b.y)
 
@@ -1944,22 +1951,22 @@ public final class OceanGameScene: SKScene {
         viewH: Double,
         zoom: Double
     ) {
-        let halfWorldW = (viewW * 0.5) / zoom + 450.0
+        let seabedScale = max(0.06, min(1.0, smoothedRelativePreyScale))
+        let halfWorldW = (viewW * 0.5) / (zoom * seabedScale) + 450.0
         let startWorldX = cameraX - halfWorldW
         let endWorldX = cameraX + halfWorldW
 
         let toScreenX: (Double) -> Double = { wx in
-            (wx - self.cameraX) * zoom + viewW * 0.5
+            (wx - self.cameraX) * seabedScale * zoom + viewW * 0.5
         }
         let toScreenY: (Double) -> Double = { wy in
-            viewH * 0.5 - (wy - self.cameraY) * zoom
+            viewH * 0.5 - (wy - self.cameraY) * seabedScale * zoom
         }
 
-        let seabedScale = max(0.40, min(1.0, smoothedRelativePreyScale))
         let tileWorldW = 680.0
         // 1:1 visual-to-physical alignment with Web renderPhysicalSeabed, scaled proportionally by seabedScale
-        let mainCrestLift = 20.0 * seabedScale
-        let mainStripWorldH = 148.0 * seabedScale
+        let mainCrestLift = 20.0
+        let mainStripWorldH = 148.0
 
         // 1A. Main Floor Underfill Polygon (prevents any sub-pixel gap below subsurface strata)
         let firstTile = Int(floor(startWorldX / tileWorldW))
@@ -1991,7 +1998,7 @@ public final class OceanGameScene: SKScene {
             var wx = firstX
             while wx <= endWorldX + stepW {
                 let fy = GameRules.getFloorDepthAt(worldX: wx)
-                let sy = toScreenY(fy + 22.0 * seabedScale)
+                let sy = toScreenY(fy + 22.0)
                 path.addLine(to: CGPoint(x: toScreenX(wx), y: sy))
                 wx += stepW
             }
@@ -2003,9 +2010,9 @@ public final class OceanGameScene: SKScene {
             // 1B. Main Floor Multi-Tier Subsurface Bedrock Strata + Top Surface Strip
             // Uses terrain-locked depth blending (resolveSeabedStripPairForDepth) & world-locked UVs (zero cameraY pop!)
             let subLayerSpecs: [(yStartWorld: Double, subWorldH: Double, uPhase: Double, alpha: Double, shade: Double, zOff: CGFloat)] = [
-                (34.0 * seabedScale,  210.0 * seabedScale, 0.37, 0.95, 0.18, 2.8),
-                (185.0 * seabedScale, 250.0 * seabedScale, 0.74, 0.92, 0.38, 2.7),
-                (375.0 * seabedScale, 290.0 * seabedScale, 0.19, 0.88, 0.56, 2.65)
+                (34.0, 210.0, 0.37, 0.95, 0.18, 2.8),
+                (185.0, 250.0, 0.74, 0.92, 0.38, 2.7),
+                (375.0, 290.0, 0.19, 0.88, 0.56, 2.65)
             ]
 
             for tIdx in firstTile...lastTile {
@@ -2120,12 +2127,12 @@ public final class OceanGameScene: SKScene {
         }
 
         // 2. Render 9 Non-Uniformly Spaced Continuous Seabed Terraces (414m down to 16,900m)
-        let terraceCrestLift = 18.0 * seabedScale
-        let terraceStripWorldH = 124.0 * seabedScale
+        let terraceCrestLift = 18.0
+        let terraceStripWorldH = 124.0
         let terracePeriodW = 540.0
         let terraceSubLayers: [(yStartWorld: Double, subWorldH: Double, uPhase: Double, alpha: Double, shade: Double, zOff: CGFloat)] = [
-            (28.0 * seabedScale,  118.0 * seabedScale, 0.37, 0.94, 0.16, 3.52),
-            (102.0 * seabedScale, 144.0 * seabedScale, 0.74, 0.90, 0.34, 3.46)
+            (28.0, 118.0, 0.37, 0.94, 0.16, 3.52),
+            (102.0, 144.0, 0.74, 0.90, 0.34, 3.46)
         ]
 
         for (tierIdx, tier) in GameRules.seabedTerraceTiers.enumerated() {
@@ -2247,8 +2254,8 @@ public final class OceanGameScene: SKScene {
                     portalNode.yScale = 1.0
                     portalNode.zRotation = 0.0
                     portalNode.size = CGSize(
-                        width: max(160.0 * zoom, caveSpanW * 1.02 * zoom),
-                        height: max(100.0 * zoom, 210.0 * zoom)
+                        width: max(160.0 * zoom * seabedScale, caveSpanW * 1.02 * zoom * seabedScale),
+                        height: max(100.0 * zoom * seabedScale, 210.0 * zoom * seabedScale)
                     )
                     portalNode.position = CGPoint(
                         x: toScreenX(seamWX),
@@ -2264,10 +2271,10 @@ public final class OceanGameScene: SKScene {
                 let leftRockPrimary = (seamHash % 2 == 0) ? "rock_2" : "rock_1"
                 let rightRockPrimary = (seamHash % 2 == 0) ? "rock_1" : "rock_2"
                 let lipShoulders: [(wx: Double, dy: Double, lipH: Double, tiltSign: Double, rockId: String, shade: Double, zPos: CGFloat)] = [
-                    (openLeftWX - 6.0,  22.0 * seabedScale, 74.0 * seabedScale, -1.0, leftRockPrimary,  0.14, 3.70),
-                    (openLeftWX - 12.0, 58.0 * seabedScale, 62.0 * seabedScale, -1.0, rightRockPrimary, 0.28, 3.67),
-                    (openRightWX + 6.0, 22.0 * seabedScale, 74.0 * seabedScale,  1.0, rightRockPrimary, 0.14, 3.70),
-                    (openRightWX + 12.0,58.0 * seabedScale, 62.0 * seabedScale,  1.0, leftRockPrimary,  0.28, 3.67)
+                    (openLeftWX - 6.0,  22.0, 74.0, -1.0, leftRockPrimary,  0.14, 3.70),
+                    (openLeftWX - 12.0, 58.0, 62.0, -1.0, rightRockPrimary, 0.28, 3.67),
+                    (openRightWX + 6.0, 22.0, 74.0,  1.0, rightRockPrimary, 0.14, 3.70),
+                    (openRightWX + 12.0,58.0, 62.0,  1.0, leftRockPrimary,  0.28, 3.67)
                 ]
                 for shoulder in lipShoulders {
                     let mainAtShoulder = GameRules.getFloorDepthAt(worldX: shoulder.wx)
@@ -2277,7 +2284,7 @@ public final class OceanGameScene: SKScene {
                     if let lipTex = SpriteAtlasManager.shared.ecologySpriteTexture(for: shoulder.rockId) {
                         let texSize = lipTex.size()
                         let aspect = max(0.6, min(1.8, Double(texSize.width / max(1.0, texSize.height))))
-                        let lipH = shoulder.lipH * zoom
+                        let lipH = shoulder.lipH * zoom * seabedScale
                         let lipW = lipH * aspect
                         let lipNode = acquirePooledParallaxTile()
                         lipNode.warpGeometry = nil
@@ -2716,28 +2723,25 @@ public final class OceanGameScene: SKScene {
         let maxAttempts = maxActivePreys * 2
         while activePreys.count < maxActivePreys && attempts < maxAttempts {
             attempts += 1
-            if !spawnOnePrey(nearShark: activePreys.count < 7) {
+            if !spawnOnePrey() {
                 break
             }
         }
+        preySpawnTimer = Double.random(in: 0.35...0.88)
     }
 
-    private func syncPreyPopulation(maxSpawnPerFrame: Int = 1) {
-        var spawnedCount = 0
-        var attempts = 0
-        let maxAttempts = maxSpawnPerFrame * 3
-        while activePreys.count < maxActivePreys && spawnedCount < maxSpawnPerFrame && attempts < maxAttempts {
-            attempts += 1
-            if spawnOnePrey(nearShark: activePreys.count < 7) {
-                spawnedCount += 1
-            } else {
-                break
-            }
+    private func syncPreyPopulation(dt: Double) {
+        guard activePreys.count < maxActivePreys else { return }
+        preySpawnTimer -= dt
+        if preySpawnTimer <= 0 {
+            spawnOnePrey()
+            // 平滑随机刷新计时器：消除一波一波出怪的卡顿波次感，0.35s ~ 0.88s 随机单条涌入
+            preySpawnTimer = Double.random(in: 0.35...0.88)
         }
     }
 
     @discardableResult
-    private func spawnOnePrey(nearShark: Bool) -> Bool {
+    private func spawnOnePrey() -> Bool {
         var targetDepth = max(45.0, sharkY + Double.random(in: -260...260))
         if sharkY <= 430.0 {
             targetDepth = min(495.0, targetDepth)
@@ -2802,11 +2806,21 @@ public final class OceanGameScene: SKScene {
                 break
             }
         }
-        let dist = nearShark ? Double.random(in: 220...480) : Double.random(in: 580...1400)
-        let ang = Double.random(in: 0...(Double.pi * 2))
-        let px = sharkX + cos(ang) * dist
+        // 屏幕边缘游入刷新：严格在屏幕外侧左右边缘生成，并朝向屏幕中央游入，严禁在身边瞬移！
+        let viewW = Double(max(320, size.width))
+        let viewH = Double(max(240, size.height))
+        let zoom = viewModel?.currentStats.cameraZoom ?? 1.0
+        let halfViewW = max(520.0, (viewW * 0.5) / max(0.4, zoom))
+        let halfViewH = max(320.0, (viewH * 0.5) / max(0.4, zoom))
+
+        let spawnOnLeft = Bool.random()
+        let edgeOffset = Double.random(in: 80.0...175.0)
+        let px = spawnOnLeft ? (cameraX - halfViewW - edgeOffset) : (cameraX + halfViewW + edgeOffset)
+        // 随机游动方向：消除全向鲨鱼游动的刻板感，猎物按自然海洋生物随机朝左或朝右游动
+        let dir: Double = Bool.random() ? 1.0 : -1.0
+
         let localFloorLimit = max(140.0, GameRules.getFloorDepthAt(worldX: px) - chosen.radius - 34.0)
-        let rawPy = max(chosen.minDepth, min(chosen.maxDepth, sharkY + sin(ang) * dist * 0.6))
+        let rawPy = max(chosen.minDepth, min(chosen.maxDepth, sharkY + Double.random(in: -halfViewH...halfViewH) * 0.82))
         let clampedPy = min(rawPy, localFloorLimit)
         // Ensure prey never spawns inside any of the 9 seabed terraces or below the main floor
         let spawnCol = GameRules.resolveSeabedCollision(
@@ -2818,7 +2832,6 @@ public final class OceanGameScene: SKScene {
             prevWorldY: clampedPy
         )
         let py = max(chosen.minDepth + 16.0, min(localFloorLimit, spawnCol.y))
-        let dir: Double = Bool.random() ? 1.0 : -1.0
 
         let node = SKSpriteNode()
         if let tex = SpriteAtlasManager.shared.preyTexture(for: chosen.spriteKey) {
@@ -2833,7 +2846,7 @@ public final class OceanGameScene: SKScene {
                 x: px,
                 y: py,
                 vx: dir * chosen.baseSpeed,
-                vy: sin(ang) * chosen.baseSpeed * 0.25,
+                vy: Double.random(in: -8.0...8.0),
                 mutation: Double.random(in: 0...1) < 0.08 ? .GOLDEN_SWARM : .NONE
             )
         )
@@ -2985,8 +2998,9 @@ public final class OceanGameScene: SKScene {
                 pt.node.setScale(CGFloat(max(0.2, 1.0 - progress * 0.65)))
                 pt.node.alpha = CGFloat(max(0.0, 1.0 - progress * 0.85))
             }
-            let sx = viewW * 0.5 + (pt.x - cameraX) * zoom
-            let sy = viewH * 0.5 - (pt.y - cameraY) * zoom
+            let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
+            let sx = viewW * 0.5 + (pt.x - cameraX) * seabedScale * zoom
+            let sy = viewH * 0.5 - (pt.y - cameraY) * seabedScale * zoom
             pt.node.position = CGPoint(x: sx, y: sy)
             pIdx -= 1
         }
@@ -3043,12 +3057,14 @@ public final class OceanGameScene: SKScene {
                 continue
             }
 
-            let sx = viewW * 0.5 + (pk.x - cameraX) * zoom
-            let sy = viewH * 0.5 - (pk.y - cameraY) * zoom
+            let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
+            let sx = viewW * 0.5 + (pk.x - cameraX) * seabedScale * zoom
+            let sy = viewH * 0.5 - (pk.y - cameraY) * seabedScale * zoom
             pk.node.position = CGPoint(x: sx, y: sy)
-            // 3D coin flip / crystal spin effect
-            pk.node.xScale = CGFloat(0.35 + 0.65 * abs(cos(pk.spinPhase)))
-            pk.node.yScale = 1.0
+            // 3D coin flip / crystal spin effect (scaled in equal proportion with world)
+            let pkScale = CGFloat(max(0.18, min(1.0, smoothedRelativePreyScale * 1.25)))
+            pk.node.xScale = CGFloat(0.35 + 0.65 * abs(cos(pk.spinPhase))) * pkScale
+            pk.node.yScale = pkScale
             kIdx -= 1
         }
 
@@ -3067,8 +3083,9 @@ public final class OceanGameScene: SKScene {
             ft.vy *= 0.94
             let progress = 1.0 - (ft.life / ft.maxLife)
             let popScale = progress < 0.18 ? (0.65 + (progress / 0.18) * 0.48) : (1.13 - (progress - 0.18) * 0.22)
-            let sx = viewW * 0.5 + (ft.x - cameraX) * zoom
-            let sy = viewH * 0.5 - (ft.y - cameraY) * zoom
+            let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
+            let sx = viewW * 0.5 + (ft.x - cameraX) * seabedScale * zoom
+            let sy = viewH * 0.5 - (ft.y - cameraY) * seabedScale * zoom
             ft.node.position = CGPoint(x: sx, y: sy)
             ft.node.setScale(CGFloat(max(0.5, popScale)))
             ft.node.alpha = CGFloat(min(1.0, ft.life / (ft.maxLife * 0.42)))
@@ -3078,19 +3095,24 @@ public final class OceanGameScene: SKScene {
 
     private func stepAndRenderPreys(viewW: Double, viewH: Double, stats: ComputedSharkStats, dt: Double, currentTime: TimeInterval) {
         guard let vm = viewModel else { return }
-        syncPreyPopulation(maxSpawnPerFrame: 1)
+        syncPreyPopulation(dt: dt)
         let zoom = stats.cameraZoom
+        let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
 
         var idx = activePreys.count - 1
         while idx >= 0 {
             let p = activePreys[idx]
             let gait = classifyPreySwimGait(p.config)
-            let speedNorm = max(0.72, min(1.35, hypot(p.vx, p.vy) / max(18.0, p.config.baseSpeed)))
+            let worldPreySpeed = p.config.baseSpeed / seabedScale
+            let speedNorm = max(0.72, min(1.35, (hypot(p.vx, p.vy) * seabedScale) / max(18.0, p.config.baseSpeed)))
             p.phase += dt * 4.6 * speedNorm
             p.stateTimer += dt
 
-            let dx = p.x - sharkX
-            let dy = p.y - sharkY
+            // 物理判定与视觉渲染坐标严格同源对齐（共用相对海床微缩比例尺，彻底消除冲刺逆流漂移与吃鱼错位）
+            let effPreyX = sharkX + (p.x - sharkX) * seabedScale
+            let effPreyY = sharkY + (p.y - sharkY) * seabedScale
+            let dx = effPreyX - sharkX
+            let dy = effPreyY - sharkY
             let dist = hypot(dx, dy)
 
             if dist > 1950 {
@@ -3119,13 +3141,13 @@ public final class OceanGameScene: SKScene {
             case .SCHOOL_FLEE:
                 if dist < 250 && encounterPreview == .DEVOUR && dist > 1.0 {
                     let fleeAng = atan2(dy, dx) + sin(p.phase * 1.35) * 0.18
-                    let fleeSpd = p.config.baseSpeed * 1.42
+                    let fleeSpd = worldPreySpeed * 1.42
                     p.vx += (cos(fleeAng) * fleeSpd - p.vx) * min(1.0, dt * 4.5)
                     p.vy += (sin(fleeAng) * fleeSpd - p.vy) * min(1.0, dt * 4.5)
                 } else {
                     let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq) * p.cruiseAmpY
-                    let desiredVy = (targetY - p.y) * 0.92 + cos(p.phase * 0.65) * p.config.baseSpeed * 0.14
-                    let desiredVx = dirSign * p.config.baseSpeed * (0.92 + 0.12 * sin(p.stateTimer * 0.95))
+                    let desiredVy = ((targetY - p.y) * 0.92) / seabedScale + (cos(p.phase * 0.65) * worldPreySpeed * 0.14)
+                    let desiredVx = dirSign * worldPreySpeed * (0.92 + 0.12 * sin(p.stateTimer * 0.95))
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
                 }
@@ -3133,36 +3155,36 @@ public final class OceanGameScene: SKScene {
                 let targetInflate = dist < 195 ? 1.0 : 0.0
                 p.inflateRatio += (targetInflate - p.inflateRatio) * min(1.0, dt * 4.5)
                 let targetY = p.cruiseDepthCenter + sin(p.stateTimer * 0.65) * (p.cruiseAmpY * 0.65)
-                let desiredVy = (targetY - p.y) * 0.85 + sin(p.phase * 0.6) * 12.0
-                let desiredVx = dirSign * p.config.baseSpeed * (1.0 - p.inflateRatio * 0.35)
+                let desiredVy = ((targetY - p.y) * 0.85) / seabedScale + (sin(p.phase * 0.6) * 12.0) / seabedScale
+                let desiredVx = dirSign * worldPreySpeed * (1.0 - p.inflateRatio * 0.35)
                 p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
                 p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
             case .EEL_CHARGER:
                 if dist < 310 && encounterPreview != .DEVOUR && dist > 1.0 {
                     let atkAng = atan2(-dy, -dx) + sin(p.phase * 1.4) * 0.14
-                    let atkSpd = p.config.baseSpeed * 1.42
+                    let atkSpd = worldPreySpeed * 1.42
                     p.vx += (cos(atkAng) * atkSpd - p.vx) * min(1.0, dt * 4.0)
                     p.vy += (sin(atkAng) * atkSpd - p.vy) * min(1.0, dt * 4.0)
                 } else {
-                    let desiredVy = cos(p.phase * 0.75) * p.config.baseSpeed * 0.18
-                    let desiredVx = dirSign * p.config.baseSpeed
+                    let desiredVy = cos(p.phase * 0.75) * worldPreySpeed * 0.18
+                    let desiredVx = dirSign * worldPreySpeed
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
                 }
             case .MINE_HAZARD:
-                p.vx = sin(p.stateTimer * 0.8 + p.phase * 0.2) * 8.0
-                p.vy = cos(p.stateTimer * 1.1 + p.phase * 0.3) * 10.0
+                p.vx = (sin(p.stateTimer * 0.8 + p.phase * 0.2) * 8.0) / seabedScale
+                p.vy = (cos(p.stateTimer * 1.1 + p.phase * 0.3) * 10.0) / seabedScale
             default:
                 if gait == .MEDUSOID_JET {
                     let jetPulse = 0.72 + 0.38 * pow(max(0.0, sin(p.phase * 0.65)), 2.0)
-                    let desiredVx = dirSign * p.config.baseSpeed * jetPulse
-                    let desiredVy = cos(p.stateTimer * 0.75) * 14.0
+                    let desiredVx = dirSign * worldPreySpeed * jetPulse
+                    let desiredVy = (cos(p.stateTimer * 0.75) * 14.0) / seabedScale
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.5)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.5)
                 } else {
                     let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq) * p.cruiseAmpY
-                    let desiredVy = (targetY - p.y) * 0.88 + sin(p.phase * 0.6) * p.config.baseSpeed * 0.14
-                    let desiredVx = dirSign * p.config.baseSpeed * (0.92 + 0.12 * cos(p.stateTimer * 0.85))
+                    let desiredVy = ((targetY - p.y) * 0.88) / seabedScale + (sin(p.phase * 0.6) * worldPreySpeed * 0.14)
+                    let desiredVx = dirSign * worldPreySpeed * (0.92 + 0.12 * cos(p.stateTimer * 0.85))
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 2.8)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 2.8)
                 }
@@ -3172,11 +3194,11 @@ public final class OceanGameScene: SKScene {
             let suctionRadius = (58.0 + stats.magnetRadius * 0.35) * stats.jawSuctionMultiplier * stats.scale
             let mouthX = sharkX + cos(sharkAngle) * 28.0 * stats.scale
             let mouthY = sharkY + sin(sharkAngle) * 28.0 * stats.scale
-            let mouthDist = hypot(mouthX - p.x, mouthY - p.y)
+            let mouthDist = hypot(mouthX - effPreyX, mouthY - effPreyY)
             if vm.gameState == "playing" && encounterPreview == .DEVOUR && mouthDist < suctionRadius && mouthDist > 1.0 {
-                let pullStrength = (1.0 - mouthDist / suctionRadius) * 540.0
-                p.x += ((mouthX - p.x) / mouthDist) * pullStrength * dt
-                p.y += ((mouthY - p.y) / mouthDist) * pullStrength * dt
+                let pullStrength = ((1.0 - mouthDist / suctionRadius) * 540.0) / seabedScale
+                p.x += ((mouthX - effPreyX) / mouthDist) * pullStrength * dt
+                p.y += ((mouthY - effPreyY) / mouthDist) * pullStrength * dt
                 if biteAnim < 0.35 {
                     biteAnim = 0.55
                 }
@@ -3220,8 +3242,10 @@ public final class OceanGameScene: SKScene {
                 }
             }
 
-            let postDx = p.x - sharkX
-            let postDy = p.y - sharkY
+            let postEffX = sharkX + (p.x - sharkX) * seabedScale
+            let postEffY = sharkY + (p.y - sharkY) * seabedScale
+            let postDx = postEffX - sharkX
+            let postDy = postEffY - sharkY
             let postDist = hypot(postDx, postDy)
             let hitRadius = p.config.radius * visualScale + 28.0 * stats.scale
 
@@ -3396,8 +3420,8 @@ public final class OceanGameScene: SKScene {
                 }
             }
 
-            let screenX = viewW * 0.5 + (p.x - cameraX) * zoom
-            let screenY = viewH * 0.5 - (p.y - cameraY) * zoom
+            let screenX = viewW * 0.5 + (p.x - cameraX) * seabedScale * zoom
+            let screenY = viewH * 0.5 - (p.y - cameraY) * seabedScale * zoom
             let inflateScale = 1.0 + p.inflateRatio * 0.38
             let baseSize = p.config.radius * GameRules.preyRadiusToDrawSize * visualScale * inflateScale * zoom
             if p.node.texture == nil,

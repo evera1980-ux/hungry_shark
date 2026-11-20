@@ -392,19 +392,19 @@ public enum GameRules {
         return HuntingHeatBuff(heatLevel: 0, speedMultiplier: 1.0, scoreMultiplier: 1.0, labelKey: "hud_heat_lv0")
     }
 
-    /// Optical Far / Mid / Near background shrinking ratios coupled to shark growth (`relativePreyScale`: 1.00 -> 0.40)
-    /// Shrink weights: Near (0.70) > Ambient (0.55) > Mid (0.45) > Far (0.22) > Water (0.15)
+    /// Optical Far / Mid / Near background shrinking ratios coupled to shark growth (`relativePreyScale`: 1.00 -> 0.015)
+    /// Shrink weights: Near (0.42) > Ambient (0.33) > Mid (0.27) > Far (0.132) > Water (0.09)
     public static func getParallaxLayerGrowthScales(relativePreyScale: Double) -> ParallaxLayerGrowthScales {
-        let clampedRel = max(0.4, min(1.0, relativePreyScale.isFinite ? relativePreyScale : 1.0))
-        let shrinkDelta = max(0.0, 1.0 - clampedRel) // 0.00 -> 0.60
+        let clampedRel = max(0.015, min(1.0, relativePreyScale.isFinite ? relativePreyScale : 1.0))
+        let growthProgress = min(1.0, max(0.0, (1.0 - clampedRel) / (1.0 - 0.015)))
         return ParallaxLayerGrowthScales(
-            growthProgress: min(1.0, shrinkDelta / 0.6),
-            waterScale: 1.0 - shrinkDelta * 0.15,
-            farScale: 1.0 - shrinkDelta * 0.22,
-            midScale: 1.0 - shrinkDelta * 0.45,
-            ambientScale: 1.0 - shrinkDelta * 0.55,
-            nearScale: 1.0 - shrinkDelta * 0.70,
-            particleScale: 1.0 - shrinkDelta * 0.45
+            growthProgress: growthProgress,
+            waterScale: 1.0 - growthProgress * 0.09,
+            farScale: 1.0 - growthProgress * 0.132,
+            midScale: 1.0 - growthProgress * 0.27,
+            ambientScale: 1.0 - growthProgress * 0.33,
+            nearScale: 1.0 - growthProgress * 0.42,
+            particleScale: 1.0 - growthProgress * 0.27
         )
     }
 
@@ -2044,15 +2044,16 @@ public enum GameRules {
             1.28,
             1.0 + Double(inRunLevel - 1) * 0.028 + Double(form.row) * 0.025 + Double(upLv - 1) * 0.006
         )
-        let growthIndex = Double(inRunLevel - 1) * 0.12 + Double(form.row) * 0.14 + Double(upLv - 1) * 0.02
-        let relativePreyScale = max(0.4, 1.0 / (1.0 + growthIndex))
+        let realBodyLengthM = form.realBodyLengthM * (1.0 + Double(inRunLevel - 1) * 0.025)
+        let relativePreyScale = max(0.015, min(1.0, 0.8 / realBodyLengthM))
         let cameraZoom = max(0.88, 1.0 / (1.0 + (scale - 1.0) * 0.42))
 
         let hpDrainReduction = min(0.58, form.hpDrainReduction + upgradeDrainRed)
         let boostCostReduction = min(0.68, form.boostCostReduction + upgradeBoostRed)
 
         let totalSpeedBonus = form.speedBonus + upgradeSpeedBonus + collectionSpeedBonus + Double(inRunLevel - 1) * 0.028
-        let baseSpeed = GameConfigGenerated.baseSharkSpeed * (1.0 + totalSpeedBonus)
+        let lengthGrowthFactor = pow(realBodyLengthM / 0.8, 0.08)
+        let baseSpeed = GameConfigGenerated.baseSharkSpeed * lengthGrowthFactor * (1.0 + totalSpeedBonus)
         let moveSpeed = frenzyActive ? baseSpeed * 1.35 : baseSpeed
         let boostSpeed = moveSpeed * GameConfigGenerated.boostSpeedMultiplier
 
@@ -2074,7 +2075,6 @@ public enum GameRules {
         let baseRewardMult = collectionRewardMult * (1.0 + Double(form.row) * 0.12)
         let canEatMines = form.id == "shark_25_bio_venom" || form.generation >= 6
 
-        let realBodyLengthM = form.realBodyLengthM * (1.0 + Double(inRunLevel - 1) * 0.025)
         let cruiseSpeedMps = form.cruiseSpeedMps * (1.0 + totalSpeedBonus)
         let boostSpeedMps = cruiseSpeedMps * (frenzyActive ? 2.6 : 2.2)
         let viewportScale = (120.0 * scale) / realBodyLengthM

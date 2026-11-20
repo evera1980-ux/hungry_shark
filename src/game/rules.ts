@@ -193,18 +193,21 @@ export function getParallaxLayerGrowthScales(
   relativePreyScale: number = 1.0
 ): ParallaxLayerGrowthScales {
   const clampedRel = Number.isFinite(relativePreyScale)
-    ? Math.max(0.4, Math.min(1.0, relativePreyScale))
+    ? Math.max(0.015, Math.min(1.0, relativePreyScale))
     : 1.0;
-  const shrinkDelta = Math.max(0, 1.0 - clampedRel); // 0.00 -> 0.60
+  // 归一化成长微缩进度：初始幼鲨 (relativePreyScale = 1.00) 为 0，满阶终焉巨兽 (<= 0.018) 为 1.00
+  const growthProgress = Number(
+    Math.min(1, Math.max(0, (1.0 - clampedRel) / (1.0 - 0.015))).toFixed(3)
+  );
 
   return {
-    growthProgress: Number(Math.min(1, shrinkDelta / 0.6).toFixed(3)),
-    waterScale: Number((1.0 - shrinkDelta * 0.15).toFixed(3)),
-    farScale: Number((1.0 - shrinkDelta * 0.22).toFixed(3)),
-    midScale: Number((1.0 - shrinkDelta * 0.45).toFixed(3)),
-    ambientScale: Number((1.0 - shrinkDelta * 0.55).toFixed(3)),
-    nearScale: Number((1.0 - shrinkDelta * 0.70).toFixed(3)),
-    particleScale: Number((1.0 - shrinkDelta * 0.45).toFixed(3)),
+    growthProgress,
+    waterScale: Number((1.0 - growthProgress * 0.09).toFixed(3)),
+    farScale: Number((1.0 - growthProgress * 0.132).toFixed(3)),
+    midScale: Number((1.0 - growthProgress * 0.27).toFixed(3)),
+    ambientScale: Number((1.0 - growthProgress * 0.33).toFixed(3)),
+    nearScale: Number((1.0 - growthProgress * 0.42).toFixed(3)),
+    particleScale: Number((1.0 - growthProgress * 0.27).toFixed(3)),
   };
 }
 
@@ -445,10 +448,9 @@ export function computeSharkStats(
       1.0 + (level - 1) * 0.032 + Object.keys(equipped).length * 0.015 + extraStars * 0.008
     ).toFixed(3)
   );
-  const growthIndex =
-    (level - 1) * 0.13 + Object.keys(equipped).length * 0.03 + extraStars * 0.012;
+  const realBodyLengthM = Number((0.8 * (1 + (level - 1) * 0.035)).toFixed(2));
   const relativePreyScale = Number(
-    Math.max(0.42, 1.0 / (1 + growthIndex)).toFixed(3)
+    Math.max(0.015, Math.min(1.0, 0.8 / realBodyLengthM)).toFixed(3)
   );
   // Subtle camera zoom out that preserves full environmental clarity and wide field of view
   const cameraZoom = Number(Math.max(0.88, 1.0 / (1 + (scale - 1) * 0.42)).toFixed(3));
@@ -460,7 +462,9 @@ export function computeSharkStats(
   const normalBiteTier = Math.min(8, rawBiteTier);
   const biteTier = frenzyActive ? 8 : normalBiteTier;
 
-  const baseSpeed = GAME_CONFIG.world.baseSharkSpeed * (1 + (level - 1) * 0.03 + speedBonus);
+  const lengthGrowthFactor = Math.pow(realBodyLengthM / 0.8, 0.08);
+  const baseSpeed =
+    GAME_CONFIG.world.baseSharkSpeed * lengthGrowthFactor * (1 + (level - 1) * 0.03 + speedBonus);
   const moveSpeed = Math.round(frenzyActive ? baseSpeed * 1.35 : baseSpeed);
   const boostSpeed = Math.round(moveSpeed * GAME_CONFIG.world.boostSpeedMultiplier);
 
@@ -500,11 +504,11 @@ export function computeSharkStats(
     devourHealMultiplier,
     frenzyDurationBonus,
     totalOrganStars,
-    realBodyLengthM: Number((1.5 * (1 + (level - 1) * 0.035)).toFixed(2)),
+    realBodyLengthM,
     cruiseSpeedMps: Number((1.8 * (1 + speedBonus)).toFixed(2)),
     boostSpeedMps: Number(((1.8 * (1 + speedBonus)) * 2.2).toFixed(2)),
-    viewportScale: Number(((120 * scale) / (1.5 * (1 + (level - 1) * 0.035))).toFixed(3)),
-    minSpawnablePreyLengthM: Number(((1.5 * (1 + (level - 1) * 0.035)) * 0.133).toFixed(2)),
+    viewportScale: Number(((120 * scale) / realBodyLengthM).toFixed(3)),
+    minSpawnablePreyLengthM: Number((realBodyLengthM * 0.133).toFixed(2)),
   };
 }
 
@@ -550,17 +554,20 @@ export function computeEvolvedSharkStats(
   const normalBiteTier = Math.min(48, rawBiteTier);
   const biteTier = frenzyActive ? 48 : normalBiteTier;
 
-  // Non-obstructive shark scale (1.0 -> 1.28) + progressive relative prey shrinking (1.0 -> 0.40)
+  // Non-obstructive shark scale (1.0 -> 1.28)
   const scale = Number(
     Math.min(
       1.28,
       1.0 + (inRunLevel - 1) * 0.028 + form.row * 0.025 + (upLv - 1) * 0.006
     ).toFixed(3)
   );
-  const growthIndex =
-    (inRunLevel - 1) * 0.12 + form.row * 0.14 + (upLv - 1) * 0.02;
+  // 100% 真实生物体长（m）：随单局内升级线性增长
+  const realBodyLengthM = Number(
+    (form.realBodyLengthM * (1.0 + (inRunLevel - 1) * 0.025)).toFixed(2)
+  );
+  // 100% 真实生物体长同比例环境微缩：以初代拟态小丑幼鲨 (0.8m) 为 1.000 基准，海床与猎物严格按 0.8 / realBodyLengthM 同步缩小
   const relativePreyScale = Number(
-    Math.max(0.4, 1.0 / (1 + growthIndex)).toFixed(3)
+    Math.max(0.015, Math.min(1.0, 0.8 / realBodyLengthM)).toFixed(3)
   );
   const cameraZoom = Number(
     Math.max(0.88, 1.0 / (1 + (scale - 1) * 0.42)).toFixed(3)
@@ -577,7 +584,9 @@ export function computeEvolvedSharkStats(
 
   const totalSpeedBonus =
     form.speedBonus + upgradeSpeedBonus + collectionSpeedBonus + (inRunLevel - 1) * 0.028;
-  const baseSpeed = GAME_CONFIG.world.baseSharkSpeed * (1 + totalSpeedBonus);
+  const lengthGrowthFactor = Math.pow(realBodyLengthM / 0.8, 0.08);
+  const baseSpeed =
+    GAME_CONFIG.world.baseSharkSpeed * lengthGrowthFactor * (1 + totalSpeedBonus);
   const moveSpeed = Math.round(frenzyActive ? baseSpeed * 1.35 : baseSpeed);
   const boostSpeed = Math.round(
     moveSpeed * GAME_CONFIG.world.boostSpeedMultiplier
@@ -753,21 +762,15 @@ export function computeEvolvedSharkStats(
     specialPreyScoreMultiplier,
     bossRewardMultiplier,
     canEatMines,
-    realBodyLengthM: Number(
-      (form.realBodyLengthM * (1.0 + (inRunLevel - 1) * 0.025)).toFixed(2)
-    ),
+    realBodyLengthM,
     cruiseSpeedMps: Number(
       (form.cruiseSpeedMps * (1 + totalSpeedBonus)).toFixed(2)
     ),
     boostSpeedMps: Number(
       (form.cruiseSpeedMps * (1 + totalSpeedBonus) * (frenzyActive ? 2.6 : 2.2)).toFixed(2)
     ),
-    viewportScale: Number(
-      ((120 * scale) / (form.realBodyLengthM * (1.0 + (inRunLevel - 1) * 0.025))).toFixed(3)
-    ),
-    minSpawnablePreyLengthM: Number(
-      (form.realBodyLengthM * (1.0 + (inRunLevel - 1) * 0.025) * 0.133).toFixed(2)
-    ),
+    viewportScale: Number(((120 * scale) / realBodyLengthM).toFixed(3)),
+    minSpawnablePreyLengthM: Number((realBodyLengthM * 0.133).toFixed(2)),
   };
 }
 

@@ -1519,8 +1519,8 @@ export class ParallaxBackground {
           sc.spriteKind === 'MOON_JELLYFISH'
             ? 0.56
             : sc.spriteKind === 'MANTA_RAY'
-            ? 0.38
-            : 0.46;
+              ? 0.38
+              : 0.46;
         ctx.globalAlpha = baseOpacity * effectiveFade;
         ctx.translate(baseX, baseY);
 
@@ -1595,11 +1595,11 @@ export class ParallaxBackground {
     }
 
     const targetRelScale = Number.isFinite(relativePreyScale)
-      ? Math.max(0.4, Math.min(1.0, relativePreyScale))
+      ? Math.max(0.015, Math.min(1.0, relativePreyScale))
       : 1.0;
     if (
       dt <= 0 ||
-      Math.abs(targetRelScale - this.smoothedRelativePreyScale) > 0.35
+      Math.abs(targetRelScale - this.smoothedRelativePreyScale) > 0.45
     ) {
       this.smoothedRelativePreyScale = targetRelScale;
     } else {
@@ -1761,8 +1761,9 @@ export class ParallaxBackground {
         b.x = this.ambientRng() * viewW;
       }
 
+      // 采用柔和的背景视差比例 (0.16)，消除冲刺时背景气泡剧烈向后倒灌飞窜带来的“逆向水流冲击/阻力”不适感
       const screenX =
-        (((b.x - cameraX * 0.55 * pScale + Math.sin(b.wobblePhase) * 11 * pScale) % viewW) +
+        (((b.x - cameraX * 0.16 * pScale + Math.sin(b.wobblePhase) * 11 * pScale) % viewW) +
           viewW) %
         viewW;
       const effR = b.r * pScale * (wS * 1.0 + wT * 0.66 + wA * 0.74);

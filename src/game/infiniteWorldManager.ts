@@ -116,8 +116,11 @@ export class InfiniteWorldManager {
     const targetCameraX = shark.x;
     const targetCameraY = Math.max(shark.y, this.seaSurfaceY);
 
+    // 冲刺与高速游动时动态提升相机跟随紧凑度（从 6.5 提升至 12.0+），消除镜头拉扯滞后与逆向水流感
+    const speedSq = (shark.vx || 0) ** 2 + (shark.vy || 0) ** 2;
+    const effectiveLerpSpeed = speedSq > 240 * 240 ? Math.max(this.cameraLerpSpeed, 12.0) : this.cameraLerpSpeed;
     const lerpFactor =
-      deltaTime > 0 ? Math.min(1, deltaTime * this.cameraLerpSpeed) : 1;
+      deltaTime > 0 ? Math.min(1, deltaTime * effectiveLerpSpeed) : 1;
     camera.x += (targetCameraX - camera.x) * lerpFactor;
     camera.y += (targetCameraY - camera.y) * lerpFactor;
 
