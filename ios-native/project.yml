@@ -18,6 +18,7 @@ targets:
         excludes:
           - "Resources/Assets/*.png"
           - "Resources/Assets/*.jpg"
+          - "Resources/Assets/*.json"
       - path: HungrySharkEvolution/Resources/Assets
         type: folder
         buildPhase: resources

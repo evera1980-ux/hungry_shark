@@ -207,7 +207,7 @@ export const PREY_140_I18N_EN: Record<string, string> = Object.fromEntries(
 );
 
 export function getPrey140ImageUrl(id: string): string {
-  return `/assets/prey_140/${id}@3x.png`;
+  return `/assets/prey_140/${id}@3x.webp`;
 }
 
 const PUFFER_LIKE_IDS = new Set<string>([
@@ -478,6 +478,7 @@ export function buildPrey140TiersWithMines(): PreyTierConfig[] {
     id: 'cyber_mine',
     nameKey: 'prey_tier6_name',
     spriteKey: 'PREY_MINE',
+    externalPngUrl: getPrey140ImageUrl('cyber_mine'),
     minDepth: 560,
     maxDepth: 20000,
     radius: 30,

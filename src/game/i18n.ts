@@ -55,42 +55,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     stat_boost_cost: '冲刺耗能降低',
     stat_magnet: '基因吸附范围',
 
-    // 15 Evolution Organs - MECHA (5)
-    organ_mecha_jaws_name: '高频等离子链锯颚',
-    organ_mecha_jaws_desc: '双排高频振动合金锯齿，可咬碎更大型装甲猎物与水雷，咬合阈值 +1 级。',
-    organ_mecha_dorsal_name: '曲率脉冲雷达背鳍',
-    organ_mecha_dorsal_desc: '搭载深海声呐阵列与流线稳定翼，游动移速 +18%，吸附范围大幅提升。',
-    organ_mecha_tail_name: '双联矢量离子推进尾',
-    organ_mecha_tail_desc: '核聚变等离子尾喷口，冲刺耗能降低 25%，游动移速 +22%。',
-    organ_mecha_armor_name: '钛合金反应装甲壳',
-    organ_mecha_armor_desc: '六边形纳米蜂窝护盾，减缓 25% 饥饿生命流失并降低受击震退。',
-    organ_mecha_aura_name: '无人机电磁纳米引力环',
-    organ_mecha_aura_desc: '环绕全身的磁暴浮游单元，自动吸附大范围基因结晶与金币。',
-
-    // 15 Evolution Organs - ABYSS (5)
-    organ_abyss_jaws_name: '古神深渊吸盘裂口',
-    organ_abyss_jaws_desc: '布满发光利齿的克苏鲁口器，撕裂大型深海猎物，咬合阈值 +1 级。',
-    organ_abyss_dorsal_name: '旧日支配者魔眼背鳍',
-    organ_abyss_dorsal_desc: '背生凝视深渊的诡异复眼，减缓 20% 生命流失并提供精神威慑加速。',
-    organ_abyss_tail_name: '幽冥共生触手鞭尾',
-    organ_abyss_tail_desc: '四条高弹性生物发光触手同步摆动，游动移速 +24%，转向更灵敏。',
-    organ_abyss_armor_name: '深潜者几丁质骨甲',
-    organ_abyss_armor_desc: '深渊高压淬炼的生物角质层，生命流失减缓 28%，咬合阈值小幅强化。',
-    organ_abyss_aura_name: '虚空暗物质噬魂漩涡',
-    organ_abyss_aura_desc: '召唤深渊引力场拉扯周围猎物与基因碎片，冲刺耗能降低 20%。',
-
-    // 15 Evolution Organs - MAGMA (5)
-    organ_magma_jaws_name: '地心黑曜石碎星巨颚',
-    organ_magma_jaws_desc: '流淌炽热岩浆的巨型犬齿，瞬间融化猎物甲壳，咬合阈值 +1 级。',
-    organ_magma_dorsal_name: '火山喷发熔岩帆鳍',
-    organ_magma_dorsal_desc: '喷涌高温蒸汽气泡的背棘，冲刺耗能降低 22%，移速 +16%。',
-    organ_magma_tail_name: '炎魔爆裂推進尾锤',
-    organ_magma_tail_desc: '每次摆尾引爆水下热浪，游动移速 +25%，冲刺尾焰威力倍增。',
-    organ_magma_armor_name: '远古龙鳞玄武岩重甲',
-    organ_magma_armor_desc: '厚重的熔岩结晶鳞片，减缓 30% 生命流失，抵御深海高压。',
-    organ_magma_aura_name: '太阳日冕炽热新星环',
-    organ_magma_aura_desc: '环绕周身的高温等离子日冕，大幅扩大基因吸附半径并加速能量回复。',
-
     // Retained Mine Hazard + 140 Marine Prey Species
     prey_tier6_name: '机械感应水雷',
     ...PREY_140_I18N_ZH,
@@ -240,42 +204,6 @@ export const I18N: Record<Lang, Record<string, string>> = {
     stat_hp_drain: 'HP Drain Reduction',
     stat_boost_cost: 'Boost Cost Reduction',
     stat_magnet: 'Gene Magnet Radius',
-
-    // 15 Evolution Organs - MECHA (5)
-    organ_mecha_jaws_name: 'Plasma Chainsaw Jaws',
-    organ_mecha_jaws_desc: 'High-frequency vibrating alloy teeth crunch larger prey and mines. Bite Tier +1.',
-    organ_mecha_dorsal_name: 'Warp Sonar Dorsal Fin',
-    organ_mecha_dorsal_desc: 'Deep-sea acoustic array & stabilizer wing. Swim Speed +18% & wider magnet pull.',
-    organ_mecha_tail_name: 'Twin Vector Ion Tail',
-    organ_mecha_tail_desc: 'Fusion plasma tail thrusters. Reduces Boost Cost by 25% & Swim Speed +22%.',
-    organ_mecha_armor_name: 'Titanium Reactive Hull',
-    organ_mecha_armor_desc: 'Hexagonal nano-shield plating slows hunger HP drain by 25% and absorbs knockback.',
-    organ_mecha_aura_name: 'Drone EM Gravity Ring',
-    organ_mecha_aura_desc: 'Orbiting electromagnetic drones pull in distant gene crystals and gold coins.',
-
-    // 15 Evolution Organs - ABYSS (5)
-    organ_abyss_jaws_name: 'Eldritch Maw Suckers',
-    organ_abyss_jaws_desc: 'Bioluminescent Cthulhu mandibles tear apart deep-sea leviathans. Bite Tier +1.',
-    organ_abyss_dorsal_name: 'All-Seeing Eye Dorsal',
-    organ_abyss_dorsal_desc: 'Gazing abyssal ocular fin slows hunger HP drain by 20% and boosts agility.',
-    organ_abyss_tail_name: 'Void Tentacle Whip Tail',
-    organ_abyss_tail_desc: 'Four rhythmic bioluminescent tentacles grant +24% Swim Speed & razor turns.',
-    organ_abyss_armor_name: 'Deep One Chitin Carapace',
-    organ_abyss_armor_desc: 'Trench-hardened bio-chitin slows HP drain by 28% and reinforces jaw strength.',
-    organ_abyss_aura_name: 'Dark Matter Vortex Aura',
-    organ_abyss_aura_desc: 'Summons an abyssal gravity well that pulls prey & shards while cutting Boost Cost by 20%.',
-
-    // 15 Evolution Organs - MAGMA (5)
-    organ_magma_jaws_name: 'Obsidian Core Crusher Jaws',
-    organ_magma_jaws_desc: 'Molten lava fangs melt through heavy armored shells instantly. Bite Tier +1.',
-    organ_magma_dorsal_name: 'Volcanic Vent Sail Fin',
-    organ_magma_dorsal_desc: 'Erupting thermal steam spines cut Boost Cost by 22% and add +16% Swim Speed.',
-    organ_magma_tail_name: 'Inferno Blast Tail Hammer',
-    organ_magma_tail_desc: 'Detonates hydrothermal shockwaves on each stroke. Swim Speed +25%.',
-    organ_magma_armor_name: 'Dragon Basalt Heavy Scales',
-    organ_magma_armor_desc: 'Crystallized magma plating slows hunger HP drain by 30% in extreme depths.',
-    organ_magma_aura_name: 'Solar Corona Nova Ring',
-    organ_magma_aura_desc: 'Searing plasma corona expands gene magnet radius and accelerates energy recovery.',
 
     // Retained Mine Hazard + 140 Marine Prey Species
     prey_tier6_name: 'Cyber Proximity Mine',

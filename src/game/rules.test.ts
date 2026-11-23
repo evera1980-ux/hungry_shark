@@ -6,13 +6,10 @@ import { I18N, translate } from './i18n';
 import { GAME_CONFIG } from './config';
 import { PREY_140_RECORDS, getTierForPreyBodyLengthCm } from './preyDatabase140';
 import {
-  computeSharkStats,
   computeEvolvedSharkStats,
   computeHuntingHeatBuff,
   resolvePreyEncounter,
   addEvolutionProgress,
-  pickEvolutionChoices,
-  getMaxMechaLoadout,
   getDepthZone,
   getParallaxLayerGrowthScales,
   computeParallaxBiomeTransitionState,
@@ -31,23 +28,33 @@ import {
   SHARK_EVOLUTION_FORMS,
 } from './sharkEvolutionConfig';
 import {
+  selectPreyIdsForDepthBand,
+  selectSharkWindowIndices,
   SHARK_CELL_BOUNDS,
   SHARK_GRID_MAP,
   spriteSheetManager,
   UI_BANNER_BOUNDS,
   UI_SETTING_BOUNDS,
+  WEB_RUNTIME_ATLAS_URLS,
 } from './spriteSheetManager';
 import {
   computeSpineSliceDeformation,
   getPreySwimGait,
 } from './canvasRenderer';
-import { sampleBathymetricWaterColor } from './parallaxBackground';
+import {
+  OCEAN_LAYER_ASSET_PATHS,
+  sampleBathymetricWaterColor,
+} from './parallaxBackground';
 import {
   ProceduralOceanWorldSystem,
   WORLD_ATLAS_ASSET_URLS,
   WORLD_ECOLOGY_SPRITE_URLS,
   WORLD_SEABED_STRIP_URLS,
 } from './worldGenerationSystem';
+import {
+  buildSharedGameData,
+  SHARED_GAME_DATA_SCHEMA_VERSION,
+} from './sharedGameData';
 
 test('I18N dictionary has complete and matching keys in both zh and en', () => {
   const zhKeys = Object.keys(I18N.zh).sort();
@@ -68,22 +75,8 @@ test('I18N dictionary has complete and matching keys in both zh and en', () => {
   );
 });
 
-test('GAME_CONFIG has 15 organs across 3 factions and 5 slots, plus 135 target prey & hazard entries (134 active marine species + cyber_mine)', () => {
-  assert.equal(GAME_CONFIG.organs.length, 15);
+test('GAME_CONFIG has 135 target prey & hazard entries (134 active marine species + cyber_mine) with complete bilingual I18N keys', () => {
   assert.equal(GAME_CONFIG.preyTiers.length, 135);
-
-  const factions = new Set(GAME_CONFIG.organs.map((o) => o.faction));
-  const slots = new Set(GAME_CONFIG.organs.map((o) => o.slot));
-  assert.deepEqual([...factions].sort(), ['ABYSS', 'MAGMA', 'MECHA']);
-  assert.deepEqual([...slots].sort(), ['ARMOR', 'AURA', 'DORSAL', 'JAWS', 'TAIL']);
-
-  // Every organ nameKey and descKey exists in I18N
-  for (const organ of GAME_CONFIG.organs) {
-    assert.ok(I18N.zh[organ.nameKey], `Missing zh name for ${organ.id}`);
-    assert.ok(I18N.en[organ.nameKey], `Missing en name for ${organ.id}`);
-    assert.ok(I18N.zh[organ.descKey], `Missing zh desc for ${organ.id}`);
-    assert.ok(I18N.en[organ.descKey], `Missing en desc for ${organ.id}`);
-  }
 
   // Every prey species nameKey exists in I18N
   for (const prey of GAME_CONFIG.preyTiers) {
@@ -92,30 +85,25 @@ test('GAME_CONFIG has 15 organs across 3 factions and 5 slots, plus 135 target p
   }
 });
 
-test('computeSharkStats scales speed, bite tier, zoom, and drain reduction with organs', () => {
-  const baseStats = computeSharkStats(1, {}, false);
+test('computeEvolvedSharkStats scales speed, bite tier, zoom, and frenzy invulnerability across generations', () => {
+  const baseStats = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false);
   assert.equal(baseStats.scale, 1.0);
-  assert.equal(baseStats.cameraZoom, 1.0);
-  assert.equal(baseStats.biteTier, 2);
+  assert.equal(baseStats.biteTier, 1);
 
-  const mechaLoadout = getMaxMechaLoadout();
-  assert.equal(Object.keys(mechaLoadout).length, 5);
+  const evolvedStats = computeEvolvedSharkStats(6, 'shark_15_abyss_tentacle', 5, false);
+  assert.ok(evolvedStats.moveSpeed > baseStats.moveSpeed);
+  assert.ok(evolvedStats.biteTier > baseStats.biteTier);
+  assert.ok(evolvedStats.cameraZoom < baseStats.cameraZoom);
 
-  const armedStats = computeSharkStats(3, mechaLoadout, false);
-  assert.ok(armedStats.moveSpeed > baseStats.moveSpeed);
-  assert.ok(armedStats.biteTier > baseStats.biteTier);
-  assert.ok(armedStats.hpDrainPerSec < baseStats.hpDrainPerSec);
-  assert.ok(armedStats.cameraZoom < baseStats.cameraZoom);
-
-  // Gold Frenzy sets biteTier to 8 and eliminates HP/boost drain
-  const frenzyStats = computeSharkStats(1, {}, true);
-  assert.equal(frenzyStats.biteTier, 8);
+  // Gold Frenzy lifts biteTier to apex (48) and eliminates HP/boost drain
+  const frenzyStats = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, true);
+  assert.equal(frenzyStats.biteTier, 48);
   assert.equal(frenzyStats.hpDrainPerSec, 0);
   assert.equal(frenzyStats.boostDrainPerSec, 0);
 });
 
 test('resolvePreyEncounter distinguishes devourable prey from oversized hazards', () => {
-  const baseStats = computeSharkStats(1, {}, false);
+  const baseStats = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false);
   const tier1Prey = GAME_CONFIG.preyTiers.find((p) => p.tier === 1 && !p.isHazard)!;
   const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!;
   const topBoss = GAME_CONFIG.preyTiers.find((p) => p.isBoss)!;
@@ -135,7 +123,7 @@ test('resolvePreyEncounter distinguishes devourable prey from oversized hazards'
   assert.equal(frenzyEatBoss.floatTextKey, 'float_boss_kill');
 });
 
-test('addEvolutionProgress handles single and multi-level XP gains and pickEvolutionChoices returns 3 unique organs', () => {
+test('addEvolutionProgress handles single and multi-level XP gains and depth zone lookup', () => {
   const p1 = addEvolutionProgress(1, 0, 30);
   assert.equal(p1.level, 1);
   assert.equal(p1.leveledUpCount, 0);
@@ -143,11 +131,6 @@ test('addEvolutionProgress handles single and multi-level XP gains and pickEvolu
   const p2 = addEvolutionProgress(1, 50, 100);
   assert.equal(p2.level, 2);
   assert.equal(p2.leveledUpCount, 1);
-
-  const choices = pickEvolutionChoices({}, () => 0.42);
-  assert.equal(choices.length, 3);
-  const uniqueIds = new Set(choices.map((c) => c.id));
-  assert.equal(uniqueIds.size, 3);
 
   assert.equal(getDepthZone(100).id, 'shallow');
   assert.equal(getDepthZone(800).id, 'twilight');
@@ -278,34 +261,21 @@ import {
   getDebugPreySizeMultiplier,
   getGeneSurgeCost,
   getGoldOverdriveCost,
-  getOrganRerollCost,
   getPreyRelativeVisualScale,
   setDebugPreySizeMultiplier,
 } from './rules';
 
-test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, Abyss Behemoth armor tier, and dynamic economy costs', () => {
-  // 1. ARMOR no longer grants redundant +1 biteTierBonus; only JAWS and 3-piece MAGMA synergy grant +1 Bite Tier
-  for (const organ of GAME_CONFIG.organs) {
-    if (organ.slot === 'ARMOR') {
-      assert.equal(organ.stats.biteTierBonus, 0, `${organ.id} should not grant biteTierBonus`);
-    }
-    if (organ.slot === 'JAWS') {
-      assert.equal(organ.stats.biteTierBonus, 1, `${organ.id} must grant +1 biteTierBonus`);
-    }
-  }
-
-  // 2. 3-Piece Faction Synergies & Organ Star Upgrades (★1 -> ★3)
-  const mechaLoadout = getMaxMechaLoadout();
-  const s1 = computeSharkStats(4, mechaLoadout, false, { JAWS: 1, TAIL: 1 }, 1.0);
-  const s3 = computeSharkStats(4, mechaLoadout, false, { JAWS: 3, TAIL: 3 }, 1.0);
-  assert.equal(s1.activeSynergy, 'MECHA');
-  assert.ok(s3.moveSpeed > s1.moveSpeed, 'Star-upgraded organs must increase moveSpeed');
-  assert.ok(s3.magnetRadius > s1.magnetRadius, 'Star-upgraded organs must increase magnetRadius');
+test('Senior Numerical Tuning: body upgrade scaling, Abyss Behemoth armor tier, and dynamic economy costs', () => {
+  // 1. Persistent Body Upgrade scaling (Lv.1 -> Lv.5) and dynamic metabolic hunger drain
+  const s1 = computeEvolvedSharkStats(4, 'shark_08_blacktip_reef', 1, false, 1.0);
+  const s5 = computeEvolvedSharkStats(4, 'shark_08_blacktip_reef', 5, false, 1.0);
+  assert.ok(s5.moveSpeed > s1.moveSpeed, 'Higher upgrade level must increase moveSpeed');
+  assert.ok(s5.biteTier > s1.biteTier, 'Lv.5 breakthrough must increase biteTier');
 
   // Dynamic metabolic hunger drain increases with level and globalDifficultyMultiplier
-  const earlyDrain = computeSharkStats(1, {}, false, {}, 1.0).hpDrainPerSec;
-  const lateDrain = computeSharkStats(10, {}, false, {}, 1.5).hpDrainPerSec;
-  assert.ok(lateDrain > earlyDrain * 2.5, 'Late-game metabolic hunger drain must scale up significantly');
+  const earlyDrain = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false, 1.0).hpDrainPerSec;
+  const lateDrain = computeEvolvedSharkStats(10, 'shark_00_clown_fry', 1, false, 1.5).hpDrainPerSec;
+  assert.ok(lateDrain > earlyDrain * 1.8, 'Late-game metabolic hunger drain must scale up significantly');
 
   // 3. Abyss Behemoth adds +1 effective Bite Tier and increases fail damage
   const tier3Prey = GAME_CONFIG.preyTiers.find((p) => p.tier === 3 && !p.isHazard)!; // Tier 3 Pelagic Prey
@@ -335,9 +305,6 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
     'Gene Surge cost must scale up with shark generation row'
   );
 
-  assert.equal(getOrganRerollCost(0), 8);
-  assert.equal(getOrganRerollCost(3), 20);
-
   // 5. EcosystemSpawner soft-caps scaleMultiplier at 1.65x in long runs
   const longSpawner = new EcosystemSpawner(50, 1500);
   const dummyPreys: PreyEntity[] = [];
@@ -357,25 +324,25 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   assert.equal(progMgr.registerGoldenMutantDevoured(), true, '8th Golden Mutant after cooldown triggers frenzy');
   assert.equal(progMgr.frenzyCooldownTimer, 25, 'Post-frenzy cooldown set to 25s');
 
-  // (b) Deep-sea hazards (Naval Mines) ALWAYS explode outside of Gold Frenzy, even at Lv.16 Bite Tier 8 while boosting
-  const maxShark = computeSharkStats(16, getMaxMechaLoadout(), false);
-  assert.equal(maxShark.biteTier, 8);
+  // (b) Deep-sea hazards (Naval Mines) ALWAYS explode outside of Gold Frenzy for non-immune sharks
+  const midApexShark = computeEvolvedSharkStats(12, 'shark_15_abyss_tentacle', 5, false);
   const tier6Mine = GAME_CONFIG.preyTiers.find((p) => p.id === 'cyber_mine')!;
-  const mineHitAtMaxLevel = resolvePreyEncounter(maxShark, tier6Mine, false, true, 'NONE', 1.5);
-  assert.equal(mineHitAtMaxLevel.canDevour, false, 'Mines must ALWAYS explode outside of Gold Frenzy even at Bite Tier 8');
-  assert.ok(mineHitAtMaxLevel.hpDelta < -80, 'Mines deal lethal flat + maxHP% damage in deep sea');
+  const mineHit = resolvePreyEncounter(midApexShark, tier6Mine, false, true, 'NONE', 1.5);
+  assert.equal(mineHit.canDevour, false, 'Mines must ALWAYS explode outside of Gold Frenzy for non-immune sharks');
+  assert.ok(mineHit.hpDelta < -80, 'Mines deal lethal flat + maxHP% damage in deep sea');
 
-  // (c) Apex Bosses require active Boost outside of Gold Frenzy in legacy organ mode
+  // (c) Armor-Crush Band (1 <= tierDiff <= 3) requires active Boost outside of Gold Frenzy
   const topBoss = GAME_CONFIG.preyTiers.find((p) => p.isBoss)!;
-  const bossNoBoost = resolvePreyEncounter(maxShark, topBoss, false, false, 'NONE', 1.2);
-  const bossWithBoost = resolvePreyEncounter(maxShark, topBoss, false, true, 'NONE', 1.2);
-  assert.equal(bossNoBoost.canDevour, false, 'Boss counter-bites if shark is not actively Boosting');
-  assert.equal(bossWithBoost.canDevour, true, 'Boss can be devoured when actively Boosting');
+  const nearBossShark = computeEvolvedSharkStats(1, SHARK_EVOLUTION_FORMS[Math.max(0, topBoss.tier - 3)].id, 1, false);
+  const bossNoBoost = resolvePreyEncounter(nearBossShark, topBoss, false, false, 'NONE', 1.2);
+  const bossWithBoost = resolvePreyEncounter(nearBossShark, topBoss, false, true, 'NONE', 1.2);
+  assert.equal(bossNoBoost.canDevour, false, 'Higher-tier Boss counter-bites if shark is not actively Boosting');
+  assert.equal(bossWithBoost.canDevour, true, 'Higher-tier Boss in armor-crush band can be devoured when actively Boosting');
 
-  // 7. Relative Prey Shrinking: shark scale stays non-obstructive (<= 1.28) while other fish shrink progressively as shark levels up
-  const lv1Shark = computeSharkStats(1, {}, false);
-  const lv5Shark = computeSharkStats(5, {}, false);
-  const lv12Shark = computeSharkStats(12, getMaxMechaLoadout(), false);
+  // 7. Relative Prey Shrinking: shark scale stays non-obstructive (<= 1.28) while other fish shrink progressively as shark evolves
+  const lv1Shark = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false);
+  const lv5Shark = computeEvolvedSharkStats(5, 'shark_08_blacktip_reef', 3, false);
+  const lv12Shark = computeEvolvedSharkStats(12, 'shark_15_abyss_tentacle', 5, false);
   assert.equal(lv1Shark.relativePreyScale, 1.0);
   assert.ok(lv5Shark.relativePreyScale < lv1Shark.relativePreyScale);
   assert.ok(lv12Shark.relativePreyScale < lv5Shark.relativePreyScale);
@@ -385,8 +352,8 @@ test('Senior Numerical Tuning: 3-piece faction synergies, organ star upgrades, A
   const fishScaleAtLv1 = getPreyRelativeVisualScale(tier1Fish, lv1Shark, 'NONE');
   const fishScaleAtLv5 = getPreyRelativeVisualScale(tier1Fish, lv5Shark, 'NONE');
   const fishScaleAtLv12 = getPreyRelativeVisualScale(tier1Fish, lv12Shark, 'NONE');
-  assert.ok(fishScaleAtLv5 < fishScaleAtLv1, 'Prey visually shrinks as shark grows to Lv.5');
-  assert.ok(fishScaleAtLv12 < fishScaleAtLv5, 'Prey shrinks further at Lv.12');
+  assert.ok(fishScaleAtLv5 < fishScaleAtLv1, 'Prey visually shrinks as shark evolves to Gen II Blacktip Reef');
+  assert.ok(fishScaleAtLv12 < fishScaleAtLv5, 'Prey shrinks further for Gen II Abyss Tentacle');
 
   // 8. Authentic Marine Depth Stratification: shallow coral reef fish never spawn in deep sea, and deep-sea fish never spawn in shallow water
   const depthSpawner = new EcosystemSpawner(50, 1000, 500);
@@ -3296,14 +3263,14 @@ test('134 Active Marine Prey Species + Cyber Mine: Non-Fish Mammal Exclusion, As
     assert.equal(byId[excludedId], undefined, `${excludedId} must be excluded from active preyTiers`);
   }
 
-  // 1. Verify every active prey record has a valid transparent @3x.png file on disk
+  // 1. Verify every active prey record has a valid pre-trimmed transparent @3x.webp file on disk
   for (const rec of PREY_140_RECORDS) {
     const cfg = byId[rec.id];
     assert.ok(cfg, `Missing PreyTierConfig for ${rec.id}`);
     assert.ok(cfg.minDepth < cfg.maxDepth, `${rec.id} must have minDepth < maxDepth`);
-    assert.ok(cfg.externalPngUrl?.endsWith(`${rec.id}@3x.png`), `${rec.id} must reference @3x PNG asset`);
+    assert.ok(cfg.externalPngUrl?.endsWith(`${rec.id}@3x.webp`), `${rec.id} must reference @3x WebP asset`);
     const filePath = path.resolve(process.cwd(), 'public', cfg.externalPngUrl!.replace(/^\//, ''));
-    assert.ok(fs.existsSync(filePath), `Missing prey asset on disk: ${filePath}`);
+    assert.ok(fs.existsSync(filePath), `Missing prey WebP asset on disk: ${filePath}`);
   }
 
   // 2. Verify "体大的优先靠近深海" (larger body size classes trend progressively deeper)
@@ -3400,8 +3367,8 @@ test('134 Active Marine Prey Species + Cyber Mine: Non-Fish Mammal Exclusion, As
 test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster) and all seabed/ecology/POI assets exist on disk', () => {
   assert.equal(
     WORLD_ATLAS_ASSET_URLS.ecologyAtlas,
-    '/assets/aistudio/world_ecology_atlas_1794473252524.jpg',
-    '4x4 ecology atlas must load world_ecology_atlas_1794473252524.jpg so 4x4 grid cells never slice solid squares from a standalone cluster PNG'
+    '/assets/aistudio/world_ecology_atlas_1794473252524.webp',
+    '4x4 ecology atlas must load world_ecology_atlas_1794473252524.webp so 4x4 grid cells never slice solid squares from a standalone cluster asset'
   );
   assert.notEqual(
     WORLD_ATLAS_ASSET_URLS.ecologyAtlas,
@@ -3420,11 +3387,14 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
   ];
   for (const url of allUrls) {
     const diskPath = path.join(publicDir, url.replace(/^\//, ''));
-    assert.ok(fs.existsSync(diskPath), `Missing world asset file on disk: ${url}`);
-    const baseName = path.basename(url);
+    assert.ok(fs.existsSync(diskPath), `Missing world WebP asset file on disk: ${url}`);
+    const stem = path.basename(url, path.extname(url));
+    const hasIosCounterpart =
+      fs.existsSync(path.join(iosAssetsDir, `${stem}.png`)) ||
+      fs.existsSync(path.join(iosAssetsDir, `${stem}.jpg`));
     assert.ok(
-      fs.existsSync(path.join(iosAssetsDir, baseName)),
-      `Missing world asset file in iOS Resources/Assets: ${baseName}`
+      hasIosCounterpart,
+      `Missing world PNG/JPG counterpart in iOS Resources/Assets for: ${stem}`
     );
   }
 
@@ -3687,6 +3657,201 @@ test('100% Real Physical Dimensions & Ecological Trophic Filter Invariants', () 
   }
   assert.ok(foundMegafauna, 'Megalodon successfully finds large megafauna prey in deep open ocean');
 });
+
+test('Cross-Platform Shared Game Data Contract (Web TS <-> shared/game_data.json <-> iOS Native Swift Loader)', () => {
+  const sharedJsonPath = path.resolve(process.cwd(), 'shared/game_data.json');
+  const iosJsonPath = path.resolve(
+    process.cwd(),
+    'ios-native/HungrySharkEvolution/Resources/Assets/game_data.json'
+  );
+  const swiftLoaderPath = path.resolve(
+    process.cwd(),
+    'ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift'
+  );
+  const pbxprojPath = path.resolve(
+    process.cwd(),
+    'ios-native/HungrySharkEvolution.xcodeproj/project.pbxproj'
+  );
+
+  assert.ok(fs.existsSync(sharedJsonPath), 'shared/game_data.json must exist (run npm run sync:ios)');
+  assert.ok(
+    fs.existsSync(iosJsonPath),
+    'ios-native/HungrySharkEvolution/Resources/Assets/game_data.json must exist (run npm run sync:ios)'
+  );
+
+  const sharedRaw = fs.readFileSync(sharedJsonPath, 'utf8');
+  const iosRaw = fs.readFileSync(iosJsonPath, 'utf8');
+  assert.equal(
+    iosRaw,
+    sharedRaw,
+    'iOS bundled game_data.json must match shared/game_data.json byte-for-byte'
+  );
+
+  const livePayload = buildSharedGameData();
+  const parsed = JSON.parse(sharedRaw);
+  assert.deepEqual(
+    parsed,
+    livePayload,
+    'shared/game_data.json is stale relative to Web TS config; run `npm run sync:ios`'
+  );
+
+  assert.equal(parsed.schemaVersion, SHARED_GAME_DATA_SCHEMA_VERSION);
+  assert.equal(parsed.sharkForms.length, 48);
+  assert.equal(parsed.preyTiers.length, 135);
+  assert.deepEqual(
+    Object.keys(parsed.lineageMeta).sort(),
+    ['APEX_BIO', 'CYBER_MECHA', 'ELDER_ABYSS', 'ELEMENTAL_CORE']
+  );
+  assert.equal(Object.keys(parsed.uiIconGridMap).length, 24);
+  assert.equal(Object.keys(parsed.uiBannerBounds).length, 4);
+  assert.equal(Object.keys(parsed.uiSettingBounds).length, 9);
+  assert.deepEqual(Object.keys(parsed.i18n.zh).sort(), Object.keys(parsed.i18n.en).sort());
+
+  for (const shark of parsed.sharkForms) {
+    assert.equal(shark.normalizedBounds.length, 4, `${shark.id} must have 4 normalized bounds`);
+    assert.ok(Number.isFinite(shark.realBodyLengthM) && shark.realBodyLengthM > 0);
+  }
+  for (const prey of parsed.preyTiers) {
+    assert.equal(prey.normalizedBounds.length, 4, `${prey.id} must have 4 normalized bounds`);
+    assert.ok(Number.isFinite(prey.minDepth) && Number.isFinite(prey.maxDepth));
+    assert.ok(prey.maxDepth >= prey.minDepth, `${prey.id} maxDepth must be >= minDepth`);
+  }
+
+  // Verify Swift config loader is a lightweight Codable JSON loader exposing the full public API
+  const swiftLoader = fs.readFileSync(swiftLoaderPath, 'utf8');
+  const swiftLineCount = swiftLoader.split('\n').length;
+  assert.ok(
+    swiftLineCount < 350,
+    `GameConfigGenerated.swift must stay a lightweight JSON loader (<350 lines), got ${swiftLineCount}`
+  );
+  assert.ok(swiftLoader.includes('JSONDecoder().decode('), 'Swift loader must decode game_data.json via JSONDecoder');
+  for (const requiredApi of [
+    'public static let baseSharkSpeed',
+    'public static let sharkForms: [SharkFormConfig]',
+    'public static let lineageMeta: [SharkLineageId: SharkLineageMeta]',
+    'public static let preyTiers: [PreyTierConfig]',
+    'public static let uiIconGridMap: [String: SIMD2<Int>]',
+    'public static let uiBannerBounds: [String: SIMD4<Double>]',
+    'public static let uiSettingBounds: [String: SIMD4<Double>]',
+    'public static let i18nZh: [String: String]',
+    'public static let i18nEn: [String: String]',
+  ]) {
+    assert.ok(
+      swiftLoader.includes(requiredApi),
+      `GameConfigGenerated.swift missing required public API: ${requiredApi}`
+    );
+  }
+
+  // Verify game_data.json is registered as text.json in Xcode project.pbxproj
+  const pbxContent = fs.readFileSync(pbxprojPath, 'utf8');
+  assert.ok(
+    pbxContent.includes('/* game_data.json in Resources */'),
+    'game_data.json must be registered in project.pbxproj PBXResourcesBuildPhase'
+  );
+  assert.ok(
+    pbxContent.includes(
+      'lastKnownFileType = text.json; name = "game_data.json"; path = "HungrySharkEvolution/Resources/Assets/game_data.json"; sourceTree = SOURCE_ROOT;'
+    ),
+    'game_data.json PBXFileReference must use text.json and SOURCE_ROOT path'
+  );
+});
+
+test('P0-2 Web Asset Slimming & Lazy-Loading: <12MB WebP bundle, zero legacy sheets, zero prey getImageData trim, depth-band & shark window selectors', () => {
+  const publicAssetsDir = path.resolve(process.cwd(), 'public/assets');
+  const aistudioDir = path.join(publicAssetsDir, 'aistudio');
+
+  // 1. Total Web public/assets size must stay strictly under 12 MB (optimized from 61 MB -> ~4.5 MB)
+  const walkTotalBytes = (dir: string): number => {
+    let total = 0;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      total += entry.isDirectory() ? walkTotalBytes(full) : fs.statSync(full).size;
+    }
+    return total;
+  };
+  const totalBytes = walkTotalBytes(publicAssetsDir);
+  assert.ok(
+    totalBytes < 12 * 1024 * 1024,
+    `public/assets must be < 12 MB, got ${(totalBytes / 1024 / 1024).toFixed(2)} MB`
+  );
+
+  // 2. Legacy redundant sheets must be completely absent from public/assets/aistudio
+  for (const removedLegacy of [
+    'sharks_ec921c3b.png',
+    'fish_24bdaa5a.png',
+    'fish2_fc857cfa.png',
+    'ocean_bg_a7a0ef52.png',
+  ]) {
+    assert.equal(
+      fs.existsSync(path.join(aistudioDir, removedLegacy)),
+      false,
+      `Legacy sheet ${removedLegacy} must be removed from public/assets/aistudio`
+    );
+  }
+
+  // 3. Verify WebP RIFF/WEBP magic headers across runtime atlases, water canopies, 48 sharks, and 135 prey
+  const assertValidWebp = (relUrl: string) => {
+    assert.ok(relUrl.endsWith('.webp'), `Runtime Web asset must be WebP: ${relUrl}`);
+    const full = path.resolve(process.cwd(), 'public', relUrl.replace(/^\//, ''));
+    assert.ok(fs.existsSync(full), `Missing WebP asset on disk: ${relUrl}`);
+    const header = fs.readFileSync(full).subarray(0, 12);
+    assert.equal(header.subarray(0, 4).toString('ascii'), 'RIFF', `Invalid RIFF header: ${relUrl}`);
+    assert.equal(header.subarray(8, 12).toString('ascii'), 'WEBP', `Invalid WEBP signature: ${relUrl}`);
+  };
+
+  for (const url of Object.values(WEB_RUNTIME_ATLAS_URLS)) {
+    assertValidWebp(url);
+  }
+  assertValidWebp(OCEAN_LAYER_ASSET_PATHS.shallow.water);
+  assertValidWebp(OCEAN_LAYER_ASSET_PATHS.twilight.water);
+  assertValidWebp(OCEAN_LAYER_ASSET_PATHS.abyss.water);
+  assertValidWebp(OCEAN_LAYER_ASSET_PATHS.ambientSprites);
+  for (const form of SHARK_EVOLUTION_FORMS) {
+    assertValidWebp(form.sprite3xUrl);
+  }
+  for (const prey of GAME_CONFIG.preyTiers) {
+    assert.ok(prey.externalPngUrl, `Prey ${prey.id} must have WebP URL`);
+    assertValidWebp(prey.externalPngUrl!);
+  }
+
+  // 4. Depth-band lazy-loader must load only shallow subset at 0m and cover all 135 entities across depths
+  const starterShallowIds = selectPreyIdsForDepthBand(0, 380);
+  assert.ok(
+    starterShallowIds.length >= 20 && starterShallowIds.length < 95,
+    `Expected shallow starter lazy batch between 20 and 94 species (not all 135), got ${starterShallowIds.length}`
+  );
+  assert.equal(
+    starterShallowIds.includes('cyber_mine'),
+    false,
+    'Deep hazard cyber_mine (minDepth 560m) should not eagerly load in 0m shallow starter batch'
+  );
+  const coveredAcrossDepths = new Set<string>();
+  for (let d = 0; d <= 20000; d += 600) {
+    for (const id of selectPreyIdsForDepthBand(d, 650)) {
+      coveredAcrossDepths.add(id);
+    }
+  }
+  assert.equal(
+    coveredAcrossDepths.size,
+    GAME_CONFIG.preyTiers.length,
+    'Scanning depth bands 0..20000m must cover 100% of all 135 active prey entities'
+  );
+
+  // 5. On-demand shark window selector wraps cleanly center-first
+  assert.deepEqual(selectSharkWindowIndices(0, 2, 48), [0, 1, 47, 2, 46]);
+  assert.deepEqual(selectSharkWindowIndices(47, 1, 48), [47, 0, 46]);
+
+  // 6. Verify runtime spriteSheetManager no longer contains main-thread prey getImageData trimmer or legacy sheet slicers
+  const ssmSource = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/game/spriteSheetManager.ts'),
+    'utf8'
+  );
+  assert.equal(ssmSource.includes('cropAndScalePreyImage'), false);
+  assert.equal(ssmSource.includes('processAndSliceSharksImage'), false);
+  assert.equal(ssmSource.includes('processAndSlicePrimaryImage'), false);
+  assert.equal(ssmSource.includes('processAndSliceFish2Image'), false);
+});
+
 
 
 

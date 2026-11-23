@@ -1,9 +1,10 @@
 import {
   getShark3xImageUrl,
+  getSharkFormById,
   type SharkSpriteKey,
 } from './sharkEvolutionConfig';
 import {
-  PREY_140_RECORDS,
+  buildPrey140TiersWithMines,
   getPrey140ImageUrl,
 } from './preyDatabase140';
 
@@ -369,6 +370,98 @@ for (let r = 0; r < 6; r++) {
   }
 }
 
+export interface PreyDepthBandEntry {
+  id: string;
+  minDepth: number;
+  maxDepth: number;
+}
+
+let cachedPreyDepthEntries: PreyDepthBandEntry[] | null = null;
+
+function getAllPreyDepthEntries(): readonly PreyDepthBandEntry[] {
+  if (!cachedPreyDepthEntries) {
+    cachedPreyDepthEntries = buildPrey140TiersWithMines().map((cfg) => ({
+      id: cfg.id,
+      minDepth: cfg.minDepth,
+      maxDepth: cfg.maxDepth,
+    }));
+  }
+  return cachedPreyDepthEntries;
+}
+
+/**
+ * Pure depth-band prey lazy-load selector:
+ * Returns all active prey IDs whose gameplay habitat [minDepth, maxDepth] overlaps
+ * `[max(0, depthMeters - 350), depthMeters + lookaheadMeters]`, ordered by proximity to `depthMeters`.
+ */
+export function selectPreyIdsForDepthBand(
+  depthMeters: number,
+  lookaheadMeters: number = 650
+): string[] {
+  const safeDepth = Number.isFinite(depthMeters) ? Math.max(0, depthMeters) : 0;
+  const lo = Math.max(0, safeDepth - 350);
+  const hi = safeDepth + Math.max(100, lookaheadMeters);
+  const entries = getAllPreyDepthEntries();
+
+  const matched = entries.filter((e) => e.minDepth <= hi && e.maxDepth >= lo);
+  matched.sort((a, b) => {
+    const aMid = (a.minDepth + a.maxDepth) * 0.5;
+    const bMid = (b.minDepth + b.maxDepth) * 0.5;
+    return Math.abs(aMid - safeDepth) - Math.abs(bMid - safeDepth);
+  });
+  return matched.map((e) => e.id);
+}
+
+/**
+ * Pure on-demand shark window selector:
+ * Returns unique wrapped indices around `centerIndex` prioritized center-first
+ * (`[center, center+1, center-1, center+2, center-2, ...]`).
+ */
+export function selectSharkWindowIndices(
+  centerIndex: number,
+  radius: number = 4,
+  total: number = 48
+): number[] {
+  if (total <= 0) return [];
+  const norm = (i: number) => ((Math.floor(i) % total) + total) % total;
+  const clampedRadius = Math.max(0, Math.min(total - 1, Math.floor(radius)));
+  const out: number[] = [];
+  const seen = new Set<number>();
+
+  const push = (idx: number) => {
+    const w = norm(idx);
+    if (!seen.has(w)) {
+      seen.add(w);
+      out.push(w);
+    }
+  };
+
+  push(centerIndex);
+  for (let d = 1; d <= clampedRadius; d++) {
+    push(centerIndex + d);
+    push(centerIndex - d);
+  }
+  return out;
+}
+
+export interface SpriteSheetLoadOptions {
+  /** Currently selected shark form ID (e.g. 'shark_00_clown_fry') or index (0..47) */
+  activeSharkId?: string | number;
+  /** Initial ocean depth in meters for shallow prey band preloading (defaults to 0m) */
+  initialDepthMeters?: number;
+  devourFxUrl?: string;
+  uiIconsUrl?: string;
+  uiBannersUrl?: string;
+  uiSettingsUrl?: string;
+}
+
+export const WEB_RUNTIME_ATLAS_URLS = {
+  devourFx: '/assets/aistudio/devour_fx.webp',
+  uiIcons: '/assets/aistudio/icons_f5128c12.webp',
+  uiBanners: '/assets/aistudio/buttons_16e3a0cf.webp',
+  uiSettings: '/assets/aistudio/setting_83a7a273.webp',
+} as const;
+
 export class SpriteSheetManager {
   public frames: Partial<Record<SpriteFrameKey, HTMLCanvasElement>> = {};
   public uiIconDataUrls: Partial<Record<UiIconKey, string>> = {};
@@ -403,13 +496,14 @@ export class SpriteSheetManager {
   public sharksLoaded: boolean = false;
   public sharks3xLoadedCount: number = 0;
   private shark3xLoadedKeys: Set<SharkSpriteKey> = new Set();
+  private shark3xLoadingKeys: Set<SharkSpriteKey> = new Set();
   public uiIconsLoaded: boolean = false;
   public uiBannersLoaded: boolean = false;
   public uiSettingsLoaded: boolean = false;
   public prey140Frames: Record<string, HTMLCanvasElement> = {};
   public prey140LoadedCount: number = 0;
   private prey140LoadingSet: Set<string> = new Set();
-  private prey140BatchStarted: boolean = false;
+  private preloadedDepthBuckets: Set<number> = new Set();
   private loadingPromise: Promise<void> | null = null;
   private listeners: Set<() => void> = new Set();
 
@@ -427,30 +521,122 @@ export class SpriteSheetManager {
   }
 
   /**
-   * Loads:
-   * 1. Primary 4x4 sprite sheet (/assets/aistudio/fish_24bdaa5a.png)
-   * 2. Extended 6x5 target fish sprite sheet (/assets/aistudio/fish2_fc857cfa.png)
-   * 3. 48-Shark Evolution Matrix 8x6 sprite sheet (/assets/aistudio/sharks_ec921c3b.png)
-   * 4. 24-Icon Game UI Atlas 6x4 sprite sheet (/assets/aistudio/icons_f5128c12.png)
-   * 5. Sci-Fi Avatar Data Bar & 3 Pill Buttons sheet (/assets/aistudio/buttons_16e3a0cf.png)
-   * 6. Pause / Settings Modal UI sheet (/assets/aistudio/setting_83a7a273.png)
+   * Draws an offline pre-trimmed WebP sprite directly into a right-sized canvas
+   * with ZERO main-thread `getImageData()` pixel scanning.
    */
-  public load(
-    primaryUrl: string = '/assets/aistudio/fish_24bdaa5a.png',
-    fish2Url: string = '/assets/aistudio/fish2_fc857cfa.png',
-    sharksUrl: string = '/assets/aistudio/sharks_ec921c3b.png',
-    uiIconsUrl: string = '/assets/aistudio/icons_f5128c12.png',
-    uiBannersUrl: string = '/assets/aistudio/buttons_16e3a0cf.png',
-    uiSettingsUrl: string = '/assets/aistudio/setting_83a7a273.png'
-  ): Promise<void> {
+  private drawPretrimmedImageToCanvas(
+    img: HTMLImageElement,
+    maxWidth: number = 420
+  ): HTMLCanvasElement | null {
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    if (!srcW || !srcH) return null;
+
+    const scale = Math.min(1, maxWidth / srcW);
+    const w = Math.max(1, Math.round(srcW * scale));
+    const h = Math.max(1, Math.round(srcH * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, w, h);
+    return canvas;
+  }
+
+  private resolveSharkIndex(keyOrIndex: SharkSpriteKey | number | string): number {
+    if (typeof keyOrIndex === 'number') {
+      return Math.max(0, Math.min(47, Math.floor(keyOrIndex)));
+    }
+    const match = /^SHARK_FORM_(\d{2})$/.exec(keyOrIndex);
+    if (match) {
+      return Math.max(0, Math.min(47, Number(match[1])));
+    }
+    return getSharkFormById(keyOrIndex).index;
+  }
+
+  /**
+   * On-demand loader for any single shark form WebP (`/assets/sharks_3x/shark_form_XX@3x.webp`).
+   * Eliminates startup download of all 48 sharks and legacy 7.2 MB `sharks_ec921c3b.png`.
+   */
+  public ensureSharkLoaded(keyOrIndex: SharkSpriteKey | number | string): Promise<void> {
+    if (typeof Image === 'undefined' || typeof document === 'undefined') {
+      return Promise.resolve();
+    }
+    const idx = this.resolveSharkIndex(keyOrIndex);
+    const key = `SHARK_FORM_${String(idx).padStart(2, '0')}` as SharkSpriteKey;
+    if (this.shark3xLoadedKeys.has(key) || this.shark3xLoadingKeys.has(key)) {
+      return Promise.resolve();
+    }
+    this.shark3xLoadingKeys.add(key);
+
+    return new Promise<void>((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.decoding = 'async';
+      img.onload = () => {
+        const canvas = this.drawPretrimmedImageToCanvas(img, 420);
+        if (canvas) {
+          const prevFrame = this.frames[key];
+          if (prevFrame && prevFrame !== canvas) {
+            prevFrame.width = 0;
+            prevFrame.height = 0;
+          }
+          this.frames[key] = canvas;
+          this.sharksGridFrames[idx] = canvas;
+          this.shark3xLoadedKeys.add(key);
+          this.sharks3xLoadedCount = this.shark3xLoadedKeys.size;
+          this.sharksLoaded = true;
+          this.notifyListeners();
+        }
+        img.onload = null;
+        img.onerror = null;
+        this.shark3xLoadingKeys.delete(key);
+        resolve();
+      };
+      img.onerror = () => {
+        img.onload = null;
+        img.onerror = null;
+        this.shark3xLoadingKeys.delete(key);
+        resolve();
+      };
+      img.src = getShark3xImageUrl(idx);
+    });
+  }
+
+  /**
+   * Preloads a small wrapped window of sharks around `centerIndex` (e.g. visible drum slots in the Atlas).
+   */
+  public ensureSharkWindowLoaded(centerIndex: number, radius: number = 5): void {
+    const indices = selectSharkWindowIndices(centerIndex, radius, 48);
+    for (const idx of indices) {
+      void this.ensureSharkLoaded(idx);
+    }
+  }
+
+  /**
+   * Loads only the actively used WebP UI & FX assets + active shark + current shallow depth band:
+   * 1. Standalone Devour FX WebP (`/assets/aistudio/devour_fx.webp`, ~6.7 KB — replaces 1.1 MB `fish_24bdaa5a.png`)
+   * 2. Active Shark + Next Evolution Target WebP (`/assets/sharks_3x/shark_form_XX@3x.webp`, ~35 KB — replaces 7.2 MB + 7.0 MB)
+   * 3. 24-Icon Game UI Atlas (`/assets/aistudio/icons_f5128c12.webp`)
+   * 4. Sci-Fi Avatar Data Bar & 3 Pill Buttons (`/assets/aistudio/buttons_16e3a0cf.webp`)
+   * 5. Pause / Settings Modal UI sheet (`/assets/aistudio/setting_83a7a273.webp`)
+   * 6. Shallow starter prey band via `preloadPreyForDepth(initialDepthMeters)` (lazy-loaded by depth band, never all 135 upfront)
+   */
+  public load(options: SpriteSheetLoadOptions = {}): Promise<void> {
     if (
       this.loaded &&
-      this.fish2Loaded &&
       this.sharksLoaded &&
       this.uiIconsLoaded &&
       this.uiBannersLoaded &&
       this.uiSettingsLoaded
     ) {
+      if (options.activeSharkId !== undefined) {
+        void this.ensureSharkLoaded(options.activeSharkId);
+      }
       return Promise.resolve();
     }
     if (this.loadingPromise) return this.loadingPromise;
@@ -458,237 +644,120 @@ export class SpriteSheetManager {
       return Promise.resolve();
     }
 
-    const loadPrimary = new Promise<void>((resolve) => {
+    const devourFxUrl = options.devourFxUrl ?? WEB_RUNTIME_ATLAS_URLS.devourFx;
+    const uiIconsUrl = options.uiIconsUrl ?? WEB_RUNTIME_ATLAS_URLS.uiIcons;
+    const uiBannersUrl = options.uiBannersUrl ?? WEB_RUNTIME_ATLAS_URLS.uiBanners;
+    const uiSettingsUrl = options.uiSettingsUrl ?? WEB_RUNTIME_ATLAS_URLS.uiSettings;
+
+    // Mark deprecated legacy sheets as complete without fetching fish_24bdaa5a.png / fish2_fc857cfa.png / sharks_ec921c3b.png
+    this.fish2Loaded = true;
+
+    const loadDevourFx = new Promise<void>((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
+      img.decoding = 'async';
       img.onload = () => {
-        this.processAndSlicePrimaryImage(img);
+        const canvas = this.drawPretrimmedImageToCanvas(img, 128);
+        if (canvas) {
+          this.frames.DEVOUR_FX = canvas;
+        }
         this.loaded = true;
         this.notifyListeners();
+        img.onload = null;
+        img.onerror = null;
         resolve();
       };
       img.onerror = () => {
-        if (primaryUrl !== '/spritesheet.png') {
-          const fallbackImg = new Image();
-          fallbackImg.crossOrigin = 'anonymous';
-          fallbackImg.onload = () => {
-            this.processAndSlicePrimaryImage(fallbackImg);
-            this.loaded = true;
-            this.notifyListeners();
-            resolve();
-          };
-          fallbackImg.onerror = () => resolve();
-          fallbackImg.src = '/spritesheet.png';
-        } else {
-          resolve();
-        }
-      };
-      img.src = primaryUrl;
-    });
-
-    const loadFish2 = new Promise<void>((resolve) => {
-      const img2 = new Image();
-      img2.crossOrigin = 'anonymous';
-      img2.onload = () => {
-        this.processAndSliceFish2Image(img2);
-        this.fish2Loaded = true;
-        this.notifyListeners();
+        this.loaded = true;
+        img.onload = null;
+        img.onerror = null;
         resolve();
       };
-      img2.onerror = () => resolve();
-      img2.src = fish2Url;
+      img.src = devourFxUrl;
     });
 
-    const loadSharks = new Promise<void>((resolve) => {
-      const orderedSharkKeys = Object.keys(SHARK_GRID_MAP) as SharkSpriteKey[];
-      let individualResolved = 0;
-      const totalSharks = orderedSharkKeys.length;
-
-      // 1. Load all 48 individual @3x super-resolved shark PNGs (/assets/sharks_3x/shark_form_XX@3x.png)
-      orderedSharkKeys.forEach((key, idx) => {
-        const img3x = new Image();
-        img3x.crossOrigin = 'anonymous';
-        img3x.onload = () => {
-          const srcW = img3x.naturalWidth || img3x.width;
-          const srcH = img3x.naturalHeight || img3x.height;
-          if (srcW > 0 && srcH > 0) {
-            // Cap individual @3x shark canvas to 420px width (still >2x Retina of max 180-220px on-screen shark draw size),
-            // reducing 48 uncompressed RGBA canvas backing stores + tinted frame copies by ~85% in GPU/RAM!
-            const MAX_SHARK_3X_W = 420;
-            const scale = Math.min(1, MAX_SHARK_3X_W / srcW);
-            const w = Math.max(1, Math.round(srcW * scale));
-            const h = Math.max(1, Math.round(srcH * scale));
-            const c = document.createElement('canvas');
-            c.width = w;
-            c.height = h;
-            const ctx = c.getContext('2d');
-            if (ctx) {
-              ctx.imageSmoothingEnabled = true;
-              ctx.imageSmoothingQuality = 'high';
-              ctx.drawImage(img3x, 0, 0, w, h);
-              const prevFrame = this.frames[key];
-              if (prevFrame && prevFrame !== c) {
-                prevFrame.width = 0;
-                prevFrame.height = 0;
-              }
-              this.frames[key] = c;
-              this.sharksGridFrames[idx] = c;
-              this.shark3xLoadedKeys.add(key);
-              this.sharks3xLoadedCount = this.shark3xLoadedKeys.size;
-              this.sharksLoaded = true;
-              this.notifyListeners();
-            }
-          }
-          img3x.onload = null;
-          img3x.onerror = null;
-          individualResolved++;
-          if (individualResolved === totalSharks) {
-            resolve();
-          }
-        };
-        img3x.onerror = () => {
-          individualResolved++;
-          if (individualResolved === totalSharks) {
-            resolve();
-          }
-        };
-        img3x.src = getShark3xImageUrl(idx);
-      });
-
-      // 2. Also load the 8x6 master sheet as an immediate fallback for any frame while @3x PNGs stream in
-      const imgSharks = new Image();
-      imgSharks.crossOrigin = 'anonymous';
-      imgSharks.onload = () => {
-        this.processAndSliceSharksImage(imgSharks);
-        this.sharksLoaded = true;
-        this.notifyListeners();
-      };
-      imgSharks.src = sharksUrl;
-    });
+    const activeIdx =
+      options.activeSharkId !== undefined
+        ? this.resolveSharkIndex(options.activeSharkId)
+        : 0;
+    const initialSharkIndices = Array.from(
+      new Set([activeIdx, Math.min(47, activeIdx + 1)])
+    );
+    const loadActiveSharks = Promise.all(
+      initialSharkIndices.map((idx) => this.ensureSharkLoaded(idx))
+    ).then(() => undefined);
 
     const loadUiIcons = new Promise<void>((resolve) => {
       const imgIcons = new Image();
       imgIcons.crossOrigin = 'anonymous';
+      imgIcons.decoding = 'async';
       imgIcons.onload = () => {
         this.processAndSliceUiIconsImage(imgIcons);
         this.uiIconsLoaded = true;
         this.notifyListeners();
+        imgIcons.onload = null;
+        imgIcons.onerror = null;
         resolve();
       };
-      imgIcons.onerror = () => resolve();
+      imgIcons.onerror = () => {
+        imgIcons.onload = null;
+        imgIcons.onerror = null;
+        resolve();
+      };
       imgIcons.src = uiIconsUrl;
     });
 
     const loadUiBanners = new Promise<void>((resolve) => {
       const imgBanners = new Image();
       imgBanners.crossOrigin = 'anonymous';
+      imgBanners.decoding = 'async';
       imgBanners.onload = () => {
         this.processAndSliceUiBannersImage(imgBanners);
         this.uiBannersLoaded = true;
         this.notifyListeners();
+        imgBanners.onload = null;
+        imgBanners.onerror = null;
         resolve();
       };
-      imgBanners.onerror = () => resolve();
+      imgBanners.onerror = () => {
+        imgBanners.onload = null;
+        imgBanners.onerror = null;
+        resolve();
+      };
       imgBanners.src = uiBannersUrl;
     });
 
     const loadUiSettings = new Promise<void>((resolve) => {
       const imgSettings = new Image();
       imgSettings.crossOrigin = 'anonymous';
+      imgSettings.decoding = 'async';
       imgSettings.onload = () => {
         this.processAndSliceUiSettingsImage(imgSettings);
         this.uiSettingsLoaded = true;
         this.notifyListeners();
+        imgSettings.onload = null;
+        imgSettings.onerror = null;
         resolve();
       };
-      imgSettings.onerror = () => resolve();
+      imgSettings.onerror = () => {
+        imgSettings.onload = null;
+        imgSettings.onerror = null;
+        resolve();
+      };
       imgSettings.src = uiSettingsUrl;
     });
 
-    // Kick off prioritized background streaming of all 140 transparent @3x prey assets
-    void this.loadPrey140Assets();
+    // Lazy-load ONLY the shallow starting prey band (instead of all 135 species on initial screen!)
+    void this.preloadPreyForDepth(options.initialDepthMeters ?? 0, 380);
 
     this.loadingPromise = Promise.all([
-      loadPrimary,
-      loadFish2,
-      loadSharks,
+      loadDevourFx,
+      loadActiveSharks,
       loadUiIcons,
       loadUiBanners,
       loadUiSettings,
     ]).then(() => undefined);
     return this.loadingPromise;
-  }
-
-  private cropAndScalePreyImage(img: HTMLImageElement): HTMLCanvasElement | null {
-    const srcW = img.naturalWidth || img.width;
-    const srcH = img.naturalHeight || img.height;
-    if (!srcW || !srcH) return null;
-
-    const MAX_PREY_W = 420;
-    const scale = Math.min(1, MAX_PREY_W / srcW);
-    const scaledW = Math.max(1, Math.round(srcW * scale));
-    const scaledH = Math.max(1, Math.round(srcH * scale));
-
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = scaledW;
-    tempCanvas.height = scaledH;
-    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
-    if (!tempCtx) return null;
-    tempCtx.imageSmoothingEnabled = true;
-    tempCtx.imageSmoothingQuality = 'high';
-    tempCtx.drawImage(img, 0, 0, scaledW, scaledH);
-
-    // Crop tightly around non-transparent pixels so every species matches its hitbox visual contract
-    let minX = scaledW;
-    let minY = scaledH;
-    let maxX = 0;
-    let maxY = 0;
-    let hasPixels = false;
-
-    try {
-      const imgData = tempCtx.getImageData(0, 0, scaledW, scaledH);
-      const data = imgData.data;
-      for (let py = 0; py < scaledH; py++) {
-        const rowOff = py * scaledW;
-        for (let px = 0; px < scaledW; px++) {
-          if (data[(rowOff + px) * 4 + 3] > 14) {
-            hasPixels = true;
-            if (px < minX) minX = px;
-            if (py < minY) minY = py;
-            if (px > maxX) maxX = px;
-            if (py > maxY) maxY = py;
-          }
-        }
-      }
-    } catch {
-      hasPixels = false;
-    }
-
-    const outCanvas = document.createElement('canvas');
-    if (hasPixels && maxX >= minX && maxY >= minY) {
-      const pad = 2;
-      const bx = Math.max(0, minX - pad);
-      const by = Math.max(0, minY - pad);
-      const bw = Math.min(scaledW - bx, maxX - minX + 1 + pad * 2);
-      const bh = Math.min(scaledH - by, maxY - minY + 1 + pad * 2);
-      outCanvas.width = Math.max(1, bw);
-      outCanvas.height = Math.max(1, bh);
-      const oCtx = outCanvas.getContext('2d');
-      if (oCtx) {
-        oCtx.drawImage(tempCanvas, bx, by, bw, bh, 0, 0, bw, bh);
-      }
-    } else {
-      outCanvas.width = scaledW;
-      outCanvas.height = scaledH;
-      const oCtx = outCanvas.getContext('2d');
-      if (oCtx) {
-        oCtx.drawImage(tempCanvas, 0, 0);
-      }
-    }
-
-    tempCanvas.width = 0;
-    tempCanvas.height = 0;
-    return outCanvas;
   }
 
   public ensurePrey140Loaded(id: string, url?: string | null): void {
@@ -700,10 +769,11 @@ export class SpriteSheetManager {
 
     const img = new Image();
     img.crossOrigin = 'anonymous';
+    img.decoding = 'async';
     img.onload = () => {
-      const cropped = this.cropAndScalePreyImage(img);
-      if (cropped) {
-        this.prey140Frames[id] = cropped;
+      const canvas = this.drawPretrimmedImageToCanvas(img, 420);
+      if (canvas) {
+        this.prey140Frames[id] = canvas;
         this.prey140LoadedCount = Object.keys(this.prey140Frames).length;
         this.notifyListeners();
       }
@@ -719,461 +789,64 @@ export class SpriteSheetManager {
     img.src = srcUrl;
   }
 
-  private async loadPrey140Assets(): Promise<void> {
-    if (this.prey140BatchStarted) return;
+  /**
+   * Depth-band lazy loader for the 135 active marine prey WebP assets.
+   * Quantizes depth into 400m buckets so calling every simulation tick is O(1) zero-cost,
+   * and streams only uncached species overlapping `[depth - 350m, depth + lookaheadMeters]`
+   * in gentle batches of 8 with zero main-thread pixel trimming.
+   */
+  public async preloadPreyForDepth(
+    depthMeters: number,
+    lookaheadMeters: number = 650
+  ): Promise<void> {
     if (typeof Image === 'undefined' || typeof document === 'undefined') return;
-    this.prey140BatchStarted = true;
+    const bucket = Math.floor(Math.max(0, depthMeters) / 400);
+    if (this.preloadedDepthBuckets.has(bucket)) return;
+    this.preloadedDepthBuckets.add(bucket);
 
-    // Prioritize sunlit shallow reef species first so initial spawn frame renders crisp fish immediately
-    const prioritized = [...PREY_140_RECORDS].sort((a, b) => {
-      const aShallow = a.realMinDepth < 50 && (a.sizeClass === 'XS' || a.sizeClass === 'S' || a.sizeClass === 'M') ? 0 : 1;
-      const bShallow = b.realMinDepth < 50 && (b.sizeClass === 'XS' || b.sizeClass === 'S' || b.sizeClass === 'M') ? 0 : 1;
-      if (aShallow !== bShallow) return aShallow - bShallow;
-      return a.realMinDepth - b.realMinDepth;
-    });
+    const candidateIds = selectPreyIdsForDepthBand(depthMeters, lookaheadMeters).filter(
+      (id) => !this.prey140Frames[id] && !this.prey140LoadingSet.has(id)
+    );
+    if (candidateIds.length === 0) return;
 
-    const BATCH_SIZE = 10;
-    for (let i = 0; i < prioritized.length; i += BATCH_SIZE) {
-      const batch = prioritized.slice(i, i + BATCH_SIZE);
+    const BATCH_SIZE = 8;
+    for (let i = 0; i < candidateIds.length; i += BATCH_SIZE) {
+      const batch = candidateIds.slice(i, i + BATCH_SIZE);
       await Promise.all(
         batch.map(
-          (rec) =>
+          (id) =>
             new Promise<void>((resolve) => {
-              if (this.prey140Frames[rec.id]) {
+              if (this.prey140Frames[id] || this.prey140LoadingSet.has(id)) {
                 resolve();
                 return;
               }
+              this.prey140LoadingSet.add(id);
               const img = new Image();
               img.crossOrigin = 'anonymous';
+              img.decoding = 'async';
               img.onload = () => {
-                const cropped = this.cropAndScalePreyImage(img);
-                if (cropped) {
-                  this.prey140Frames[rec.id] = cropped;
+                const canvas = this.drawPretrimmedImageToCanvas(img, 420);
+                if (canvas) {
+                  this.prey140Frames[id] = canvas;
                   this.prey140LoadedCount = Object.keys(this.prey140Frames).length;
                 }
                 img.onload = null;
                 img.onerror = null;
+                this.prey140LoadingSet.delete(id);
                 resolve();
               };
               img.onerror = () => {
                 img.onload = null;
                 img.onerror = null;
+                this.prey140LoadingSet.delete(id);
                 resolve();
               };
-              img.src = getPrey140ImageUrl(rec.id);
+              img.src = getPrey140ImageUrl(id);
             })
         )
       );
       this.notifyListeners();
     }
-  }
-
-  private createChromaKeyCanvas(
-    img: HTMLImageElement
-  ): { sheetCanvas: HTMLCanvasElement; imgData: ImageData } | null {
-    const fullW = img.naturalWidth || img.width;
-    const fullH = img.naturalHeight || img.height;
-    if (!fullW || !fullH) return null;
-
-    const sheetCanvas = document.createElement('canvas');
-    sheetCanvas.width = fullW;
-    sheetCanvas.height = fullH;
-    const sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
-    if (!sheetCtx) return null;
-
-    sheetCtx.drawImage(img, 0, 0);
-    const imgData = sheetCtx.getImageData(0, 0, fullW, fullH);
-    const data = imgData.data;
-
-    // Chroma-Key White Background Removal: R > 240, G > 240, B > 240 -> Alpha = 0
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-
-      if (r > 240 && g > 240 && b > 240) {
-        data[i + 3] = 0;
-      } else if (r > 222 && g > 222 && b > 222) {
-        const maxChannel = Math.max(r, g, b);
-        const factor = Math.max(0, (240 - maxChannel) / 18);
-        data[i + 3] = Math.round(data[i + 3] * factor);
-      }
-    }
-    sheetCtx.putImageData(imgData, 0, 0);
-    return { sheetCanvas, imgData };
-  }
-
-  private sliceBoundedFrame(
-    sheetCanvas: HTMLCanvasElement,
-    fullData: Uint8ClampedArray,
-    bounds: [number, number, number, number]
-  ): HTMLCanvasElement {
-    const fullW = sheetCanvas.width;
-    const fullH = sheetCanvas.height;
-    const [nx0, ny0, nx1, ny1] = bounds;
-    const sx = Math.floor(nx0 * fullW);
-    const sy = Math.floor(ny0 * fullH);
-    const cellW = Math.max(1, Math.floor((nx1 - nx0) * fullW));
-    const cellH = Math.max(1, Math.floor((ny1 - ny0) * fullH));
-
-    let minX = cellW;
-    let minY = cellH;
-    let maxX = 0;
-    let maxY = 0;
-    let hasPixels = false;
-
-    for (let py = 0; py < cellH; py++) {
-      const rowOffset = (sy + py) * fullW + sx;
-      for (let px = 0; px < cellW; px++) {
-        const alpha = fullData[(rowOffset + px) * 4 + 3];
-        if (alpha > 18) {
-          hasPixels = true;
-          if (px < minX) minX = px;
-          if (py < minY) minY = py;
-          if (px > maxX) maxX = px;
-          if (py > maxY) maxY = py;
-        }
-      }
-    }
-
-    const frameCanvas = document.createElement('canvas');
-    if (hasPixels) {
-      const pad = 4;
-      const bx = Math.max(0, minX - pad);
-      const by = Math.max(0, minY - pad);
-      const bw = Math.min(cellW - bx, maxX - minX + 1 + pad * 2);
-      const bh = Math.min(cellH - by, maxY - minY + 1 + pad * 2);
-      frameCanvas.width = bw;
-      frameCanvas.height = bh;
-      const fCtx = frameCanvas.getContext('2d');
-      if (fCtx) {
-        fCtx.drawImage(sheetCanvas, sx + bx, sy + by, bw, bh, 0, 0, bw, bh);
-      }
-    } else {
-      frameCanvas.width = cellW;
-      frameCanvas.height = cellH;
-      const fCtx = frameCanvas.getContext('2d');
-      if (fCtx) {
-        fCtx.drawImage(sheetCanvas, sx, sy, cellW, cellH, 0, 0, cellW, cellH);
-      }
-    }
-
-    return frameCanvas;
-  }
-
-  private processAndSlicePrimaryImage(img: HTMLImageElement): void {
-    const res = this.createChromaKeyCanvas(img);
-    if (!res) return;
-    const { sheetCanvas, imgData } = res;
-    const fullData = imgData.data;
-
-    this.rawGridFrames = [];
-    const orderedKeys: PrimarySpriteFrameKey[] = [
-      'BASE_SHARK',
-      'MECHA_JAWS',
-      'ABYSS_JAWS',
-      'MAGMA_JAWS',
-      'MECHA_DORSAL',
-      'ABYSS_DORSAL',
-      'MAGMA_DORSAL',
-      'EVO_TAIL',
-      'PREY_JELLY',
-      'PREY_PUFFER',
-      'PREY_SUB',
-      'PREY_CRAB',
-      'PREY_EEL',
-      'PREY_MINE',
-      'PREY_KRAKEN',
-      'DEVOUR_FX',
-    ];
-
-    for (const key of orderedKeys) {
-      const frameCanvas = this.sliceBoundedFrame(
-        sheetCanvas,
-        fullData,
-        SPRITE_CELL_BOUNDS[key]
-      );
-      this.frames[key] = frameCanvas;
-      this.rawGridFrames.push(frameCanvas);
-    }
-    sheetCanvas.width = 0;
-    sheetCanvas.height = 0;
-  }
-
-  private processAndSliceFish2Image(img: HTMLImageElement): void {
-    const res = this.createChromaKeyCanvas(img);
-    if (!res) return;
-    const { sheetCanvas, imgData } = res;
-    const fullData = imgData.data;
-
-    this.fish2GridFrames = [];
-    const orderedFish2Keys = Object.keys(FISH2_GRID_MAP) as Fish2SpriteKey[];
-
-    for (const key of orderedFish2Keys) {
-      const frameCanvas = this.sliceBoundedFrame(
-        sheetCanvas,
-        fullData,
-        FISH2_CELL_BOUNDS[key]
-      );
-      this.frames[key] = frameCanvas;
-      this.fish2GridFrames.push(frameCanvas);
-    }
-    sheetCanvas.width = 0;
-    sheetCanvas.height = 0;
-  }
-
-  private processAndSliceSharksImage(img: HTMLImageElement): void {
-    const orderedSharkKeys = Object.keys(SHARK_GRID_MAP) as SharkSpriteKey[];
-    if (this.shark3xLoadedKeys.size >= orderedSharkKeys.length) {
-      return;
-    }
-    const srcW = img.naturalWidth || img.width;
-    const srcH = img.naturalHeight || img.height;
-    if (!srcW || !srcH) return;
-
-    // High-DPI working resolution cap:
-    // A 4K sheet (4096x2286 = 9.36M pixels) has ~512x381px per cell, whereas the largest
-    // on-screen shark render is ~224x120 CSS px (448x240 physical px on 2x Retina).
-    // Supersampling to 2400px width (~300x220 per cell) preserves 100% of 4K crispness
-    // while cutting pixel-processing time and per-frame 18-slice GPU/CPU bandwidth by ~70%.
-    const MAX_SHARK_SHEET_W = 2400;
-    const scale = Math.min(1, MAX_SHARK_SHEET_W / srcW);
-    const fullW = Math.max(1, Math.round(srcW * scale));
-    const fullH = Math.max(1, Math.round(srcH * scale));
-
-    const rawCanvas = document.createElement('canvas');
-    rawCanvas.width = fullW;
-    rawCanvas.height = fullH;
-    const rawCtx = rawCanvas.getContext('2d', { willReadFrequently: true });
-    if (!rawCtx) return;
-    rawCtx.imageSmoothingEnabled = true;
-    rawCtx.imageSmoothingQuality = 'high';
-    rawCtx.drawImage(img, 0, 0, fullW, fullH);
-    const fullImgData = rawCtx.getImageData(0, 0, fullW, fullH);
-    const fullData = fullImgData.data;
-
-    const pad = Math.max(4, Math.round((fullW / 1376) * 4));
-
-    // Preallocate reusable BFS buffers sized for the largest cell to avoid 48x GC allocations
-    const maxCellPixels = Math.ceil(fullW * 0.2) * Math.ceil(fullH * 0.25);
-    let sharedVisited = new Uint8Array(maxCellPixels);
-    let sharedDistMap = new Uint8Array(maxCellPixels);
-    let sharedQueue = new Int32Array(maxCellPixels);
-
-    for (let idx = 0; idx < orderedSharkKeys.length; idx++) {
-      const key = orderedSharkKeys[idx];
-      if (this.shark3xLoadedKeys.has(key)) continue;
-      const [nx0, ny0, nx1, ny1] = SHARK_CELL_BOUNDS[key];
-      const sx = Math.floor(nx0 * fullW);
-      const sy = Math.floor(ny0 * fullH);
-      const cellW = Math.max(1, Math.floor((nx1 - nx0) * fullW));
-      const cellH = Math.max(1, Math.floor((ny1 - ny0) * fullH));
-      const cellLen = cellW * cellH;
-
-      if (sharedVisited.length < cellLen) {
-        sharedVisited = new Uint8Array(cellLen);
-        sharedDistMap = new Uint8Array(cellLen);
-        sharedQueue = new Int32Array(cellLen);
-      } else {
-        sharedVisited.fill(0, 0, cellLen);
-        sharedDistMap.fill(0, 0, cellLen);
-      }
-
-      const visited = sharedVisited;
-      const distMap = sharedDistMap;
-      const queue = sharedQueue;
-
-      const cellImg = rawCtx.createImageData(cellW, cellH);
-      const data = cellImg.data;
-      for (let py = 0; py < cellH; py++) {
-        const srcRowStart = ((sy + py) * fullW + sx) * 4;
-        const dstRowStart = py * cellW * 4;
-        data.set(
-          fullData.subarray(srcRowStart, srcRowStart + cellW * 4),
-          dstRowStart
-        );
-      }
-
-      let qHead = 0;
-      let qTail = 0;
-
-      const isStudioWhiteBg = (i: number): boolean => {
-        const p = i * 4;
-        const r = data[p];
-        const g = data[p + 1];
-        const b = data[p + 2];
-        const maxC = Math.max(r, g, b);
-        const minC = Math.min(r, g, b);
-        return minC >= 232 && maxC - minC <= 20;
-      };
-
-      const enqueue = (px: number, py: number) => {
-        if (px < 0 || px >= cellW || py < 0 || py >= cellH) return;
-        const i = py * cellW + px;
-        if (visited[i] || !isStudioWhiteBg(i)) return;
-        visited[i] = 1;
-        queue[qTail++] = i;
-      };
-
-      // 1. Seed all 4 perimeter edges of the cell
-      for (let px = 0; px < cellW; px++) {
-        enqueue(px, 0);
-        enqueue(px, cellH - 1);
-      }
-      for (let py = 0; py < cellH; py++) {
-        enqueue(0, py);
-        enqueue(cellW - 1, py);
-      }
-
-      // 2. Run BFS Flood-Fill for studio white background
-      while (qHead < qTail) {
-        const curr = queue[qHead++];
-        data[curr * 4 + 3] = 0;
-        const cx = curr % cellW;
-        const cy = (curr - cx) / cellW;
-        if (cx > 0) enqueue(cx - 1, cy);
-        if (cx + 1 < cellW) enqueue(cx + 1, cy);
-        if (cy > 0) enqueue(cx, cy - 1);
-        if (cy + 1 < cellH) enqueue(cx, cy + 1);
-      }
-
-      // 3. Preserve all enclosed interior white regions (shark countershaded bellies, eye sclera, teeth)
-
-      // 4. Multi-pixel boundary Color-to-Alpha white unmixing (eliminates 100% of white anti-aliasing fringe on 4K outlines & glowing auras)
-      let bHead = 0;
-      let bTail = 0;
-      const maxHaloSteps = Math.max(4, Math.round((fullW / 1376) * 4));
-
-      for (let py = 1; py < cellH - 1; py++) {
-        const rowOff = py * cellW;
-        for (let px = 1; px < cellW - 1; px++) {
-          const i = rowOff + px;
-          if (!visited[i]) continue;
-          if (
-            !visited[i - 1] ||
-            !visited[i + 1] ||
-            !visited[i - cellW] ||
-            !visited[i + cellW]
-          ) {
-            distMap[i] = 1;
-            queue[bTail++] = i;
-          }
-        }
-      }
-
-      while (bHead < bTail) {
-        const curr = queue[bHead++];
-        const d = distMap[curr];
-        if (d > maxHaloSteps) continue;
-        const cx = curr % cellW;
-        const cy = (curr - cx) / cellW;
-        const neighbors = [
-          cx > 0 ? curr - 1 : -1,
-          cx + 1 < cellW ? curr + 1 : -1,
-          cy > 0 ? curr - cellW : -1,
-          cy + 1 < cellH ? curr + cellW : -1,
-        ];
-        for (const nIdx of neighbors) {
-          if (nIdx < 0 || visited[nIdx] || distMap[nIdx] > 0) continue;
-          const p = nIdx * 4;
-          const r = data[p];
-          const g = data[p + 1];
-          const b = data[p + 2];
-          const minC = Math.min(r, g, b);
-
-          // Any boundary pixel within maxHaloSteps that still contains white component (minC > 45)
-          // is unmixed against pure white (255,255,255) so min(R',G',B') -> 0 (pure dark outline or pure saturated aura)
-          if (minC > 45) {
-            distMap[nIdx] = d + 1;
-            queue[bTail++] = nIdx;
-            const cleanAlpha = Math.max(0, Math.min(1, (250 - minC) / 205));
-            if (cleanAlpha <= 0.03) {
-              data[p + 3] = 0;
-            } else {
-              const unmixDiv = Math.max(0.05, (255 - minC) / 255);
-              data[p] = Math.max(
-                0,
-                Math.min(255, Math.round((r - minC) / unmixDiv))
-              );
-              data[p + 1] = Math.max(
-                0,
-                Math.min(255, Math.round((g - minC) / unmixDiv))
-              );
-              data[p + 2] = Math.max(
-                0,
-                Math.min(255, Math.round((b - minC) / unmixDiv))
-              );
-              data[p + 3] = Math.round(
-                data[p + 3] * Math.pow(cleanAlpha, 1.15)
-              );
-            }
-          }
-        }
-      }
-
-      // 5. Find tight non-transparent bounding box and slice into frameCanvas
-      let minX = cellW;
-      let minY = cellH;
-      let maxX = 0;
-      let maxY = 0;
-      let hasPixels = false;
-
-      for (let py = 0; py < cellH; py++) {
-        const rowOff = py * cellW;
-        for (let px = 0; px < cellW; px++) {
-          if (data[(rowOff + px) * 4 + 3] > 18) {
-            hasPixels = true;
-            if (px < minX) minX = px;
-            if (py < minY) minY = py;
-            if (px > maxX) maxX = px;
-            if (py > maxY) maxY = py;
-          }
-        }
-      }
-
-      const tempCell = document.createElement('canvas');
-      tempCell.width = cellW;
-      tempCell.height = cellH;
-      const tempCtx = tempCell.getContext('2d');
-      if (tempCtx) {
-        tempCtx.putImageData(cellImg, 0, 0);
-      }
-
-      const frameCanvas = document.createElement('canvas');
-      if (hasPixels) {
-        const bx = Math.max(0, minX - pad);
-        const by = Math.max(0, minY - pad);
-        const bw = Math.min(cellW - bx, maxX - minX + 1 + pad * 2);
-        const bh = Math.min(cellH - by, maxY - minY + 1 + pad * 2);
-        frameCanvas.width = bw;
-        frameCanvas.height = bh;
-        const fCtx = frameCanvas.getContext('2d');
-        if (fCtx) {
-          fCtx.drawImage(tempCell, bx, by, bw, bh, 0, 0, bw, bh);
-        }
-      } else {
-        frameCanvas.width = cellW;
-        frameCanvas.height = cellH;
-        const fCtx = frameCanvas.getContext('2d');
-        if (fCtx) {
-          fCtx.drawImage(tempCell, 0, 0);
-        }
-      }
-
-      tempCell.width = 0;
-      tempCell.height = 0;
-
-      // Do not overwrite if the @3x individual shark PNG has already loaded for this key
-      if (!this.shark3xLoadedKeys.has(key)) {
-        this.frames[key] = frameCanvas;
-        this.sharksGridFrames[idx] = frameCanvas;
-      } else {
-        frameCanvas.width = 0;
-        frameCanvas.height = 0;
-      }
-    }
-    rawCanvas.width = 0;
-    rawCanvas.height = 0;
   }
 
   /**
@@ -2137,45 +1810,17 @@ export class SpriteSheetManager {
   public getSharkFormFrame(
     keyOrIndex: SharkSpriteKey | number
   ): HTMLCanvasElement | undefined {
-    if (typeof keyOrIndex === 'number') {
-      const clamped = Math.max(0, Math.min(47, Math.floor(keyOrIndex)));
-      const key = `SHARK_FORM_${String(clamped).padStart(2, '0')}` as SharkSpriteKey;
-      return this.frames[key] ?? this.frames.BASE_SHARK;
+    const idx = this.resolveSharkIndex(keyOrIndex);
+    const key = `SHARK_FORM_${String(idx).padStart(2, '0')}` as SharkSpriteKey;
+    const frame = this.frames[key];
+    if (!frame) {
+      void this.ensureSharkLoaded(idx);
     }
-    return this.frames[keyOrIndex] ?? this.frames.BASE_SHARK;
+    return frame;
   }
 
   public getSharkForm3xUrl(keyOrIndex: SharkSpriteKey | number): string {
     return getShark3xImageUrl(keyOrIndex);
-  }
-
-  public getOrganFrame(organId: string): HTMLCanvasElement | undefined {
-    switch (organId) {
-      case 'mecha_jaws':
-        return this.frames.MECHA_JAWS;
-      case 'abyss_jaws':
-        return this.frames.ABYSS_JAWS;
-      case 'magma_jaws':
-        return this.frames.MAGMA_JAWS;
-      case 'mecha_dorsal':
-      case 'mecha_armor':
-        return this.frames.MECHA_DORSAL;
-      case 'abyss_dorsal':
-      case 'abyss_armor':
-        return this.frames.ABYSS_DORSAL;
-      case 'magma_dorsal':
-      case 'magma_armor':
-        return this.frames.MAGMA_DORSAL;
-      case 'mecha_tail':
-      case 'abyss_tail':
-      case 'magma_tail':
-        return this.frames.EVO_TAIL;
-      case 'mecha_aura':
-      case 'abyss_aura':
-        return this.frames.DEVOUR_FX;
-      default:
-        return this.frames.MECHA_DORSAL;
-    }
   }
 
   public getPreySprite(config: {
@@ -2189,9 +1834,7 @@ export class SpriteSheetManager {
     }
     if (config.externalPngUrl && config.id) {
       this.ensurePrey140Loaded(config.id, config.externalPngUrl);
-      // Never fall back to legacy sprite-atlas fish (fish_24bdaa5a / fish2_fc857cfa) for 134 @3x species
-      const loadedPrey140 = Object.values(this.prey140Frames);
-      return loadedPrey140.length > 0 ? loadedPrey140[0] : undefined;
+      return undefined;
     }
     if (config.spriteKey && this.frames[config.spriteKey]) {
       return this.frames[config.spriteKey];

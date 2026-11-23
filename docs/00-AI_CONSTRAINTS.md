@@ -1,7 +1,7 @@
 # 00. AI 辅助开发约束与文档防过期同步规范 (AI Constraints & Doc-Sync Contract)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-10-26
+> **最后更新**：2026-11-22
 > **适用对象**：全体开发人员及其使用的 AI 编程工具（Cursor、Claude Code、Windsurf、GitHub Copilot、Cline、Google AI Studio 等）
 
 ---
@@ -36,23 +36,24 @@ AI 在动手写任何一行代码前，必须按顺序确认：
 - 玩家养成与外观变化完全通过 **48 阶鲨鱼本体进化（6 代 × 8 列，精灵图 `/public/assets/aistudio/sharks_ec921c3b.png`）** 实现。
 - `drawSharkEntity` 中严禁绘制任何外挂器官几何图形。
 
-### 红线 2：屏幕视觉体型与吞噬判定的绝对一致性（Visual Size === Edible Rule）
+### 红线 2：屏幕视觉体型与物理碰撞体积的绝对同源一致性（Visual Size === Hitbox Scale）
 - **核心定律**：
-  1. 凡是当前鲨鱼可以直接吞噬的猎物（`canDevourDirectly === true`），其在屏幕上的渲染尺寸与碰撞体积**必须严格小于玩家鲨鱼（线性尺寸 `<= 64%` 鲨鱼尺寸，即 `<= 0.64 * 96 * shark.stats.scale`）**。
-  2. 凡是当前鲨鱼无法直接吞噬、触碰会扣血或需要冲刺撕咬的猎物/水雷（`canDevourDirectly === false`），其在屏幕上的渲染尺寸与碰撞体积**必须大于或等于玩家鲨鱼（线性尺寸 `>= 118%` 鲨鱼尺寸，即 `>= 1.18 * 96 * shark.stats.scale`）**。
-- **实现约束**：`src/game/canvasRenderer.ts` 的 `drawPreyEntity()` 与 `src/App.tsx` 的碰撞检测**必须统一调用 `src/game/rules.ts` 中的 `getPreyRelativeVisualScale()`**，严禁在渲染层或碰撞层单独乘以额外的缩放系数。
+  1. 134 种现役海洋生物 + `cyber_mine`（`src/game/preyDatabase140.ts`）与 48 阶鲨鱼均基于真实生物学体长（`realBodyLengthM`）驱动屏幕视觉比例，并配合咬合阶位（`biteTier`）执行吞噬/破甲/反伤判定。
+  2. 渲染层与碰撞层**严禁各算各的**，避免视觉大小与实际咬合碰撞半径脱节。
+- **实现约束**：`src/game/canvasRenderer.ts` 的 `drawPreyEntity()` 与 `src/game/sim/stepSimulation.ts` 的碰撞检测**必须统一调用 `src/game/rules.ts` 中的 `getPreyRelativeVisualScale()` 并一致透传 `shark.stats.realBodyLengthM`**，严禁在渲染层或碰撞层单独乘以额外的缩放系数。
 
 ### 红线 3：移动端多点触控与零重渲染摇杆（Mobile Multi-Touch Isolation）
-- **摇杆零 React 重渲染**：左手按住虚拟摇杆（`.landscape-thumb-joy`）拖动时，`handleJoystickPointerMove` **只能更新 `simRef.current.input` 并通过 `joystickKnobRef.current.style.transform` 直接操作 DOM**，严禁在 `pointermove` 中调用 `useState` 的 `setter`（否则 60Hz~120Hz 重渲染会吞掉右手对升级按钮的点击）。
+- **摇杆零 React 重渲染**：左手按住虚拟摇杆（`.landscape-thumb-joy`，渲染于 `src/components/game/InGameHudOverlay.tsx`）拖动时，`handleJoystickPointerMove` **只能更新 `simRef.current.input` 并通过 `joystickKnobRef.current.style.transform` 直接操作 DOM**，严禁在 `pointermove` 中调用 `useState` 的 `setter`（否则 60Hz~120Hz 重渲染会吞掉右手对升级按钮的点击）。
 - **按钮多指即时触发**：移动端浏览器在手指 1 按住 `touch-none` 区域（摇杆或画布）时，手指 2 点击按钮不会触发合成 `onClick` 事件。因此所有局内按钮**必须使用 `bindMultiTouchButton(action, isDisabled)`**（同时监听 `onPointerDown`、`onTouchStart`、`onClick` 并带 320ms 时间戳去重）。
 - **多指 Pointer ID 隔离**：`simRef.current.input` 必须独立维护 `joyPointerId`、`canvasPointerId` 和 `boostPointerId`，任何一根手指抬起（`pointerup` / `pointercancel`）时只能释放自己对应的控制通道。
 
-### 红线 4：鱼类真实海洋深度分布（Strict Habitat Depth Zones）
-- 32 种海洋生物严格划分为三大深度带：**阳光珊瑚浅海（`0m ~ 520m`）**、**暮光温跃层（`520m ~ 1150m`）**、**午夜深渊海沟（`1150m+`）**。
-- 刷新逻辑（`src/game/ecosystemSpawner.ts` 与 `src/App.tsx` 中的 `createPreyEntity`）必须保证猎物生成 Y 坐标被钳制在 `[chosenTier.minDepth, chosenTier.maxDepth]` 范围内，严禁浅水小丑鱼/蝴蝶鱼出现在深渊，或深海安康鱼/大王乌贼刷到浅滩。
+### 红线 4：鱼类真实五层水深栖息地分布（Strict Habitat Depth Zones）
+- 134 种现役海洋生物 + `cyber_mine`（共 135 项，定义于 `src/game/preyDatabase140.ts`）严格分布于 `0m ~ 20,000m` 五层海洋深度带（表层浅海 `0~2000m` 含 `0~520m` 珊瑚浅滩安全区、中层暮光 `2000~6000m`、半深海 `6000~10000m`、深渊 `10000~16000m`、冥渊海沟 `16000~20000m`）。
+- 刷新逻辑（`src/game/ecosystemSpawner.ts` 与 `src/game/sim/types.ts` 中的 `createPreyEntityForSim`）必须保证猎物生成 Y 坐标被钳制在 `[chosenTier.minDepth, chosenTier.maxDepth]` 范围内，严禁浅水热带鱼出现在深渊，或深海巨怪/主动攻击鱼类刷到阳光浅滩。
 
-### 红线 5：60FPS 零 GC 游戏主循环（Zero-GC Simulation Loop）
-- `requestAnimationFrame` 主循环内的粒子（`particles`）、掉落物（`pickups`）、飘字（`floatTexts`）必须复用固定长度环形对象池（Object Pool），严禁每帧 `new` 对象或调用 `.filter()` 创建新数组。
+### 红线 5：60FPS 零 GC 游戏主循环与 Canvas 栈平衡（Zero-GC Simulation Loop）
+- 60FPS 仿真与渲染已解耦至纯 TS 引擎（`src/game/sim/SharkGameEngine.ts` + `stepSimulation.ts` + `renderOceanWorld.ts`），`requestAnimationFrame` 主循环内的粒子（`particles`）、掉落物（`pickups`）、飘字（`floatTexts`）必须复用固定长度环形对象池（Object Pool），严禁每帧 `new` 对象或调用 `.filter()` 创建新数组。
+- 所有 Canvas 2D 渲染函数（尤其是 `src/game/world/seabedRenderer.ts` 与 `worldRenderer.ts`）必须保证 `ctx.save()` / `ctx.restore()` 在任意提前 `return` 路径下 100% 成对平衡（优先使用 `try { ... } finally { ctx.restore(); }`）。
 - React HUD 状态（`hudState`）采用 **120ms 节流同步 + 关键操作（升级躯体、破茧进化、狂暴、基因突破）同帧立即同步** 的混合策略。
 
 ### 红线 6：Vercel 与生产构建兼容性
@@ -84,3 +85,4 @@ AI 在动手写任何一行代码前，必须按顺序确认：
 | :--- | :--- | :--- |
 | 2026-10-26 | 初始化 AI 协同约束规范与代码-文档强制同步机制 | `AGENTS.md`, `CLAUDE.md`, `docs/00-AI_CONSTRAINTS.md` |
 | 2026-11-05 | 新增《05. 移动端与跨平台原生移植避坑指南》索引映射，将多语言模板完整性、背景无缝解混平铺、猎物非线性步态与五位一体吞噬特效纳入跨平台移植核查红线 | `AGENTS.md`, `docs/00-AI_CONSTRAINTS.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
+| 2026-11-22 | **P1-3 拆分上帝文件并刷新过期红线**：同步 134 种海洋生物 + `cyber_mine`（135 项）、真实体长比例驱动与 `0~20000m` 五层深度带；更新 `src/game/world/*`、`src/game/sim/*`、`src/components/game/*` 模块映射并新增 Canvas `save/restore` 栈平衡红线 | `AGENTS.md`, `docs/00-AI_CONSTRAINTS.md`, `docs/01-ARCHITECTURE.md`, `docs/07-REVIEW_AND_ACTION_PLAN.md` |

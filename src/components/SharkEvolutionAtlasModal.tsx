@@ -15,6 +15,7 @@ import {
 } from '../game/sharkEvolutionConfig';
 import { SharkFormCanvasPreview } from './SharkFormCanvasPreview';
 import { getLineageUiIconKey, UiAtlasIcon } from './UiAtlasIcon';
+import { spriteSheetManager } from '../game/spriteSheetManager';
 
 interface SharkEvolutionAtlasModalProps {
   lang: Lang;
@@ -440,6 +441,9 @@ export const SharkEvolutionAtlasModal: React.FC<
   };
 
   const inspectedForm = SHARK_EVOLUTION_FORMS[activeIndex];
+  useEffect(() => {
+    spriteSheetManager.ensureSharkWindowLoaded(activeIndex, 5);
+  }, [activeIndex]);
   const isInspectedUnlocked = metaSave.unlockedSharkIds.includes(
     inspectedForm.id
   );

@@ -1,16 +1,11 @@
 import {
   FactionId,
   GAME_CONFIG,
-  OrganConfig,
-  OrganSlotId,
   OceanZoneConfig,
   PreyTierConfig,
 } from './config';
 import type { PreyMutationVariant } from './infiniteProgressionManager';
 import { getSharkFormById } from './sharkEvolutionConfig';
-
-export type EquippedOrgansMap = Partial<Record<OrganSlotId, OrganConfig>>;
-export type OrganStarsMap = Partial<Record<OrganSlotId, number>>;
 
 export interface ComputedSharkStats {
   level: number;
@@ -88,10 +83,6 @@ export function getGeneSurgeCost(
   const n = Math.max(0, useCount);
   const rowMult = 1 + Math.max(0, generationRow) * 0.25;
   return Math.round((12 + (lv - 1) * 5 + n * 10 + n * n * 6) * rowMult);
-}
-
-export function getOrganRerollCost(rerollCount: number): number {
-  return 8 + Math.max(0, rerollCount) * 4;
 }
 
 export const SHARK_BASE_DRAW_SIZE = 96;
@@ -369,146 +360,6 @@ export function computeParallaxBiomeTransitionState(
     particleShallowWeight,
     particleTwilightWeight,
     particleAbyssWeight,
-  };
-}
-
-
-
-export function computeSharkStats(
-  level: number,
-  equipped: EquippedOrgansMap,
-  frenzyActive: boolean,
-  organStars: OrganStarsMap = {},
-  globalDifficultyMultiplier: number = 1.0
-): ComputedSharkStats {
-  let speedBonus = 0;
-  let biteTierBonus = 0;
-  let hpDrainReduction = 0;
-  let boostCostReduction = 0;
-  let magnetRadiusBonus = 0;
-  let totalOrganStars = 0;
-
-  const factionCounts: Record<FactionId, number> = {
-    MECHA: 0,
-    ABYSS: 0,
-    MAGMA: 0,
-  };
-
-  const slots: OrganSlotId[] = ['JAWS', 'DORSAL', 'TAIL', 'ARMOR', 'AURA'];
-  for (const slot of slots) {
-    const organ = equipped[slot];
-    if (organ) {
-      const star = Math.max(1, organStars[slot] ?? 1);
-      totalOrganStars += star;
-      const starMult = 1 + (star - 1) * 0.25;
-      factionCounts[organ.faction] += 1;
-
-      speedBonus += organ.stats.speedBonus * starMult;
-      biteTierBonus += organ.stats.biteTierBonus;
-      hpDrainReduction += organ.stats.hpDrainReduction * starMult;
-      boostCostReduction += organ.stats.boostCostReduction * starMult;
-      magnetRadiusBonus += organ.stats.magnetRadiusBonus * starMult;
-    }
-  }
-
-  // Check 3-Piece Faction Set Synergy (>= 3 organs of the same faction)
-  let activeSynergy: FactionId | null = null;
-  let synergyMaxHpBonus = 0;
-  let synergyMaxEnergyBonus = 0;
-  let devourHealMultiplier = 1.0;
-  let frenzyDurationBonus = 0;
-
-  if (factionCounts.MECHA >= 3) {
-    activeSynergy = 'MECHA';
-    boostCostReduction += 0.15;
-    magnetRadiusBonus += 90;
-    synergyMaxEnergyBonus = 25;
-  } else if (factionCounts.ABYSS >= 3) {
-    activeSynergy = 'ABYSS';
-    hpDrainReduction += 0.12;
-    devourHealMultiplier = 1.35;
-    synergyMaxHpBonus = 25;
-  } else if (factionCounts.MAGMA >= 3) {
-    activeSynergy = 'MAGMA';
-    biteTierBonus += 1;
-    speedBonus += 0.12;
-    frenzyDurationBonus = 1.5;
-  }
-
-  // Clamp reductions so hunger pressure remains meaningful in late game (max 50% hunger drain reduction, 65% boost cost reduction)
-  hpDrainReduction = Math.min(0.5, hpDrainReduction);
-  boostCostReduction = Math.min(0.65, boostCostReduction);
-
-  // Non-obstructive shark scale (capped at 1.28x so the shark never blocks the screen)
-  // paired with progressive relative prey shrinking (1.00x -> 0.42x) to create the sensation of growing into a sea leviathan!
-  const extraStars = Math.max(0, totalOrganStars - Object.keys(equipped).length);
-  const scale = Number(
-    Math.min(
-      1.28,
-      1.0 + (level - 1) * 0.032 + Object.keys(equipped).length * 0.015 + extraStars * 0.008
-    ).toFixed(3)
-  );
-  const realBodyLengthM = Number((0.8 * (1 + (level - 1) * 0.035)).toFixed(2));
-  const relativePreyScale = Number(
-    Math.max(0.015, Math.min(1.0, 0.8 / realBodyLengthM)).toFixed(3)
-  );
-  // Subtle camera zoom out that preserves full environmental clarity and wide field of view
-  const cameraZoom = Number(Math.max(0.88, 1.0 / (1 + (scale - 1) * 0.42)).toFixed(3));
-
-  // Early levels (Lv.1~4) grant +1 Bite Tier at Lv.2 and Lv.4; after Lv.4 require 3 levels per +1 Bite Tier
-  const levelBiteBonus =
-    level <= 4 ? Math.floor(level / 2) : 2 + Math.floor((level - 4) / 3);
-  const rawBiteTier = GAME_CONFIG.world.baseBiteTier + levelBiteBonus + biteTierBonus;
-  const normalBiteTier = Math.min(8, rawBiteTier);
-  const biteTier = frenzyActive ? 8 : normalBiteTier;
-
-  const lengthGrowthFactor = Math.pow(realBodyLengthM / 0.8, 0.08);
-  const baseSpeed =
-    GAME_CONFIG.world.baseSharkSpeed * lengthGrowthFactor * (1 + (level - 1) * 0.03 + speedBonus);
-  const moveSpeed = Math.round(frenzyActive ? baseSpeed * 1.35 : baseSpeed);
-  const boostSpeed = Math.round(moveSpeed * GAME_CONFIG.world.boostSpeedMultiplier);
-
-  // Dynamic Metabolic Hunger Drain: bigger sharks & longer survival times require higher caloric intake
-  const metabolicBaseDrain =
-    (GAME_CONFIG.world.baseHpDrainPerSec + (level - 1) * 0.72) *
-    (1 + Math.max(0, globalDifficultyMultiplier - 1.0) * 0.55);
-
-  const hpDrainPerSec = frenzyActive
-    ? 0
-    : Number((metabolicBaseDrain * (1 - hpDrainReduction)).toFixed(2));
-
-  const boostDrainPerSec = frenzyActive
-    ? 0
-    : Number((GAME_CONFIG.world.baseBoostDrainPerSec * (1 - boostCostReduction)).toFixed(2));
-
-  const magnetRadius = Math.round(
-    (GAME_CONFIG.world.baseMagnetRadius + magnetRadiusBonus + (level - 1) * 10) *
-      (frenzyActive ? 1.35 : 1.0)
-  );
-
-  return {
-    level,
-    scale,
-    relativePreyScale,
-    cameraZoom,
-    maxHp: 100 + (level - 1) * 15 + synergyMaxHpBonus,
-    maxEnergy: 100 + (level - 1) * 4 + synergyMaxEnergyBonus,
-    moveSpeed,
-    boostSpeed,
-    biteTier,
-    normalBiteTier,
-    hpDrainPerSec,
-    boostDrainPerSec,
-    magnetRadius,
-    activeSynergy,
-    devourHealMultiplier,
-    frenzyDurationBonus,
-    totalOrganStars,
-    realBodyLengthM,
-    cruiseSpeedMps: Number((1.8 * (1 + speedBonus)).toFixed(2)),
-    boostSpeedMps: Number(((1.8 * (1 + speedBonus)) * 2.2).toFixed(2)),
-    viewportScale: Number(((120 * scale) / realBodyLengthM).toFixed(3)),
-    minSpawnablePreyLengthM: Number((realBodyLengthM * 0.133).toFixed(2)),
   };
 }
 
@@ -799,31 +650,20 @@ export function resolvePreyEncounter(
   const effectiveTier = getEffectivePreyTier(prey, mutationVariant);
   const tierDiff = effectiveTier - sharkStats.biteTier;
 
-  // In 48-Shark Evolution mode (sharkFormId defined):
+  // 48-Shark Evolution Encounter Tiers:
   // - tierDiff <= 0: Direct Devour (DEVOUR)
   // - 1 <= tierDiff <= 3: Boost Armor-Crush (ARMOR_CRUSH when isBoosting, NEED_BOOST when not boosting)
   // - tierDiff >= 4: Deadly Apex Predator (DEADLY_PREDATOR — unbreakable even when boosting, must evade!)
-  const is48SharkMode = Boolean(sharkStats.sharkFormId);
   const isArmorCrushBand =
     !prey.isHazard && tierDiff >= 1 && tierDiff <= 3;
 
   let predatorGate = false;
   let isArmorCrush = false;
-  if (is48SharkMode) {
-    if (tierDiff <= 0) {
-      predatorGate = true;
-    } else if (isArmorCrushBand && isBoosting) {
-      predatorGate = true;
-      isArmorCrush = true;
-    }
-  } else {
-    // Legacy organ mode (!sharkFormId) retains boss/behemoth boost armor-break requirement for unit test compatibility
-    const requiresBoostArmorBreak =
-      (mutationVariant === 'ABYSS_BEHEMOTH' && prey.tier >= 7) ||
-      Boolean(prey.isBoss);
-    predatorGate = requiresBoostArmorBreak
-      ? frenzyActive || (sharkStats.biteTier >= Math.min(8, effectiveTier) && isBoosting)
-      : sharkStats.biteTier >= effectiveTier;
+  if (tierDiff <= 0) {
+    predatorGate = true;
+  } else if (isArmorCrushBand && isBoosting) {
+    predatorGate = true;
+    isArmorCrush = true;
   }
 
   // Deep-sea hazards (Naval Mines) ALWAYS explode on contact unless Gold Frenzy is active or shark has Bio-Venom / Elder God Mine Immunity!
@@ -893,7 +733,7 @@ export function resolvePreyEncounter(
     : prey.tier >= 30 || mutationVariant === 'ABYSS_BEHEMOTH'
     ? Math.round(sharkStats.maxHp * 0.08)
     : 0;
-  const needBoostDamping = is48SharkMode && isArmorCrushBand ? 0.85 : 1.0;
+  const needBoostDamping = isArmorCrushBand ? 0.85 : 1.0;
   const rawFailDamage =
     Math.round(
       prey.damageOnFail *
@@ -909,15 +749,14 @@ export function resolvePreyEncounter(
     Math.round(rawFailDamage * armorMitigation)
   );
   const knockbackForce = Math.round(
-    (prey.isHazard ? 440 : is48SharkMode && isArmorCrushBand ? 260 : 320) *
+    (prey.isHazard ? 440 : isArmorCrushBand ? 260 : 320) *
       (sharkStats.knockbackMultiplier ?? 1.0)
   );
 
   return {
     canDevour: false,
     isArmorCrush: false,
-    encounterState:
-      is48SharkMode && isArmorCrushBand ? 'NEED_BOOST' : 'DEADLY_PREDATOR',
+    encounterState: isArmorCrushBand ? 'NEED_BOOST' : 'DEADLY_PREDATOR',
     hpDelta: -scaledFailDamage,
     xpGain: 0,
     scoreGain: 0,
@@ -926,7 +765,7 @@ export function resolvePreyEncounter(
     knockbackForce,
     floatTextKey: prey.isHazard
       ? 'float_mine_hit'
-      : is48SharkMode && isArmorCrushBand
+      : isArmorCrushBand
       ? 'float_need_boost'
       : 'float_too_big',
     isCrit: false,
@@ -963,54 +802,6 @@ export function addEvolutionProgress(
     xpToNext,
     leveledUpCount,
   };
-}
-
-export function pickEvolutionChoices(
-  equipped: EquippedOrgansMap,
-  rng: () => number = Math.random
-): OrganConfig[] {
-  const equippedIds = new Set(
-    Object.values(equipped)
-      .filter((o): o is OrganConfig => Boolean(o))
-      .map((o) => o.id)
-  );
-
-  // When fewer than 4 slots are filled, prioritize unequipped organs so player fills slots first;
-  // afterwards mix all 15 organs so player can either Star-Upgrade occupied slots (★2..★5+) or pivot Faction Synergies
-  const unequippedPool = GAME_CONFIG.organs.filter((o) => !equippedIds.has(o.id));
-  const sourcePool =
-    Object.keys(equipped).length < 4 && unequippedPool.length >= 3
-      ? [...unequippedPool]
-      : [...GAME_CONFIG.organs];
-
-  // Pick 3 organs from distinct slots for rich strategic choice
-  const picked: OrganConfig[] = [];
-  const usedSlots = new Set<OrganSlotId>();
-
-  const shuffled = [...sourcePool].sort(() => rng() - 0.5);
-  for (const organ of shuffled) {
-    if (picked.length < 3 && !usedSlots.has(organ.slot)) {
-      picked.push(organ);
-      usedSlots.add(organ.slot);
-    }
-  }
-  for (const organ of shuffled) {
-    if (picked.length < 3 && !picked.some((p) => p.id === organ.id)) {
-      picked.push(organ);
-    }
-  }
-
-  return picked.slice(0, 3);
-}
-
-export function getMaxMechaLoadout(): EquippedOrgansMap {
-  const loadout: EquippedOrgansMap = {};
-  for (const organ of GAME_CONFIG.organs) {
-    if (organ.faction === 'MECHA') {
-      loadout[organ.slot] = organ;
-    }
-  }
-  return loadout;
 }
 
 export {

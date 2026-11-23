@@ -1,6 +1,5 @@
-import { OrganConfig, PreyTierConfig } from './config';
+import { PreyTierConfig } from './config';
 import {
-  EquippedOrgansMap,
   getEffectivePreyTier,
   getPreyRelativeVisualScale,
 } from './rules';
@@ -24,7 +23,6 @@ export interface RenderSharkParams {
   frenzyTimer: number;
   hitFlashTimer: number;
   invulnerableTimer?: number;
-  equipped?: EquippedOrgansMap;
   sharkFormId?: string;
   morphFlashTimer?: number;
   /** Normalized angular turning rate in [-1, 1] for dynamic spinal C-bend & tail whip */
@@ -442,28 +440,6 @@ export function drawUndulatingSpriteFrame(
 
     def0 = def1;
   }
-}
-
-/**
- * Legacy helper kept for OrganCanvasPreview compatibility
- */
-export function drawOrganPart(
-  ctx: CanvasRenderingContext2D,
-  organ: OrganConfig,
-  swimPhase: number,
-  biteAnim: number,
-  isBoosting: boolean
-): void {
-  const frame = spriteSheetManager.getOrganFrame(organ.id);
-  if (!frame) return;
-
-  ctx.save();
-  const sway = Math.sin(swimPhase * 2) * 0.08;
-  const boostScale = isBoosting ? 1.12 : 1.0;
-  ctx.rotate(sway * 0.4 - biteAnim * 0.1);
-  ctx.scale(boostScale, boostScale);
-  drawNaturalAspectFrame(ctx, frame, 48, 0, 0);
-  ctx.restore();
 }
 
 /**

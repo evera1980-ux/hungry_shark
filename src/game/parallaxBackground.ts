@@ -125,24 +125,24 @@ export function sampleBathymetricWaterColor(depthMeters: number): WaterSpectrumS
  */
 export const OCEAN_LAYER_ASSET_PATHS = {
   shallow: {
-    water: '/assets/aistudio/bg_shallow_0_water_0e65cb68.png',
-    far: '/assets/aistudio/bg_shallow_1_far_8898229a.png',
-    mid: '/assets/aistudio/bg_shallow_2_mid_b4e0d30a.png',
-    near: '/assets/aistudio/bg_shallow_3_near_96e92ee1.png',
+    water: '/assets/aistudio/bg_shallow_0_water_0e65cb68.webp',
+    far: '/assets/aistudio/bg_shallow_0_water_0e65cb68.webp',
+    mid: '/assets/aistudio/bg_shallow_0_water_0e65cb68.webp',
+    near: '/assets/aistudio/bg_shallow_0_water_0e65cb68.webp',
   },
   twilight: {
-    water: '/assets/aistudio/bg_twilight_0_17bcb84c.png',
-    far: '/assets/aistudio/bg_twilight_1_04f5d35f.png',
-    mid: '/assets/aistudio/bg_twilight_2_fd5a1b33.png',
-    near: '/assets/aistudio/bg_twilight_3_6e0dd7c1.png',
+    water: '/assets/aistudio/bg_twilight_0_17bcb84c.webp',
+    far: '/assets/aistudio/bg_twilight_0_17bcb84c.webp',
+    mid: '/assets/aistudio/bg_twilight_0_17bcb84c.webp',
+    near: '/assets/aistudio/bg_twilight_0_17bcb84c.webp',
   },
   abyss: {
-    water: '/assets/aistudio/bg_abyss_0_1bbf506a.png',
-    far: '/assets/aistudio/bg_abyss_1_75e4a628.png',
-    mid: '/assets/aistudio/bg_abyss_2_6ce66695.png',
-    near: '/assets/aistudio/bg_abyss_3_a4986280.png',
+    water: '/assets/aistudio/bg_abyss_0_1bbf506a.webp',
+    far: '/assets/aistudio/bg_abyss_0_1bbf506a.webp',
+    mid: '/assets/aistudio/bg_abyss_0_1bbf506a.webp',
+    near: '/assets/aistudio/bg_abyss_0_1bbf506a.webp',
   },
-  ambientSprites: '/assets/aistudio/bg_ambient_sprites_0c6882ce.png',
+  ambientSprites: '/assets/aistudio/bg_ambient_sprites_0c6882ce.webp',
 } as const;
 
 export interface BiomeParallaxPlanes {

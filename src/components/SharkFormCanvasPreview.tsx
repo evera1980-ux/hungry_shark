@@ -230,10 +230,14 @@ export const SharkFormCanvasPreview: React.FC<SharkFormCanvasPreviewProps> = ({
     };
 
     renderFrame();
+    const unsubscribe = !animate
+      ? spriteSheetManager.subscribe(renderFrame)
+      : undefined;
     const timer = window.setTimeout(renderFrame, 280);
 
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
+      if (unsubscribe) unsubscribe();
       window.clearTimeout(timer);
     };
   }, [sharkId, width, height, locked, animate, heroStage]);

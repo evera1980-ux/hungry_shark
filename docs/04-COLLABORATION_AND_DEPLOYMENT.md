@@ -1,7 +1,7 @@
 # 04. 多人协同开发、自动化测试与 Vercel 部署手册 (Collaboration & Deployment)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-10-26
+> **最后更新**：2026-11-21
 > **关联约束**：修改 `package.json`、`.npmrc`、`vite.config.ts`、测试脚本或部署流程时，必须同步更新本文档（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
@@ -22,7 +22,7 @@
 | `npm run lint` | 运行 `tsc --noEmit` 全量 TypeScript 类型检查 |
 | `npm run build` | 执行生产环境打包，产物输出至 `dist/` 目录 |
 | `npm run preview` | 本地预览 `dist/` 生产构建产物 |
-| `npm run build:ios` | **纯原生 iOS 工程生成（零 WebView 套壳）**：从 TypeScript 唯一数据源同步生成 `ios-native/` 下的 Swift 5.9 + SpriteKit (Metal) + SwiftUI 完整 Xcode 工程与 22 张原生图片资源 |
+| `npm run sync:ios` / `npm run build:ios` | **跨端数据与资源同步（Shared JSON Data Contract）**：从 Web TypeScript 唯一数据源导出 `shared/game_data.json` 并同步至 `ios-native/HungrySharkEvolution/Resources/Assets/`，同步全部 PNG/JPG 资源并刷新 Xcode `project.pbxproj` / `project.yml`（**不再覆盖任何 Swift 源码**） |
 
 ---
 
@@ -88,24 +88,22 @@
 
 本项目提供 **100% 纯原生 iOS 工程（Swift 5.9 + SpriteKit Metal 硬件加速 2D 引擎 + SwiftUI 原生 HUD，零 `WKWebView`/Capacitor/Cordova 套壳）**。
 
-### 5.1 单一数据源自动同步架构 (`scripts/build-ios-native.ts`)
-每当修改了 `src/game/sharkEvolutionConfig.ts`、`src/game/config.ts`、`src/game/rules.ts`、`src/game/i18n.ts` 或 `public/assets/aistudio/*.png` 素材后，只需在项目根目录执行：
+### 5.1 跨平台共享 JSON 数据契约与独立 Swift 源码架构 (`src/game/sharedGameData.ts` + `scripts/build-ios-native.ts`)
+从 2026-11-21（P2-2）起，项目彻底淘汰了用 12,422 行 TypeScript 模板字符串拼接 Swift 源码的旧方案，改为 **Shared JSON Data Contract + 独立原生 Xcode 源码库**：
+每当修改了 `src/game/sharkEvolutionConfig.ts`、`src/game/config.ts`、`src/game/preyDatabase140.ts`、`src/game/i18n.ts`、`src/game/adManager.ts` 或 `public/assets/` 资源后，只需在项目根目录执行：
 ```bash
-npm run build:ios
+npm run sync:ios   # 或兼容别名 npm run build:ios
 ```
-该脚本会自动完成以下工作：
-1. 将 48 阶鲨鱼完整属性矩阵、四重血统元数据 (`LINEAGE_META`)、33 种海洋猎物配置、中英双语词典 (`I18N.zh` / `I18N.en`) 及所有 UI 精灵图归一化裁切坐标编译生成至 `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift`。
-2. 同步生成纯原生核心模块：
-   - `Core/GameRules.swift`：100% 对齐 `src/game/rules.ts` 与 `src/game/sharkEvolutionConfig.ts` 的经验曲线、48 阶躯体成长、三重解锁条件校验 `evaluateSharkUnlock`、单鲨三阶皇冠积分专精 `settleSharkScoreMastery`、全局图谱收集加成 `getGlobalAtlasBonuses`、猎物严格体型契约 `getPreyRelativeVisualScale`、远中近景光学视差缩小 `getParallaxLayerGrowthScales`、碰撞破甲判定 `resolvePreyEncounter` 及 `UserDefaults` 跨局存档。
-   - `Rendering/SpriteAtlasManager.swift`：基于 `CoreGraphics` (`CGContext`) 的离屏像素级处理器，完整复刻 Web 端 `spriteSheetManager.ts` 的五大图集切分管线：
-     - `sharks_ec921c3b.png`（4K 48 阶鲨鱼）与 `fish_24bdaa5a.png` / `fish2_fc857cfa.png`（32 种猎物）：四边 BFS 去白底 + 边缘 `Color-to-Alpha` 解混。
-     - `icons_f5128c12.png`（6×4 局内图标、声呐摇杆底座 `UI_JOYSTICK_BASE` + 中心镂空种子、摇杆核心 `UI_JOYSTICK_KNOB`、冲刺/狂暴/突破/强化/进化圆形技能章）：自动紧致包围盒归一化为 `128×128` 高清图标。
-     - `buttons_16e3a0cf.png`（左上角金属斜切头像状态栏 `UI_PLATE_AVATAR_BAR` + 中心圆窗镂空种子与动态孔位度量 `avatarBarHollowMetrics`，以及首页底部绿/蓝/金三色横幅按钮 `UI_BAR_BTN_GREEN` / `UI_BAR_BTN_BLUE` / `UI_BAR_BTN_GOLD`）。
-     - `setting_83a7a273.png`（暂停/结算科幻金属弹窗外框 `SETTING_MODAL_FRAME` + 净版顶章 `SETTING_MODAL_FRAME_CLEAN`、三宫格水平拉宽至 `6.05:1` 的鲨鱼摘要横幅卡 `SETTING_SHARK_CARD`、以及提取左侧发光图标并水平扫描线修补底纹的八角形按钮 `SETTING_BTN_*`）。
-   - `Rendering/OceanGameScene.swift`：基于 Apple Metal 驱动的 `SKScene`（支持 iPhone ProMotion 120Hz），包含中英双语实时切换 (`vm.toggleLanguage()`)、3 步交互式新手引导 (`EAT_SMALL_FISH` / `HOLD_BOOST` / `HANDS_ON_UPGRADE`)、悬赏猎物追踪、黄金变异充能、3 秒模拟激励视频广告 (`SimRewardedAdState`)、10 列 `SKWarpGeometryGrid` 脊椎摆动、5 层海底视差背景随鲨鱼体型联动缩小与触觉音效反馈。
-   - `UI/ContentView.swift`：100% 复刻原版 UI 素材的纯 SwiftUI 视图层（包含 `UiAvatarDataBarView`、`UiBannerButtonView`、`UiSettingModalFrameView`、`UiSettingSharkCardView`、`UiSettingButtonView`、原版素材声呐摇杆、90° MOBA 技能轮盘、暂停/复活/战利品结算弹窗，以及带 **7 槽位半圆弧形罗盘拨盘 (`ARC_OFFSETS = [-3..3]`)** 与去框化指令台的 48 阶进化图谱全屏弹窗 `EvolutionAtlasSheetView`）。
-3. 将 `public/assets/aistudio/` 下的全部 22 张高清 PNG 资源同步拷贝至 `ios-native/HungrySharkEvolution/Resources/Assets/`。
-4. 生成可直接双击打开的 `ios-native/HungrySharkEvolution.xcodeproj/project.pbxproj`、`ios-native/project.yml`（支持 XcodeGen）与 `ios-native/Package.swift`。
+该脚本仅负责**数据、资源与工程配置同步（绝不覆盖任何 `.swift` 源码或 `Info.plist`）**：
+1. 调用 `src/game/sharedGameData.ts` 的纯函数 `buildSharedGameData()`，将 48 阶鲨鱼矩阵、四重血统元数据、135 项海洋猎物配置、UI 图集裁切坐标、中英双语词典及广告配置导出为标准 JSON 契约 `shared/game_data.json`，并同步拷贝至 `ios-native/HungrySharkEvolution/Resources/Assets/game_data.json`。
+2. 原生 Swift 模块均为独立可直接在 Xcode 中编辑与调试的一等公民源码（`npm run sync:ios` 永不覆写）：
+   - `Generated/GameConfigGenerated.swift`（~255 行）：轻量化 `JSONDecoder` 数据加载器，启动时一次性解码捆绑的 `game_data.json`，对外 100% 保持原有 `GameConfigGenerated.*` 静态 API 契约。
+   - `Core/GameRules.swift`：纯原生游戏数值、进化门禁、9 层海床地形与双向防穿透物理碰撞模块。
+   - `Rendering/SpriteAtlasManager.swift`：基于 `CoreGraphics` 的离屏像素级图集与 `@3x` 独立透明 PNG 纹理管理器。
+   - `Rendering/OceanGameScene.swift`：基于 Apple Metal 驱动的 `SKScene`（60/120fps）。
+   - `UI/ContentView.swift`：纯 SwiftUI 视图层、声呐摇杆、90° 技能轮盘与 48 阶进化图谱转轮。
+3. 将 `public/assets/{aistudio,sharks_3x,prey_140}` 下的 PNG/JPG 资源与 `Assets.xcassets` 启动目录增量同步至 `ios-native/HungrySharkEvolution/Resources/Assets/`。
+4. 自动扫描 `ios-native/HungrySharkEvolution/` 下全部 `.swift` 文件（含开发者在 Xcode 中新增的 Swift 文件）及全部 `.png/.jpg/.json` 资源，刷新 `project.yml`、`Package.swift` 与通过 OpenStep Plist 校验的 `project.pbxproj`。
 
 ### 5.2 在 macOS Xcode 中运行与真机打包步骤
 1. 在 macOS 上直接打开 Xcode 工程：
@@ -130,4 +128,5 @@ npm run build:ios
 | 2026-11-14 | **新增 `npm run build:ecology`（`scripts/build-ecology-sprites.ts`）4 张独立写实透明背景 `@3x`（`2048×2048` 216 DPI）海床生态 PNG 生成管线**：将 `world_ecology_atlas_1794473252524.jpg` 替换为 4 张独立的 `2048×2048`（`@3x` 216 DPI）写实透明背景 PNG（`ecology_coral_reef_cluster.png`、`ecology_rocky_outcrop.png`、`ecology_kelp_forest_cluster.png`、`ecology_abyssal_vent_debris.png`），无需 4×4 网格切图即可在 Web 与 iOS 原生工程中直接加载 | `package.json`, `scripts/build-ecology-sprites.ts`, `src/game/worldGenerationSystem.ts`, `scripts/build-ios-native.ts`, `docs/04-COLLABORATION_AND_DEPLOYMENT.md` |
 | 2026-11-14 | **新增 `npm run build:seabed`（`scripts/build-seabed-strips.ts`）4 张独立写实透明背景高分辨率海床 PNG 生成管线**：将 `world_seabed_strips_1794473245165.jpg` 替换为 4 张独立的 `2048×1152`（`@3x` 216 DPI）写实透明背景 PNG（`seabed_strip_coral_reef.png`、`seabed_strip_rocky_shelf.png`、`seabed_strip_underwater_canyon.png`、`seabed_strip_deep_abyss.png`），无需切图即可在 Web 与 iOS 原生工程中直接加载 | `package.json`, `scripts/build-seabed-strips.ts`, `src/game/worldGenerationSystem.ts`, `scripts/build-ios-native.ts`, `docs/04-COLLABORATION_AND_DEPLOYMENT.md` |
 | 2026-11-14 | **iOS 原生 Xcode 工程 1:1 同步 1.0x 物理海床、多层地下岩层、向下弧形洞口、9 层非均匀间距海床阶梯与双向防穿透物理碰撞**：① 在 `scripts/build-ios-native.ts` 中同步生成 `GameRules.swift` 的 9 层海床阶梯配置 `seabedTerraceTiers`（`414m` ~ `16,900m` 间距随深度递增）、`getFloorDepthAt`、`getSeabedTerraceAt`、`getSeabedOutcropsForChunk` 与双向子步进物理碰撞 `resolveSeabedCollision` / `resolveSeabedKineticStep`；② 在 `SpriteAtlasManager.swift` 中新增 `.jpg` 图集加载与切分管线（`world_seabed_strips_1794473245165.jpg` 表层海床与地下基岩层 `sliceSeabedSubStratum`、`world_ecology_atlas_1794473252524.jpg` 16 种珊瑚/海草/热液喷口、`world_pois_atlas_1794473250443.jpg` 10 种海底遗迹地标、以及 140 种 `@3x` 猎物独立透明 PNG 优先直载）；③ 在 `OceanGameScene.swift` 中使用 `SKWarpGeometryGrid` 实时渲染 1.0x 世界空间连续海床、地下岩层、向下弧形洞口与复合珊瑚群落，并在 `npm run build:ios` 中自动拷贝全部 `.png` 与 `.jpg` 资源至 `ios-native/HungrySharkEvolution/Resources/Assets/` | `scripts/build-ios-native.ts`, `ios-native/`, `docs/04-COLLABORATION_AND_DEPLOYMENT.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
+| 2026-11-21 | **P2-2 跨端同步架构升级为 Shared JSON Data Contract（`npm run sync:ios`）**：移除 `scripts/build-ios-native.ts` 中 12,000 行 TS 字符串拼接 Swift 源码模板（瘦身至 ~440 行），新增 `src/game/sharedGameData.ts` 导出 `shared/game_data.json` 并注册至 Xcode `project.pbxproj`；`GameConfigGenerated.swift` 重构为 ~255 行 `JSONDecoder` 轻量加载器；`ios-native/` 下所有 `.swift` 文件正式转为独立源码维护且永不被同步脚本覆写 | `src/game/sharedGameData.ts`, `shared/game_data.json`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift`, `ios-native/project.yml`, `package.json`, `src/game/rules.test.ts` |
 

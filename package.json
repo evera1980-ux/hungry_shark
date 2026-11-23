@@ -13,7 +13,9 @@
     "redraw:sharks:nanobanana": "tsx scripts/build-sharks-3x.ts --nanobanana",
     "build:seabed": "tsx scripts/build-seabed-strips.ts",
     "build:ecology": "tsx scripts/build-ecology-sprites.ts",
-    "build:ios": "tsx scripts/build-ios-native.ts"
+    "optimize:assets": "tsx scripts/optimize-web-assets.ts",
+    "build:ios": "tsx scripts/build-ios-native.ts",
+    "sync:ios": "tsx scripts/build-ios-native.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

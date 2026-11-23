@@ -1,7 +1,7 @@
 # 01. 项目系统架构与模块说明书 (System Architecture)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-16
+> **最后更新**：2026-11-22
 > **关联约束**：修改任何模块划分、文件职责、主循环状态或存档 Schema 时，必须同步更新本文档（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
@@ -54,24 +54,50 @@
 │   ├── 03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md# 核心数值策划案（Lv/T 计算、48阶进化、鱼类体型与深度）
 │   ├── 04-COLLABORATION_AND_DEPLOYMENT.md     # 多人协同、测试与 Vercel 部署手册
 │   ├── 05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md # 移动端与跨平台原生移植避坑指南
-│   └── 06-PREY_DATABASE_140.md                # 140 种统一猎物数据库与 @3x 资产生成与实装看板
+│   ├── 06-PREY_DATABASE_140.md                # 140 种统一猎物数据库与 @3x 资产生成与实装看板
+│   └── 07-REVIEW_AND_ACTION_PLAN.md           # 双视角深度 Review 与可追踪 P0/P1/P2 整改计划
 └── src/
     ├── main.tsx                               # React 挂载入口
     ├── index.css                              # 全局字体、Tailwind v4 导入与自定义样式工具类
-    ├── App.tsx                                # 顶层游戏容器、60FPS 物理仿真循环、无框图标化 HUD 与多指交互控制器
+    ├── App.tsx                                # React 薄层编排容器（1,607 行：状态机、跨局存档/经济/广告事件处理、多指输入绑定与 5 个覆盖层组合，已抽离 60FPS 引擎）
     ├── components/
     │   ├── UiAtlasIcon.tsx                    # UI 图集渲染组件（UiAtlasIcon / UiAvatarDataBar / UiBannerButton / UiSettingModalFrame / UiSettingSharkCard / UiSettingButton）
-    │   └── SharkEvolutionAtlasModal.tsx       # 48 阶鲨鱼图谱弹窗（支持血统筛选、本体升级与新形态解锁）
+    │   ├── SharkEvolutionAtlasModal.tsx       # 48 阶鲨鱼图谱弹窗（支持血统筛选、本体升级与新形态解锁）
+    │   ├── GoogleRewardedVideoAdOverlay.tsx   # 模拟激励视频广告覆盖层
+    │   └── game/                              # 拆离自 App.tsx 的 5 个轻量声明式 UI 覆盖层组件
+    │       ├── DebugPanelOverlay.tsx          # 调试调参面板（同屏猎物上限、体型倍率、Chunk 网格开关）
+    │       ├── TitleScreenOverlay.tsx         # 标题界面（Logo + 开始猎杀 / 图谱 / 试驾三键）
+    │       ├── InGameHudOverlay.tsx           # 局内无框 HUD（头像条、经济深度悬赏栏、虚拟摇杆、MOBA 技能扇区，严格保留多指零重渲染不变量）
+    │       ├── PauseModalOverlay.tsx          # 暂停/设置弹窗（中英切换、静音、重温教程、重开、主菜单）
+    │       └── GameOverModalOverlay.tsx       # 结算与原地满血复活弹窗
     └── game/
         ├── preyDatabase140.ts                 # 134 种现役海洋生物元数据（已剔除海牛/儒艮/海象/海狮等 6 种非鱼形态哺乳类）、双语词典、游泳步态分类集合与真实水深+体型深海映射生成器（+ cyber_mine 共 135 项）
         ├── config.ts                          # 静态世界常量、3 大深度带、接入 buildPrey140TiersWithMines() 的 135 项生态配置
         ├── sharkEvolutionConfig.ts            # 48 阶鲨鱼进化矩阵、四重血统、三重解锁门禁、跨局存档读写
         ├── rules.ts                           # 纯函数核心规则（Lv/T 属性合成、猎物相对体型缩放、碰撞判定）
-        ├── rules.test.ts                      # 核心纯函数单元测试套件（41 项核心断言）
+        ├── rules.test.ts                      # 核心纯函数与跨端数据契约单元测试套件（46 项核心断言）
+        ├── sharedGameData.ts                  # 跨平台共享数据契约构建器（导出 shared/game_data.json 供 iOS Swift 原生直读）
+        ├── sim/                               # 拆离自 App.tsx 的纯 TypeScript 60FPS 仿真与渲染引擎层（零 React 依赖）
+        │   ├── types.ts                       # 仿真状态/HUD 快照/宿主桥接接口、零 GC 环形对象池操作与悬赏/猎物生成工具
+        │   ├── SharkGameEngine.ts             # 独立 60FPS 引擎类（管理 rAF 调度、DPR 画布尺寸同步、定步长 dt 限幅）
+        │   ├── stepSimulation.ts              # 60FPS 物理步进、2.5D 脊柱转向、海床碰撞、猎物 AI、吞噬结算与 120ms 节流 HUD 同步
+        │   └── renderOceanWorld.ts            # 完整海洋世界帧渲染管线（五层视差、实体海床、激活 Chunk、猎物、鲨鱼、粒子、雷达与准星）
+        ├── worldGenerationSystem.ts           # 15 行向后兼容 Barrel 出口（聚合转发 src/game/world/* 全部公开符号）
+        ├── world/                             # 拆离自原 11,285 行 worldGenerationSystem.ts 的 11 个无环职责子模块
+        │   ├── worldCore.ts                   # WorldConfig 校验、坐标系换算、2D Chunk 索引与 WorldSeedService 隔离随机流
+        │   ├── terrainSystem.ts               # 全局连续海床深度/斜率、9 级阶梯海床、珊瑚环礁露头与双向防穿透物理碰撞
+        │   ├── biomeSystem.ts                 # 宏观生态区 O(1) 闭式选择、C2 混合权重、五层水深带与深度视觉 Profile
+        │   ├── ecologyAndPoi.ts               # 15 类生态配置、5 类 POI 唯一归属与 11 步确定性 Chunk 生成管线
+        │   ├── chunkStateAndPersistence.ts    # 6 态生命周期迁移、对象池、视口预加载窗口、5 级降级控制器与增量存档
+        │   ├── worldAssetRegistry.ts          # 海床/POI/生态图集加载、BFS 抠图、无缝海床条带与缺省占位回退
+        │   ├── seabedRenderer.ts              # 1.0x 物理海床与 9 级阶梯海床 Catmull-Rom 细分与多层基岩渲染（try/finally 栈保护）
+        │   ├── worldRenderer.ts               # 激活态 Chunk POI、4 层复合珊瑚礁群落与底栖生态装饰绘制
+        │   ├── chunkLifecycleManager.ts       # 2ms 帧预算异步 Chunk 生成队列与防过期激活管理器
+        │   ├── worldDebug.ts                  # 可选调试网格与遥测叠层（独立叶节点模块，保持 DAG 无环）
+        │   └── proceduralWorldSystem.ts       # L0~L3 高层编排类（WorldGenerator / BiomeManager / ProceduralOceanWorldSystem 等）
         ├── spriteSheetManager.ts              # 8×6 鲨鱼精灵图 + 猎物 @3x 独立 PNG 按需/分批裁剪缓存 + UI 图集加载与离屏缓存
         ├── canvasRenderer.ts                  # 鲨鱼多段脊柱游动渲染、134 种现役猎物五步态骨骼渲染、状态指示环与定制图标头标
-        ├── parallaxBackground.ts              # 13 张 AI 分层美术背景离屏 BFS 抠图/余弦无缝拼接与五层真视差海洋环境引擎
-        ├── worldGenerationSystem.ts           # 八模块程序化海底世界生成系统（WorldGenerator / BiomeManager / TerrainGenerator / StructureGenerator / EcologyGenerator / ChunkManager / DecorationRenderer / WorldStateManager）
+        ├── parallaxBackground.ts              # 连续水深光谱与视差氛围海洋环境引擎
         ├── infiniteWorldManager.ts            # 无限水平环形世界与动态深海垂直下潜边界控制器
         ├── ecosystemSpawner.ts                # 85% 原生深度带 + Poisson Disk 群落聚集生态刷新器、浅滩新手安全区与咬合阶位感知刷新
         ├── infiniteProgressionManager.ts      # 无限局内难度递增、深渊变异词缀与狂暴叠层控制器
@@ -79,6 +105,9 @@
         ├── adManager.ts                       # 模拟激励视频广告管理器（复活狂暴、空投补给、试驾机甲利维坦）
         ├── singleFileExporter.ts              # 离线单文件 HTML 导出生成器
         └── i18n.ts                            # 中英双语词典与格式化工具
+├── shared/
+│   └── game_data.json                         # Web TS 唯一数据源导出的跨端 JSON 契约（48鲨鱼/135猎物/UI坐标/双语词典/广告配置）
+└── ios-native/                                # 独立维护的纯原生 Swift 5.9 + SpriteKit/Metal + SwiftUI Xcode 工程（直读 game_data.json）
 ```
 
 ---
@@ -91,8 +120,8 @@
 - **零副作用、零 DOM 依赖**：所有属性计算（`computeEvolvedSharkStats`）、猎物视觉体型缩放（`getPreyRelativeVisualScale`）、碰撞吞噬/破甲/反伤判定（`resolvePreyEncounter`）、解锁校验（`evaluateSharkUnlock`）均为纯函数。
 - **100% 可单测**：不启动浏览器即可通过 `npx tsx --test src/game/rules.test.ts` 在毫秒级验证全部数值与判定不变量。
 
-### 3.2 第二层：60FPS 零 GC 高频物理与 Canvas 仿真层 (`simRef.current`)
-- 所有每帧变化的游戏实体全部存储在 `useRef`（`simRef.current`）中，**绝不放入 React `useState`**：
+### 3.2 第二层：独立纯 TS 60FPS 零 GC 仿真与渲染引擎 (`src/game/sim/SharkGameEngine.ts` + `simRef.current`)
+- 60FPS 物理步进（`src/game/sim/stepSimulation.ts`）与 Canvas 渲染（`src/game/sim/renderOceanWorld.ts`）已彻底从 `App.tsx` 中剥离为纯 TypeScript 引擎 `SharkGameEngine`，零 React 依赖，由 `App.tsx` 通过 `SimEngineHost` 桥接传入 `simRef` 与节流 HUD setter：
   - `shark`：玩家鲨鱼坐标、速度、角度、转向角速度 `turnRate`、水平朝向与 2.5D 透视翻转系数（`facingDir` / `facingScaleX`）、生命值、饥饿延迟黄条 `ghostHp`、冲刺能量、局内等级 `level`、经验 `xp`、当前形态 `sharkFormId` 及合成属性 `stats`。
   - `preyList`：当前活跃的海洋猎物与深水雷列表。
   - `particles`（容量 160）、`pickups`（容量 80）、`floatTexts`（容量 36）：**预分配环形对象池（Ring-Buffer Object Pools）**，通过游标（`particleCursor` / `pickupCursor` / `floatCursor`）循环覆写，`requestAnimationFrame` 期间零内存分配、零 GC 卡顿。
@@ -150,6 +179,9 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-22 | **P1-3 拆分两大上帝文件（`worldGenerationSystem.ts` + `App.tsx`）并同步文档体系 + 修复浅海海床 Canvas `ctx.save()` 栈泄漏**：① 将原 11,285 行 `src/game/worldGenerationSystem.ts` 按职责拆分为 `src/game/world/` 下 11 个严格无环子模块（`worldCore` / `terrainSystem` / `biomeSystem` / `ecologyAndPoi` / `chunkStateAndPersistence` / `worldAssetRegistry` / `seabedRenderer` / `worldRenderer` / `chunkLifecycleManager` / `worldDebug` / `proceduralWorldSystem`），原入口瘦身为 15 行向后兼容 Barrel；② 将原 5,448 行 `src/App.tsx` 拆分为 4 个纯 TS 60FPS 引擎模块（`src/game/sim/{types,SharkGameEngine,stepSimulation,renderOceanWorld}.ts`）与 5 个薄层 React UI 覆盖层（`src/components/game/{DebugPanel,TitleScreen,InGameHud,PauseModal,GameOverModal}Overlay.tsx`），`App.tsx` 瘦身至 1,607 行；③ 实测浏览器验收捕获并修复 `seabedRenderer.ts` 在浅海提前 `return` 及函数尾部遗漏外层 `ctx.restore()` 导致相机矩阵逐帧累乘的渲染缺陷，补充 `try/finally` 栈守恒与 `renderOceanWorld.ts` 每帧 `setTransform` 归零保护；④ 全面刷新 `AGENTS.md`、`docs/00`、`docs/01`、`docs/07` 消除过期规范漂移 | `src/game/worldGenerationSystem.ts`, `src/game/world/*.ts`, `src/game/sim/*.ts`, `src/components/game/*.tsx`, `src/App.tsx`, `AGENTS.md`, `docs/00-AI_CONSTRAINTS.md`, `docs/01-ARCHITECTURE.md`, `docs/07-REVIEW_AND_ACTION_PLAN.md` |
+| 2026-11-21 | **P2-2 跨端同步架构解耦（共享 JSON 数据契约替代 12,422 行 TS 字符串拼 Swift）**：① 新增 `src/game/sharedGameData.ts` 纯函数构建器，导出 `shared/game_data.json`（含 48 阶鲨鱼、135 项猎物、4 血统元数据、UI 切片坐标、261 条双语词典、世界常量与广告配置）；② 将 `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift` 由 6,489 行生成字面量重构为 ~255 行 `JSONDecoder` 轻量加载器，100% 保持原公开 Swift API 不变；③ 将 `scripts/build-ios-native.ts` 从 12,423 行瘦身至 ~440 行，仅负责导出 JSON、同步资源与刷新 `project.pbxproj`（动态扫描 `.swift` 并注册 `game_data.json`），**永不覆盖原生 Swift 源码**；④ `rules.test.ts` 新增跨端 JSON 契约一致性单测 | `src/game/sharedGameData.ts`, `shared/game_data.json`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift`, `ios-native/HungrySharkEvolution.xcodeproj/project.pbxproj`, `ios-native/project.yml`, `package.json`, `src/game/rules.test.ts` |
+| 2026-11-21 | **P0-1 死代码与遗留器官系统大扫除（恢复 `tsc --noEmit` 0 Error 绿灯）**：① 删除半途回滚残留的 6 个孤儿文件（`useSharkSimulation.ts` 与 `InGameHud/GameOverModal/TitleScreen/PauseModal/DebugPanel.tsx`，共 5,583 行）；② 彻底移除早期外挂器官系统遗留文件（`OrganCanvasPreview.tsx`、`src/game/legacy/organSystem.ts`）以及 `config.ts`、`rules.ts`、`canvasRenderer.ts`、`spriteSheetManager.ts`、`i18n.ts` 中的死代码与冗余分支，并将 `rules.test.ts` 对应断言全部迁移至现役 48 阶本体进化公式 `computeEvolvedSharkStats()` | `src/game/config.ts`, `src/game/rules.ts`, `src/game/canvasRenderer.ts`, `src/game/spriteSheetManager.ts`, `src/game/i18n.ts`, `src/game/rules.test.ts`, `docs/01-ARCHITECTURE.md`, `docs/07-REVIEW_AND_ACTION_PLAN.md` |
 | 2026-11-16 | **修复「免费满血复活」广告结束后回到出生地 Bug，双端严格实现原地满血复活**：① iOS `OceanGameScene.update` 移除 `lastTrackedGameState == "gameover"` 时的 `sharkY = max(145, min(260, sharkY))` 与 `cameraY = sharkY` 强行钳回出生浅水深度逻辑（仅保留 `"title"` -> `"playing"` 与 `startedNewRunThisFrame` 重开归位），并在原地复活时保持死亡瞬间 `(sharkX, sharkY, cameraX, cameraY)` 不变、速度归零并赋予 `2.5s` 护盾；② iOS `GoogleAdMobManager` 改为在广告关闭（`adDidDismissFullScreenContent`）且获得奖励后统一兑现复活（避免广告未关时后台提前倒计时），`GameViewModel` 同步 `reviveUsedInCurrentRun` 单局 1 次上限与 `recomputeCurrentSharkStats()` 全属性狂暴刷新；③ Web `App.tsx` `handleReviveWithFrenzyAd` 同步清空输入缓冲、归零残余速度、授予 `2.5s` 保护无敌并立即同步 HUD | `src/App.tsx`, `scripts/build-ios-native.ts`, `ios-native/`, `docs/01-ARCHITECTURE.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-16 | **剔除海狮/海象/海牛/儒艮等非鱼形态哺乳类并修正 `PREY-203` 灰鲸与 `PREY-110` 蝠鲼朝向与游动方向**：① 从 `RAW_PREY_140_TUPLES`、`PREY_140_RIGID_IDS` 及 iOS 打包资源过滤中移除 `PREY-122` 海牛、`PREY-123` 儒艮、`PREY-124` 海象、`PREY-125` 北海狮、`PREY-126` 南美海狮与 `PREY-209` 北极海象（保留海龟与鲸豚，现役生态配置调整为 **134 种海洋生物 + `cyber_mine` = 135 项**）；② 水平镜像 `src/assets/images/prey_203_graywhale_1794661665632.jpg` 与 `src/assets/images/prey_110_mantaray_1794661504599.jpg` 并重切 `PREY-203.png` / `PREY-203@3x.png` 与 `PREY-110.png` / `PREY-110@3x.png`，使灰鲸与蝠鲼均严格面朝右侧、尾鳍朝左，与 Web/iOS 脊柱正弦摆尾方向（`u=0` 头部稳态、`u=1` 尾部推进）完全一致 | `src/game/preyDatabase140.ts`, `src/assets/images/prey_203_graywhale_1794661665632.jpg`, `src/assets/images/prey_110_mantaray_1794661504599.jpg`, `public/assets/prey_140/PREY-203@3x.png`, `public/assets/prey_140/PREY-110@3x.png`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts` |
 | 2026-11-15 | **新增 `src/game/preyDatabase140.ts` 并将双端生态体系切换为 140 种新猎物（`PREY-001..210`）+ `cyber_mine`**：① 建立 `PREY_140_RECORDS` 与 `buildPrey140TiersWithMines()` 替换 `config.ts` 旧 33 项配置并同步 `i18n.ts`；② `spriteSheetManager.ts` 增加 `prey140Frames` 分批/按需透明 `@3x.png` 加载器（限宽 420px + 紧凑非透明裁切）；③ `canvasRenderer.ts` 与 `ecosystemSpawner.ts` / `App.tsx` 全面切换至 140 种生物步态（新增 `SHARK_APEX`）、`0~20000m` 五段阶位权重与 `<=515m` 浅海伴游深度钳制；④ 同步 `scripts/build-ios-native.ts` 并通过 41/41 单元测试 | `src/game/preyDatabase140.ts`, `src/game/config.ts`, `src/game/i18n.ts`, `src/game/spriteSheetManager.ts`, `src/game/canvasRenderer.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `src/game/rules.test.ts` |
