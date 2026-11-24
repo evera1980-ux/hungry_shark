@@ -244,6 +244,7 @@ public struct ContentView: View {
         if !atlasManager.isReady {
             StartupLoadingView(vm: vm, atlasManager: atlasManager)
                 .zIndex(200)
+                .allowsHitTesting(!atlasManager.isReady)
                 .transition(.opacity)
         }
     }
@@ -258,17 +259,17 @@ public struct ContentView: View {
     ) -> some View {
         let showcase = vm.nextShowcaseSharkForm
         let showcaseName = vm.lang == "zh" ? showcase.nameZh : showcase.nameEn
-        let screenBounds = UIScreen.main.bounds.size
-        let fullW = max(geo.size.width, screenBounds.width)
-        let fullH = max(geo.size.height, screenBounds.height)
+        let fullW = max(320.0, geo.size.width)
+        let fullH = max(240.0, geo.size.height)
         // Exact 1323x371 (3.566:1) aspect ratio box so SwiftUI never adds vertical centering dead space above the title
         let titleAspect: CGFloat = 1323.0 / 371.0
-        let maxTitleH = fullH * 0.36
-        let targetTitleW = min(760.0, min(fullW * 0.74, maxTitleH * titleAspect))
+        let maxTitleH = fullH * 0.35
+        let targetTitleW = min(720.0, min(fullW * 0.72, maxTitleH * titleAspect))
         let targetTitleH = targetTitleW / titleAspect
-        let usableBtnSpan = max(520.0, fullW - hudLead - hudTrail - 24.0)
-        let btnW = min(264.0, max(168.0, usableBtnSpan / 3.0))
-        let btnH = max(50.0, min(68.0, btnW / 3.65))
+        let usableBtnSpan = max(420.0, fullW - hudLead - hudTrail - 24.0)
+        // Compact Web-parity 3-button dock sizing (~168x55pt on iPhone 14 Pro Max instead of oversized 264x68pt)
+        let btnW = min(168.0, max(136.0, usableBtnSpan / 4.6))
+        let btnH = (max(44.0, min(55.0, btnW / 3.05))).rounded()
 
         return ZStack {
             // Matching radial vignette from Web preview so white brush title pops against shallow water
@@ -290,9 +291,11 @@ public struct ContentView: View {
                     Image(uiImage: titleImg)
                         .resizable()
                         .interpolation(.high)
+                        .scaledToFit()
                         .frame(width: targetTitleW, height: targetTitleH, alignment: .top)
                         .shadow(color: .black.opacity(0.9), radius: 16, x: 0, y: 6)
                         .padding(.top, max(2.0, hudTop - 4.0))
+                        .allowsHitTesting(false)
                 } else {
                     Text(vm.t("game_title"))
                         .font(.system(size: min(40, max(26, geo.size.width * 0.05)), weight: .black))
@@ -305,70 +308,71 @@ public struct ContentView: View {
                         )
                         .shadow(color: .black.opacity(0.85), radius: 8, x: 0, y: 3)
                         .padding(.top, max(6.0, hudTop))
+                        .allowsHitTesting(false)
                 }
 
                 Spacer(minLength: 0)
 
-            // Bottom 3 Sliced Banner Buttons (UI_BAR_BTN_GREEN, UI_BAR_BTN_BLUE, UI_BAR_BTN_GOLD)
-            HStack(spacing: 12) {
-                // 1. Primary Green Start Button
-                UiBannerButtonView(
-                    bannerKey: "UI_BAR_BTN_GREEN",
-                    title: vm.t("btn_start"),
-                    subtitle: vm.lang == "zh" ? "立即潜入深海" : "START HUNTING",
-                    width: btnW,
-                    height: btnH,
-                    leftContent: {
-                        Text("▶")
-                            .font(.system(size: btnH * 0.36, weight: .black))
-                            .foregroundColor(.white)
-                    },
-                    action: {
-                        vm.startNewRun()
-                    }
-                )
+                // Bottom 3 Sliced Banner Buttons (UI_BAR_BTN_GREEN, UI_BAR_BTN_BLUE, UI_BAR_BTN_GOLD)
+                HStack(spacing: 14) {
+                    // 1. Primary Green Start Button
+                    UiBannerButtonView(
+                        bannerKey: "UI_BAR_BTN_GREEN",
+                        title: vm.t("btn_start"),
+                        subtitle: vm.lang == "zh" ? "立即潜入深海" : "START HUNTING",
+                        width: btnW,
+                        height: btnH,
+                        leftContent: {
+                            Text("▶")
+                                .font(.system(size: btnH * 0.34, weight: .black))
+                                .foregroundColor(.white)
+                        },
+                        action: {
+                            vm.startNewRun()
+                        }
+                    )
 
-                // 2. Blue Evolution Atlas Button
-                let evoReady = GameRules.getNextEvolutionTarget(save: vm.save)?.check.canUnlockNow ?? false
-                UiBannerButtonView(
-                    bannerKey: "UI_BAR_BTN_BLUE",
-                    title: vm.lang == "zh"
-                        ? "进化 (\(vm.save.unlockedSharkIds.count)/48)"
-                        : "EVOLVE (\(vm.save.unlockedSharkIds.count)/48)",
-                    subtitle: evoReady
-                        ? (vm.lang == "zh" ? "✨ 可立即破茧进化！" : "✨ READY TO EVOLVE!")
-                        : (vm.lang == "zh" ? "48阶图谱 · 点击打开" : "48-SHARK ATLAS"),
-                    badgeText: "🪙\(vm.save.bankedCoins) · 🧬\(vm.save.bankedGenes)",
-                    width: btnW,
-                    height: btnH,
-                    leftContent: {
-                        SharkPreviewView(form: vm.activeSharkForm, width: btnH * 0.54, height: btnH * 0.38)
-                    },
-                    action: {
-                        vm.playUiTick()
-                        vm.showEvolutionAtlas = true
-                    }
-                )
+                    // 2. Blue Evolution Atlas Button
+                    let evoReady = GameRules.getNextEvolutionTarget(save: vm.save)?.check.canUnlockNow ?? false
+                    UiBannerButtonView(
+                        bannerKey: "UI_BAR_BTN_BLUE",
+                        title: vm.lang == "zh"
+                            ? "进化 (\(vm.save.unlockedSharkIds.count)/48)"
+                            : "EVOLVE (\(vm.save.unlockedSharkIds.count)/48)",
+                        subtitle: evoReady
+                            ? (vm.lang == "zh" ? "✨ 可立即破茧进化" : "✨ READY TO EVOLVE")
+                            : (vm.lang == "zh" ? "48阶图谱" : "48-SHARK ATLAS"),
+                        badgeText: "🪙\(vm.save.bankedCoins) · 🧬\(vm.save.bankedGenes)",
+                        width: btnW,
+                        height: btnH,
+                        leftContent: {
+                            SharkPreviewView(form: vm.activeSharkForm, width: btnH * 0.54, height: btnH * 0.38)
+                        },
+                        action: {
+                            vm.playUiTick()
+                            vm.showEvolutionAtlas = true
+                        }
+                    )
 
-                // 3. Gold Apex Trial Button
-                UiBannerButtonView(
-                    bannerKey: "UI_BAR_BTN_GOLD",
-                    title: vm.lang == "zh" ? "试驾 · \(showcaseName)" : "TRIAL · \(showcaseName)",
-                    subtitle: vm.lang == "zh" ? "📺 本局免费体验高阶巨兽" : "📺 FREE APEX SHARK TRIAL",
-                    badgeText: "T\(showcase.baseBiteTier) · Lv.5",
-                    width: btnW,
-                    height: btnH,
-                    leftContent: {
-                        SharkPreviewView(form: showcase, width: btnH * 0.54, height: btnH * 0.38)
-                    },
-                    action: {
-                        vm.showRewardedAd(kind: .TRIAL_SHARK)
-                    }
-                )
-            }
-            .padding(.leading, hudLead)
-            .padding(.trailing, hudTrail)
-            .padding(.bottom, max(14.0, rawBottom))
+                    // 3. Gold Apex Trial Button
+                    UiBannerButtonView(
+                        bannerKey: "UI_BAR_BTN_GOLD",
+                        title: vm.lang == "zh" ? "试驾 · \(showcaseName)" : "TRIAL · \(showcaseName)",
+                        subtitle: vm.lang == "zh" ? "📺 免费体验高阶巨兽" : "📺 FREE APEX TRIAL",
+                        badgeText: "T\(showcase.baseBiteTier) · Lv.5",
+                        width: btnW,
+                        height: btnH,
+                        leftContent: {
+                            SharkPreviewView(form: showcase, width: btnH * 0.54, height: btnH * 0.38)
+                        },
+                        action: {
+                            vm.showRewardedAd(kind: .TRIAL_SHARK)
+                        }
+                    )
+                }
+                .padding(.leading, hudLead)
+                .padding(.trailing, hudTrail)
+                .padding(.bottom, max(16.0, rawBottom + 2.0))
             }
         }
     }

@@ -162,7 +162,6 @@ public final class OceanAudioEngine {
 
         if engine.isRunning {
             isEngineRunning = true
-            startAmbientLoopsIfNeeded()
             return true
         }
 
@@ -173,7 +172,6 @@ public final class OceanAudioEngine {
             engine.prepare()
             try engine.start()
             isEngineRunning = true
-            startAmbientLoopsIfNeeded()
             return true
         } catch {
             isEngineRunning = false
@@ -187,7 +185,7 @@ public final class OceanAudioEngine {
         engine.attach(sfxMixer)
         engine.attach(ambientMixer)
         sfxMixer.outputVolume = 0.92
-        ambientMixer.outputVolume = 0.85
+        ambientMixer.outputVolume = 0.72
 
         engine.connect(sfxMixer, to: engine.mainMixerNode, format: audioFormat)
         engine.connect(ambientMixer, to: engine.mainMixerNode, format: audioFormat)
@@ -222,6 +220,19 @@ public final class OceanAudioEngine {
         ambientLoopsScheduled = true
     }
 
+    private func pauseAmbientLoops() {
+        guard isEngineConfigured else { return }
+        ambientShallowPlayer.volume = 0.0
+        ambientTwilightPlayer.volume = 0.0
+        ambientAbyssPlayer.volume = 0.0
+        if ambientLoopsScheduled {
+            ambientShallowPlayer.pause()
+            ambientTwilightPlayer.pause()
+            ambientAbyssPlayer.pause()
+            ambientLoopsScheduled = false
+        }
+    }
+
     private func scheduleLoop(_ player: AVAudioPlayerNode, key: String) {
         guard let buf = buffers[key] else { return }
         player.stop()
@@ -234,36 +245,28 @@ public final class OceanAudioEngine {
     // MARK: - 3-Layer Depth-Reactive Ocean Ambient Mixer
 
     /// Updates crossfade gain of shallow / twilight / abyss ocean beds (~10Hz throttled).
+    /// Completely silent on the Title screen, Loading screen, Atlas modal, and Pause screen so there is ZERO idle hum.
     public func updateAmbientDepth(worldY: Double, isPlaying: Bool, isPaused: Bool) {
-        guard !isMuted && !isBackgrounded && !isInterrupted else { return }
+        if !isPlaying || isPaused || isMuted || isBackgrounded || isInterrupted {
+            pauseAmbientLoops()
+            return
+        }
         let now = CACurrentMediaTime()
         guard now - lastAmbientUpdateTime >= 0.095 else { return }
         lastAmbientUpdateTime = now
 
         guard ensureEngineRunning() else { return }
+        startAmbientLoopsIfNeeded()
 
         let depthM = GameRules.worldYToMeterDepth(max(0.0, worldY))
-        // Normalized 0..1 across ocean zones:
-        // Shallow: peaks 0..250m, fades out by 650m
-        // Twilight: fades in 150..420m, peaks ~500m, fades out 1200..2200m
-        // Abyss: fades in 900..1800m, dominant in abyssal & hadal trenches
         let shallowWeight = max(0.0, min(1.0, 1.0 - max(0.0, depthM - 160.0) / 480.0))
         let abyssWeight = max(0.0, min(1.0, (depthM - 750.0) / 1100.0))
         let twilightWeight = max(0.0, min(1.0, 1.0 - shallowWeight - abyssWeight))
 
-        let masterBedScale: Double
-        if isPaused {
-            masterBedScale = 0.06
-        } else if isPlaying {
-            masterBedScale = 0.28
-        } else {
-            // Title patrol: calm surface ocean shimmer
-            masterBedScale = 0.16
-        }
-
+        let masterBedScale = 0.14
         ambientShallowPlayer.volume = Float(shallowWeight * masterBedScale)
-        ambientTwilightPlayer.volume = Float(twilightWeight * masterBedScale * 1.05)
-        ambientAbyssPlayer.volume = Float(abyssWeight * masterBedScale * 1.15)
+        ambientTwilightPlayer.volume = Float(twilightWeight * masterBedScale * 0.95)
+        ambientAbyssPlayer.volume = Float(abyssWeight * masterBedScale * 0.90)
     }
 
     // MARK: - Gameplay & UI Sound Effects
@@ -374,30 +377,30 @@ public final class OceanAudioEngine {
         buffers["ui_tick"] = makeSweepBuffer(duration: 0.036, startHz: 780.0, endHz: 420.0, peakAmp: 0.28, isTriangle: false)
         buffers["wheel_detent"] = makeSweepBuffer(duration: 0.018, startHz: 1120.0, endHz: 340.0, peakAmp: 0.22, isTriangle: true)
 
-        // Seamless 4.0-second integer-cycle ocean ambient beds
+        // Seamless 4.0-second filtered underwater current beds (zero low-frequency sine oscillator hum!)
         buffers["amb_shallow"] = makeAmbientBedBuffer(
             duration: 4.0,
-            fundamentalHz: 130.75,
-            harmonicHz: 196.0,
-            thirdHz: 261.75,
-            pulseHz: 0.5,
-            shimmerDepth: 0.22
+            lowCutHz: 240.0,
+            highCutHz: 780.0,
+            swellHz: 0.5,
+            shimmerDepth: 0.28,
+            seed: 0x1029_3847
         )
         buffers["amb_twilight"] = makeAmbientBedBuffer(
             duration: 4.0,
-            fundamentalHz: 65.5,
-            harmonicHz: 98.0,
-            thirdHz: 147.0,
-            pulseHz: 0.25,
-            shimmerDepth: 0.34
+            lowCutHz: 190.0,
+            highCutHz: 540.0,
+            swellHz: 0.25,
+            shimmerDepth: 0.34,
+            seed: 0x5678_1234
         )
         buffers["amb_abyss"] = makeAmbientBedBuffer(
             duration: 4.0,
-            fundamentalHz: 41.25,
-            harmonicHz: 61.75,
-            thirdHz: 82.5,
-            pulseHz: 0.25,
-            shimmerDepth: 0.42
+            lowCutHz: 160.0,
+            highCutHz: 390.0,
+            swellHz: 0.25,
+            shimmerDepth: 0.38,
+            seed: 0x9ABC_DEF1
         )
     }
 
@@ -588,33 +591,60 @@ public final class OceanAudioEngine {
         return buf
     }
 
-    /// Generates a mathematically seamless looping underwater pad (integer cycle multiples over `duration`).
+    /// Generates a seamless band-limited underwater water-current bed (no low-frequency sine drone hum).
     private func makeAmbientBedBuffer(
         duration: Double,
-        fundamentalHz: Double,
-        harmonicHz: Double,
-        thirdHz: Double,
-        pulseHz: Double,
-        shimmerDepth: Double
+        lowCutHz: Double,
+        highCutHz: Double,
+        swellHz: Double,
+        shimmerDepth: Double,
+        seed: UInt32
     ) -> AVAudioPCMBuffer? {
         guard let buf = allocateBuffer(duration: duration), let ch = buf.floatChannelData?[0] else { return nil }
         let n = Int(buf.frameLength)
         let exactDur = Double(n) / sampleRate
-        // Snap frequencies to integer cycle counts over `exactDur` for zero-click seamless looping
-        let f1 = (fundamentalHz * exactDur).rounded() / exactDur
-        let f2 = (harmonicHz * exactDur).rounded() / exactDur
-        let f3 = (thirdHz * exactDur).rounded() / exactDur
-        let lfoF = max(1.0, (pulseHz * exactDur).rounded()) / exactDur
-        let lfo2F = max(1.0, (0.75 * exactDur).rounded()) / exactDur
+        let lfoF = max(1.0, (swellHz * exactDur).rounded()) / exactDur
+        let dt = 1.0 / sampleRate
+        let hpRc = 1.0 / (2.0 * .pi * lowCutHz)
+        let hpAlpha = hpRc / (hpRc + dt)
+        let lpRc = 1.0 / (2.0 * .pi * highCutHz)
+        let lpAlpha = dt / (lpRc + dt)
+
+        var raw = [Double](repeating: 0.0, count: n)
+        var rng = seed
+        var prevX = 0.0
+        var hpY = 0.0
+        var lp1 = 0.0
+        var lp2 = 0.0
+
+        // Warm up filters with 0.25s preroll so start/end match smoothly
+        let warmup = Int(sampleRate * 0.25)
+        for idx in 0..<(n + warmup) {
+            rng = rng &* 1664525 &+ 1013904223
+            let white = (Double(rng >> 16) / 32768.0) - 1.0
+            hpY = hpAlpha * (hpY + white - prevX)
+            prevX = white
+            lp1 += lpAlpha * (hpY - lp1)
+            lp2 += lpAlpha * (lp1 - lp2)
+            if idx >= warmup {
+                let sampleIdx = idx - warmup
+                let t = Double(sampleIdx) / sampleRate
+                let swell = 0.74 + shimmerDepth * (0.5 + 0.5 * sin(2.0 * .pi * lfoF * t))
+                raw[sampleIdx] = lp2 * swell * 0.65
+            }
+        }
+
+        // Crossfade 0.25s seam window with raised-cosine weights for click-free infinite looping
+        let fadeLen = min(n / 4, Int(sampleRate * 0.25))
+        for i in 0..<fadeLen {
+            let w = 0.5 - 0.5 * cos(.pi * Double(i) / Double(fadeLen))
+            let tailIdx = n - fadeLen + i
+            let blended = raw[tailIdx] * (1.0 - w) + raw[i] * w
+            raw[i] = blended
+        }
 
         for i in 0..<n {
-            let t = Double(i) / sampleRate
-            let swell = 0.72 + shimmerDepth * (0.5 + 0.5 * sin(2.0 * .pi * lfoF * t))
-            let currentMod = 0.85 + 0.15 * cos(2.0 * .pi * lfo2F * t)
-            let w1 = sin(2.0 * .pi * f1 * t) * 0.42
-            let w2 = sin(2.0 * .pi * f2 * t) * 0.24 * currentMod
-            let w3 = sin(2.0 * .pi * f3 * t) * 0.14 * swell
-            ch[i] = Float(max(-0.85, min(0.85, (w1 + w2 + w3) * swell * 0.48)))
+            ch[i] = Float(max(-0.45, min(0.45, raw[i])))
         }
         return buf
     }

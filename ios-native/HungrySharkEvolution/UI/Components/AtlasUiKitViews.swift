@@ -72,14 +72,23 @@ public struct SharkPreviewView: View {
     }
 }
 
+private struct BannerPressButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1.0)
+            .brightness(configuration.isPressed ? 0.08 : 0.0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 /// Home & HUD Horizontal Banner Button (`buttons_16e3a0cf.png`: UI_BAR_BTN_GREEN / BLUE / GOLD)
 public struct UiBannerButtonView<LeftContent: View>: View {
     public let bannerKey: String // "UI_BAR_BTN_GREEN", "UI_BAR_BTN_BLUE", "UI_BAR_BTN_GOLD"
     public let title: String
     public let subtitle: String?
     public let badgeText: String?
-    public var width: CGFloat = 216
-    public var height: CGFloat = 60
+    public var width: CGFloat = 168
+    public var height: CGFloat = 55
     public let leftContent: () -> LeftContent
     public let action: () -> Void
     @ObservedObject private var atlasManager = SpriteAtlasManager.shared
@@ -89,8 +98,8 @@ public struct UiBannerButtonView<LeftContent: View>: View {
         title: String,
         subtitle: String? = nil,
         badgeText: String? = nil,
-        width: CGFloat = 216,
-        height: CGFloat = 60,
+        width: CGFloat = 168,
+        height: CGFloat = 55,
         @ViewBuilder leftContent: @escaping () -> LeftContent,
         action: @escaping () -> Void
     ) {
@@ -106,64 +115,80 @@ public struct UiBannerButtonView<LeftContent: View>: View {
 
     public var body: some View {
         let _ = atlasManager.atlasRevision
+        let iconDiameter = height * 0.54
+        let isGreen = bannerKey == "UI_BAR_BTN_GREEN"
         Button(action: action) {
             ZStack {
+                // Opaque-alpha hit-catch base ensures taps register cleanly over SpriteView
+                Color.black.opacity(0.001)
+
                 if let bgImg = atlasManager.uiBannerImage(for: bannerKey) {
                     Image(uiImage: bgImg)
                         .resizable()
                         .interpolation(.high)
-                        .scaledToFill()
                         .frame(width: width, height: height)
+                        .clipped()
+                        .allowsHitTesting(false)
                 } else {
-                    RoundedRectangle(cornerRadius: 16)
+                    RoundedRectangle(cornerRadius: height * 0.36)
                         .fill(Color(red: 8/255, green: 32/255, blue: 62/255))
                         .frame(width: width, height: height)
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.cyan, lineWidth: 2))
+                        .overlay(RoundedRectangle(cornerRadius: height * 0.36).stroke(Color.cyan, lineWidth: 2))
+                        .allowsHitTesting(false)
                 }
 
-                // Left Circular Medallion Window (centered at ~23.5% x, 50% y)
-                leftContent()
-                    .frame(width: height * 0.56, height: height * 0.56)
-                    .clipShape(Circle())
-                    .position(x: width * 0.235, y: height * 0.50)
+                HStack(spacing: 0) {
+                    Color.clear
+                        .frame(width: width * 0.085, height: height)
 
-                // Right Text Area (35.5% .. 93.5% x)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(.system(size: max(11, height * 0.22), weight: .black))
-                        .foregroundColor(.white)
-                        .shadow(color: .black.opacity(0.9), radius: 2, x: 0, y: 1)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                    if let sub = subtitle {
-                        Text(sub)
-                            .font(.system(size: max(8, height * 0.145), weight: .heavy))
-                            .foregroundColor(.white.opacity(0.92))
-                            .shadow(color: .black.opacity(0.9), radius: 1, x: 0, y: 1)
+                    leftContent()
+                        .frame(width: iconDiameter, height: iconDiameter)
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title)
+                            .font(.system(size: max(10.5, min(14.5, height * 0.25)), weight: .black))
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.92), radius: 2, x: 0, y: 1)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.75)
+                            .minimumScaleFactor(0.68)
+                        if let sub = subtitle {
+                            Text(sub)
+                                .font(.system(size: max(7.5, min(10.0, height * 0.165)), weight: .heavy))
+                                .foregroundColor(.white.opacity(0.92))
+                                .shadow(color: .black.opacity(0.92), radius: 1.5, x: 0, y: 1)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.68)
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, width * 0.055)
+                    .padding(.trailing, isGreen ? width * 0.12 : width * 0.06)
                 }
-                .frame(width: width * 0.58, alignment: .leading)
-                .position(x: width * 0.645, y: height * 0.50)
-
+                .frame(width: width, height: height)
+                .allowsHitTesting(false)
+            }
+            .frame(width: width, height: height)
+            .contentShape(Rectangle())
+            .overlay(alignment: .topTrailing) {
                 if let badge = badgeText {
                     Text(badge)
-                        .font(.system(size: 9, weight: .black))
+                        .font(.system(size: 8.5, weight: .black, design: .monospaced))
                         .foregroundColor(Color(red: 254/255, green: 240/255, blue: 138/255))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, 5.5)
+                        .padding(.vertical, 1.5)
                         .background(
                             Capsule()
                                 .fill(Color.black.opacity(0.88))
                                 .overlay(Capsule().stroke(Color.yellow.opacity(0.65), lineWidth: 1))
                         )
-                        .position(x: width * 0.86, y: 4)
+                        .offset(x: -6, y: -7)
+                        .allowsHitTesting(false)
                 }
             }
-            .frame(width: width, height: height)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(BannerPressButtonStyle())
+        .contentShape(Rectangle())
     }
 }
 
@@ -201,6 +226,7 @@ public struct UiAvatarDataBarView: View {
             vm.showEvolutionAtlas = true
         } label: {
             ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.001)
                 // Layer 0: Deep Ocean Backdrop Disc inside the hollow ring
                 Circle()
                     .fill(
@@ -358,8 +384,11 @@ public struct UiAvatarDataBarView: View {
                 .position(x: width * 0.665, y: height * 0.52)
             }
             .frame(width: width, height: height)
+            .contentShape(Rectangle())
+            .allowsHitTesting(true)
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
     }
 }
 
@@ -382,15 +411,19 @@ public struct UiSettingButtonView: View {
             if !disabled { action() }
         } label: {
             ZStack {
+                Color.black.opacity(0.001)
                 if let bg = atlasManager.uiSettingImage(for: variantKey) {
                     Image(uiImage: bg)
                         .resizable()
                         .interpolation(.high)
                         .frame(width: width, height: height)
+                        .clipped()
+                        .allowsHitTesting(false)
                 } else {
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Color(red: 12/255, green: 34/255, blue: 68/255))
                         .frame(width: width, height: height)
+                        .allowsHitTesting(false)
                 }
 
                 // Left Icon Slot (left: 14%, width: 17%)
@@ -407,6 +440,7 @@ public struct UiSettingButtonView: View {
                     }
                 }
                 .position(x: width * 0.225, y: height * 0.50)
+                .allowsHitTesting(false)
 
                 // Right Text Slot (left: 33%, right: 10%)
                 VStack(spacing: 0) {
@@ -426,6 +460,7 @@ public struct UiSettingButtonView: View {
                 }
                 .frame(width: width * 0.56)
                 .position(x: width * 0.61, y: height * 0.50)
+                .allowsHitTesting(false)
 
                 if let badge = badgeText {
                     Text(badge)
@@ -439,12 +474,15 @@ public struct UiSettingButtonView: View {
                                 .overlay(Capsule().stroke(Color.cyan.opacity(0.55), lineWidth: 1))
                         )
                         .position(x: width * 0.84, y: 3)
+                        .allowsHitTesting(false)
                 }
             }
             .frame(width: width, height: height)
+            .contentShape(Rectangle())
             .opacity(disabled ? 0.45 : 1.0)
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
     }
 }
 
