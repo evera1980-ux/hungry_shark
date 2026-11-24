@@ -131,6 +131,17 @@ public struct EvolutionAtlasSheetView: View {
 
         GeometryReader { geo in
             let isLandscape = geo.size.width > geo.size.height
+            let winInsets = ContentView.currentWindowSafeAreaInsets()
+            let rawLead = max(geo.safeAreaInsets.leading, winInsets.left)
+            let rawTrail = max(geo.safeAreaInsets.trailing, winInsets.right)
+            let rawTop = max(geo.safeAreaInsets.top, winInsets.top)
+            let rawBottom = max(geo.safeAreaInsets.bottom, winInsets.bottom)
+            let headerLead = ContentView.cornerHudInset(for: rawLead, fallback: 16.0)
+            let headerTrail = ContentView.cornerHudInset(for: rawTrail, fallback: 16.0)
+            let splitLead: CGFloat = isLandscape ? max(12.0, rawLead) : 0.0
+            let splitTrail: CGFloat = isLandscape ? max(12.0, rawTrail) : 0.0
+            let usableSplitW = max(320.0, geo.size.width - splitLead - splitTrail)
+
             ZStack {
                 // Deep-Sea Bioluminescent Backdrop
                 LinearGradient(
@@ -147,8 +158,10 @@ public struct EvolutionAtlasSheetView: View {
                 VStack(spacing: 0) {
                     // 1. Single-Line Header Bar
                     atlasHeaderBar(globalBonuses: globalBonuses)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
+                        .padding(.leading, headerLead)
+                        .padding(.trailing, headerTrail)
+                        .padding(.top, max(8.0, rawTop))
+                        .padding(.bottom, 8)
                         .background(Color(red: 2/255, green: 8/255, blue: 23/255).opacity(0.65))
 
                     Divider().background(Color.cyan.opacity(0.2))
@@ -161,9 +174,9 @@ public struct EvolutionAtlasSheetView: View {
                                 check: check,
                                 lineageMeta: lineageMeta,
                                 curLv: curLv,
-                                stageWidth: geo.size.width * 0.50
+                                stageWidth: usableSplitW * 0.50
                             )
-                            .frame(width: geo.size.width * 0.50)
+                            .frame(width: usableSplitW * 0.50)
                             Divider().background(Color.cyan.opacity(0.18))
                             commandDeckPanel(
                                 form: form,
@@ -174,8 +187,11 @@ public struct EvolutionAtlasSheetView: View {
                                 bestScore: bestScore,
                                 claimedTier: claimedTier
                             )
-                            .frame(width: geo.size.width * 0.50)
+                            .frame(width: usableSplitW * 0.50)
                         }
+                        .padding(.leading, splitLead)
+                        .padding(.trailing, splitTrail)
+                        .padding(.bottom, max(4.0, rawBottom * 0.55))
                     } else {
                         VStack(spacing: 0) {
                             aquariumAndArcDialStage(
@@ -197,6 +213,7 @@ public struct EvolutionAtlasSheetView: View {
                                 claimedTier: claimedTier
                             )
                         }
+                        .padding(.bottom, rawBottom)
                     }
                 }
             }

@@ -22,7 +22,7 @@ public struct ContentView: View {
 
     public var body: some View {
         GeometryReader { geo in
-            let isCompactH: Bool = geo.size.height < 430
+            let isCompactH: Bool = geo.size.height < 460
             ZStack {
                 // 0. Base Abyssal Backdrop (#061528) so the root container is never black
                 Color(red: 6.0 / 255.0, green: 21.0 / 255.0, blue: 40.0 / 255.0)
@@ -40,7 +40,9 @@ public struct ContentView: View {
                 // 4. Ad Connection, Ad Alert & Layer 2 Dynamic Startup Loading Overlay
                 systemAndStartupOverlayLayer
             }
+            .frame(width: geo.size.width, height: geo.size.height)
         }
+        .ignoresSafeArea()
         .statusBarHidden(true)
         .onChange(of: vm.gameState) { _ in
             joystickResetToken &+= 1
@@ -112,12 +114,44 @@ public struct ContentView: View {
             }
     }
 
+    static func currentWindowSafeAreaInsets() -> UIEdgeInsets {
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            if let keyWindow = windowScene.windows.first(where: \.isKeyWindow) ?? windowScene.windows.first {
+                return keyWindow.safeAreaInsets
+            }
+        }
+        return .zero
+    }
+
+    static func cornerHudInset(for rawSafeInset: CGFloat, fallback: CGFloat = 14.0) -> CGFloat {
+        if rawSafeInset >= 48.0 {
+            // Dynamic Island (iPhone 14/15/16 Pro & Pro Max report 59pt across the full vertical edge):
+            // Top/bottom HUD sit completely above/below the island housing (`y ≈ 152..278pt`) and only
+            // need ~24pt to trace the 55pt rounded screen corner cleanly.
+            return 24.0
+        } else if rawSafeInset >= 34.0 {
+            // Notch iPhones (44~47pt landscape safe area): 20pt comfortably clears corner bezels.
+            return 20.0
+        } else {
+            return max(fallback, rawSafeInset)
+        }
+    }
+
     @ViewBuilder
     private func activeStateHudLayer(geo: GeometryProxy, isCompactH: Bool) -> some View {
-        let safeLead = max(12.0, geo.safeAreaInsets.leading)
-        let safeTrail = max(12.0, geo.safeAreaInsets.trailing)
-        let safeTop = max(6.0, geo.safeAreaInsets.top)
-        let safeBottom = max(14.0, geo.safeAreaInsets.bottom)
+        let winInsets = Self.currentWindowSafeAreaInsets()
+        let rawLead = max(geo.safeAreaInsets.leading, winInsets.left)
+        let rawTrail = max(geo.safeAreaInsets.trailing, winInsets.right)
+        let rawTop = max(geo.safeAreaInsets.top, winInsets.top)
+        let rawBottom = max(geo.safeAreaInsets.bottom, winInsets.bottom)
+
+        let hudLead = Self.cornerHudInset(for: rawLead, fallback: isCompactH ? 18.0 : 16.0)
+        let hudTrail = Self.cornerHudInset(for: rawTrail, fallback: isCompactH ? 18.0 : 16.0)
+        let hudTop = max(isCompactH ? 8.0 : 10.0, rawTop)
+        // Corner joystick & boost sit far left/right of the centered Home Indicator (`x ≈ 308..624pt`).
+        let cornerBottom: CGFloat = 12.0
+        let centerBannerBottom = max(14.0, rawBottom)
 
         if vm.gameState == "playing" {
             VStack(spacing: 3) {
@@ -128,9 +162,9 @@ public struct ContentView: View {
                     Spacer(minLength: 4)
                     pauseMedallionButton
                 }
-                .padding(.leading, safeLead)
-                .padding(.trailing, safeTrail)
-                .padding(.top, safeTop)
+                .padding(.leading, hudLead)
+                .padding(.trailing, hudTrail)
+                .padding(.top, hudTop)
 
                 HudRow2StatusOverlayView(vm: vm, telemetry: vm.telemetry)
                     .allowsHitTesting(false)
@@ -141,21 +175,21 @@ public struct ContentView: View {
                 Spacer()
                 HStack(alignment: .bottom) {
                     SonarJoystickView(vm: vm, resetToken: joystickResetToken)
-                        .padding(.leading, safeLead + 14.0)
-                        .padding(.bottom, safeBottom + 4.0)
+                        .padding(.leading, hudLead)
+                        .padding(.bottom, cornerBottom)
                     Spacer(minLength: 6)
                     if vm.onboardingStep != .DONE {
                         onboardingBottomBanner
-                            .padding(.bottom, safeBottom)
+                            .padding(.bottom, centerBannerBottom)
                     }
                     Spacer(minLength: 6)
-                    mobaSkillFan
-                        .padding(.trailing, safeTrail + 10.0)
-                        .padding(.bottom, safeBottom + 2.0)
+                    mobaSkillFan(rawSafeTrail: rawTrail)
+                        .padding(.trailing, hudTrail)
+                        .padding(.bottom, cornerBottom)
                 }
             }
         } else if vm.gameState == "title" {
-            titleScreenOverlay(geo: geo)
+            titleScreenOverlay(geo: geo, hudLead: hudLead, hudTrail: hudTrail, hudTop: hudTop, rawBottom: rawBottom)
         }
     }
 
@@ -215,7 +249,13 @@ public struct ContentView: View {
     }
 
     // MARK: - Title Screen Overlay
-    private func titleScreenOverlay(geo: GeometryProxy) -> some View {
+    private func titleScreenOverlay(
+        geo: GeometryProxy,
+        hudLead: CGFloat,
+        hudTrail: CGFloat,
+        hudTop: CGFloat,
+        rawBottom: CGFloat
+    ) -> some View {
         let showcase = vm.nextShowcaseSharkForm
         let showcaseName = vm.lang == "zh" ? showcase.nameZh : showcase.nameEn
         let screenBounds = UIScreen.main.bounds.size
@@ -226,8 +266,9 @@ public struct ContentView: View {
         let maxTitleH = fullH * 0.36
         let targetTitleW = min(760.0, min(fullW * 0.74, maxTitleH * titleAspect))
         let targetTitleH = targetTitleW / titleAspect
-        let btnW = min(226.0, max(168.0, (geo.size.width - 56.0) / 3.0))
-        let btnH = max(50.0, btnW / 3.6)
+        let usableBtnSpan = max(520.0, fullW - hudLead - hudTrail - 24.0)
+        let btnW = min(264.0, max(168.0, usableBtnSpan / 3.0))
+        let btnH = max(50.0, min(68.0, btnW / 3.65))
 
         return ZStack {
             // Matching radial vignette from Web preview so white brush title pops against shallow water
@@ -251,7 +292,7 @@ public struct ContentView: View {
                         .interpolation(.high)
                         .frame(width: targetTitleW, height: targetTitleH, alignment: .top)
                         .shadow(color: .black.opacity(0.9), radius: 16, x: 0, y: 6)
-                        .padding(.top, 2)
+                        .padding(.top, max(2.0, hudTop - 4.0))
                 } else {
                     Text(vm.t("game_title"))
                         .font(.system(size: min(40, max(26, geo.size.width * 0.05)), weight: .black))
@@ -263,7 +304,7 @@ public struct ContentView: View {
                             )
                         )
                         .shadow(color: .black.opacity(0.85), radius: 8, x: 0, y: 3)
-                        .padding(.top, 6)
+                        .padding(.top, max(6.0, hudTop))
                 }
 
                 Spacer(minLength: 0)
@@ -325,7 +366,9 @@ public struct ContentView: View {
                     }
                 )
             }
-            .padding(.bottom, 8)
+            .padding(.leading, hudLead)
+            .padding(.trailing, hudTrail)
+            .padding(.bottom, max(14.0, rawBottom))
             }
         }
     }

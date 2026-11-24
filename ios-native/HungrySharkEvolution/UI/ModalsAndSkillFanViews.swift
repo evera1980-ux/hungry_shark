@@ -146,7 +146,7 @@ public struct FixedEvolutionHudButton: View {
 
 extension ContentView {
     // MARK: - Bottom-Right 90° MOBA Skill Fan (using UI_BTN_* from icons_f5128c12.png)
-    var mobaSkillFan: some View {
+    func mobaSkillFan(rawSafeTrail: CGFloat = 0.0) -> some View {
         let form = vm.activeSharkForm
         let goldCost = GameRules.getGoldOverdriveCost(useCount: vm.goldOverdriveUseCount, generationRow: form.row)
         let geneCost = GameRules.getGeneSurgeCost(level: vm.inRunLevel, useCount: vm.geneSurgeUseCount, generationRow: form.row)
@@ -158,10 +158,22 @@ extension ContentView {
         let nextTarget = GameRules.getNextEvolutionTarget(save: vm.save)
         let evoReady = nextTarget?.check.canUnlockNow ?? false
 
+        // When anchored 24pt from the right corner on Dynamic Island / Notch iPhones,
+        // nudge only the upper buttons (`y ≈ 192..318pt`) along the fan arc so they stay
+        // 100% clear of the mid-height sensor housing (`y ≈ 152..278pt`).
+        let isDynamicIsland = rawSafeTrail >= 48.0
+        let isNotch = !isDynamicIsland && rawSafeTrail >= 34.0
+        let evoOffsetX: CGFloat = isDynamicIsland ? -36.0 : (isNotch ? -28.0 : -4.0)
+        let evoOffsetY: CGFloat = (isDynamicIsland || isNotch) ? -162.0 : -164.0
+        let upgradeOffsetX: CGFloat = isDynamicIsland ? -14.0 : (isNotch ? -10.0 : -4.0)
+        let surgeOffsetX: CGFloat = isDynamicIsland ? -78.0 : (isNotch ? -74.0 : -70.0)
+        let frenzyOffsetX: CGFloat = (isDynamicIsland || isNotch) ? -96.0 : -98.0
+        let airdropOffsetX: CGFloat = isDynamicIsland ? -142.0 : (isNotch ? -138.0 : -116.0)
+
         return ZStack(alignment: .bottomTrailing) {
-            // 0. Fixed Evolution Button directly above Body Upgrade (x: -4, y: -164)
+            // 0. Fixed Evolution Button directly above Body Upgrade
             FixedEvolutionHudButton(vm: vm)
-                .offset(x: -4, y: -164)
+                .offset(x: evoOffsetX, y: evoOffsetY)
 
             // Optional Emergency Supply Drop when short on all resources
             if !canGold && !canGene && !canUpgrade && !evoReady {
@@ -175,7 +187,7 @@ extension ContentView {
                 ) {
                     vm.showRewardedAd(kind: .SUPPLY_DROP)
                 }
-                .offset(x: -116, y: -70)
+                .offset(x: airdropOffsetX, y: -70)
             }
 
             // 1. 0° Left Slot: Gold Frenzy (UI_BTN_GOLD_FRENZY)
@@ -189,7 +201,7 @@ extension ContentView {
             ) {
                 vm.triggerGoldFrenzy()
             }
-            .offset(x: -98, y: -4)
+            .offset(x: frenzyOffsetX, y: -4)
 
             // 2. 45° Diagonal Slot: Gene Surge (UI_BTN_GENE_SURGE)
             skillFanSatelliteButton(
@@ -202,7 +214,7 @@ extension ContentView {
             ) {
                 vm.triggerGeneSurge()
             }
-            .offset(x: -70, y: -70)
+            .offset(x: surgeOffsetX, y: -70)
 
             // 3. 90° Top Slot: Body Upgrade (UI_BTN_BODY_UPGRADE)
             skillFanSatelliteButton(
@@ -219,7 +231,7 @@ extension ContentView {
             ) {
                 vm.upgradeActiveSharkBody()
             }
-            .offset(x: -4, y: -98)
+            .offset(x: upgradeOffsetX, y: -98)
 
             // 4. Primary Bottom-Right Anchor: Isolated Hold-to-Boost Medallion (iOS-P1-1 + iOS-P1-2)
             BoostMedallionView(vm: vm, telemetry: vm.telemetry, resetToken: joystickResetToken)
