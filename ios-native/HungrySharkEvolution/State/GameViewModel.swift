@@ -2,7 +2,6 @@ import Foundation
 import SwiftUI
 import UIKit
 import QuartzCore
-import AudioToolbox
 
 public enum OnboardingStep: String, Sendable {
     case EAT_SMALL_FISH
@@ -134,6 +133,7 @@ public final class GameViewModel: ObservableObject {
         if UserDefaults.standard.bool(forKey: onboardingDoneKey) {
             self.onboardingStep = .DONE
         }
+        OceanAudioEngine.shared.setMuted(!self.save.soundEnabled)
         recomputeCurrentSharkStats()
         pickNewBountyPrey()
         GoogleAdMobManager.shared.startSDKAndPreload()
@@ -172,6 +172,7 @@ public final class GameViewModel: ObservableObject {
 
     public func toggleMute() {
         save.soundEnabled.toggle()
+        OceanAudioEngine.shared.setMuted(!save.soundEnabled)
         persistSave()
         playUiTick()
     }
@@ -179,14 +180,14 @@ public final class GameViewModel: ObservableObject {
     public func playUiTick() {
         HapticFeedbackManager.shared.playLight(minInterval: 0.03)
         if save.soundEnabled {
-            AudioServicesPlaySystemSound(1104)
+            OceanAudioEngine.shared.playUiTick()
         }
     }
 
     public func playSuccessSound() {
         HapticFeedbackManager.shared.playNotification(.success, minInterval: 0.06)
         if save.soundEnabled {
-            AudioServicesPlaySystemSound(1025)
+            OceanAudioEngine.shared.playCoin(isGene: true)
         }
     }
 
@@ -335,11 +336,13 @@ public final class GameViewModel: ObservableObject {
         playUiTick()
     }
 
-    public func pauseGame() {
+    public func pauseGame(silent: Bool = false) {
         guard gameState == "playing" else { return }
         resetInputState()
         gameState = "paused"
-        playUiTick()
+        if !silent {
+            playUiTick()
+        }
     }
 
     public func resumeGame() {
@@ -372,6 +375,9 @@ public final class GameViewModel: ObservableObject {
             finalizeRunSettlement()
         }
         persistSave()
+        if save.soundEnabled {
+            OceanAudioEngine.shared.playHit()
+        }
     }
 
     public func declineRevive() {
@@ -414,7 +420,10 @@ public final class GameViewModel: ObservableObject {
         energy = maxEnergy
         recomputeCurrentSharkStats()
         persistSave()
-        playSuccessSound()
+        HapticFeedbackManager.shared.playHeavy(minInterval: 0.08)
+        if save.soundEnabled {
+            OceanAudioEngine.shared.playFrenzy()
+        }
     }
 
     public func triggerGeneSurge() {
@@ -456,7 +465,10 @@ public final class GameViewModel: ObservableObject {
         hp = min(maxHp, hp + maxHp * 0.25)
         flushTelemetryImmediate()
         persistSave()
-        playSuccessSound()
+        HapticFeedbackManager.shared.playNotification(.success, minInterval: 0.06)
+        if save.soundEnabled {
+            OceanAudioEngine.shared.playEvolution()
+        }
         return true
     }
 
@@ -480,7 +492,10 @@ public final class GameViewModel: ObservableObject {
         flushTelemetryImmediate()
         SpriteAtlasManager.shared.prewarmSharkWindow(selectedSharkId: form.id)
         persistSave()
-        playSuccessSound()
+        HapticFeedbackManager.shared.playNotification(.success, minInterval: 0.08)
+        if save.soundEnabled {
+            OceanAudioEngine.shared.playEvolution()
+        }
         return true
     }
 
@@ -515,7 +530,10 @@ public final class GameViewModel: ObservableObject {
             hp = min(maxHp, hp + maxHp * 0.38)
             energy = min(maxEnergy, energy + maxEnergy * 0.50)
             flushTelemetryImmediate()
-            playSuccessSound()
+            HapticFeedbackManager.shared.playNotification(.success, minInterval: 0.08)
+            if save.soundEnabled {
+                OceanAudioEngine.shared.playEvolution()
+            }
         }
         return leveledUp
     }

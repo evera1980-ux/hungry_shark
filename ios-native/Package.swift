@@ -23,10 +23,21 @@ let package = Package(
                 .product(name: "GoogleMobileAds", package: "swift-package-manager-google-mobile-ads", condition: .when(platforms: [.iOS]))
             ],
             path: "HungrySharkEvolution",
-            exclude: ["Info.plist", "HungrySharkEvolutionApp.swift"],
+            exclude: [
+                "Info.plist",
+                "HungrySharkEvolutionApp.swift",
+                "PrivacyInfo.xcprivacy",
+                "zh-Hans.lproj",
+                "en.lproj"
+            ],
             resources: [
                 .copy("Resources/Assets")
             ]
+        ),
+        .testTarget(
+            name: "HungrySharkEvolutionTests",
+            dependencies: ["HungrySharkEvolutionCore"],
+            path: "HungrySharkEvolutionTests"
         )
     ]
 )

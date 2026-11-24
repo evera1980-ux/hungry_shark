@@ -14,13 +14,29 @@
 		A10000052B00000000000001 /* OceanGameScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000052B00000000000001 /* OceanGameScene.swift */; };
 		A10000062B00000000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000062B00000000000001 /* ContentView.swift */; };
 		A10001012B00000000000001 /* HapticFeedbackManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001012B00000000000001 /* HapticFeedbackManager.swift */; };
-		A10001022B00000000000001 /* GoogleAdMobManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001022B00000000000001 /* GoogleAdMobManager.swift */; };
-		A10001032B00000000000001 /* GameViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001032B00000000000001 /* GameViewModel.swift */; };
-		A10001042B00000000000001 /* HudTelemetryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001042B00000000000001 /* HudTelemetryStore.swift */; };
-		A10001052B00000000000001 /* HudLeafViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001052B00000000000001 /* HudLeafViews.swift */; };
+		A10001022B00000000000001 /* OceanAudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001022B00000000000001 /* OceanAudioEngine.swift */; };
+		A10001032B00000000000001 /* SeabedTerraceSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001032B00000000000001 /* SeabedTerraceSystem.swift */; };
+		A10001042B00000000000001 /* TerrainSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001042B00000000000001 /* TerrainSystem.swift */; };
+		A10001052B00000000000001 /* GoogleAdMobManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001052B00000000000001 /* GoogleAdMobManager.swift */; };
+		A10001062B00000000000001 /* AtlasEnvironmentProcessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001062B00000000000001 /* AtlasEnvironmentProcessor.swift */; };
+		A10001072B00000000000001 /* AtlasUiSlicer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001072B00000000000001 /* AtlasUiSlicer.swift */; };
+		A10001082B00000000000001 /* OceanFXSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001082B00000000000001 /* OceanFXSystem.swift */; };
+		A10001092B00000000000001 /* PreySimulation.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001092B00000000000001 /* PreySimulation.swift */; };
+		A10001102B00000000000001 /* SeabedRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001102B00000000000001 /* SeabedRenderer.swift */; };
+		A10001112B00000000000001 /* GameViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001112B00000000000001 /* GameViewModel.swift */; };
+		A10001122B00000000000001 /* HudTelemetryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001122B00000000000001 /* HudTelemetryStore.swift */; };
+		A10001132B00000000000001 /* AtlasUiKitViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001132B00000000000001 /* AtlasUiKitViews.swift */; };
+		A10001142B00000000000001 /* HudLeafViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001142B00000000000001 /* HudLeafViews.swift */; };
+		A10001152B00000000000001 /* MultiTouchControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001152B00000000000001 /* MultiTouchControls.swift */; };
+		A10001162B00000000000001 /* EvolutionAtlasSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001162B00000000000001 /* EvolutionAtlasSheetView.swift */; };
+		A10001172B00000000000001 /* ModalsAndSkillFanViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001172B00000000000001 /* ModalsAndSkillFanViews.swift */; };
+		A10001182B00000000000001 /* StartupLoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20001182B00000000000001 /* StartupLoadingView.swift */; };
 		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
 		A10000082B00000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000102B00000000000001 /* Assets.xcassets */; };
 		A10000092B00000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = A99000022B00000000000001 /* GoogleMobileAds */; };
+		A100000A2B00000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000112B00000000000001 /* PrivacyInfo.xcprivacy */; };
+		A100000B2B00000000000001 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A20000122B00000000000001 /* InfoPlist.strings */; };
+		T10000012B00000000000001 /* GameRulesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = T20000012B00000000000001 /* GameRulesTests.swift */; };
 		B10000012B00000000000001 /* PREY-001@3x.webp in Resources */ = {isa = PBXBuildFile; fileRef = B20000012B00000000000001 /* PREY-001@3x.webp */; };
 		B10000022B00000000000001 /* PREY-002@3x.webp in Resources */ = {isa = PBXBuildFile; fileRef = B20000022B00000000000001 /* PREY-002@3x.webp */; };
 		B10000032B00000000000001 /* PREY-003@3x.webp in Resources */ = {isa = PBXBuildFile; fileRef = B20000032B00000000000001 /* PREY-003@3x.webp */; };
@@ -229,8 +245,19 @@
 		B10002062B00000000000001 /* world_pois_atlas_1794473250443.webp in Resources */ = {isa = PBXBuildFile; fileRef = B20002062B00000000000001 /* world_pois_atlas_1794473250443.webp */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		T70000012B00000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A70000012B00000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A50000012B00000000000001;
+			remoteInfo = HungrySharkEvolution;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		A00000012B00000000000001 /* HungrySharkEvolution.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HungrySharkEvolution.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		T00000012B00000000000001 /* HungrySharkEvolutionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HungrySharkEvolutionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000012B00000000000001 /* HungrySharkEvolutionApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HungrySharkEvolutionApp.swift; sourceTree = "<group>"; };
 		A20000022B00000000000001 /* GameConfigGenerated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Generated/GameConfigGenerated.swift"; sourceTree = "<group>"; };
 		A20000032B00000000000001 /* GameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/GameRules.swift"; sourceTree = "<group>"; };
@@ -238,13 +265,30 @@
 		A20000052B00000000000001 /* OceanGameScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/OceanGameScene.swift"; sourceTree = "<group>"; };
 		A20000062B00000000000001 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/ContentView.swift"; sourceTree = "<group>"; };
 		A20001012B00000000000001 /* HapticFeedbackManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Audio/HapticFeedbackManager.swift"; sourceTree = "<group>"; };
-		A20001022B00000000000001 /* GoogleAdMobManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Monetization/GoogleAdMobManager.swift"; sourceTree = "<group>"; };
-		A20001032B00000000000001 /* GameViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "State/GameViewModel.swift"; sourceTree = "<group>"; };
-		A20001042B00000000000001 /* HudTelemetryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "State/HudTelemetryStore.swift"; sourceTree = "<group>"; };
-		A20001052B00000000000001 /* HudLeafViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/Components/HudLeafViews.swift"; sourceTree = "<group>"; };
+		A20001022B00000000000001 /* OceanAudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Audio/OceanAudioEngine.swift"; sourceTree = "<group>"; };
+		A20001032B00000000000001 /* SeabedTerraceSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/SeabedTerraceSystem.swift"; sourceTree = "<group>"; };
+		A20001042B00000000000001 /* TerrainSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Core/TerrainSystem.swift"; sourceTree = "<group>"; };
+		A20001052B00000000000001 /* GoogleAdMobManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Monetization/GoogleAdMobManager.swift"; sourceTree = "<group>"; };
+		A20001062B00000000000001 /* AtlasEnvironmentProcessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/AtlasEnvironmentProcessor.swift"; sourceTree = "<group>"; };
+		A20001072B00000000000001 /* AtlasUiSlicer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/AtlasUiSlicer.swift"; sourceTree = "<group>"; };
+		A20001082B00000000000001 /* OceanFXSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/OceanFXSystem.swift"; sourceTree = "<group>"; };
+		A20001092B00000000000001 /* PreySimulation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/PreySimulation.swift"; sourceTree = "<group>"; };
+		A20001102B00000000000001 /* SeabedRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Rendering/SeabedRenderer.swift"; sourceTree = "<group>"; };
+		A20001112B00000000000001 /* GameViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "State/GameViewModel.swift"; sourceTree = "<group>"; };
+		A20001122B00000000000001 /* HudTelemetryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "State/HudTelemetryStore.swift"; sourceTree = "<group>"; };
+		A20001132B00000000000001 /* AtlasUiKitViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/Components/AtlasUiKitViews.swift"; sourceTree = "<group>"; };
+		A20001142B00000000000001 /* HudLeafViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/Components/HudLeafViews.swift"; sourceTree = "<group>"; };
+		A20001152B00000000000001 /* MultiTouchControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/Components/MultiTouchControls.swift"; sourceTree = "<group>"; };
+		A20001162B00000000000001 /* EvolutionAtlasSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/EvolutionAtlasSheetView.swift"; sourceTree = "<group>"; };
+		A20001172B00000000000001 /* ModalsAndSkillFanViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/ModalsAndSkillFanViews.swift"; sourceTree = "<group>"; };
+		A20001182B00000000000001 /* StartupLoadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UI/StartupLoadingView.swift"; sourceTree = "<group>"; };
+		T20000012B00000000000001 /* GameRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameRulesTests.swift; sourceTree = "<group>"; };
 		A20000072B00000000000001 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Resources/Assets"; sourceTree = "<group>"; };
 		A20000082B00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000102B00000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A20000112B00000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A20000132B00000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = "en.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		A20000142B00000000000001 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		B20000012B00000000000001 /* PREY-001@3x.webp */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PREY-001@3x.webp"; path = "HungrySharkEvolution/Resources/Assets/PREY-001@3x.webp"; sourceTree = SOURCE_ROOT; };
 		B20000022B00000000000001 /* PREY-002@3x.webp */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PREY-002@3x.webp"; path = "HungrySharkEvolution/Resources/Assets/PREY-002@3x.webp"; sourceTree = SOURCE_ROOT; };
 		B20000032B00000000000001 /* PREY-003@3x.webp */ = {isa = PBXFileReference; lastKnownFileType = file; name = "PREY-003@3x.webp"; path = "HungrySharkEvolution/Resources/Assets/PREY-003@3x.webp"; sourceTree = SOURCE_ROOT; };
@@ -462,6 +506,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T30000012B00000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -469,6 +520,7 @@
 			isa = PBXGroup;
 			children = (
 				A40000022B00000000000001 /* HungrySharkEvolution */,
+				T40000022B00000000000001 /* HungrySharkEvolutionTests */,
 				A40000032B00000000000001 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -483,16 +535,39 @@
 				A20000052B00000000000001 /* OceanGameScene.swift */,
 				A20000062B00000000000001 /* ContentView.swift */,
 				A20001012B00000000000001 /* HapticFeedbackManager.swift */,
-				A20001022B00000000000001 /* GoogleAdMobManager.swift */,
-				A20001032B00000000000001 /* GameViewModel.swift */,
-				A20001042B00000000000001 /* HudTelemetryStore.swift */,
-				A20001052B00000000000001 /* HudLeafViews.swift */,
+				A20001022B00000000000001 /* OceanAudioEngine.swift */,
+				A20001032B00000000000001 /* SeabedTerraceSystem.swift */,
+				A20001042B00000000000001 /* TerrainSystem.swift */,
+				A20001052B00000000000001 /* GoogleAdMobManager.swift */,
+				A20001062B00000000000001 /* AtlasEnvironmentProcessor.swift */,
+				A20001072B00000000000001 /* AtlasUiSlicer.swift */,
+				A20001082B00000000000001 /* OceanFXSystem.swift */,
+				A20001092B00000000000001 /* PreySimulation.swift */,
+				A20001102B00000000000001 /* SeabedRenderer.swift */,
+				A20001112B00000000000001 /* GameViewModel.swift */,
+				A20001122B00000000000001 /* HudTelemetryStore.swift */,
+				A20001132B00000000000001 /* AtlasUiKitViews.swift */,
+				A20001142B00000000000001 /* HudLeafViews.swift */,
+				A20001152B00000000000001 /* MultiTouchControls.swift */,
+				A20001162B00000000000001 /* EvolutionAtlasSheetView.swift */,
+				A20001172B00000000000001 /* ModalsAndSkillFanViews.swift */,
+				A20001182B00000000000001 /* StartupLoadingView.swift */,
 				A20000102B00000000000001 /* Assets.xcassets */,
 				A20000072B00000000000001 /* Assets */,
 				A40000042B00000000000001 /* BundledAssets */,
+				A20000112B00000000000001 /* PrivacyInfo.xcprivacy */,
+				A20000122B00000000000001 /* InfoPlist.strings */,
 				A20000082B00000000000001 /* Info.plist */,
 			);
 			path = HungrySharkEvolution;
+			sourceTree = "<group>";
+		};
+		T40000022B00000000000001 /* HungrySharkEvolutionTests */ = {
+			isa = PBXGroup;
+			children = (
+				T20000012B00000000000001 /* GameRulesTests.swift */,
+			);
+			path = HungrySharkEvolutionTests;
 			sourceTree = "<group>";
 		};
 		A40000042B00000000000001 /* BundledAssets */ = {
@@ -712,6 +787,7 @@
 			isa = PBXGroup;
 			children = (
 				A00000012B00000000000001 /* HungrySharkEvolution.app */,
+				T00000012B00000000000001 /* HungrySharkEvolutionTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -739,6 +815,24 @@
 			productReference = A00000012B00000000000001 /* HungrySharkEvolution.app */;
 			productType = "com.apple.product-type.application";
 		};
+		T50000012B00000000000001 /* HungrySharkEvolutionTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = T80000022B00000000000001 /* Build configuration list for PBXNativeTarget "HungrySharkEvolutionTests" */;
+			buildPhases = (
+				T60000012B00000000000001 /* Sources */,
+				T30000012B00000000000001 /* Frameworks */,
+				T60000022B00000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				T70000022B00000000000001 /* PBXTargetDependency */,
+			);
+			name = HungrySharkEvolutionTests;
+			productName = HungrySharkEvolutionTests;
+			productReference = T00000012B00000000000001 /* HungrySharkEvolutionTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -748,6 +842,11 @@
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					T50000012B00000000000001 = {
+						TestTargetID = A50000012B00000000000001;
+					};
+				};
 			};
 			buildConfigurationList = A80000012B00000000000001 /* Build configuration list for PBXProject "HungrySharkEvolution" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -756,6 +855,7 @@
 			knownRegions = (
 				en,
 				zh_CN,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = A40000012B00000000000001;
@@ -767,6 +867,7 @@
 			projectRoot = "";
 			targets = (
 				A50000012B00000000000001 /* HungrySharkEvolution */,
+				T50000012B00000000000001 /* HungrySharkEvolutionTests */,
 			);
 		};
 /* End PBXProject section */
@@ -778,6 +879,8 @@
 			files = (
 				A10000082B00000000000001 /* Assets.xcassets in Resources */,
 				A10000072B00000000000001 /* Assets in Resources */,
+				A100000A2B00000000000001 /* PrivacyInfo.xcprivacy in Resources */,
+				A100000B2B00000000000001 /* InfoPlist.strings in Resources */,
 				B10000012B00000000000001 /* PREY-001@3x.webp in Resources */,
 				B10000022B00000000000001 /* PREY-002@3x.webp in Resources */,
 				B10000032B00000000000001 /* PREY-003@3x.webp in Resources */,
@@ -987,6 +1090,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T60000022B00000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -1001,14 +1111,55 @@
 				A10000052B00000000000001 /* OceanGameScene.swift in Sources */,
 				A10000062B00000000000001 /* ContentView.swift in Sources */,
 				A10001012B00000000000001 /* HapticFeedbackManager.swift in Sources */,
-				A10001022B00000000000001 /* GoogleAdMobManager.swift in Sources */,
-				A10001032B00000000000001 /* GameViewModel.swift in Sources */,
-				A10001042B00000000000001 /* HudTelemetryStore.swift in Sources */,
-				A10001052B00000000000001 /* HudLeafViews.swift in Sources */,
+				A10001022B00000000000001 /* OceanAudioEngine.swift in Sources */,
+				A10001032B00000000000001 /* SeabedTerraceSystem.swift in Sources */,
+				A10001042B00000000000001 /* TerrainSystem.swift in Sources */,
+				A10001052B00000000000001 /* GoogleAdMobManager.swift in Sources */,
+				A10001062B00000000000001 /* AtlasEnvironmentProcessor.swift in Sources */,
+				A10001072B00000000000001 /* AtlasUiSlicer.swift in Sources */,
+				A10001082B00000000000001 /* OceanFXSystem.swift in Sources */,
+				A10001092B00000000000001 /* PreySimulation.swift in Sources */,
+				A10001102B00000000000001 /* SeabedRenderer.swift in Sources */,
+				A10001112B00000000000001 /* GameViewModel.swift in Sources */,
+				A10001122B00000000000001 /* HudTelemetryStore.swift in Sources */,
+				A10001132B00000000000001 /* AtlasUiKitViews.swift in Sources */,
+				A10001142B00000000000001 /* HudLeafViews.swift in Sources */,
+				A10001152B00000000000001 /* MultiTouchControls.swift in Sources */,
+				A10001162B00000000000001 /* EvolutionAtlasSheetView.swift in Sources */,
+				A10001172B00000000000001 /* ModalsAndSkillFanViews.swift in Sources */,
+				A10001182B00000000000001 /* StartupLoadingView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		T60000012B00000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				T10000012B00000000000001 /* GameRulesTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		T70000022B00000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A50000012B00000000000001 /* HungrySharkEvolution */;
+			targetProxy = T70000012B00000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		A20000122B00000000000001 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A20000132B00000000000001 /* en */,
+				A20000142B00000000000001 /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		A90000012B00000000000001 /* Debug */ = {
@@ -1115,6 +1266,54 @@
 			};
 			name = Release;
 		};
+		T90000032B00000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = "1.0.0";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolutionTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = "5.0";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HungrySharkEvolution.app/HungrySharkEvolution";
+			};
+			name = Debug;
+		};
+		T90000042B00000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = "1.0.0";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolutionTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = "5.0";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HungrySharkEvolution.app/HungrySharkEvolution";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1132,6 +1331,15 @@
 			buildConfigurations = (
 				A90000032B00000000000001 /* Debug */,
 				A90000042B00000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		T80000022B00000000000001 /* Build configuration list for PBXNativeTarget "HungrySharkEvolutionTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				T90000032B00000000000001 /* Debug */,
+				T90000042B00000000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

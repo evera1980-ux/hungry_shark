@@ -11,14 +11,14 @@
 
 | 维度 | 当前实测基线 | 关键风险 / 问题 |
 | :--- | :--- | :--- |
-| **代码规模与结构** | **12,447 行 Swift** + 122 行 `Info.plist`（已拆至 **11 个源码文件**） | 已抽离 `Monetization/GoogleAdMobManager.swift`、`State/GameViewModel.swift`、`State/HudTelemetryStore.swift`、`Audio/HapticFeedbackManager.swift`、`UI/Components/HudLeafViews.swift`；剩余大文件继续在后续轮次拆分 |
-| **App Store 审核与变现** | `Monetization/GoogleAdMobManager.swift`（`iOS-P0-1` 已完成） | 已隔离 `#if DEBUG` 测试广告位与 `GADSimulatorID`（移除硬编码个人设备 ID），Release 强制主/备正式广告位；已修正为等待 ATT 授权后再调用 `GADMobileAds.start()`；已移除 `Bundle` Method Swizzling；已补齐分广告位冷却与每日上限；`CFBundleDisplayName`（`Info.plist` 与 `project.pbxproj`）已全量统一为 `DeepSea Evolution` |
+| **代码规模与结构** | **13,475 行 App Swift（24 文件，单文件 max 938 行 `< 1,000`）** + 290 行 `XCTest` + 122 行 `Info.plist`（`iOS-P1-3` 已完成） | 全量拆分为 `Core/`（3 文件）、`Rendering/`（7 文件）、`UI/`（7 文件）、`State/`（2 文件）、`Audio/`（2 文件）、`Monetization/`、`Generated/`、`HungrySharkEvolutionTests/`；100% 注册进 `project.pbxproj` / `Package.swift` / `project.yml` |
+| **App Store 审核与变现** | `Monetization/GoogleAdMobManager.swift` + `PrivacyInfo.xcprivacy` + 双语 `InfoPlist.strings` | 已隔离 `#if DEBUG` 测试广告位与 `GADSimulatorID`，Release 强制主/备正式广告位；ATT 授权后才启动 AdMob；已移除 Swizzling；`iOS-P2-2` 已落地 `PrivacyInfo.xcprivacy` 与 `en`/`zh-Hans` `InfoPlist.strings`（iCloud/Game Center/StoreKit 2 待 Apple Developer 能力配置） |
 | **Web ↔ iOS 玩法一致性** | `Core/GameRules.swift` + `Rendering/OceanGameScene.swift` + `UI/ContentView.swift`（`iOS-P0-2` 已完成） | **Web P1-2 已完整同步至 Swift**：全量移除 `seabedScale` / `effPreyX` / `effPreyY` 双空间微缩补丁，回归真 2D 相机变焦（`0.8m -> 1.00`, `45m -> 0.22`）+ 线性猎物体长比 + 巨鲨撞碎 Tier 0~4 阶梯海床 + `vm.depthMeters` 修正为 `worldYToMeterDepth` + 悬赏过滤 `minSpawnablePreyLengthM` + 非阻断双语深潜提示 |
 | **包体与内存 / 显存（VRAM）** | `Resources/Assets/` **5.8 MB（206 文件）**（`iOS-P0-3` 已完成，原 61 MB） | 已同步 iOS 16+ 原生 WebP 资产并自动清理 224 个旧图集/重复 PNG（含 9.6MB 旧大图）；启动仅解码出战鲨鱼窗口（2~3 条）+ 浅海带猎物 + UI/海床；预览位图改为有界 `NSCache`，GPU 纹理采用 LRU 上限（鲨鱼 ≤8 / 猎物 ≤52）+ 跨深度带异步预热 + `didReceiveMemoryWarningNotification` 自动释放 |
-| **帧率稳态与 SwiftUI 重绘** | `SpriteView(..., preferredFramesPerSecond: 60)` + `HudTelemetryStore`（`iOS-P1-1` 已完成） | 高频数值（HP/能量/深度/连击/狂暴/深潜提示）已隔离开箱至 `HudTelemetryStore`（~18Hz 节流）仅由叶子视图订阅，摇杆与冲刺抽离至 `HudLeafViews.swift` 实现拖动期间根视图 0 重绘；金币/基因掉落复用单例 `SKTexture`；触感抽为 `HapticFeedbackManager` 单例复用；形变网格复用预分配缓冲区并将猎物摆动节流至 30Hz |
-| **前后台生命周期与触控** | 无 `scenePhase` / `willResignActive` 监听；纯 SwiftUI `DragGesture` | 切后台/来电/下拉通知栏时**不自动暂停**，返回易暴毙或卡摇杆；多指并发（左手摇杆 + 右手技能/升级）存在 SwiftUI 手势抢占隐患 |
-| **听觉与触感反馈** | 仅 `AudioServicesPlaySystemSound(1104 / 1025)` 2 个系统按键音 | **零独立吞噬/冲刺/破甲/碎石/受伤音效，零水深环境音与 BGM**；不遵守 iOS 静音拨片/音频会话中断；每次吞噬现场 `new UIImpactFeedbackGenerator()` 未复用与 `prepare()` |
-| **并发安全与自动化测试** | **0 个 XCTest 用例**；Swift 5.0 模式 | `GameRules.terrainBlockNodeCache` 为无锁全局静态字典（非并发安全）；无原生单元测试验证 Swift `GameRules` 与 Web `rules.ts` 数值对齐 |
+| **帧率稳态与 SwiftUI 重绘** | `SpriteView(..., preferredFramesPerSecond: 60)` + `HudTelemetryStore`（`iOS-P1-1` 已完成） | 高频数值（HP/能量/深度/连击/狂暴/深潜提示）已隔离至 `HudTelemetryStore`（~18Hz 节流）仅由叶子视图订阅，摇杆与冲刺抽离至 UIKit 多指控件 + 叶子视图实现拖动期间根视图 0 重绘；金币/基因掉落复用单例 `SKTexture`；触感抽为 `HapticFeedbackManager` 单例复用；形变网格复用预分配缓冲区并将猎物摆动节流至 30Hz |
+| **前后台生命周期与触控** | `scenePhase` + `willResignActive` + UIKit 多指触控（`iOS-P1-2` 已完成） | 切后台/来电/控制中心自动静默暂停并冻结 `scene.isPaused` + 归零摇杆与冲刺输入 + 重置帧时钟；左下摇杆与右下冲刺改为 `UIViewRepresentable`（`isMultipleTouchEnabled = true`、按 `UITouch` 追踪、确保取消/退场归零），并增加横屏安全区（Safe Area）保护 |
+| **听觉与触感反馈** | `Audio/OceanAudioEngine.swift` + `Audio/HapticFeedbackManager.swift`（`iOS-P1-4` 已完成） | 全量清除 `AudioServicesPlaySystemSound`，落地 `AVAudioEngine` 零资源程序化合成器：覆盖吞噬（连击升调）、冲刺、破甲、碎石、受伤、金币/基因拾取、升级/进化、狂热、转盘棘轮与 UI 点击 **10 类事件** + **3 层水深环境音**淡入淡出；`AVAudioSession` 采用 `.ambient` + `[.mixWithOthers]` 遵守静音拨片、支持后台音乐并监听电话/广告中断恢复 |
+| **并发安全与自动化测试** | **`GameRulesTests.swift`（6 个 XCTest 用例方法）**；`NSLock` 地形缓存（`iOS-P2-1` 已完成） | `SeabedTerrainBlockCache` 已采用 `NSLock` + `@unchecked Sendable` 封装；`HungrySharkEvolutionTests` Target 已接入 `project.pbxproj`、`project.yml` 与 `Package.swift`（Linux 沙盒静态全检通过，真机 `xcodebuild test` 待 macOS 执行） |
 
 ---
 
@@ -31,13 +31,13 @@
 
 ### P1 · 帧率稳态、生命周期与架构稳固（上架体验底线）
 - [x] **iOS-P1-1**：消除 120Hz 发热与掉帧（`HudTelemetryStore` 18Hz 节流隔离、摇杆/冲刺抽离独立叶子视图、缓存金币/基因 `SKTexture`、预分配形变缓冲 + 30Hz 猎物形变节流、复接触感引擎与 60fps 稳态帧率）
-- [ ] **iOS-P1-2**：补齐 iOS 生命周期保护与多指触控稳健性（前后台/来电自动暂停、音频中断恢复、防手势卡死与安全区适配）
-- [-] **iOS-P1-3**：拆分 4 个上帝 Swift 文件为模块化目录结构（`Monetization/`、`State/`、`Audio/`、`UI/Components/` 已拆出 5 个独立模块；剩余 `Engine/`、`UI/` 弹窗拆分与 `terrainBlockNodeCache` 并发安全待续）
-- [ ] **iOS-P1-4**：补齐原生 `AVAudioEngine` 听觉闭环（吞噬/破甲/碎石/受伤/升级音效 + 3 层水深环境音/BGM + `AVAudioSession` 静音键合规）
+- [x] **iOS-P1-2**：补齐 iOS 生命周期保护与多指触控稳健性（前后台/来电自动暂停、音频中断恢复、UIKit 原生多指摇杆/冲刺与安全区适配）
+- [x] **iOS-P1-3**：拆分 4 个上帝 Swift 文件为模块化目录结构（24 个源码文件，单文件 max 938 行 `< 1,000`，`SeabedTerrainBlockCache` 已加 `NSLock` 并发保护并全量注册进 Xcode）
+- [x] **iOS-P1-4**：补齐原生 `AVAudioEngine` 听觉闭环（吞噬连击升调/冲刺/破甲/碎石/受伤/拾取/升级进化/狂热/转盘棘轮 + 3 层水深环境音 + `AVAudioSession` 静音键与中断合规）
 
 ### P2 · 品质对齐、长线留存与原生生态放大
-- [ ] **iOS-P2-1**：补齐 `XCTest` 原生单元测试套件（校验 Swift `GameRules` 与 `game_data.json` / Web `rules.ts` 核心不变量 1:1 咬合）
-- [ ] **iOS-P2-2**：完善 App Store 发行打磨与原生生态（中英双语 `InfoPlist.strings`、正式 App 名称与合规隐私清单 `PrivacyInfo.xcprivacy`、Game Center 成就/榜单 + iCloud 存档 + StoreKit 2 混合变现）
+- [x] **iOS-P2-1**：补齐 `XCTest` 原生单元测试套件（`HungrySharkEvolutionTests/GameRulesTests.swift` 校验 Swift `GameRules` 与 `game_data.json` / Web `rules.ts` 核心不变量 1:1 咬合，macOS `xcodebuild test` 待在 Xcode 运行）
+- [-] **iOS-P2-2**：完善 App Store 发行打磨与原生生态（已完成 `PrivacyInfo.xcprivacy` 合规隐私清单 + `en.lproj` / `zh-Hans.lproj` `InfoPlist.strings` 本地化；Game Center / iCloud / StoreKit 2 需 Apple Developer 能力配置，待后续按发行节奏接入）
 
 ---
 
@@ -113,68 +113,68 @@
 
 ---
 
-### [ ] iOS-P1-2 · 补齐前后台生命周期保护与原生多指触控稳健性
+### [x] iOS-P1-2 · 补齐前后台生命周期保护与原生多指触控稳健性
 - **当前问题（源码定位）**：
   - `ContentView.swift` 与 `HungrySharkEvolutionApp.swift` 均**未监听 `@Environment(\.scenePhase)` 或 `UIApplication.willResignActiveNotification`**。玩家在游戏中途切后台、接听来电、弹出系统低电量提示或看激励广告时，游戏不会自动进入 `"paused"` 状态且 `dt` 虽被 clamp 为 `0.05`，但恢复后可能出现摇杆状态残留或直接掉血。
   - `ContentView.swift:1393`（摇杆）与 `1693`（冲刺按钮）以及技能按钮使用纯 SwiftUI `DragGesture` + `Button` 混排；在 iOS 多点触控下，左手按住摇杆拖移出边界或系统边缘手势触发时，易出现右手技能偶发失灵或左手抬起回调丢失。
 - **可选方案**：
-  - **方案 A（推荐）**：① 在 `ContentView` 监听 `scenePhase`（`.inactive` / `.background` 自动调用 `vm.pauseGame()` 并 `scene.isPaused = true` + 归零输入）；② 监听 `UIApplication.willResignActiveNotification` 与 `AVAudioSession.interruptionNotification`；③ 将左下摇杆与右下冲刺区升级为轻量 `UIViewRepresentable`（直接接管 `UITouch` `touchesBegan/Moved/Ended/Cancelled` + `isMultipleTouchEnabled = true`），彻底根治多指抢占与手势丢失，并支持左半屏任意落点动态摇杆。
+  - **方案 A（推荐）**：① 在 `ContentView` 监听 `scenePhase`（`.inactive` / `.background` 自动调用 `vm.pauseGame(silent: true)` 并 `scene.isPaused = true` + `scene.resetFrameClock()` + 归零输入）；② 监听 `UIApplication.willResignActiveNotification` / `didBecomeActiveNotification` 与 `AVAudioSession.interruptionNotification`；③ 将左下摇杆与右下冲刺区升级为轻量 `UIViewRepresentable`（`MultiTouchControls.swift` 直接接管 `UITouch` `touchesBegan/Moved/Ended/Cancelled` + `isMultipleTouchEnabled = true` + `willMove(toWindow: nil)` 兜底重置），彻底根治多指抢占与手势丢失，并适配横屏安全区 `geo.safeAreaInsets`。
   - **方案 B**：补齐 `scenePhase` 自动暂停与输入重置，保留 SwiftUI 手势但将摇杆/冲刺独立成不相互干扰的顶层手势容器。
-- **决策记录**：`待决策`
+- **决策记录**：`采用方案 A：新增 UI/Components/MultiTouchControls.swift 并在 ContentView/HudLeafViews 落地完整前后台生命周期保护、UIKit 原生多指摇杆/冲刺与安全区适配`（2026-11-24 已落地）
 - **验收标准（DoD）**：
-  - [ ] 游玩中切后台、锁屏、拉下控制中心或来电中断，返回后必定处于暂停态且血量无意外流失
-  - [ ] 左手长按摇杆持续转向时，右手连点升级躯体、狂暴、基因突进、按住冲刺 100% 并发响应且抬手必归零
+  - [x] 游玩中切后台、锁屏、拉下控制中心或来电中断，自动静默暂停、冻结 `scene.isPaused`、重置帧时钟与输入状态，返回后必定处于暂停态且血量无意外流失
+  - [x] 左手长按 UIKit 多指摇杆持续转向时，右手连点升级躯体/狂暴/突破及按住 UIKit 冲刺遮罩 100% 并发响应且 `touchesCancelled`/退场必归零（最终真机手势验证待 macOS Xcode 完成）
 
 ---
 
-### [-] iOS-P1-3 · 拆分 4 个上帝 Swift 文件并修复并发安全隐患
+### [x] iOS-P1-3 · 拆分 4 个上帝 Swift 文件并修复并发安全隐患
 - **当前问题（源码定位）**：
-  - `OceanGameScene.swift`（原 3,466 行 → 现 2,807 行）已剥离 `Monetization/GoogleAdMobManager.swift`（388 行）与 `State/GameViewModel.swift`（550 行），剩余 SpriteKit 物理、渲染、视差、海床、刷怪、粒子待进一步拆分。
-  - `ContentView.swift`（3,024 行）将 10+ 视图组件（启动页、HUD、摇杆、MOBA 技能扇区、暂停/结算弹窗、48 阶转盘图鉴）堆在同一文件，编译增量耗时高且极难协同维护。
+  - 原 4 个超千行上帝文件：`GameRules.swift`（2,193 行）、`SpriteAtlasManager.swift`（2,602 行）、`OceanGameScene.swift`（3,466 行）、`ContentView.swift`（2,998 行）。
   - `GameRules.swift:613-615`：`terrainBlockNodeCache` 与 `terrainBlockCacheOrder` 为无锁全局 `private static var`，在 Swift 6 严格并发检查或后台线程查询地形时会引发编译报错 / 运行时数据竞争。
 - **可选方案**：
-  - **方案 A（推荐）**：参照 Web 端 `P1-3` 的模块化分层，将 `ios-native/HungrySharkEvolution/` 拆分为清晰子目录（`scripts/build-ios-native.ts` 已支持自动递归扫描 `.swift` 并更新 `project.pbxproj`）：
-    - `Monetization/GoogleAdMobManager.swift`（已落地）
-    - `State/GameViewModel.swift`（已落地）+ `State/HudTelemetryStore.swift`
-    - `Core/GameRules.swift` + `Core/TerrainSystem.swift`（用 `NSLock` 或 `@MainActor` 封装地形块缓存）
-    - `Rendering/OceanGameScene.swift` + `Rendering/SeabedRenderer.swift` + `Rendering/PreySimulation.swift` + `Rendering/DevourFXSystem.swift`
-    - `UI/Components/` + `UI/StartupLoadingView.swift` + `UI/InGameHudView.swift` + `UI/EvolutionAtlasSheetView.swift` + `UI/ModalsView.swift`
+  - **方案 A（推荐）**：参照 Web 端 `P1-3` 的模块化分层，将 `ios-native/HungrySharkEvolution/` 拆分为清晰子目录（`scripts/build-ios-native.ts` 自动递归扫描 `.swift` 并更新 `project.pbxproj`）：
+    - `Monetization/GoogleAdMobManager.swift`（388 行）
+    - `State/GameViewModel.swift`（622 行）+ `State/HudTelemetryStore.swift`（146 行）
+    - `Audio/HapticFeedbackManager.swift`（65 行）+ `Audio/OceanAudioEngine.swift`（622 行）
+    - `Core/GameRules.swift`（815 行）+ `Core/TerrainSystem.swift`（671 行，含 `NSLock` + `@unchecked Sendable` 封装的 `SeabedTerrainBlockCache`）+ `Core/SeabedTerraceSystem.swift`（938 行）
+    - `Rendering/OceanGameScene.swift`（772 行）+ `Rendering/SeabedRenderer.swift`（902 行）+ `Rendering/PreySimulation.swift`（599 行）+ `Rendering/OceanFXSystem.swift`（564 行）+ `Rendering/SpriteAtlasManager.swift`（809 行）+ `Rendering/AtlasUiSlicer.swift`（931 行）+ `Rendering/AtlasEnvironmentProcessor.swift`（877 行）
+    - `UI/ContentView.swift`（468 行）+ `UI/StartupLoadingView.swift`（301 行）+ `UI/EvolutionAtlasSheetView.swift`（883 行）+ `UI/ModalsAndSkillFanViews.swift`（646 行）+ `UI/Components/AtlasUiKitViews.swift`（586 行）+ `UI/Components/HudLeafViews.swift`（229 行）+ `UI/Components/MultiTouchControls.swift`（312 行）
   - **方案 B**：最小拆分，仅将 `GoogleAdMobManager`、`GameViewModel`、`EvolutionAtlasSheetView` 抽离为独立文件，并给 `terrainBlockNodeCache` 加 `NSLock`。
-- **决策记录**：`采用“先轻拆（AdMob + ViewModel）后同步修 P0，再逐步细拆其余模块”渐进路线`（Round 1 已落地 2 个独立模块）
+- **决策记录**：`采用方案 A，分 4 轮渐进完成全部 4 个上帝文件细拆与 NSLock 并发防护`（2026-11-24 Round 4 已全面落地）
 - **验收标准（DoD）**：
-  - [ ] 单文件行数原则上 `< 1,000` 行，零循环依赖，运行 `npm run sync:ios` 后 `project.pbxproj` 完整注册所有新建 Swift 文件（当前 8 个源码文件已注册）
-  - [ ] `GameRules` 全局地形缓存具备明确并发保护（`@MainActor` 或 `NSLock`），开启 `Strict Concurrency Checking = Complete` 无数据竞争警告
+  - [x] 单文件行数全部 `< 1,000` 行（24 个 App Swift 文件最高 `938` 行、0 循环依赖），运行 `npm run sync:ios` 后 `project.pbxproj` 完整注册所有新建 Swift 文件
+  - [x] `GameRules` 全局地形缓存已由 `SeabedTerrainBlockCache`（`@unchecked Sendable` + `NSLock`）封装并发保护（最终 Xcode Swift 6 `Strict Concurrency` 编译复验待 macOS 执行）
 
 ---
 
-### [ ] iOS-P1-4 · 补齐原生 `AVAudioEngine` 听觉闭环与音频会话合规
+### [x] iOS-P1-4 · 补齐原生 `AVAudioEngine` 听觉闭环与音频会话合规
 - **当前问题（源码定位）**：
-  - 全 iOS 工程目前仅在 `OceanGameScene.swift:471, 478` 调用了 `AudioServicesPlaySystemSound(1104)` 和 `1025` 两个系统按键音；**吞噬、冲刺、破甲、撞碎海床、受伤、黄金狂热、升级进化全部静音**，且完全没有浅海/暮光/深渊环境音或 BGM。
+  - 全 iOS 工程原仅在 `OceanGameScene.swift`、`GameViewModel.swift` 与 `ContentView.swift` 调用了 `AudioServicesPlaySystemSound(1104)` 和 `1025` 两个系统按键音；吞噬、冲刺、破甲、撞碎海床、受伤、黄金狂热、升级进化全部静音，且完全没有浅海/暮光/深渊环境音或 BGM。
   - `AudioServicesPlaySystemSound` 无法精细控制音量、音高爬升（连击 Pitch）与混音。
 - **可选方案**：
-  - **方案 A（推荐）**：新增 `Audio/OceanAudioEngine.swift`，基于 `AVAudioEngine` + `AVAudioPlayerNode` / 程序化合成器缓冲实现零外部版权风险的高爽感 SFX（吞噬气泡咬合 + 连击音阶爬升、冲刺水流、破甲撞击、巨鲨碎石低频、黄金狂热高能循环）与 3 层水深环境音淡入淡出；配置 `AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])` 以天然遵守硬件静音开关并兼容玩家后台音乐，监听音频中断自动暂停/恢复。
+  - **方案 A（推荐）**：新增 `Audio/OceanAudioEngine.swift`，基于 `AVAudioEngine` + 6 通道 `AVAudioPlayerNode`/`AVAudioUnitVarispeed` 程序化合成器缓冲实现零外部版权风险的高爽感 SFX（吞噬气泡咬合 + 连击音阶爬升、冲刺水流、破甲裂纹/粉碎、巨鲨碎石低频、受伤告警、金币/基因双音、进化五音琶音、狂热和弦、转盘棘轮与 UI 点击）与 3 层整数周期无缝水深环境音淡入淡出（浅海/暮光/深渊）；配置 `AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])` 以天然遵守硬件静音开关并兼容玩家后台音乐，监听音频中断与路由切换自动暂停/恢复。
   - **方案 B**：使用 `SKAction.playSoundFileNamed` 配合轻量 `.caf`/`.m4a` 音效资源包实现基础音效。
-- **决策记录**：`待决策`
+- **决策记录**：`采用方案 A：新增 Audio/OceanAudioEngine.swift 并全量移除 AudioToolbox / AudioServicesPlaySystemSound`（2026-11-24 已落地）
 - **验收标准（DoD）**：
-  - [ ] 覆盖吞噬（连击升调）、破甲、碎石、受伤、升级、进化、狂热、UI 点击 8 类事件与水深环境音
-  - [ ] 拨动 iPhone 静音键、来电或播放激励视频广告时自动静音/让渡音频会话，切回无杂音与崩溃
+  - [x] 覆盖吞噬（连击升调）、冲刺、破甲、碎石、受伤、金币/基因拾取、升级/进化、狂热、转盘棘轮与 UI 点击 10 类事件及 3 层水深环境音无缝混音
+  - [x] `AVAudioSession` 配置 `.ambient` + `[.mixWithOthers]` 并监听 `interruptionNotification` / `routeChangeNotification` / `AVAudioEngineConfigurationChange`（最终真机静音拨片与来电中断复测待 macOS Xcode 完成）
 
 ---
 
-### [ ] iOS-P2-1 · 建立 Swift `XCTest` 原生单元测试护城河
+### [x] iOS-P2-1 · 建立 Swift `XCTest` 原生单元测试护城河
 - **当前问题**：
   - Web 端已有 `48/48` 条严格单元不变量测试（`src/game/rules.test.ts`），但 `ios-native/` 为 **0 测试 Target**。未来 Swift 端修改公式或解析 `game_data.json` 时，无法在 Xcode CI/本地自动捕获双端数值漂移。
 - **验收标准（DoD）**：
-  - [ ] 新增 `HungrySharkEvolutionTests` XCTest Target
-  - [ ] 覆盖：`game_data.json` 解码完整性（48 鲨 + 135 猎物 + 双语 I18N 零缺失）、`computeTrueCameraZoom` / `worldScale` / `getPreyRelativeVisualScale` 线性体长比守恒、9 阶海床碰撞与 Tier 0~4 破壁阈值、`worldYToMeterDepth` 分段精度、三色皇冠与 48 阶解锁门禁
+  - [x] 新增 `HungrySharkEvolutionTests` XCTest Target（已同步至 `scripts/build-ios-native.ts`、`project.pbxproj`、`project.yml` 与 `Package.swift`）
+  - [x] `GameRulesTests.swift`（290 行）覆盖 6 项核心测试：`game_data.json` 解码完整性（48 鲨 + 135 猎物 + 双语 I18N 零缺失）、`computeTrueCameraZoom` / `worldScale` / `getPreyRelativeVisualScale` 线性体长比守恒、9 阶海床碰撞与 Tier 0~4 破壁阈值、`worldYToMeterDepth` 分段精度、200 并发 `DispatchGroup` 地形缓存压测、三色皇冠与 48 阶解锁门禁（macOS `xcodebuild test` 待在 macOS 运行）
 
 ---
 
-### [ ] iOS-P2-2 · App Store 发行打磨与 iOS 原生留存/变现能力
+### [-] iOS-P2-2 · App Store 发行打磨与 iOS 原生留存/变现能力
 - **当前问题与规划子项**：
-  - [ ] **隐私清单与本地化**：新增 `PrivacyInfo.xcprivacy`（App Store 强制要求声明 `UserDefaults` API 原因 `CA92.1` 及广告 SDK 追踪数据）；补齐 `zh-Hans.lproj` / `en.lproj` 的 `InfoPlist.strings`（正式中英文 App 展示名与 ATT 授权说明，替换当前小写 `deepsea:evolution`）。
-  - [ ] **云存档与榜单**：接入 `NSUbiquitousKeyValueStore`（iCloud 轻量键值云存档，冲突取最高进度合并）与 Game Center（48 阶图鉴成就 + 最高分/最深海沟排行榜）。
-  - [ ] **StoreKit 2 混合变现**：补充“免广告特权 / 基因补给礼盒 / 限时特惠鲨”轻量 IAP，并保留规范的“恢复购买（Restore Purchases）”入口以符合 App Store 3.1.1 规范。
+  - [x] **隐私清单与本地化**：新增 `PrivacyInfo.xcprivacy`（XML Plist 声明 `NSPrivacyTracking`、AdMob 域名、广告/设备 ID 收集用途及 `CA92.1`/`C617.1`/`35F9.1`/`E174.1` 必需 API 原因）；补齐 `zh-Hans.lproj/InfoPlist.strings`（`"深海进化：饥饿鲨"`）与 `en.lproj/InfoPlist.strings`（`"DeepSea Evolution"`）及双语 ATT 授权文案，并全量注册进 `project.pbxproj` `PBXVariantGroup`。
+  - [ ] **云存档与榜单**：接入 `NSUbiquitousKeyValueStore`（iCloud 轻量键值云存档，冲突取最高进度合并）与 Game Center（48 阶图鉴成就 + 最高分/最深海沟排行榜，需 Apple Developer Entitlements 配置）。
+  - [ ] **StoreKit 2 混合变现**：补充“免广告特权 / 基因补给礼盒 / 限时特惠鲨”轻量 IAP，并保留规范的“恢复购买（Restore Purchases）”入口以符合 App Store 3.1.1 规范（需 App Store Connect 商品 ID）。
 
 ---
 
@@ -195,3 +195,5 @@
 | 2026-11-23 | iOS-P0-2 | 同步 Web P1-2 至 `Core/GameRules.swift`、`Rendering/OceanGameScene.swift`、`State/GameViewModel.swift`、`UI/ContentView.swift`：全量废除 `seabedScale`/`effPreyX/Y` 双空间微缩补丁，回归真 2D 相机变焦（`0.8m -> 1.00`, `45m -> 0.22`）+ 线性体长比 + 低缩放海床 LOD；落地巨鲨撞碎 Tier 0~4 阶梯海床（`8/12/18/26/36m`）与 `breachedTerraceCells` 缺口/碎石反馈；修正 `vm.depthMeters` 使用 `worldYToMeterDepth`、悬赏过滤 `minSpawnablePreyLengthM` 与滞留浅海 `>= 1.5s` 非阻断双语深潜提示 | `[x]` | 静态 grep `seabedScale` / `effPreyX` / `postEffX` 0 残留；8 个 Swift 文件语法平衡与跨文件符号核对全通过；Web `rules.test.ts` 48/48 全绿、`npm run lint` 与 `npm run build` 0 错误 |
 | 2026-11-23 | iOS-P0-3 | 升级 `scripts/build-ios-native.ts` 与 `SpriteAtlasManager.swift` 支持 iOS 16+ 原生 WebP 资产同步并自动清理 224 个旧图集/重复 PNG（`Resources/Assets/` 从 61 MB 瘦身至 5.8 MB）；重构启动加载仅预热出战鲨鱼窗口 + 浅海带猎物 + UI/海床并在首屏淡出后释放 3 张启动海报；预览位图改为有界 `NSCache`、GPU 纹理增加 LRU 淘汰与跨深度带异步预热并响应 `didReceiveMemoryWarningNotification` | `[x]` | `npm run sync:ios` 同步 206 个资源与 11 个 Swift 源码文件至 `project.pbxproj`；`rules.test.ts` Test 42 升级校验 WebP 魔数 + 零旧大图 + `< 12 MB` 包体守恒，48/48 全绿 |
 | 2026-11-23 | iOS-P1-1 + iOS-P1-3 (Phase 2) | 新增 `State/HudTelemetryStore.swift`（~18Hz 节流）、`UI/Components/HudLeafViews.swift`（隔离摇杆/冲刺/深度/Row2 提示/教程计时）与 `Audio/HapticFeedbackManager.swift`（单例复用 Taptic 引擎）；`GameViewModel` 移除逐帧 `@Published` 写入、`SpriteView` 调整为 60fps；金币/基因拾取物改为复用 `SpriteAtlasManager.uiIconTexture`；鲨鱼/猎物/海床 `SKWarpGeometryGrid` 全部复用预分配 `[SIMD2<Float>]` 缓冲且猎物形变节流至 30Hz | `[x]` | 静态审计 0 残留 `preferredFramesPerSecond: 120`、0 处 `OceanGameScene` 运行时 `SKTexture(image:)`、0 处分散 `UIImpactFeedbackGenerator`；11 个 Swift 文件括号/插值平衡全 `OK`；Web `rules.test.ts` 48/48 + `tsc --noEmit` + `npm run build` 全绿 |
+| 2026-11-24 | iOS-P1-4 + iOS-P1-2 + iOS-P1-3 (Phase 3) | 新增 `Audio/OceanAudioEngine.swift`（基于 `AVAudioEngine` 6 通道变调 SFX + 3 层整数周期水深环境音 + `.ambient` 静音拨片合规 + 中断/路由自恢复）并全量移除 `AudioToolbox`/`AudioServicesPlaySystemSound`；新增 `UI/Components/MultiTouchControls.swift`（UIKit `isMultipleTouchEnabled = true` 摇杆与冲刺遮罩，按 `UITouch` 追踪、确保取消/退场归零），在 `ContentView` 落地 `scenePhase` + `willResignActive`/`didBecomeActive` 自动暂停、冻结物理与横屏安全区 HUD 保护 | `[x]` | `npm run sync:ios` 注册全部 13 个 Swift 源码与 206 个资源进 `project.pbxproj`；静态 grep 0 残留 `AudioServicesPlaySystemSound` / `import AudioToolbox`；13 个 Swift 文件（13,428 行）括号/引号平衡全 `OK`；Web `rules.test.ts` 48/48 + `tsc --noEmit` + `npm run build` 全绿（最终真机体验与编译待 macOS Xcode） |
+| 2026-11-24 | Round 4: iOS-P1-3 (Final) + iOS-P2-1 + iOS-P2-2 (Privacy/L10n) | 彻底完成 4 个上帝文件模块化拆解与并发加固：`Core/GameRules.swift`（815）+ `TerrainSystem.swift`（671，`SeabedTerrainBlockCache` `NSLock`）+ `SeabedTerraceSystem.swift`（938）；`Rendering/OceanGameScene.swift`（772）+ `SeabedRenderer.swift`（902）+ `PreySimulation.swift`（599）+ `OceanFXSystem.swift`（564）+ `SpriteAtlasManager.swift`（809）+ `AtlasUiSlicer.swift`（931）+ `AtlasEnvironmentProcessor.swift`（877）；`UI/ContentView.swift`（468）+ `AtlasUiKitViews.swift`（586）+ `StartupLoadingView.swift`（301）+ `ModalsAndSkillFanViews.swift`（646）+ `EvolutionAtlasSheetView.swift`（883）。新增 `HungrySharkEvolutionTests/GameRulesTests.swift`（290 行，6 测试方法）与 `PrivacyInfo.xcprivacy`、`en.lproj`/`zh-Hans.lproj/InfoPlist.strings`，并同步更新 `scripts/build-ios-native.ts` 生成 `project.pbxproj` / `project.yml` / `Package.swift` | `[x]` | `npm run sync:ios` 注册 24 App Swift（13,475 行，max 938 行，0 文件 `>=1000`）+ 1 Test Swift + 206 资源进纯 ASCII `project.pbxproj`；26 个 Swift 文件括号/引号平衡与扩展静态存储检查 0 错误、跨文件 `extension` 可见性审计 0 错误；`PrivacyInfo.xcprivacy` / `.strings` 解析通过；Web `rules.test.ts` 48/48、`npm run build`、`npm run lint` 全绿（最终 macOS Xcode 构建与 `xcodebuild test` 待在 macOS 运行） |

@@ -26,6 +26,7 @@ const SHARED_DIR = path.join(ROOT_DIR, 'shared');
 const SHARED_JSON_PATH = path.join(SHARED_DIR, 'game_data.json');
 const IOS_ROOT = path.join(ROOT_DIR, 'ios-native');
 const APP_DIR = path.join(IOS_ROOT, 'HungrySharkEvolution');
+const TESTS_DIR = path.join(IOS_ROOT, 'HungrySharkEvolutionTests');
 
 const CANONICAL_SWIFT_FILES = [
   'HungrySharkEvolutionApp.swift',
@@ -66,7 +67,12 @@ function discoverSwiftSourceFiles(appDir: string): string[] {
 
   const walk = (currentDir: string, relPrefix: string) => {
     for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
-      if (entry.name.startsWith('.') || entry.name === 'Resources' || entry.name === 'Assets.xcassets') {
+      if (
+        entry.name.startsWith('.') ||
+        entry.name === 'Resources' ||
+        entry.name === 'Assets.xcassets' ||
+        entry.name.endsWith('.lproj')
+      ) {
         continue;
       }
       const fullPath = path.join(currentDir, entry.name);
@@ -93,6 +99,25 @@ function discoverSwiftSourceFiles(appDir: string): string[] {
 
   const extras = discovered.filter((f) => !canonicalSet.has(f)).sort();
   return [...CANONICAL_SWIFT_FILES, ...extras];
+}
+
+function discoverTestSwiftFiles(testsDir: string): string[] {
+  if (!fs.existsSync(testsDir)) return [];
+  const discovered: string[] = [];
+  const walk = (currentDir: string, relPrefix: string) => {
+    for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue;
+      const fullPath = path.join(currentDir, entry.name);
+      const relPath = relPrefix ? `${relPrefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walk(fullPath, relPath);
+      } else if (entry.isFile() && entry.name.endsWith('.swift')) {
+        discovered.push(relPath);
+      }
+    }
+  };
+  walk(testsDir, '');
+  return discovered.sort();
 }
 
 function generateXcodeGenProjectYml(): string {
@@ -144,6 +169,19 @@ targets:
         INFOPLIST_KEY_GADApplicationIdentifier: "${GOOGLE_ADS_CONFIG.admobAppId}"
         INFOPLIST_KEY_GADIsAdManagerApp: YES
         INFOPLIST_KEY_NSUserTrackingUsageDescription: "允许追踪以提供个性化深海狩猎激励视频广告体验"
+  HungrySharkEvolutionTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: HungrySharkEvolutionTests
+    dependencies:
+      - target: HungrySharkEvolution
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.deepsea.hungryshark.evolutionTests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 5.9
 `;
 }
 
@@ -173,10 +211,21 @@ let package = Package(
                 .product(name: "GoogleMobileAds", package: "swift-package-manager-google-mobile-ads", condition: .when(platforms: [.iOS]))
             ],
             path: "HungrySharkEvolution",
-            exclude: ["Info.plist", "HungrySharkEvolutionApp.swift"],
+            exclude: [
+                "Info.plist",
+                "HungrySharkEvolutionApp.swift",
+                "PrivacyInfo.xcprivacy",
+                "zh-Hans.lproj",
+                "en.lproj"
+            ],
             resources: [
                 .copy("Resources/Assets")
             ]
+        ),
+        .testTarget(
+            name: "HungrySharkEvolutionTests",
+            dependencies: ["HungrySharkEvolutionCore"],
+            path: "HungrySharkEvolutionTests"
         )
     ]
 )
@@ -190,9 +239,10 @@ function getResourceFileType(fileName: string): string {
   return 'image.png';
 }
 
-function generatePbxproj(swiftFiles: string[], assetFiles: string[]): string {
+function generatePbxproj(swiftFiles: string[], assetFiles: string[], testSwiftFiles: string[]): string {
   // Valid Xcode 15/16 project.pbxproj referencing all discovered Swift files, Assets.xcassets,
-  // the bundled Assets folder, GoogleMobileAds Swift Package (minimumVersion = "11.2.0"),
+  // PrivacyInfo.xcprivacy, bilingual InfoPlist.strings (en + zh-Hans), HungrySharkEvolutionTests,
+  // GoogleMobileAds Swift Package (minimumVersion = "11.2.0"),
   // AND every individual PNG/JPG/JSON resource (including game_data.json).
   const swiftEntries = swiftFiles.map((relPath, i) => {
     const fileName = path.basename(relPath);
@@ -264,6 +314,37 @@ function generatePbxproj(swiftFiles: string[], assetFiles: string[]): string {
     })
     .join('\n');
 
+  const testEntries = testSwiftFiles.map((relPath, i) => {
+    const fileName = path.basename(relPath);
+    const idxHex = String(i + 1).padStart(4, '0');
+    const buildId = `T100${idxHex}2B00000000000001`;
+    const fileRefId = `T200${idxHex}2B00000000000001`;
+    const quotedPath = relPath.includes('/') ? `"${relPath}"` : relPath;
+    return { relPath, fileName, buildId, fileRefId, quotedPath };
+  });
+
+  const testBuildFiles = testEntries
+    .map(
+      (s) =>
+        `\t\t${s.buildId} /* ${s.fileName} in Sources */ = {isa = PBXBuildFile; fileRef = ${s.fileRefId} /* ${s.fileName} */; };`
+    )
+    .join('\n');
+
+  const testFileRefs = testEntries
+    .map(
+      (s) =>
+        `\t\t${s.fileRefId} /* ${s.fileName} */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ${s.quotedPath}; sourceTree = "<group>"; };`
+    )
+    .join('\n');
+
+  const testGroupChildren = testEntries
+    .map((s) => `\t\t\t\t${s.fileRefId} /* ${s.fileName} */,`)
+    .join('\n');
+
+  const testSourcePhaseEntries = testEntries
+    .map((s) => `\t\t\t\t${s.buildId} /* ${s.fileName} in Sources */,`)
+    .join('\n');
+
   return `// !$*UTF8*$!
 {
 	archiveVersion = 1;
@@ -277,15 +358,33 @@ ${swiftBuildFiles}
 		A10000072B00000000000001 /* Assets in Resources */ = {isa = PBXBuildFile; fileRef = A20000072B00000000000001 /* Assets */; };
 		A10000082B00000000000001 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A20000102B00000000000001 /* Assets.xcassets */; };
 		A10000092B00000000000001 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = A99000022B00000000000001 /* GoogleMobileAds */; };
+		A100000A2B00000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A20000112B00000000000001 /* PrivacyInfo.xcprivacy */; };
+		A100000B2B00000000000001 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = A20000122B00000000000001 /* InfoPlist.strings */; };
+${testBuildFiles}
 ${assetBuildFiles}
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		T70000012B00000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A70000012B00000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A50000012B00000000000001;
+			remoteInfo = HungrySharkEvolution;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		A00000012B00000000000001 /* HungrySharkEvolution.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HungrySharkEvolution.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		T00000012B00000000000001 /* HungrySharkEvolutionTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HungrySharkEvolutionTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 ${swiftFileRefs}
+${testFileRefs}
 		A20000072B00000000000001 /* Assets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Resources/Assets"; sourceTree = "<group>"; };
 		A20000082B00000000000001 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000102B00000000000001 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A20000112B00000000000001 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A20000132B00000000000001 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = "en.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		A20000142B00000000000001 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 ${assetFileRefs}
 /* End PBXFileReference section */
 
@@ -298,6 +397,13 @@ ${assetFileRefs}
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T30000012B00000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -305,6 +411,7 @@ ${assetFileRefs}
 			isa = PBXGroup;
 			children = (
 				A40000022B00000000000001 /* HungrySharkEvolution */,
+				T40000022B00000000000001 /* HungrySharkEvolutionTests */,
 				A40000032B00000000000001 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -316,9 +423,19 @@ ${swiftGroupChildren}
 				A20000102B00000000000001 /* Assets.xcassets */,
 				A20000072B00000000000001 /* Assets */,
 				A40000042B00000000000001 /* BundledAssets */,
+				A20000112B00000000000001 /* PrivacyInfo.xcprivacy */,
+				A20000122B00000000000001 /* InfoPlist.strings */,
 				A20000082B00000000000001 /* Info.plist */,
 			);
 			path = HungrySharkEvolution;
+			sourceTree = "<group>";
+		};
+		T40000022B00000000000001 /* HungrySharkEvolutionTests */ = {
+			isa = PBXGroup;
+			children = (
+${testGroupChildren}
+			);
+			path = HungrySharkEvolutionTests;
 			sourceTree = "<group>";
 		};
 		A40000042B00000000000001 /* BundledAssets */ = {
@@ -333,6 +450,7 @@ ${assetGroupChildren}
 			isa = PBXGroup;
 			children = (
 				A00000012B00000000000001 /* HungrySharkEvolution.app */,
+				T00000012B00000000000001 /* HungrySharkEvolutionTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -360,6 +478,24 @@ ${assetGroupChildren}
 			productReference = A00000012B00000000000001 /* HungrySharkEvolution.app */;
 			productType = "com.apple.product-type.application";
 		};
+		T50000012B00000000000001 /* HungrySharkEvolutionTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = T80000022B00000000000001 /* Build configuration list for PBXNativeTarget "HungrySharkEvolutionTests" */;
+			buildPhases = (
+				T60000012B00000000000001 /* Sources */,
+				T30000012B00000000000001 /* Frameworks */,
+				T60000022B00000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				T70000022B00000000000001 /* PBXTargetDependency */,
+			);
+			name = HungrySharkEvolutionTests;
+			productName = HungrySharkEvolutionTests;
+			productReference = T00000012B00000000000001 /* HungrySharkEvolutionTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -369,6 +505,11 @@ ${assetGroupChildren}
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					T50000012B00000000000001 = {
+						TestTargetID = A50000012B00000000000001;
+					};
+				};
 			};
 			buildConfigurationList = A80000012B00000000000001 /* Build configuration list for PBXProject "HungrySharkEvolution" */;
 			compatibilityVersion = "Xcode 14.0";
@@ -377,6 +518,7 @@ ${assetGroupChildren}
 			knownRegions = (
 				en,
 				zh_CN,
+				"zh-Hans",
 				Base,
 			);
 			mainGroup = A40000012B00000000000001;
@@ -388,6 +530,7 @@ ${assetGroupChildren}
 			projectRoot = "";
 			targets = (
 				A50000012B00000000000001 /* HungrySharkEvolution */,
+				T50000012B00000000000001 /* HungrySharkEvolutionTests */,
 			);
 		};
 /* End PBXProject section */
@@ -399,7 +542,16 @@ ${assetGroupChildren}
 			files = (
 				A10000082B00000000000001 /* Assets.xcassets in Resources */,
 				A10000072B00000000000001 /* Assets in Resources */,
+				A100000A2B00000000000001 /* PrivacyInfo.xcprivacy in Resources */,
+				A100000B2B00000000000001 /* InfoPlist.strings in Resources */,
 ${assetResourceEntries}
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		T60000022B00000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -414,7 +566,35 @@ ${swiftSourcePhaseEntries}
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		T60000012B00000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+${testSourcePhaseEntries}
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		T70000022B00000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A50000012B00000000000001 /* HungrySharkEvolution */;
+			targetProxy = T70000012B00000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		A20000122B00000000000001 /* InfoPlist.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				A20000132B00000000000001 /* en */,
+				A20000142B00000000000001 /* zh-Hans */,
+			);
+			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
 		A90000012B00000000000001 /* Debug */ = {
@@ -521,6 +701,54 @@ ${swiftSourcePhaseEntries}
 			};
 			name = Release;
 		};
+		T90000032B00000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = "1.0.0";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolutionTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = "5.0";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HungrySharkEvolution.app/HungrySharkEvolution";
+			};
+			name = Debug;
+		};
+		T90000042B00000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 3N2FUK7M23;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = "16.0";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = "1.0.0";
+				PRODUCT_BUNDLE_IDENTIFIER = "com.deepsea.hungryshark.evolutionTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = "5.0";
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/HungrySharkEvolution.app/HungrySharkEvolution";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -538,6 +766,15 @@ ${swiftSourcePhaseEntries}
 			buildConfigurations = (
 				A90000032B00000000000001 /* Debug */,
 				A90000042B00000000000001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		T80000022B00000000000001 /* Build configuration list for PBXNativeTarget "HungrySharkEvolutionTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				T90000032B00000000000001 /* Debug */,
+				T90000042B00000000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -736,6 +973,7 @@ function main(): void {
     throw new Error('[sync:ios] Missing ios-native/HungrySharkEvolution/Info.plist.');
   }
   const swiftFiles = discoverSwiftSourceFiles(APP_DIR);
+  const testSwiftFiles = discoverTestSwiftFiles(TESTS_DIR);
 
   // Clean stale Xcode user session caches (xcuserdata)
   for (const staleUserDir of [
@@ -817,7 +1055,7 @@ function main(): void {
     .filter(
       (f) => f.endsWith('.webp') || f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.json')
     );
-  const pbxprojContent = generatePbxproj(swiftFiles, allBundledAssetFiles);
+  const pbxprojContent = generatePbxproj(swiftFiles, allBundledAssetFiles, testSwiftFiles);
   validateOpenStepPbxproj(pbxprojContent);
   writeFileIfChanged(path.join(xcodeprojDir, 'project.pbxproj'), pbxprojContent);
 
@@ -835,7 +1073,7 @@ function main(): void {
     `[sync:ios] ✅ Synced ${syncedImageCount} WebP/PNG/JPG assets + game_data.json into ios-native/HungrySharkEvolution/Resources/Assets/ (pruned ${prunedCount} obsolete legacy files)`
   );
   console.log(
-    `[sync:ios] ✅ Updated project.pbxproj (${swiftFiles.length} native Swift sources preserved untouched, ${allBundledAssetFiles.length} bundled resources)`
+    `[sync:ios] ✅ Updated project.pbxproj (${swiftFiles.length} app Swift sources, ${testSwiftFiles.length} test sources, ${allBundledAssetFiles.length} bundled resources)`
   );
   process.exit(0);
 }

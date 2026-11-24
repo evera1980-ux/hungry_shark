@@ -46,3 +46,16 @@ targets:
         INFOPLIST_KEY_GADApplicationIdentifier: "ca-app-pub-9273669553362347~9016886171"
         INFOPLIST_KEY_GADIsAdManagerApp: YES
         INFOPLIST_KEY_NSUserTrackingUsageDescription: "允许追踪以提供个性化深海狩猎激励视频广告体验"
+  HungrySharkEvolutionTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: HungrySharkEvolutionTests
+    dependencies:
+      - target: HungrySharkEvolution
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.deepsea.hungryshark.evolutionTests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 5.9
