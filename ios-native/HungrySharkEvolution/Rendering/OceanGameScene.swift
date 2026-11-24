@@ -2,837 +2,10 @@ import SpriteKit
 import SwiftUI
 import UIKit
 import AudioToolbox
-import ObjectiveC
 import simd
-#if canImport(AppTrackingTransparency)
-import AppTrackingTransparency
-#endif
-#if canImport(GoogleMobileAds)
-import GoogleMobileAds
-#endif
-
-/// Runtime Info.plist Guard & Auto-Injector for Google Mobile Ads SDK.
-/// Prevents uncaught Objective-C NSException 'GADInvalidInitializationException' even when
-/// an Xcode 15/16 target uses GENERATE_INFOPLIST_FILE=YES or omits Info.plist keys.
-public enum GADInfoPlistRuntimePatch {
-    private static var isInstalled = false
-    private static let lock = NSLock()
-
-    public static func installIfNeeded() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !isInstalled else { return }
-        isInstalled = true
-
-        if let existing = Bundle.main.infoDictionary?["GADApplicationIdentifier"] as? String,
-           existing.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("ca-app-pub-") {
-            return
-        }
-
-        let origObjSel = #selector(Bundle.object(forInfoDictionaryKey:))
-        let swizObjSel = #selector(Bundle.gad_swizzled_object(forInfoDictionaryKey:))
-        if let origMethod = class_getInstanceMethod(Bundle.self, origObjSel),
-           let swizMethod = class_getInstanceMethod(Bundle.self, swizObjSel) {
-            method_exchangeImplementations(origMethod, swizMethod)
-        }
-
-        let origDictSel = #selector(getter: Bundle.infoDictionary)
-        let swizDictSel = #selector(Bundle.gad_swizzled_infoDictionary)
-        if let origDictMethod = class_getInstanceMethod(Bundle.self, origDictSel),
-           let swizDictMethod = class_getInstanceMethod(Bundle.self, swizDictSel) {
-            method_exchangeImplementations(origDictMethod, swizDictMethod)
-        }
-    }
-}
-
-extension Bundle {
-    @objc fileprivate func gad_swizzled_object(forInfoDictionaryKey key: String) -> Any? {
-        if let val = self.gad_swizzled_object(forInfoDictionaryKey: key) {
-            return val
-        }
-        if self == Bundle.main {
-            if key == "GADApplicationIdentifier" {
-                return GameConfigGenerated.googleAdMobAppId
-            }
-            if key == "GADIsAdManagerApp" {
-                return NSNumber(value: true)
-            }
-        }
-        return nil
-    }
-
-    @objc fileprivate func gad_swizzled_infoDictionary() -> [String: Any]? {
-        var dict = self.gad_swizzled_infoDictionary() ?? [:]
-        if self == Bundle.main {
-            if dict["GADApplicationIdentifier"] == nil {
-                dict["GADApplicationIdentifier"] = GameConfigGenerated.googleAdMobAppId
-            }
-            if dict["GADIsAdManagerApp"] == nil {
-                dict["GADIsAdManagerApp"] = true
-            }
-        }
-        return dict
-    }
-}
-
-/// Production Google AdMob Rewarded Video Bridge (App ID: ca-app-pub-9273669553362347~9016886171, Unit ID: ca-app-pub-9273669553362347/8698331137).
-/// Automatically activates real GADRewardedAd when GoogleMobileAds SPM package is linked in Xcode,
-/// maintains an instant-ready Google rewarded video pool, and gracefully connects with zero premature fallback simulation.
-@MainActor
-public final class GoogleAdMobManager: NSObject, ObservableObject {
-    public static let shared = GoogleAdMobManager()
-    public let appId: String = GameConfigGenerated.googleAdMobAppId
-    public let rewardedAdUnitId: String = GameConfigGenerated.googleAdMobRewardedAdUnitId
-    /// Google official rewarded video test unit for iOS development verification
-    public static let officialTestRewardedAdUnitId: String = "ca-app-pub-3940256099942544/1712485313"
-
-    @Published public var isConnectingAd: Bool = false
-
-    #if canImport(GoogleMobileAds)
-    private var rewardedAd: GADRewardedAd?
-    private var isLoadingAd: Bool = false
-    private var sdkStarted: Bool = false
-    private var pendingRewardAction: (() -> Void)? = nil
-    private var pendingUnavailableAction: (() -> Void)? = nil
-    private var activeAdRewardCallback: (() -> Void)? = nil
-    private var activeAdDidEarnReward: Bool = false
-    private var activeAdDidDismiss: Bool = false
-    private var timeoutTask: Task<Void, Never>? = nil
-    #endif
-
-    public override init() {
-        GADInfoPlistRuntimePatch.installIfNeeded()
-        super.init()
-    }
-
-    public var hasValidPlistAdMobConfig: Bool {
-        GADInfoPlistRuntimePatch.installIfNeeded()
-        if let gadAppId = Bundle.main.object(forInfoDictionaryKey: "GADApplicationIdentifier") as? String,
-           gadAppId.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("ca-app-pub-") {
-            return true
-        }
-        if let isAdManager = Bundle.main.object(forInfoDictionaryKey: "GADIsAdManagerApp") as? Bool,
-           isAdManager {
-            return true
-        }
-        return false
-    }
-
-    public func startSDKAndPreload() {
-        GADInfoPlistRuntimePatch.installIfNeeded()
-        #if canImport(GoogleMobileAds)
-        guard hasValidPlistAdMobConfig else { return }
-        if !sdkStarted {
-            sdkStarted = true
-            print("[GoogleAdMob] 🚀 Starting Google Mobile Ads SDK...")
-            GADMobileAds.sharedInstance().requestConfiguration.testDeviceIdentifiers = [
-                GADSimulatorID,
-                "4599a37a91ce92ab678ffee214ef6819"
-            ]
-            print("[GoogleAdMob] ⏳ 即将调用 AdMob start")
-            GADMobileAds.sharedInstance().start { [weak self] status in
-                print("[GoogleAdMob] ✅ AdMob 初始化完成. Status: \(status.adapterStatusesByClassName.keys)")
-                Task { @MainActor in
-                    self?.preloadRewardedAd()
-                }
-            }
-            print("[GoogleAdMob] 🚀 AdMob start 已调用（非阻塞）")
-
-            #if canImport(AppTrackingTransparency)
-            if #available(iOS 14, *) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                    if ATTrackingManager.trackingAuthorizationStatus == .notDetermined {
-                        ATTrackingManager.requestTrackingAuthorization { status in
-                            print("[GoogleAdMob] 🔒 ATT Status: \(status.rawValue)")
-                        }
-                    }
-                }
-            }
-            #endif
-        } else {
-            preloadRewardedAd()
-        }
-        #else
-        print("[GoogleAdMob] ⚠️ GoogleMobileAds SDK is NOT linked in current build target.")
-        print("[GoogleAdMob] 💡 Add SPM: https://github.com/googleads/swift-package-manager-google-mobile-ads.git")
-        #endif
-    }
-
-    public func preloadRewardedAd() {
-        GADInfoPlistRuntimePatch.installIfNeeded()
-        #if canImport(GoogleMobileAds)
-        guard hasValidPlistAdMobConfig else { return }
-        guard !isLoadingAd, rewardedAd == nil else { return }
-        isLoadingAd = true
-        print("[GoogleAdMob] 📡 Preloading Google rewarded video ad into memory pool...")
-
-        // Prioritize official test ad unit for 100% reliable instant presentation in test device
-        let request = GADRequest()
-        GADRewardedAd.load(withAdUnitID: Self.officialTestRewardedAdUnitId, request: request) { [weak self] ad, error in
-            Task { @MainActor in
-                guard let self = self else { return }
-                self.isLoadingAd = false
-                if let loadedAd = ad {
-                    self.rewardedAd = loadedAd
-                    print("[GoogleAdMob] 🎉 Real Google rewarded video ad loaded into memory pool!")
-                    self.presentPendingAdIfAny()
-                } else if let error = error as? NSError {
-                    print("[GoogleAdMob] ⚠️ Test ad load failed (code: \(error.code)): \(error.localizedDescription)")
-                    self.loadProductionUnitAd()
-                }
-            }
-        }
-        #endif
-    }
-
-    #if canImport(GoogleMobileAds)
-    private func loadProductionUnitAd() {
-        guard !isLoadingAd, rewardedAd == nil else { return }
-        isLoadingAd = true
-        let request = GADRequest()
-        GADRewardedAd.load(withAdUnitID: rewardedAdUnitId, request: request) { [weak self] ad, error in
-            Task { @MainActor in
-                guard let self = self else { return }
-                self.isLoadingAd = false
-                if let loadedAd = ad {
-                    self.rewardedAd = loadedAd
-                    print("[GoogleAdMob] 🎉 Production rewarded ad loaded successfully!")
-                    self.presentPendingAdIfAny()
-                } else if let error = error as? NSError {
-                    print("[GoogleAdMob] ❌ Both ad units failed (code: \(error.code)): \(error.localizedDescription)")
-                    self.failPendingAdIfAny()
-                }
-            }
-        }
-    }
-
-    private func presentPendingAdIfAny() {
-        guard let pending = pendingRewardAction,
-              let ad = rewardedAd,
-              let rootVC = Self.topViewController() else { return }
-        print("[GoogleAdMob] 🎬 Presenting queued Google rewarded video ad now!")
-        pendingRewardAction = nil
-        pendingUnavailableAction = nil
-        timeoutTask?.cancel()
-        timeoutTask = nil
-        isConnectingAd = false
-        rewardedAd = nil
-        activeAdDidEarnReward = false
-        activeAdDidDismiss = false
-        activeAdRewardCallback = pending
-        ad.fullScreenContentDelegate = self
-        ad.present(fromRootViewController: rootVC) { [weak self] in
-            print("[GoogleAdMob] 🎁 User earned ad reward (will apply on ad close).")
-            self?.handleAdRewardEarned()
-        }
-        preloadRewardedAd()
-    }
-
-    private func handleAdRewardEarned() {
-        activeAdDidEarnReward = true
-        if activeAdDidDismiss, let cb = activeAdRewardCallback {
-            activeAdRewardCallback = nil
-            cb()
-        }
-    }
-
-    private func failPendingAdIfAny() {
-        guard let unavailable = pendingUnavailableAction else { return }
-        pendingRewardAction = nil
-        pendingUnavailableAction = nil
-        timeoutTask?.cancel()
-        timeoutTask = nil
-        isConnectingAd = false
-        unavailable()
-    }
-    #endif
-
-    public func showRewardedAd(
-        onReward: @escaping () -> Void,
-        onUnavailable: @escaping () -> Void
-    ) {
-        #if canImport(GoogleMobileAds)
-        // 1. If ad is already loaded in memory, present immediately (Zero delay)
-        if let ad = rewardedAd, let rootVC = Self.topViewController() {
-            print("[GoogleAdMob] 🎬 Presenting real Google rewarded video ad immediately...")
-            rewardedAd = nil
-            activeAdDidEarnReward = false
-            activeAdDidDismiss = false
-            activeAdRewardCallback = onReward
-            ad.fullScreenContentDelegate = self
-            ad.present(fromRootViewController: rootVC) { [weak self] in
-                print("[GoogleAdMob] 🎁 User earned ad reward (will apply on ad close).")
-                self?.handleAdRewardEarned()
-            }
-            preloadRewardedAd()
-            return
-        }
-
-        // 2. If ad is not ready yet, queue the presentation with an elegant loading HUD
-        print("[GoogleAdMob] ⏳ Ad not ready in cache yet. Connecting to Google and queuing presentation...")
-        isConnectingAd = true
-        pendingRewardAction = onReward
-        pendingUnavailableAction = onUnavailable
-
-        preloadRewardedAd()
-
-        // 4-second safety watchdog: if Google returns no fill or network is slow, report unavailable
-        timeoutTask?.cancel()
-        timeoutTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
-            if self.isConnectingAd {
-                print("[GoogleAdMob] ⚠️ 4s timeout connecting to Google Ad. Reporting unavailable.")
-                self.failPendingAdIfAny()
-            }
-        }
-        #else
-        print("[GoogleAdMob] ⚠️ GoogleMobileAds SDK is not linked. Reporting unavailable.")
-        onUnavailable()
-        #endif
-    }
-
-    private static func topViewController() -> UIViewController? {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        guard let window = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) ?? scenes.flatMap({ $0.windows }).first,
-              var top = window.rootViewController else {
-            return nil
-        }
-        while let presented = top.presentedViewController {
-            top = presented
-        }
-        return top
-    }
-}
-
-#if canImport(GoogleMobileAds)
-extension GoogleAdMobManager: GADFullScreenContentDelegate {
-    public func adDidDismissFullScreenContent(_ ad: GADFullScreenPresentingAd) {
-        print("[GoogleAdMob] 🎬 Ad dismissed by user. Granting earned reward if eligible & preloading next ad...")
-        activeAdDidDismiss = true
-        if activeAdDidEarnReward, let cb = activeAdRewardCallback {
-            activeAdRewardCallback = nil
-            cb()
-        } else {
-            activeAdRewardCallback = nil
-        }
-        preloadRewardedAd()
-    }
-
-    public func ad(_ ad: GADFullScreenPresentingAd, didFailToPresentFullScreenContentWithError error: Error) {
-        print("[GoogleAdMob] ❌ Failed to present full screen ad: \(error.localizedDescription)")
-        activeAdRewardCallback = nil
-        activeAdDidEarnReward = false
-        activeAdDidDismiss = false
-        failPendingAdIfAny()
-    }
-}
-#endif
-
-public enum OnboardingStep: String, Sendable {
-    case EAT_SMALL_FISH
-    case HOLD_BOOST
-    case HANDS_ON_UPGRADE
-    case CELEBRATE
-    case DONE
-}
-
-public enum SimRewardedAdKind: String, Sendable {
-    case REVIVE
-    case DOUBLE_SETTLEMENT
-    case SUPPLY_DROP
-    case TRIAL_SHARK
-}
-
-@MainActor
-public final class GameViewModel: ObservableObject {
-    @Published public var save: SharkMetaSaveData
-    @Published public var gameState: String = "title" // "title", "playing", "paused", "gameover"
-    @Published public var score: Int = 0
-    @Published public var inRunLevel: Int = 1
-    @Published public var xp: Int = 0
-    @Published public var xpRequired: Int = 140
-    @Published public var hp: Double = 100
-    @Published public var maxHp: Double = 100
-    @Published public var ghostHpPct: Double = 100
-    @Published public var energy: Double = 100
-    @Published public var maxEnergy: Double = 100
-    @Published public var biteTier: Int = 1
-    @Published public var depthMeters: Int = 22
-    @Published public var comboCount: Int = 0
-    @Published public var comboTimer: Double = 0
-    @Published public var frenzyActive: Bool = false
-    @Published public var frenzyTimer: Double = 0
-    @Published public var showEvolutionAtlas: Bool = false
-    @Published public var goldOverdriveUseCount: Int = 0
-    @Published public var geneSurgeUseCount: Int = 0
-
-    // Target Bounty & Golden Mutant Charge
-    @Published public var targetBountyPreyId: String = "PREY-001"
-    @Published public var targetBountyCaptured: Int = 0
-    @Published public var goldenMutantCharge: Int = 0
-    public let goldenMutantNeed: Int = 5
-
-    // 3-Step Interactive Onboarding Tutorial
-    @Published public var onboardingStep: OnboardingStep = .EAT_SMALL_FISH
-    @Published public var onboardingEatCount: Int = 0
-    @Published public var onboardingBoostSeconds: Double = 0
-    @Published public var onboardingHandsOnUpgraded: Bool = false
-    @Published public var onboardingCelebrationTimer: Double = 0
-
-    // GameOver Revive & Settlement
-    @Published public var reviveOffered: Bool = false
-    private var reviveUsedInCurrentRun: Bool = false
-    @Published public var runSurvivalSec: Int = 0
-    @Published public var runCoinsEarned: Int = 0
-    @Published public var runGenesEarned: Int = 0
-    @Published public var runPeakCombo: Int = 0
-    @Published public var runMaxDepth: Int = 22
-    @Published public var settlementDoubled: Bool = false
-    @Published public var lastMasterySettlement: MasterySettlementResult? = nil
-    @Published public var trialSharkIdForRun: String? = nil
-
-    // Ad Unavailable Alert Notice (Zero simulated 3s ad on iOS!)
-    @Published public var adUnavailableMessage: String? = nil
-
-    // Non-Published real-time input state (Zero SwiftUI re-render during 60/120Hz joystick drag!)
-    public var joyDx: CGFloat = 0
-    public var joyDy: CGFloat = 0
-    public var joyActive: Bool = false
-    public var isBoostingHeld: Bool = false
-    public var lastRenderedSpriteKey: String = ""
-    @Published public var runSequenceId: Int = 0
-
-    public func resetInputState() {
-        joyDx = 0
-        joyDy = 0
-        joyActive = false
-        isBoostingHeld = false
-    }
-
-    private let saveKey = "hungry_shark_48_meta_save_v2"
-    private let onboardingDoneKey = "hungry_shark_onboarding_v2_done"
-
-    public init() {
-        GADInfoPlistRuntimePatch.installIfNeeded()
-        if let data = UserDefaults.standard.data(forKey: saveKey),
-           let decoded = try? JSONDecoder().decode(SharkMetaSaveData.self, from: data) {
-            self.save = decoded
-        } else {
-            self.save = SharkMetaSaveData.createDefault()
-        }
-        if UserDefaults.standard.bool(forKey: onboardingDoneKey) {
-            self.onboardingStep = .DONE
-        }
-        recomputeCurrentSharkStats()
-        pickNewBountyPrey()
-        GoogleAdMobManager.shared.startSDKAndPreload()
-    }
-
-    public func persistSave() {
-        if let data = try? JSONEncoder().encode(save) {
-            UserDefaults.standard.set(data, forKey: saveKey)
-        }
-    }
-
-    // MARK: - Bilingual I18N (zh / en)
-    public var lang: String {
-        save.language == "en" ? "en" : "zh"
-    }
-
-    public func t(_ key: String, _ params: [String: String] = [:]) -> String {
-        let dict = lang == "en" ? GameConfigGenerated.i18nEn : GameConfigGenerated.i18nZh
-        var text = dict[key] ?? GameConfigGenerated.i18nEn[key] ?? key
-        for (k, v) in params {
-            text = text.replacingOccurrences(of: "{\(k)}", with: v)
-        }
-        // Guarantee no uninterpolated {var} placeholder ever leaks into the UI
-        if text.contains("{"), let regex = try? NSRegularExpression(pattern: "\\{[a-zA-Z0-9_]+\\}") {
-            let range = NSRange(text.startIndex..<text.endIndex, in: text)
-            text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "").trimmingCharacters(in: .whitespaces)
-        }
-        return text
-    }
-
-    public func toggleLanguage() {
-        save.language = (save.language == "zh") ? "en" : "zh"
-        persistSave()
-        playUiTick()
-    }
-
-    public func toggleMute() {
-        save.soundEnabled.toggle()
-        persistSave()
-        playUiTick()
-    }
-
-    public func playUiTick() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        if save.soundEnabled {
-            AudioServicesPlaySystemSound(1104)
-        }
-    }
-
-    public func playSuccessSound() {
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        if save.soundEnabled {
-            AudioServicesPlaySystemSound(1025)
-        }
-    }
-
-    // MARK: - Active Shark & Computed Stats
-    public var activeSharkId: String {
-        trialSharkIdForRun ?? save.selectedSharkId
-    }
-
-    public var activeSharkForm: SharkFormConfig {
-        GameConfigGenerated.sharkForms.first(where: { $0.id == activeSharkId })
-            ?? GameConfigGenerated.sharkForms[0]
-    }
-
-    public var activeUpgradeLevel: Int {
-        if trialSharkIdForRun != nil {
-            return max(5, save.sharkUpgradeLevels[activeSharkId] ?? 5)
-        }
-        return save.sharkUpgradeLevels[activeSharkId] ?? 1
-    }
-
-    public var currentStats: ComputedSharkStats {
-        GameRules.computeEvolvedSharkStats(
-            inRunLevel: inRunLevel,
-            sharkFormId: activeSharkId,
-            upgradeLevel: activeUpgradeLevel,
-            frenzyActive: frenzyActive,
-            globalDifficultyMultiplier: 1.0,
-            unlockedCount: save.unlockedSharkIds.count
-        )
-    }
-
-    public var huntingHeatBuff: HuntingHeatBuff {
-        GameRules.computeHuntingHeatBuff(comboCount: comboCount)
-    }
-
-    public var targetBountyPrey: PreyTierConfig {
-        GameConfigGenerated.preyTiers.first(where: { $0.id == targetBountyPreyId })
-            ?? GameConfigGenerated.preyTiers[0]
-    }
-
-    public func pickNewBountyPrey() {
-        let maxBite = max(1, currentStats.normalBiteTier)
-        let candidates = GameConfigGenerated.preyTiers.filter { !$0.isHazard && !$0.isBoss && $0.tier <= maxBite }
-        if let picked = candidates.randomElement() {
-            targetBountyPreyId = picked.id
-        } else {
-            targetBountyPreyId = "PREY-001"
-        }
-        targetBountyCaptured = 0
-    }
-
-    public func recomputeCurrentSharkStats() {
-        let st = currentStats
-        maxHp = st.maxHp
-        maxEnergy = st.maxEnergy
-        biteTier = st.biteTier
-        xpRequired = GameRules.getXpRequiredForLevel(inRunLevel)
-        if hp > maxHp { hp = maxHp }
-        if energy > maxEnergy { energy = maxEnergy }
-    }
-
-    // MARK: - Run Lifecycle
-    public var nextShowcaseSharkForm: SharkFormConfig {
-        if let nextTarget = GameRules.getNextEvolutionTarget(save: save) {
-            return nextTarget.form
-        }
-        return GameConfigGenerated.sharkForms.last ?? GameConfigGenerated.sharkForms[0]
-    }
-
-    public func startNewRun(trialSharkId: String? = nil) {
-        resetInputState()
-        trialSharkIdForRun = trialSharkId
-        inRunLevel = trialSharkId != nil ? 5 : 1
-        xp = 0
-        score = 0
-        comboCount = 0
-        comboTimer = 0
-        frenzyActive = false
-        frenzyTimer = 0
-        goldOverdriveUseCount = 0
-        geneSurgeUseCount = 0
-        runSurvivalSec = 0
-        runCoinsEarned = 0
-        runGenesEarned = 0
-        runPeakCombo = 0
-        runMaxDepth = 22
-        reviveOffered = false
-        reviveUsedInCurrentRun = false
-        settlementDoubled = false
-        lastMasterySettlement = nil
-
-        let st = currentStats
-        maxHp = st.maxHp
-        hp = st.maxHp
-        ghostHpPct = 100
-        maxEnergy = st.maxEnergy
-        energy = st.maxEnergy
-        biteTier = st.biteTier
-        xpRequired = GameRules.getXpRequiredForLevel(inRunLevel)
-        pickNewBountyPrey()
-
-        save.totalRuns += 1
-        persistSave()
-        runSequenceId += 1
-        gameState = "playing"
-        playUiTick()
-    }
-
-    public func pauseGame() {
-        guard gameState == "playing" else { return }
-        resetInputState()
-        gameState = "paused"
-        playUiTick()
-    }
-
-    public func resumeGame() {
-        guard gameState == "paused" else { return }
-        resetInputState()
-        gameState = "playing"
-        playUiTick()
-    }
-
-    public func returnToTitle() {
-        resetInputState()
-        trialSharkIdForRun = nil
-        gameState = "title"
-        recomputeCurrentSharkStats()
-        playUiTick()
-    }
-
-    public func triggerGameOver() {
-        guard gameState != "gameover" else { return }
-        resetInputState()
-        gameState = "gameover"
-        if !reviveUsedInCurrentRun {
-            reviveOffered = true
-        } else {
-            reviveOffered = false
-            finalizeRunSettlement()
-        }
-        persistSave()
-    }
-
-    public func declineRevive() {
-        resetInputState()
-        reviveOffered = false
-        finalizeRunSettlement()
-        playUiTick()
-    }
-
-    public func finalizeRunSettlement() {
-        let activeId = activeSharkId
-        let settlement = GameRules.settleSharkScoreMastery(
-            sharkId: activeId,
-            runScore: score,
-            save: save
-        )
-        save.sharkBestScores[activeId] = settlement.newBestScore
-        save.sharkMasteryTiers[activeId] = settlement.newMasteryTier
-        if settlement.totalBonusCoins > 0 {
-            save.bankedCoins += settlement.totalBonusCoins
-        }
-        if settlement.totalBonusGenes > 0 {
-            save.bankedGenes += settlement.totalBonusGenes
-        }
-        lastMasterySettlement = settlement
-        persistSave()
-    }
-
-    // MARK: - In-Run Skills & Upgrades
-    public func triggerGoldFrenzy() {
-        let form = activeSharkForm
-        let cost = GameRules.getGoldOverdriveCost(useCount: goldOverdriveUseCount, generationRow: form.row)
-        guard save.bankedCoins >= cost && !frenzyActive else { return }
-        save.bankedCoins -= cost
-        goldOverdriveUseCount += 1
-        frenzyActive = true
-        frenzyTimer = GameConfigGenerated.frenzyDuration + currentStats.frenzyDurationBonus
-        hp = maxHp
-        ghostHpPct = 100
-        energy = maxEnergy
-        recomputeCurrentSharkStats()
-        persistSave()
-        playSuccessSound()
-    }
-
-    public func triggerGeneSurge() {
-        let form = activeSharkForm
-        let cost = GameRules.getGeneSurgeCost(level: inRunLevel, useCount: geneSurgeUseCount, generationRow: form.row)
-        guard save.bankedGenes >= cost else { return }
-        save.bankedGenes -= cost
-        geneSurgeUseCount += 1
-        let bonusXp = Int((Double(xpRequired) * 0.55).rounded())
-        _ = addXp(bonusXp)
-        hp = min(maxHp, hp + 35)
-        energy = maxEnergy
-        persistSave()
-        playSuccessSound()
-    }
-
-    public func upgradeActiveSharkBody() {
-        _ = upgradeSharkForm(activeSharkForm)
-        if onboardingStep == .HANDS_ON_UPGRADE {
-            onboardingHandsOnUpgraded = true
-            onboardingStep = .CELEBRATE
-            onboardingCelebrationTimer = 3.2
-            UserDefaults.standard.set(true, forKey: onboardingDoneKey)
-        }
-    }
-
-    @discardableResult
-    public func upgradeSharkForm(_ form: SharkFormConfig) -> Bool {
-        let curLv = save.sharkUpgradeLevels[form.id] ?? 1
-        guard curLv < 10 else { return false }
-        let coinCost = GameRules.getSharkUpgradeCoinCost(form: form, currentLevel: curLv)
-        let geneCost = GameRules.getSharkUpgradeGeneCost(form: form, currentLevel: curLv)
-        guard save.bankedCoins >= coinCost && save.bankedGenes >= geneCost else { return false }
-        save.bankedCoins -= coinCost
-        save.bankedGenes -= geneCost
-        save.sharkUpgradeLevels[form.id] = curLv + 1
-        recomputeCurrentSharkStats()
-        hp = min(maxHp, hp + maxHp * 0.25)
-        persistSave()
-        playSuccessSound()
-        return true
-    }
-
-    @discardableResult
-    public func unlockSharkForm(_ form: SharkFormConfig) -> Bool {
-        let check = GameRules.evaluateSharkUnlock(form: form, save: save)
-        guard check.canUnlockNow else { return false }
-        save.bankedCoins -= form.unlockCoins
-        save.bankedGenes -= form.unlockGenes
-        if !save.unlockedSharkIds.contains(form.id) {
-            save.unlockedSharkIds.append(form.id)
-        }
-        if save.sharkUpgradeLevels[form.id] == nil {
-            save.sharkUpgradeLevels[form.id] = 1
-        }
-        save.selectedSharkId = form.id
-        trialSharkIdForRun = nil
-        recomputeCurrentSharkStats()
-        hp = maxHp
-        energy = maxEnergy
-        persistSave()
-        playSuccessSound()
-        return true
-    }
-
-    public func selectSharkForm(_ form: SharkFormConfig) {
-        guard save.unlockedSharkIds.contains(form.id) else { return }
-        save.selectedSharkId = form.id
-        trialSharkIdForRun = nil
-        recomputeCurrentSharkStats()
-        persistSave()
-        playUiTick()
-    }
-
-    public func evolveToNextReadySharkInRun() {
-        guard let nextTarget = GameRules.getNextEvolutionTarget(save: save),
-              nextTarget.check.canUnlockNow else { return }
-        _ = unlockSharkForm(nextTarget.form)
-    }
-
-    @discardableResult
-    public func addXp(_ amount: Int) -> Bool {
-        xp += amount
-        var leveledUp = false
-        while xp >= xpRequired {
-            xp -= xpRequired
-            inRunLevel += 1
-            leveledUp = true
-            if inRunLevel > save.bestInRunLevel {
-                save.bestInRunLevel = inRunLevel
-            }
-            recomputeCurrentSharkStats()
-            hp = min(maxHp, hp + maxHp * 0.38)
-            energy = min(maxEnergy, energy + maxEnergy * 0.50)
-            playSuccessSound()
-        }
-        return leveledUp
-    }
-
-    // MARK: - Onboarding Controls
-    public func restartOnboardingTutorial() {
-        UserDefaults.standard.set(false, forKey: onboardingDoneKey)
-        onboardingStep = .EAT_SMALL_FISH
-        onboardingEatCount = 0
-        onboardingBoostSeconds = 0
-        onboardingHandsOnUpgraded = false
-        onboardingCelebrationTimer = 0
-        if gameState == "paused" {
-            gameState = "playing"
-        }
-        playUiTick()
-    }
-
-    public func skipOnboardingTutorial() {
-        UserDefaults.standard.set(true, forKey: onboardingDoneKey)
-        onboardingStep = .DONE
-        playUiTick()
-    }
-
-    // MARK: - Google AdMob Rewarded Video (iOS Native Zero-Simulation)
-    public func showRewardedAd(kind: SimRewardedAdKind) {
-        GoogleAdMobManager.shared.showRewardedAd(
-            onReward: { [weak self] in
-                self?.grantAdReward(for: kind)
-            },
-            onUnavailable: { [weak self] in
-                guard let self = self else { return }
-                self.adUnavailableMessage = self.lang == "zh"
-                    ? "暂时没有可用的广告，请稍后再试"
-                    : "No ads currently available. Please try again later."
-                self.playUiTick()
-            }
-        )
-    }
-
-    public func dismissAdUnavailableAlert() {
-        adUnavailableMessage = nil
-        playUiTick()
-    }
-
-    public func grantAdReward(for kind: SimRewardedAdKind) {
-        switch kind {
-        case .REVIVE:
-            resetInputState()
-            reviveUsedInCurrentRun = true
-            reviveOffered = false
-            frenzyActive = true
-            recomputeCurrentSharkStats()
-            frenzyTimer = GameConfigGenerated.frenzyDuration + currentStats.frenzyDurationBonus
-            hp = maxHp
-            ghostHpPct = 100
-            energy = maxEnergy
-            gameState = "playing"
-        case .DOUBLE_SETTLEMENT:
-            if !settlementDoubled {
-                settlementDoubled = true
-                save.bankedCoins += max(30, runCoinsEarned)
-                save.bankedGenes += max(5, runGenesEarned)
-                persistSave()
-            }
-        case .SUPPLY_DROP:
-            save.bankedCoins += 300
-            save.bankedGenes += 25
-            persistSave()
-        case .TRIAL_SHARK:
-            let showcase = nextShowcaseSharkForm
-            startNewRun(trialSharkId: showcase.id)
-        }
-        playSuccessSound()
-    }
-}
 
 /// Native SpriteKit (Metal-Accelerated) Ocean Simulation, 5-Layer Parallax & Devour FX Scene
+/// (AdMob monetization lives in Monetization/GoogleAdMobManager.swift; ViewModel state lives in State/GameViewModel.swift)
 @MainActor
 public final class OceanGameScene: SKScene {
     public weak var viewModel: GameViewModel?
@@ -852,12 +25,23 @@ public final class OceanGameScene: SKScene {
     private var invulnTimer: Double = 0
     private var cameraX: Double = 0
     private var cameraY: Double = 220
-    private var smoothedRelativePreyScale: Double = 1.0
+    private var smoothedCameraZoom: Double = 1.0
     private var smoothedDepthRefY: Double = -1.0
+    private var breachedTerraceCells: Set<String> = []
+    private var breachedTerraceOrder: [String] = []
+    private var shallowDepletionTimer: Double = 0.0
     private var lastUpdateTime: TimeInterval = 0
     private var survivalAccumulator: Double = 0
     private var lastTrackedGameState: String = ""
     private var lastTrackedRunSequenceId: Int = -1
+
+    // Pre-allocated warp grid scratch buffers (iOS-P1-1: eliminates dozens of per-frame heap allocations)
+    private var sharkWarpSrc: [SIMD2<Float>] = []
+    private var sharkWarpDst: [SIMD2<Float>] = []
+    private var preyWarpSrc: [SIMD2<Float>] = []
+    private var preyWarpDst: [SIMD2<Float>] = []
+    private var seabedWarpSrc: [SIMD2<Float>] = []
+    private var seabedWarpDst: [SIMD2<Float>] = []
 
     private let waterBgNode = SKSpriteNode()
     private let parallaxContainer = SKNode()
@@ -889,6 +73,7 @@ public final class OceanGameScene: SKScene {
         var cruiseDepthCenter: Double
         let cruiseAmpY: Double
         let cruiseFreq: Double
+        var lastWarpTime: TimeInterval = 0
 
         init(config: PreyTierConfig, node: SKSpriteNode, x: Double, y: Double, vx: Double, vy: Double, mutation: PreyMutationVariant) {
             self.config = config
@@ -1085,8 +270,9 @@ public final class OceanGameScene: SKScene {
 
     private func resetSimulationForNewRun(vm: GameViewModel) {
         vm.resetInputState()
+        let st = vm.currentStats
         sharkX = 0.0
-        sharkY = 220.0
+        sharkY = max(220.0, (22.0 * st.worldScale + 95.0).rounded())
         sharkVx = 0.0
         sharkVy = 0.0
         sharkAngle = 0.0
@@ -1102,7 +288,15 @@ public final class OceanGameScene: SKScene {
         survivalAccumulator = 0.0
         trailBubbleAccumulator = 0.0
         smoothedDepthRefY = sharkY
-        smoothedRelativePreyScale = vm.currentStats.relativePreyScale
+        smoothedCameraZoom = st.cameraZoom
+        breachedTerraceCells.removeAll()
+        breachedTerraceOrder.removeAll()
+        shallowDepletionTimer = 0.0
+        vm.deepDivePromptMeters = nil
+
+        let initDepthM = Int(GameRules.worldYToMeterDepth(sharkY).rounded())
+        vm.depthMeters = initDepthM
+        vm.runMaxDepth = initDepthM
 
         for prey in activePreys {
             prey.node.removeFromParent()
@@ -1154,8 +348,9 @@ public final class OceanGameScene: SKScene {
             }
         }
         if vm.gameState != lastTrackedGameState {
-            if vm.gameState == "playing" && lastTrackedGameState == "title" {
-                sharkY = max(145.0, min(260.0, sharkY))
+            if !startedNewRunThisFrame && vm.gameState == "playing" && lastTrackedGameState == "title" {
+                let safeSpawnY = max(220.0, (22.0 * stats.worldScale + 95.0).rounded())
+                sharkY = max(safeSpawnY, min(max(260.0, safeSpawnY), sharkY))
                 cameraY = sharkY
                 vm.resetInputState()
             } else if !startedNewRunThisFrame && vm.gameState == "playing" && lastTrackedGameState == "gameover" {
@@ -1197,11 +392,26 @@ public final class OceanGameScene: SKScene {
             vm.ghostHpPct = nextGhostPct
         }
 
+        // Smooth true 2D camera zoom (0.8m -> 1.00, 45m -> 0.22) once per frame and share across physics & rendering
+        let targetZoom = stats.cameraZoom
+        if abs(targetZoom - smoothedCameraZoom) > 0.35 {
+            smoothedCameraZoom = targetZoom
+        } else {
+            smoothedCameraZoom += (targetZoom - smoothedCameraZoom) * min(1.0, dt * 4.5)
+        }
+        let renderZoom = max(GameRules.minRenderZoomFloor, smoothedCameraZoom)
+        let invZoom = 1.0 / max(GameRules.cameraZoomMin, renderZoom)
+
         // 1. Update Shark Physics (Title screen patrol vs In-game hunting)
         if vm.gameState == "title" {
             let patrolDir: Double = cos(currentTime * 0.95) >= 0 ? 1.0 : -1.0
-            let inputY = sin(currentTime * 2.2) * 0.12 + max(-0.18, min(0.18, (210.0 - sharkY) * 0.008))
-            stepSharkKinematics(inputX: patrolDir, inputY: inputY, inputMagnitude: 1.0, isBoosting: false, stats: stats, dt: dt)
+            let titleCruiseY = max(210.0, (22.0 * stats.worldScale + 95.0).rounded())
+            let inputY = sin(currentTime * 2.2) * 0.12 + max(-0.18, min(0.18, (titleCruiseY - sharkY) * 0.008))
+            stepSharkKinematics(inputX: patrolDir, inputY: inputY, inputMagnitude: 1.0, isBoosting: false, stats: stats, renderZoom: renderZoom, dt: dt)
+            shallowDepletionTimer = 0.0
+            if vm.deepDivePromptMeters != nil {
+                vm.deepDivePromptMeters = nil
+            }
         } else if vm.gameState == "playing" {
             survivalAccumulator += dt
             if survivalAccumulator >= 1.0 {
@@ -1215,7 +425,7 @@ public final class OceanGameScene: SKScene {
             let normX = mag > 0.08 ? ix / mag : 0.0
             let normY = mag > 0.08 ? iy / mag : 0.0
             let canBoost = vm.isBoostingHeld && vm.energy > 2.0
-            stepSharkKinematics(inputX: normX, inputY: normY, inputMagnitude: mag, isBoosting: canBoost, stats: stats, dt: dt)
+            stepSharkKinematics(inputX: normX, inputY: normY, inputMagnitude: mag, isBoosting: canBoost, stats: stats, renderZoom: renderZoom, dt: dt)
 
             if canBoost {
                 vm.energy = max(0, vm.energy - stats.boostDrainPerSec * dt)
@@ -1263,7 +473,8 @@ public final class OceanGameScene: SKScene {
             }
 
             invulnTimer = max(0, invulnTimer - dt)
-            let curDepth = Int(max(0, sharkY).rounded())
+            // Convert world-pixel Y to true piecewise ocean meters (matches Web stepSimulation.ts & shark unlock reqMaxDepth)
+            let curDepth = Int(GameRules.worldYToMeterDepth(max(0.0, sharkY)).rounded())
             if curDepth != vm.depthMeters {
                 vm.depthMeters = curDepth
                 if curDepth > vm.runMaxDepth {
@@ -1273,35 +484,58 @@ public final class OceanGameScene: SKScene {
                     vm.save.maxDepthReached = Double(curDepth)
                 }
             }
+
+            // Giant-shark shallow depletion guidance: when lingering > 1.5s in waters with no viable prey, prompt deep dive
+            let minPreyLenCm = stats.minSpawnablePreyLengthM * 100.0
+            let hasViableHere = GameRules.hasViablePreyAtDepth(worldY: sharkY, minPreyLengthCm: minPreyLenCm)
+            if !hasViableHere && activePreys.count <= 2,
+               let minViableWorldY = GameRules.getMinViableWorldYForShark(minPreyLengthCm: minPreyLenCm),
+               minViableWorldY > sharkY + 80.0 {
+                shallowDepletionTimer += dt
+                if shallowDepletionTimer >= 1.5 {
+                    let targetMeters = max(10, Int(GameRules.worldYToMeterDepth(minViableWorldY).rounded()))
+                    if vm.deepDivePromptMeters != targetMeters {
+                        vm.deepDivePromptMeters = targetMeters
+                    }
+                }
+            } else {
+                shallowDepletionTimer = 0.0
+                if vm.deepDivePromptMeters != nil {
+                    vm.deepDivePromptMeters = nil
+                }
+            }
+        } else {
+            shallowDepletionTimer = 0.0
+            if vm.deepDivePromptMeters != nil {
+                vm.deepDivePromptMeters = nil
+            }
         }
 
-        // 2. Sea-Surface Locked Camera Tracking (keeps shark centered at 50% X, 50% Y on Title Screen)
+        // Throttled ~18Hz HUD telemetry sync (decoupled from root ContentView) & async depth-band texture prewarm
+        vm.syncTelemetryThrottled(timestamp: currentTime)
+        SpriteAtlasManager.shared.prewarmDepthBandIfNeeded(worldY: sharkY)
+
+        // 2. Sea-Surface Locked Camera Tracking (scaled by invZoom so look-ahead stays natural at 0.22x giant zoom)
         let minSurfaceCameraY = 40.0
         let targetCamX = vm.gameState == "title"
             ? sharkX
-            : (sharkX + cos(sharkAngle) * 58.0)
+            : (sharkX + cos(sharkAngle) * 58.0 * invZoom)
         let targetCamY = vm.gameState == "title"
             ? max(minSurfaceCameraY, sharkY)
-            : max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0)
+            : max(minSurfaceCameraY, sharkY + sin(sharkAngle) * 28.0 * invZoom)
         let isBoostingCam = vm.gameState == "playing" && vm.isBoostingHeld && vm.energy > 2.0
         let effectiveLerp = isBoostingCam ? 12.0 : 6.5
         cameraX += (targetCamX - cameraX) * min(1.0, dt * effectiveLerp)
         cameraY += (targetCamY - cameraY) * min(1.0, dt * effectiveLerp)
 
         if cameraShakeTrauma > 0.01 {
-            let shakeMag = cameraShakeTrauma * cameraShakeTrauma * 9.0
+            let shakeMag = min(28.0, cameraShakeTrauma * cameraShakeTrauma * 9.0 * invZoom)
             cameraX += Double.random(in: -shakeMag...shakeMag)
             cameraY += Double.random(in: -shakeMag...shakeMag)
         }
 
-        // 3. Smooth Optical Growth Shrinking of Background Layers
-        let targetRelScale = stats.relativePreyScale
-        if abs(targetRelScale - smoothedRelativePreyScale) > 0.35 {
-            smoothedRelativePreyScale = targetRelScale
-        } else {
-            smoothedRelativePreyScale += (targetRelScale - smoothedRelativePreyScale) * min(1.0, dt * 4.5)
-        }
-        let bgScales = GameRules.getParallaxLayerGrowthScales(relativePreyScale: smoothedRelativePreyScale)
+        // 3. Smooth Optical Growth Shrinking of Background Layers driven by True Camera Zoom
+        let bgScales = GameRules.getParallaxLayerGrowthScalesFromZoom(cameraZoom: renderZoom)
 
         let rawDepthY = max(0.0, sharkY)
         if smoothedDepthRefY < 0.0 || abs(rawDepthY - smoothedDepthRefY) > 650.0 {
@@ -1311,14 +545,22 @@ public final class OceanGameScene: SKScene {
         }
         let transition = GameRules.computeParallaxBiomeTransitionState(depthMeters: smoothedDepthRefY)
 
-        renderParallaxBackground(viewW: viewW, viewH: viewH, bgScales: bgScales, transition: transition, zoom: stats.cameraZoom)
+        renderParallaxBackground(viewW: viewW, viewH: viewH, bgScales: bgScales, transition: transition, zoom: renderZoom)
         stepAndRenderAmbientBubbles(viewW: viewW, viewH: viewH, bgScales: bgScales, transition: transition, dt: dt)
-        stepAndRenderPreys(viewW: viewW, viewH: viewH, stats: stats, dt: dt, currentTime: currentTime)
-        stepAndRenderDevourFX(viewW: viewW, viewH: viewH, stats: stats, dt: dt)
-        renderPlayerShark(viewW: viewW, viewH: viewH, stats: stats)
+        stepAndRenderPreys(viewW: viewW, viewH: viewH, stats: stats, renderZoom: renderZoom, dt: dt, currentTime: currentTime)
+        stepAndRenderDevourFX(viewW: viewW, viewH: viewH, stats: stats, renderZoom: renderZoom, dt: dt)
+        renderPlayerShark(viewW: viewW, viewH: viewH, stats: stats, renderZoom: renderZoom)
     }
 
-    private func stepSharkKinematics(inputX: Double, inputY: Double, inputMagnitude: Double, isBoosting: Bool, stats: ComputedSharkStats, dt: Double) {
+    private func stepSharkKinematics(
+        inputX: Double,
+        inputY: Double,
+        inputMagnitude: Double,
+        isBoosting: Bool,
+        stats: ComputedSharkStats,
+        renderZoom: Double,
+        dt: Double
+    ) {
         let hasDirectionInput = inputMagnitude > 0.08
         if hasDirectionInput {
             sharkTargetAngle = atan2(inputY, inputX)
@@ -1350,7 +592,7 @@ public final class OceanGameScene: SKScene {
 
         facingScaleX += (facingDir - facingScaleX) * min(1.0, dt * 11.0)
 
-        let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
+        let invZoom = 1.0 / max(GameRules.cameraZoomMin, renderZoom)
         let cadenceFactor = max(0.42, min(1.0, pow(0.8 / max(0.6, stats.realBodyLengthM), 0.22)))
 
         // When joystick is not moved and not boosting, keep shark stationary in place (zero drift in previous direction!)
@@ -1364,7 +606,7 @@ public final class OceanGameScene: SKScene {
         let heatMult = viewModel?.huntingHeatBuff.speedMultiplier ?? 1.0
         let joySpeedFactor = isBoosting ? 1.0 : min(1.0, max(0.55, inputMagnitude))
         let targetScreenSpeed = (isBoosting ? stats.boostSpeed : stats.moveSpeed * joySpeedFactor) * heatMult
-        let worldSpeed = targetScreenSpeed / seabedScale
+        let worldSpeed = targetScreenSpeed * invZoom
         sharkVx = cos(sharkAngle) * worldSpeed
         sharkVy = sin(sharkAngle) * worldSpeed
 
@@ -1373,8 +615,13 @@ public final class OceanGameScene: SKScene {
         let nextX = sharkX + sharkVx * dt
         let nextY = max(46.0, min(20000.0, sharkY + sharkVy * dt))
 
-        // Enforce 2-way physical seabed & 9-tier terrace collision (top landing + underside anti-penetration!)
-        let sharkHitRadius = (26.0 * stats.scale) / seabedScale
+        // Enforce 2-way physical seabed & 9-tier terrace collision in unified world space (giant sharks shatter upper Tiers 0..4!)
+        let sharkHitRadius = 24.0 * stats.worldScale
+        let clearancePadding = 6.0 * max(1.0, sqrt(stats.worldScale))
+        let seabedOptions = GameRules.SeabedCollisionOptions(
+            sharkLengthM: stats.realBodyLengthM,
+            breachedCells: breachedTerraceCells
+        )
         let stepCol = GameRules.resolveSeabedKineticStep(
             prevX: prevX,
             prevY: prevY,
@@ -1383,13 +630,53 @@ public final class OceanGameScene: SKScene {
             vx: sharkVx,
             vy: sharkVy,
             entityRadius: sharkHitRadius,
-            clearancePadding: 8.0 / seabedScale
+            clearancePadding: clearancePadding,
+            options: seabedOptions
         )
         sharkX = stepCol.x
         sharkY = max(46.0, min(20000.0, stepCol.y))
         sharkVx = stepCol.vx
         sharkVy = stepCol.vy
         swimPhase += dt * (isBoosting ? 12.5 : 7.8) * cadenceFactor
+
+        // Giant-shark upper-terrace shattering: carve local breach cells and trigger rock-debris VFX + haptic thud
+        if let shatterHit = GameRules.detectShatterableTerraceHit(
+            prevX: prevX,
+            prevY: prevY,
+            nextX: sharkX,
+            nextY: sharkY,
+            entityRadius: sharkHitRadius,
+            sharkLengthM: stats.realBodyLengthM,
+            breachedCells: breachedTerraceCells
+        ) {
+            let cellSpan = max(1, Int(ceil(sharkHitRadius / GameRules.terraceBreachCellWidth)))
+            for c in (shatterHit.cellIndex - cellSpan)...(shatterHit.cellIndex + cellSpan) {
+                let key = GameRules.formatTerraceBreachKey(tierIndex: shatterHit.tierIndex, cellIndex: c)
+                if !breachedTerraceCells.contains(key) {
+                    if breachedTerraceCells.count >= 512, let oldest = breachedTerraceOrder.first {
+                        breachedTerraceOrder.removeFirst()
+                        breachedTerraceCells.remove(oldest)
+                    }
+                    breachedTerraceCells.insert(key)
+                    breachedTerraceOrder.append(key)
+                }
+            }
+            if shatterHit.isNewlyBreached {
+                sharkVx *= 0.92
+                sharkVy *= 0.92
+                cameraShakeTrauma = min(1.0, max(cameraShakeTrauma, 0.34) + 0.24)
+                spawnTerraceShatterParticles(
+                    x: sharkX,
+                    y: sharkY,
+                    stripId: shatterHit.stripId,
+                    worldScale: stats.worldScale
+                )
+                HapticFeedbackManager.shared.playHeavy(minInterval: 0.12)
+                if viewModel?.save.soundEnabled == true {
+                    AudioServicesPlaySystemSound(1105)
+                }
+            }
+        }
 
         // Emit swimming bubbles from shark tail (faster during Boost, shimmering Gold during Gold Frenzy!)
         let isFrenzy = viewModel?.frenzyActive ?? false
@@ -1401,10 +688,54 @@ public final class OceanGameScene: SKScene {
         }
     }
 
+    private func spawnTerraceShatterParticles(x: Double, y: Double, stripId: String, worldScale: Double) {
+        let fxScale = max(1.0, min(4.2, worldScale * 0.72))
+        let isCoral = (stripId == "coral_reef")
+        let count = 16
+        for i in 0..<count {
+            if activeParticles.count > 72 { break }
+            let ang = (Double(i) * .pi * 2.0) / Double(count) + Double.random(in: -0.35...0.35)
+            let spd = Double.random(in: 95.0...265.0) * fxScale
+            let isBubble = (i % 3 == 0)
+            let rad = isBubble ? Double.random(in: 3.5...6.5) : Double.random(in: 5.0...9.5)
+            let dot = SKShapeNode(circleOfRadius: CGFloat(rad))
+            if isBubble {
+                dot.fillColor = UIColor(red: 186/255, green: 230/255, blue: 253/255, alpha: 0.75)
+                dot.strokeColor = UIColor.white.withAlphaComponent(0.75)
+            } else if isCoral {
+                dot.fillColor = (i % 2 == 0)
+                    ? UIColor(red: 217/255, green: 119/255, blue: 6/255, alpha: 0.95)
+                    : UIColor(red: 245/255, green: 158/255, blue: 11/255, alpha: 0.95)
+                dot.strokeColor = UIColor(red: 120/255, green: 53/255, blue: 15/255, alpha: 0.85)
+            } else {
+                dot.fillColor = (i % 2 == 0)
+                    ? UIColor(red: 100/255, green: 116/255, blue: 139/255, alpha: 0.95)
+                    : UIColor(red: 71/255, green: 85/255, blue: 105/255, alpha: 0.95)
+                dot.strokeColor = UIColor(red: 30/255, green: 41/255, blue: 59/255, alpha: 0.85)
+            }
+            dot.lineWidth = 1.2
+            dot.zPosition = 24
+            fxContainer.addChild(dot)
+            let offsetR = 14.0 * worldScale
+            activeParticles.append(
+                ActiveParticle(
+                    node: dot,
+                    x: x + cos(ang) * offsetR,
+                    y: y + sin(ang) * offsetR,
+                    vx: cos(ang) * spd,
+                    vy: sin(ang) * spd - Double.random(in: 10.0...40.0) * fxScale,
+                    maxLife: Double.random(in: 0.52...0.88),
+                    baseRadius: rad
+                )
+            )
+        }
+    }
+
     private func spawnSharkWakeBubble(stats: ComputedSharkStats, isBoosting: Bool, isFrenzy: Bool) {
         if activeParticles.count > 44 { return }
-        let tailX = sharkX - cos(sharkAngle) * 38.0 * stats.scale + Double.random(in: -6...6)
-        let tailY = sharkY - sin(sharkAngle) * 38.0 * stats.scale + Double.random(in: -6...6)
+        let ws = stats.worldScale
+        let tailX = sharkX - cos(sharkAngle) * 40.0 * ws + Double.random(in: -6...6) * ws
+        let tailY = sharkY - sin(sharkAngle) * 40.0 * ws + Double.random(in: -6...6) * ws
         let rad = isFrenzy ? Double.random(in: 3.2...6.4) : (isBoosting ? Double.random(in: 2.8...5.6) : Double.random(in: 2.0...4.0))
         let bubble = SKShapeNode(circleOfRadius: CGFloat(rad))
         if isFrenzy {
@@ -1418,8 +749,9 @@ public final class OceanGameScene: SKScene {
         }
         bubble.zPosition = 18
         fxContainer.addChild(bubble)
-        let backVx = -cos(sharkAngle) * (isBoosting ? 42.0 : 16.0) + Double.random(in: -14...14)
-        let upVy = -Double.random(in: 22...52)
+        let velScale = max(1.0, sqrt(ws))
+        let backVx = (-cos(sharkAngle) * (isBoosting ? 42.0 : 16.0) + Double.random(in: -14...14)) * velScale
+        let upVy = -Double.random(in: 22...52) * velScale
         activeParticles.append(
             ActiveParticle(
                 node: bubble,
@@ -1433,15 +765,16 @@ public final class OceanGameScene: SKScene {
         )
     }
 
-    private func renderPlayerShark(viewW: Double, viewH: Double, stats: ComputedSharkStats) {
-        let zoom = stats.cameraZoom
+    private func renderPlayerShark(viewW: Double, viewH: Double, stats: ComputedSharkStats, renderZoom: Double) {
+        let zoom = renderZoom
         let biteSnap = sin(biteAnim * .pi)
-        let lungeWorld = biteSnap * 14.0 * stats.scale
+        let lungeWorld = biteSnap * 14.0 * stats.worldScale
         let screenX = viewW * 0.5 + (sharkX + cos(sharkAngle) * lungeWorld - cameraX) * zoom
         let screenY = viewH * 0.5 - (sharkY + sin(sharkAngle) * lungeWorld - cameraY) * zoom
 
-        // 1:1 Constant-Area Aspect Normalization (drawW = baseSize * sqrt(aspect), drawH = baseSize / sqrt(aspect)) matching Web canvasRenderer.ts
-        let baseSize = GameRules.sharkBaseDrawSize * stats.scale * zoom
+        // 1:1 Constant-Area Aspect Normalization in true camera zoom space:
+        // worldScale * renderZoom == stats.scale at steady state, preserving comfortable screen framing across 0.8m -> 45m!
+        let baseSize = GameRules.sharkBaseDrawSize * stats.worldScale * zoom
         let texAspect: Double
         if let tex = sharkNode.texture, tex.size().height > 0 {
             texAspect = Double(tex.size().width / tex.size().height)
@@ -1481,24 +814,25 @@ public final class OceanGameScene: SKScene {
 
     private func applySpineWaveWarp(to node: SKSpriteNode, phase: Double, turnBend: Double) {
         let cols = 10
-        var src: [SIMD2<Float>] = []
-        var dst: [SIMD2<Float>] = []
-        src.reserveCapacity((cols + 1) * 2)
-        dst.reserveCapacity((cols + 1) * 2)
+        let count = (cols + 1) * 2
+        sharkWarpSrc.removeAll(keepingCapacity: true)
+        sharkWarpDst.removeAll(keepingCapacity: true)
+        if sharkWarpSrc.capacity < count { sharkWarpSrc.reserveCapacity(count) }
+        if sharkWarpDst.capacity < count { sharkWarpDst.reserveCapacity(count) }
 
         for row in 0...1 {
             let v = Float(row)
             for col in 0...cols {
                 let u = Float(col) / Float(cols)
-                src.append(SIMD2<Float>(u, v))
+                sharkWarpSrc.append(SIMD2<Float>(u, v))
                 let tailProgress = Double(1.0 - u)
                 let env = 0.015 * tailProgress + 0.985 * pow(tailProgress, 2.25)
                 let waveDy = sin(phase - tailProgress * 2.15 * .pi) * 0.09 * env
                 let cBendDy = -max(-0.8, min(0.8, turnBend)) * 0.14 * pow(tailProgress, 1.72)
-                dst.append(SIMD2<Float>(u, v + Float(waveDy + cBendDy)))
+                sharkWarpDst.append(SIMD2<Float>(u, v + Float(waveDy + cBendDy)))
             }
         }
-        node.warpGeometry = SKWarpGeometryGrid(columns: cols, rows: 1, sourcePositions: src, destinationPositions: dst)
+        node.warpGeometry = SKWarpGeometryGrid(columns: cols, rows: 1, sourcePositions: sharkWarpSrc, destinationPositions: sharkWarpDst)
     }
 
     private static let prey140SharkLikeIds: Set<String> = [
@@ -1530,24 +864,31 @@ public final class OceanGameScene: SKScene {
         return .CARANGIFORM
     }
 
-    private func applyPreySpineWaveWarp(to node: SKSpriteNode, prey: ActivePrey) {
+    private func applyPreySpineWaveWarp(to node: SKSpriteNode, prey: ActivePrey, screenMaxDim: Double, currentTime: TimeInterval) {
         let gait = classifyPreySwimGait(prey.config)
-        if gait == .RIGID_PROPULSION {
-            node.warpGeometry = nil
+        if gait == .RIGID_PROPULSION || screenMaxDim < 22.0 {
+            if node.warpGeometry != nil { node.warpGeometry = nil }
             return
         }
-        let cols = 8
-        var src: [SIMD2<Float>] = []
-        var dst: [SIMD2<Float>] = []
-        src.reserveCapacity((cols + 1) * 2)
-        dst.reserveCapacity((cols + 1) * 2)
+        // Throttle prey spine warp to ~30Hz (halves SKWarpGeometryGrid GPU uploads with imperceptible visual diff)
+        if node.warpGeometry != nil && (currentTime - prey.lastWarpTime) < (1.0 / 30.0) {
+            return
+        }
+        prey.lastWarpTime = currentTime
+
+        let cols = 6
+        let count = (cols + 1) * 2
+        preyWarpSrc.removeAll(keepingCapacity: true)
+        preyWarpDst.removeAll(keepingCapacity: true)
+        if preyWarpSrc.capacity < count { preyWarpSrc.reserveCapacity(count) }
+        if preyWarpDst.capacity < count { preyWarpDst.reserveCapacity(count) }
 
         // Shark-like sleek anterior-locked envelope: head & chest (u -> 1.0) stay steady, posterior tail (u -> 0.0) sweeps smoothly
         for row in 0...1 {
             let v = Float(row)
             for col in 0...cols {
                 let u = Float(col) / Float(cols)
-                src.append(SIMD2<Float>(u, v))
+                preyWarpSrc.append(SIMD2<Float>(u, v))
                 let tailProgress = Double(1.0 - u)
                 let sharkLikeEnv = 0.015 * tailProgress + 0.985 * pow(tailProgress, 2.25)
                 let dy: Double
@@ -1566,10 +907,10 @@ public final class OceanGameScene: SKScene {
                 case .RIGID_PROPULSION:
                     dy = 0
                 }
-                dst.append(SIMD2<Float>(u, v + Float(dy)))
+                preyWarpDst.append(SIMD2<Float>(u, v + Float(dy)))
             }
         }
-        node.warpGeometry = SKWarpGeometryGrid(columns: cols, rows: 1, sourcePositions: src, destinationPositions: dst)
+        node.warpGeometry = SKWarpGeometryGrid(columns: cols, rows: 1, sourcePositions: preyWarpSrc, destinationPositions: preyWarpDst)
     }
 
     // MARK: - 42 Depth-Reactive Ambient Ocean Bubbles / Marine Snow / Bioluminescent Spores / Magma Embers
@@ -1759,7 +1100,7 @@ public final class OceanGameScene: SKScene {
         renderPhysicalSeabedAndEcology(
             viewW: viewW,
             viewH: viewH,
-            zoom: max(0.35, zoom)
+            zoom: max(GameRules.minRenderZoomFloor, zoom)
         )
 
         // Hide any unused pooled tile nodes without removing them from the scene graph
@@ -1842,23 +1183,24 @@ public final class OceanGameScene: SKScene {
         node.color = color
         node.colorBlendFactor = CGFloat(max(0.0, min(0.85, colorBlendFactor)))
 
-        var src: [SIMD2<Float>] = []
-        var dst: [SIMD2<Float>] = []
-        src.reserveCapacity((safeCols + 1) * 2)
-        dst.reserveCapacity((safeCols + 1) * 2)
+        let count = (safeCols + 1) * 2
+        seabedWarpSrc.removeAll(keepingCapacity: true)
+        seabedWarpDst.removeAll(keepingCapacity: true)
+        if seabedWarpSrc.capacity < count { seabedWarpSrc.reserveCapacity(count) }
+        if seabedWarpDst.capacity < count { seabedWarpDst.reserveCapacity(count) }
 
         for row in 0...1 {
             let vSrc = Float(row)
             for col in 0...safeCols {
                 let uNorm = Float(col) / Float(safeCols)
                 let uSrc = Float(uSrc0 + (uSrc1 - uSrc0) * Double(uNorm))
-                src.append(SIMD2<Float>(uSrc, vSrc))
+                seabedWarpSrc.append(SIMD2<Float>(uSrc, vSrc))
                 let targetY = (row == 0) ? botYs[col] : topYs[col]
                 let vDst = Float((targetY - minY) / boxH)
-                dst.append(SIMD2<Float>(uNorm, vDst))
+                seabedWarpDst.append(SIMD2<Float>(uNorm, vDst))
             }
         }
-        node.warpGeometry = SKWarpGeometryGrid(columns: safeCols, rows: 1, sourcePositions: src, destinationPositions: dst)
+        node.warpGeometry = SKWarpGeometryGrid(columns: safeCols, rows: 1, sourcePositions: seabedWarpSrc, destinationPositions: seabedWarpDst)
     }
 
     /// Maps any continuous world span [wx0, wx1] to exact world-locked periodic UVs [0..1] (splitting cleanly across seam=1.0),
@@ -1951,20 +1293,19 @@ public final class OceanGameScene: SKScene {
         viewH: Double,
         zoom: Double
     ) {
-        let seabedScale = max(0.06, min(1.0, smoothedRelativePreyScale))
-        let halfWorldW = (viewW * 0.5) / (zoom * seabedScale) + 450.0
+        let halfWorldW = (viewW * 0.5) / zoom + 480.0
         let startWorldX = cameraX - halfWorldW
         let endWorldX = cameraX + halfWorldW
 
         let toScreenX: (Double) -> Double = { wx in
-            (wx - self.cameraX) * seabedScale * zoom + viewW * 0.5
+            (wx - self.cameraX) * zoom + viewW * 0.5
         }
         let toScreenY: (Double) -> Double = { wy in
-            viewH * 0.5 - (wy - self.cameraY) * seabedScale * zoom
+            viewH * 0.5 - (wy - self.cameraY) * zoom
         }
 
         let tileWorldW = 680.0
-        // 1:1 visual-to-physical alignment with Web renderPhysicalSeabed, scaled proportionally by seabedScale
+        // 1:1 visual-to-physical alignment with Web renderPhysicalSeabed under true camera zoom
         let mainCrestLift = 20.0
         let mainStripWorldH = 148.0
 
@@ -1991,7 +1332,7 @@ public final class OceanGameScene: SKScene {
             let fillNode = acquirePooledArchFillNode()
             fillNode.zPosition = 2.6
             let path = CGMutablePath()
-            let stepW = 80.0
+            let stepW = zoom < 0.45 ? 160.0 : 80.0
             let firstX = floor(startWorldX / stepW) * stepW
             let bottomFillY = min(-640.0, -viewH - 240.0)
             path.move(to: CGPoint(x: toScreenX(firstX), y: bottomFillY))
@@ -2009,11 +1350,13 @@ public final class OceanGameScene: SKScene {
 
             // 1B. Main Floor Multi-Tier Subsurface Bedrock Strata + Top Surface Strip
             // Uses terrain-locked depth blending (resolveSeabedStripPairForDepth) & world-locked UVs (zero cameraY pop!)
-            let subLayerSpecs: [(yStartWorld: Double, subWorldH: Double, uPhase: Double, alpha: Double, shade: Double, zOff: CGFloat)] = [
+            let allSubLayerSpecs: [(yStartWorld: Double, subWorldH: Double, uPhase: Double, alpha: Double, shade: Double, zOff: CGFloat)] = [
                 (34.0, 210.0, 0.37, 0.95, 0.18, 2.8),
                 (185.0, 250.0, 0.74, 0.92, 0.38, 2.7),
                 (375.0, 290.0, 0.19, 0.88, 0.56, 2.65)
             ]
+            // Zoomed-out LOD: render top stratum when wide-angle giant view spans many tiles
+            let subLayerSpecs = zoom < 0.42 ? Array(allSubLayerSpecs.prefix(1)) : allSubLayerSpecs
 
             for tIdx in firstTile...lastTile {
                 let wx0 = Double(tIdx) * tileWorldW
@@ -2130,10 +1473,11 @@ public final class OceanGameScene: SKScene {
         let terraceCrestLift = 18.0
         let terraceStripWorldH = 124.0
         let terracePeriodW = 540.0
-        let terraceSubLayers: [(yStartWorld: Double, subWorldH: Double, uPhase: Double, alpha: Double, shade: Double, zOff: CGFloat)] = [
+        let allTerraceSubLayers: [(yStartWorld: Double, subWorldH: Double, uPhase: Double, alpha: Double, shade: Double, zOff: CGFloat)] = [
             (28.0, 118.0, 0.37, 0.94, 0.16, 3.52),
             (102.0, 144.0, 0.74, 0.90, 0.34, 3.46)
         ]
+        let terraceSubLayers = zoom < 0.45 ? Array(allTerraceSubLayers.prefix(1)) : allTerraceSubLayers
 
         for (tierIdx, tier) in GameRules.seabedTerraceTiers.enumerated() {
             let minScreenY = toScreenY(tier.baseDepth + 440.0)
@@ -2254,8 +1598,8 @@ public final class OceanGameScene: SKScene {
                     portalNode.yScale = 1.0
                     portalNode.zRotation = 0.0
                     portalNode.size = CGSize(
-                        width: max(160.0 * zoom * seabedScale, caveSpanW * 1.02 * zoom * seabedScale),
-                        height: max(100.0 * zoom * seabedScale, 210.0 * zoom * seabedScale)
+                        width: max(160.0 * zoom, caveSpanW * 1.02 * zoom),
+                        height: max(100.0 * zoom, 210.0 * zoom)
                     )
                     portalNode.position = CGPoint(
                         x: toScreenX(seamWX),
@@ -2277,6 +1621,7 @@ public final class OceanGameScene: SKScene {
                     (openRightWX + 12.0,58.0, 62.0,  1.0, leftRockPrimary,  0.28, 3.67)
                 ]
                 for shoulder in lipShoulders {
+                    if GameRules.isTerraceCellBreached(tierIndex: tierIdx, worldX: shoulder.wx, breachedCells: breachedTerraceCells) { continue }
                     let mainAtShoulder = GameRules.getFloorDepthAt(worldX: shoulder.wx)
                     if mainAtShoulder <= tier.graftStartMainY + 24.0 { continue }
                     let sLip = GameRules.getSeabedTerraceAt(worldX: shoulder.wx, tierIndex: tierIdx)
@@ -2284,7 +1629,7 @@ public final class OceanGameScene: SKScene {
                     if let lipTex = SpriteAtlasManager.shared.ecologySpriteTexture(for: shoulder.rockId) {
                         let texSize = lipTex.size()
                         let aspect = max(0.6, min(1.8, Double(texSize.width / max(1.0, texSize.height))))
-                        let lipH = shoulder.lipH * zoom * seabedScale
+                        let lipH = shoulder.lipH * zoom
                         let lipW = lipH * aspect
                         let lipNode = acquirePooledParallaxTile()
                         lipNode.warpGeometry = nil
@@ -2369,10 +1714,12 @@ public final class OceanGameScene: SKScene {
                         let gx0 = max(segStartWX, Double(gIdx) * polyGridStep)
                         let gx1 = min(segEndWX, Double(gIdx + 1) * polyGridStep)
                         if gx1 <= gx0 + 0.5 { continue }
-                        let mMid = GameRules.getFloorDepthAt(worldX: (gx0 + gx1) * 0.5)
+                        let midGX = (gx0 + gx1) * 0.5
+                        let isBreachedCell = GameRules.isTerraceCellBreached(tierIndex: tierIdx, worldX: midGX, breachedCells: breachedTerraceCells)
+                        let mMid = GameRules.getFloorDepthAt(worldX: midGX)
                         let m0 = GameRules.getFloorDepthAt(worldX: gx0)
                         let m1 = GameRules.getFloorDepthAt(worldX: gx1)
-                        if max(mMid, max(m0, m1)) > tier.graftStartMainY + 12.0 {
+                        if !isBreachedCell && max(mMid, max(m0, m1)) > tier.graftStartMainY + 12.0 {
                             if runStartWX == nil { runStartWX = gx0 }
                         } else if let r0 = runStartWX {
                             if gx0 - r0 > 6.0 { activeFillRuns.append((r0, gx0)) }
@@ -2444,13 +1791,20 @@ public final class OceanGameScene: SKScene {
                     let minM = min(mStart, min(mQ1, min(mMid, min(mQ3, mEnd))))
                     if maxM <= tier.graftStartMainY + 2.0 { continue }
 
-                    let subChunkStep = (minM < tier.graftFuseMainY) ? 60.0 : chunkStep
+                    let hasTierBreaches = !breachedTerraceCells.isEmpty && tier.shatterLengthM.isFinite
+                    var subChunkStep = (minM < tier.graftFuseMainY) ? 60.0 : chunkStep
+                    if hasTierBreaches {
+                        subChunkStep = min(subChunkStep, GameRules.terraceBreachCellWidth)
+                    }
                     let subCount = max(1, Int(ceil((cw1 - cw0) / subChunkStep - 1e-4)))
 
                     for sIdx in 0..<subCount {
                         let sw0 = cw0 + (cw1 - cw0) * (Double(sIdx) / Double(subCount))
                         let sw1 = cw0 + (cw1 - cw0) * (Double(sIdx + 1) / Double(subCount))
                         if sw1 - sw0 < 1.5 { continue }
+                        if hasTierBreaches && GameRules.isTerraceCellBreached(tierIndex: tierIdx, worldX: (sw0 + sw1) * 0.5, breachedCells: breachedTerraceCells) {
+                            continue
+                        }
 
                         let gA = terraceGraftVisualMetrics(wx: sw0)
                         let gM = terraceGraftVisualMetrics(wx: (sw0 + sw1) * 0.5)
@@ -2599,10 +1953,15 @@ public final class OceanGameScene: SKScene {
         for cIdx in firstChunk...lastChunk {
             let outcrops = GameRules.getSeabedOutcropsForChunk(chunkIndex: cIdx, chunkWidth: chunkWidth)
             for outcrop in outcrops {
+                if let tIdx = outcrop.terraceIndex,
+                   GameRules.isTerraceCellBreached(tierIndex: tIdx, worldX: outcrop.worldX, breachedCells: breachedTerraceCells) {
+                    continue
+                }
                 let sx = toScreenX(outcrop.worldX)
                 let sy = toScreenY(outcrop.baseY)
-                let drawBaseW = outcrop.width * seabedScale * zoom
-                let drawBaseH = outcrop.height * seabedScale * zoom
+                let drawBaseW = outcrop.width * zoom
+                let drawBaseH = outcrop.height * zoom
+                if drawBaseH < 5.0 { continue }
                 if sx + drawBaseW * 2.0 < -100.0 || sx - drawBaseW * 2.0 > viewW + 100.0 { continue }
                 if sy + drawBaseH * 2.0 < -100.0 || sy - drawBaseH * 2.0 > viewH + 100.0 { continue }
 
@@ -2742,8 +2101,17 @@ public final class OceanGameScene: SKScene {
 
     @discardableResult
     private func spawnOnePrey() -> Bool {
-        var targetDepth = max(45.0, sharkY + Double.random(in: -260...260))
-        if sharkY <= 430.0 {
+        let viewW = Double(max(320, size.width))
+        let viewH = Double(max(240, size.height))
+        let renderZoom = max(GameRules.minRenderZoomFloor, smoothedCameraZoom)
+        let invZoom = 1.0 / max(GameRules.cameraZoomMin, renderZoom)
+        let halfViewW = max(520.0, (viewW * 0.5) / renderZoom)
+        let halfViewH = max(320.0, (viewH * 0.5) / renderZoom)
+        let verticalSpread = min(halfViewH * 0.85, max(260.0, halfViewH * 0.72))
+
+        let minSpawnLenM = viewModel?.currentStats.minSpawnablePreyLengthM ?? 0.0
+        var targetDepth = max(45.0, sharkY + Double.random(in: -verticalSpread...verticalSpread))
+        if sharkY <= 430.0 && minSpawnLenM < 1.2 {
             targetDepth = min(495.0, targetDepth)
         }
         let isShallowZone = targetDepth <= 520.0
@@ -2761,8 +2129,8 @@ public final class OceanGameScene: SKScene {
                     ? GameConfigGenerated.preyTiers.filter { $0.maxDepth >= 1150.0 }
                     : GameConfigGenerated.preyTiers.filter { $0.minDepth >= 500.0 || $0.maxDepth >= 800.0 }))
 
-        // Giant shark scale filter: do not spawn tiny fish if shark is too large
-        let minPreyLenCm = (viewModel?.currentStats.minSpawnablePreyLengthM ?? 0.0) * 100.0
+        // Giant shark scale filter: do not spawn tiny fish if shark is too large (preserves shallow depletion loop)
+        let minPreyLenCm = minSpawnLenM * 100.0
         let candidates = minPreyLenCm > 0
             ? rawCandidates.filter { ($0.bodyLengthCm > 0 ? $0.bodyLengthCm : $0.radius * 2.5) >= minPreyLenCm }
             : rawCandidates
@@ -2806,15 +2174,9 @@ public final class OceanGameScene: SKScene {
                 break
             }
         }
-        // 屏幕边缘游入刷新：严格在屏幕外侧左右边缘生成，并朝向屏幕中央游入，严禁在身边瞬移！
-        let viewW = Double(max(320, size.width))
-        let viewH = Double(max(240, size.height))
-        let zoom = viewModel?.currentStats.cameraZoom ?? 1.0
-        let halfViewW = max(520.0, (viewW * 0.5) / max(0.4, zoom))
-        let halfViewH = max(320.0, (viewH * 0.5) / max(0.4, zoom))
-
+        // 屏幕边缘游入刷新：按真实相机视野半宽 halfViewW 在屏幕外侧边缘生成，严禁在视野内瞬移！
         let spawnOnLeft = Bool.random()
-        let edgeOffset = Double.random(in: 80.0...175.0)
+        let edgeOffset = Double.random(in: 80.0...175.0) * invZoom
         let px = spawnOnLeft ? (cameraX - halfViewW - edgeOffset) : (cameraX + halfViewW + edgeOffset)
         // 随机游动方向：消除全向鲨鱼游动的刻板感，猎物按自然海洋生物随机朝左或朝右游动
         let dir: Double = Bool.random() ? 1.0 : -1.0
@@ -2822,14 +2184,15 @@ public final class OceanGameScene: SKScene {
         let localFloorLimit = max(140.0, GameRules.getFloorDepthAt(worldX: px) - chosen.radius - 34.0)
         let rawPy = max(chosen.minDepth, min(chosen.maxDepth, sharkY + Double.random(in: -halfViewH...halfViewH) * 0.82))
         let clampedPy = min(rawPy, localFloorLimit)
-        // Ensure prey never spawns inside any of the 9 seabed terraces or below the main floor
+        // Ensure prey never spawns inside any intact seabed terrace or below the main floor
         let spawnCol = GameRules.resolveSeabedCollision(
             worldX: px,
             worldY: clampedPy,
             vy: 0.0,
             entityRadius: chosen.radius + 16.0,
             clearancePadding: 10.0,
-            prevWorldY: clampedPy
+            prevWorldY: clampedPy,
+            options: GameRules.SeabedCollisionOptions(breachedCells: breachedTerraceCells)
         )
         let py = max(chosen.minDepth + 16.0, min(localFloorLimit, spawnCol.y))
 
@@ -2903,14 +2266,12 @@ public final class OceanGameScene: SKScene {
     }
 
     private func spawnDevourPickups(x: Double, y: Double, coinGain: Int, geneGain: Int) {
+        let coinTex = SpriteAtlasManager.shared.uiIconTexture(for: "UI_ICON_COIN")
         let coinCount = min(4, max(1, (coinGain + 3) / 4))
         let baseCoinVal = max(1, coinGain / coinCount)
         for i in 0..<coinCount {
             let val = (i == coinCount - 1) ? max(1, coinGain - baseCoinVal * (coinCount - 1)) : baseCoinVal
-            let node = SKSpriteNode()
-            if let img = SpriteAtlasManager.shared.uiIconImage(for: "UI_ICON_COIN") {
-                node.texture = SKTexture(image: img)
-            }
+            let node = SKSpriteNode(texture: coinTex)
             node.size = CGSize(width: 22, height: 22)
             node.zPosition = 24
             fxContainer.addChild(node)
@@ -2930,10 +2291,8 @@ public final class OceanGameScene: SKScene {
         }
 
         if geneGain > 0 {
-            let node = SKSpriteNode()
-            if let img = SpriteAtlasManager.shared.uiIconImage(for: "UI_ICON_GENE") {
-                node.texture = SKTexture(image: img)
-            }
+            let geneTex = SpriteAtlasManager.shared.uiIconTexture(for: "UI_ICON_GENE")
+            let node = SKSpriteNode(texture: geneTex)
             node.size = CGSize(width: 24, height: 24)
             node.zPosition = 24
             fxContainer.addChild(node)
@@ -2970,9 +2329,10 @@ public final class OceanGameScene: SKScene {
         )
     }
 
-    private func stepAndRenderDevourFX(viewW: Double, viewH: Double, stats: ComputedSharkStats, dt: Double) {
+    private func stepAndRenderDevourFX(viewW: Double, viewH: Double, stats: ComputedSharkStats, renderZoom: Double, dt: Double) {
         guard let vm = viewModel else { return }
-        let zoom = stats.cameraZoom
+        let zoom = renderZoom
+        let invZoom = 1.0 / max(GameRules.cameraZoomMin, zoom)
 
         // 1. Update & Render Devour Burst Particles
         var pIdx = activeParticles.count - 1
@@ -2998,15 +2358,15 @@ public final class OceanGameScene: SKScene {
                 pt.node.setScale(CGFloat(max(0.2, 1.0 - progress * 0.65)))
                 pt.node.alpha = CGFloat(max(0.0, 1.0 - progress * 0.85))
             }
-            let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
-            let sx = viewW * 0.5 + (pt.x - cameraX) * seabedScale * zoom
-            let sy = viewH * 0.5 - (pt.y - cameraY) * seabedScale * zoom
+            let sx = viewW * 0.5 + (pt.x - cameraX) * zoom
+            let sy = viewH * 0.5 - (pt.y - cameraY) * zoom
             pt.node.position = CGPoint(x: sx, y: sy)
             pIdx -= 1
         }
 
         // 2. Update & Render 3D Spinning Coin & Gene Pickups with Magnetic Pull
-        let magnetR = (vm.frenzyActive ? 390.0 : 120.0) + stats.magnetRadius
+        let magnetR = ((vm.frenzyActive ? 390.0 : 120.0) + stats.magnetRadius) * invZoom
+        let collectRadius = 38.0 * stats.worldScale
         var kIdx = activePickups.count - 1
         while kIdx >= 0 {
             let pk = activePickups[kIdx]
@@ -3017,7 +2377,7 @@ public final class OceanGameScene: SKScene {
             let dist = hypot(dx, dy)
 
             if dist < magnetR && dist > 1.0 {
-                let pullSpeed = vm.frenzyActive ? 620.0 : 410.0
+                let pullSpeed = (vm.frenzyActive ? 620.0 : 410.0) * invZoom
                 pk.vx += (dx / dist) * pullSpeed * dt * 5.2
                 pk.vy += (dy / dist) * pullSpeed * dt * 5.2
             } else {
@@ -3027,14 +2387,14 @@ public final class OceanGameScene: SKScene {
             pk.x += pk.vx * dt
             pk.y += pk.vy * dt
 
-            if dist < 38.0 * stats.scale || pk.life <= 0 {
-                if dist < 38.0 * stats.scale {
+            if dist < collectRadius || pk.life <= 0 {
+                if dist < collectRadius {
                     if pk.isGene {
                         vm.save.bankedGenes += pk.value
                         vm.runGenesEarned += pk.value
                         spawnFloatingText(
                             x: pk.x,
-                            y: pk.y - 12,
+                            y: pk.y - 12.0 * invZoom,
                             text: "+\(pk.value) 🧬",
                             color: UIColor(red: 110/255, green: 231/255, blue: 183/255, alpha: 1.0),
                             fontSize: 13
@@ -3044,7 +2404,7 @@ public final class OceanGameScene: SKScene {
                         vm.runCoinsEarned += pk.value
                         spawnFloatingText(
                             x: pk.x,
-                            y: pk.y - 10,
+                            y: pk.y - 10.0 * invZoom,
                             text: "+\(pk.value) 🪙",
                             color: UIColor(red: 253/255, green: 224/255, blue: 71/255, alpha: 1.0),
                             fontSize: 12
@@ -3057,12 +2417,11 @@ public final class OceanGameScene: SKScene {
                 continue
             }
 
-            let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
-            let sx = viewW * 0.5 + (pk.x - cameraX) * seabedScale * zoom
-            let sy = viewH * 0.5 - (pk.y - cameraY) * seabedScale * zoom
+            let sx = viewW * 0.5 + (pk.x - cameraX) * zoom
+            let sy = viewH * 0.5 - (pk.y - cameraY) * zoom
             pk.node.position = CGPoint(x: sx, y: sy)
-            // 3D coin flip / crystal spin effect (scaled in equal proportion with world)
-            let pkScale = CGFloat(max(0.18, min(1.0, smoothedRelativePreyScale * 1.25)))
+            // 3D coin flip / crystal spin effect (stays legible even at 0.22x giant zoom)
+            let pkScale = CGFloat(max(0.72, min(1.15, 0.82 + 0.18 * zoom)))
             pk.node.xScale = CGFloat(0.35 + 0.65 * abs(cos(pk.spinPhase))) * pkScale
             pk.node.yScale = pkScale
             kIdx -= 1
@@ -3079,13 +2438,12 @@ public final class OceanGameScene: SKScene {
                 fIdx -= 1
                 continue
             }
-            ft.y += ft.vy * dt
+            ft.y += ft.vy * dt * invZoom
             ft.vy *= 0.94
             let progress = 1.0 - (ft.life / ft.maxLife)
             let popScale = progress < 0.18 ? (0.65 + (progress / 0.18) * 0.48) : (1.13 - (progress - 0.18) * 0.22)
-            let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
-            let sx = viewW * 0.5 + (ft.x - cameraX) * seabedScale * zoom
-            let sy = viewH * 0.5 - (ft.y - cameraY) * seabedScale * zoom
+            let sx = viewW * 0.5 + (ft.x - cameraX) * zoom
+            let sy = viewH * 0.5 - (ft.y - cameraY) * zoom
             ft.node.position = CGPoint(x: sx, y: sy)
             ft.node.setScale(CGFloat(max(0.5, popScale)))
             ft.node.alpha = CGFloat(min(1.0, ft.life / (ft.maxLife * 0.42)))
@@ -3093,29 +2451,30 @@ public final class OceanGameScene: SKScene {
         }
     }
 
-    private func stepAndRenderPreys(viewW: Double, viewH: Double, stats: ComputedSharkStats, dt: Double, currentTime: TimeInterval) {
+    private func stepAndRenderPreys(viewW: Double, viewH: Double, stats: ComputedSharkStats, renderZoom: Double, dt: Double, currentTime: TimeInterval) {
         guard let vm = viewModel else { return }
         syncPreyPopulation(dt: dt)
-        let zoom = stats.cameraZoom
-        let seabedScale = max(0.015, min(1.0, smoothedRelativePreyScale))
+        let zoom = renderZoom
+        let halfViewW = max(520.0, (viewW * 0.5) / zoom)
+        let cullDist = max(1950.0, halfViewW * 1.55 + 650.0)
+        let senseScale = max(1.0, stats.worldScale * 0.55)
+        let preySeabedOptions = GameRules.SeabedCollisionOptions(breachedCells: breachedTerraceCells)
 
         var idx = activePreys.count - 1
         while idx >= 0 {
             let p = activePreys[idx]
             let gait = classifyPreySwimGait(p.config)
-            let worldPreySpeed = p.config.baseSpeed / seabedScale
-            let speedNorm = max(0.72, min(1.35, (hypot(p.vx, p.vy) * seabedScale) / max(18.0, p.config.baseSpeed)))
+            let worldPreySpeed = p.config.baseSpeed
+            let speedNorm = max(0.72, min(1.35, hypot(p.vx, p.vy) / max(18.0, p.config.baseSpeed)))
             p.phase += dt * 4.6 * speedNorm
             p.stateTimer += dt
 
-            // 物理判定与视觉渲染坐标严格同源对齐（共用相对海床微缩比例尺，彻底消除冲刺逆流漂移与吃鱼错位）
-            let effPreyX = sharkX + (p.x - sharkX) * seabedScale
-            let effPreyY = sharkY + (p.y - sharkY) * seabedScale
-            let dx = effPreyX - sharkX
-            let dy = effPreyY - sharkY
+            // 统一世界坐标系：物理碰撞与真相机变焦投影 100% 同源，彻底废除 seabedScale/effPrey 微缩补丁
+            let dx = p.x - sharkX
+            let dy = p.y - sharkY
             let dist = hypot(dx, dy)
 
-            if dist > 1950 {
+            if dist > cullDist {
                 p.node.removeFromParent()
                 activePreys.remove(at: idx)
                 idx -= 1
@@ -3135,32 +2494,32 @@ public final class OceanGameScene: SKScene {
                 mutationVariant: p.mutation
             )
 
-            // Biomechanical Smooth Horizontal Cruising Trajectory AI (1:1 parity with src/App.tsx)
+            // Biomechanical Smooth Horizontal Cruising Trajectory AI (1:1 parity with Web)
             let dirSign: Double = p.vx >= 0 ? 1.0 : -1.0
             switch p.config.behavior {
             case .SCHOOL_FLEE:
-                if dist < 250 && encounterPreview == .DEVOUR && dist > 1.0 {
+                if dist < 250.0 * senseScale && encounterPreview == .DEVOUR && dist > 1.0 {
                     let fleeAng = atan2(dy, dx) + sin(p.phase * 1.35) * 0.18
                     let fleeSpd = worldPreySpeed * 1.42
                     p.vx += (cos(fleeAng) * fleeSpd - p.vx) * min(1.0, dt * 4.5)
                     p.vy += (sin(fleeAng) * fleeSpd - p.vy) * min(1.0, dt * 4.5)
                 } else {
                     let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq) * p.cruiseAmpY
-                    let desiredVy = ((targetY - p.y) * 0.92) / seabedScale + (cos(p.phase * 0.65) * worldPreySpeed * 0.14)
+                    let desiredVy = (targetY - p.y) * 0.92 + cos(p.phase * 0.65) * worldPreySpeed * 0.14
                     let desiredVx = dirSign * worldPreySpeed * (0.92 + 0.12 * sin(p.stateTimer * 0.95))
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
                 }
             case .PUFFER_INFLATE:
-                let targetInflate = dist < 195 ? 1.0 : 0.0
+                let targetInflate = dist < 195.0 * senseScale ? 1.0 : 0.0
                 p.inflateRatio += (targetInflate - p.inflateRatio) * min(1.0, dt * 4.5)
                 let targetY = p.cruiseDepthCenter + sin(p.stateTimer * 0.65) * (p.cruiseAmpY * 0.65)
-                let desiredVy = ((targetY - p.y) * 0.85) / seabedScale + (sin(p.phase * 0.6) * 12.0) / seabedScale
+                let desiredVy = (targetY - p.y) * 0.85 + sin(p.phase * 0.6) * 12.0
                 let desiredVx = dirSign * worldPreySpeed * (1.0 - p.inflateRatio * 0.35)
                 p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.0)
                 p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
             case .EEL_CHARGER:
-                if dist < 310 && encounterPreview != .DEVOUR && dist > 1.0 {
+                if dist < 310.0 * senseScale && encounterPreview != .DEVOUR && dist > 1.0 {
                     let atkAng = atan2(-dy, -dx) + sin(p.phase * 1.4) * 0.14
                     let atkSpd = worldPreySpeed * 1.42
                     p.vx += (cos(atkAng) * atkSpd - p.vx) * min(1.0, dt * 4.0)
@@ -3172,33 +2531,33 @@ public final class OceanGameScene: SKScene {
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.0)
                 }
             case .MINE_HAZARD:
-                p.vx = (sin(p.stateTimer * 0.8 + p.phase * 0.2) * 8.0) / seabedScale
-                p.vy = (cos(p.stateTimer * 1.1 + p.phase * 0.3) * 10.0) / seabedScale
+                p.vx = sin(p.stateTimer * 0.8 + p.phase * 0.2) * 8.0
+                p.vy = cos(p.stateTimer * 1.1 + p.phase * 0.3) * 10.0
             default:
                 if gait == .MEDUSOID_JET {
                     let jetPulse = 0.72 + 0.38 * pow(max(0.0, sin(p.phase * 0.65)), 2.0)
                     let desiredVx = dirSign * worldPreySpeed * jetPulse
-                    let desiredVy = (cos(p.stateTimer * 0.75) * 14.0) / seabedScale
+                    let desiredVy = cos(p.stateTimer * 0.75) * 14.0
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 3.5)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 3.5)
                 } else {
                     let targetY = p.cruiseDepthCenter + sin(p.stateTimer * p.cruiseFreq) * p.cruiseAmpY
-                    let desiredVy = ((targetY - p.y) * 0.88) / seabedScale + (sin(p.phase * 0.6) * worldPreySpeed * 0.14)
+                    let desiredVy = (targetY - p.y) * 0.88 + sin(p.phase * 0.6) * worldPreySpeed * 0.14
                     let desiredVx = dirSign * worldPreySpeed * (0.92 + 0.12 * cos(p.stateTimer * 0.85))
                     p.vx += (desiredVx - p.vx) * min(1.0, dt * 2.8)
                     p.vy += (desiredVy - p.vy) * min(1.0, dt * 2.8)
                 }
             }
 
-            // Jaw Suction Pull: pull devourable prey straight into the shark's open jaws when close!
-            let suctionRadius = (58.0 + stats.magnetRadius * 0.35) * stats.jawSuctionMultiplier * stats.scale
-            let mouthX = sharkX + cos(sharkAngle) * 28.0 * stats.scale
-            let mouthY = sharkY + sin(sharkAngle) * 28.0 * stats.scale
-            let mouthDist = hypot(mouthX - effPreyX, mouthY - effPreyY)
+            // Jaw Suction Pull: pull devourable prey straight into the shark's open jaws in unified world space
+            let suctionRadius = (58.0 + stats.magnetRadius * 0.35) * stats.jawSuctionMultiplier * stats.worldScale
+            let mouthX = sharkX + cos(sharkAngle) * 28.0 * stats.worldScale
+            let mouthY = sharkY + sin(sharkAngle) * 28.0 * stats.worldScale
+            let mouthDist = hypot(mouthX - p.x, mouthY - p.y)
             if vm.gameState == "playing" && encounterPreview == .DEVOUR && mouthDist < suctionRadius && mouthDist > 1.0 {
-                let pullStrength = ((1.0 - mouthDist / suctionRadius) * 540.0) / seabedScale
-                p.x += ((mouthX - effPreyX) / mouthDist) * pullStrength * dt
-                p.y += ((mouthY - effPreyY) / mouthDist) * pullStrength * dt
+                let pullStrength = (1.0 - mouthDist / suctionRadius) * 540.0 * max(1.0, stats.worldScale * 0.65)
+                p.x += ((mouthX - p.x) / mouthDist) * pullStrength * dt
+                p.y += ((mouthY - p.y) / mouthDist) * pullStrength * dt
                 if biteAnim < 0.35 {
                     biteAnim = 0.55
                 }
@@ -3224,7 +2583,8 @@ public final class OceanGameScene: SKScene {
                 vx: p.vx,
                 vy: p.vy,
                 entityRadius: preyHitRadius,
-                clearancePadding: 8.0
+                clearancePadding: 8.0,
+                options: preySeabedOptions
             )
             p.x = preyStepCol.x
             p.y = preyStepCol.y
@@ -3242,12 +2602,10 @@ public final class OceanGameScene: SKScene {
                 }
             }
 
-            let postEffX = sharkX + (p.x - sharkX) * seabedScale
-            let postEffY = sharkY + (p.y - sharkY) * seabedScale
-            let postDx = postEffX - sharkX
-            let postDy = postEffY - sharkY
+            let postDx = p.x - sharkX
+            let postDy = p.y - sharkY
             let postDist = hypot(postDx, postDy)
-            let hitRadius = p.config.radius * visualScale + 28.0 * stats.scale
+            let hitRadius = p.config.radius * visualScale + 28.0 * stats.worldScale
 
             if vm.gameState == "playing" && postDist < hitRadius {
                 if encounterPreview == .DEVOUR {
@@ -3287,7 +2645,7 @@ public final class OceanGameScene: SKScene {
                     }
                     spawnFloatingText(
                         x: p.x,
-                        y: p.y - 14,
+                        y: p.y - 14.0 * max(1.0, stats.worldScale * 0.5),
                         text: devourLabel,
                         color: p.mutation == .GOLDEN_SWARM
                             ? UIColor(red: 250/255, green: 204/255, blue: 21/255, alpha: 1.0)
@@ -3303,11 +2661,11 @@ public final class OceanGameScene: SKScene {
                             vm.save.bankedGenes += 3
                             vm.runCoinsEarned += 45
                             vm.runGenesEarned += 3
-                            vm.pickNewBountyPrey()
+                            vm.pickNewBountyPrey(currentWorldY: sharkY)
                             vm.playSuccessSound()
                             spawnFloatingText(
                                 x: sharkX,
-                                y: sharkY - 34,
+                                y: sharkY - 34.0 * max(1.0, stats.worldScale * 0.5),
                                 text: vm.lang == "zh" ? "🎯 悬赏达成! +45🪙 +3🧬" : "🎯 BOUNTY! +45🪙 +3🧬",
                                 color: UIColor(red: 253/255, green: 224/255, blue: 71/255, alpha: 1.0),
                                 fontSize: 15
@@ -3325,7 +2683,7 @@ public final class OceanGameScene: SKScene {
                             vm.recomputeCurrentSharkStats()
                             spawnFloatingText(
                                 x: sharkX,
-                                y: sharkY - 40,
+                                y: sharkY - 40.0 * max(1.0, stats.worldScale * 0.5),
                                 text: vm.lang == "zh" ? "🔥 黄金狂暴觉醒!" : "🔥 GOLDEN FRENZY!",
                                 color: UIColor.yellow,
                                 fontSize: 16
@@ -3346,13 +2704,13 @@ public final class OceanGameScene: SKScene {
                     if vm.addXp(p.config.xpValue * mult) {
                         spawnFloatingText(
                             x: sharkX,
-                            y: sharkY - 38,
+                            y: sharkY - 38.0 * max(1.0, stats.worldScale * 0.5),
                             text: vm.lang == "zh" ? "⚡ LV.\(vm.inRunLevel) 体型成长!" : "⚡ LV.\(vm.inRunLevel) SIZE UP!",
                             color: UIColor.cyan,
                             fontSize: 16
                         )
                     }
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    HapticFeedbackManager.shared.playLight()
                     p.node.removeFromParent()
                     activePreys.remove(at: idx)
                     idx -= 1
@@ -3362,7 +2720,7 @@ public final class OceanGameScene: SKScene {
                     biteAnim = 0.85
                     cameraShakeTrauma = min(1.0, cameraShakeTrauma + 0.42)
                     invulnTimer = 0.45
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    HapticFeedbackManager.shared.playHeavy()
                     if p.armorHp <= 0 {
                         vm.score += p.config.scoreValue * 2
                         let gGain = max(1, p.config.geneValue * 2)
@@ -3370,7 +2728,7 @@ public final class OceanGameScene: SKScene {
                         spawnDevourPickups(x: p.x, y: p.y, coinGain: p.config.coinValue * 2, geneGain: gGain)
                         spawnFloatingText(
                             x: p.x,
-                            y: p.y - 16,
+                            y: p.y - 16.0 * max(1.0, stats.worldScale * 0.5),
                             text: vm.lang == "zh" ? "💥 破甲粉碎! +\(p.config.scoreValue * 2)" : "💥 ARMOR CRUSH! +\(p.config.scoreValue * 2)",
                             color: UIColor.cyan,
                             fontSize: 15
@@ -3383,12 +2741,12 @@ public final class OceanGameScene: SKScene {
                     } else {
                         spawnFloatingText(
                             x: p.x,
-                            y: p.y - 14,
+                            y: p.y - 14.0 * max(1.0, stats.worldScale * 0.5),
                             text: vm.lang == "zh" ? "⚡ 护甲裂纹!" : "⚡ ARMOR CRACK!",
                             color: UIColor.orange,
                             fontSize: 13
                         )
-                        p.x += (postDx / max(1.0, postDist)) * 65.0
+                        p.x += (postDx / max(1.0, postDist)) * 65.0 * max(1.0, stats.worldScale * 0.5)
                     }
                 } else if encounterPreview == .NEED_BOOST {
                     if invulnTimer <= 0 {
@@ -3397,13 +2755,14 @@ public final class OceanGameScene: SKScene {
                         cameraShakeTrauma = min(1.0, cameraShakeTrauma + 0.35)
                         spawnFloatingText(
                             x: sharkX,
-                            y: sharkY - 26,
+                            y: sharkY - 26.0 * max(1.0, stats.worldScale * 0.5),
                             text: vm.lang == "zh" ? "⚠️ 按住冲刺破甲!" : "⚠️ BOOST TO CRUSH!",
                             color: UIColor.orange,
                             fontSize: 14
                         )
-                        UINotificationFeedbackGenerator().notificationOccurred(.warning)
-                        p.x += (postDx / max(1.0, postDist)) * 45.0
+                        HapticFeedbackManager.shared.playNotification(.warning)
+                        vm.flushTelemetryImmediate(timestamp: currentTime)
+                        p.x += (postDx / max(1.0, postDist)) * 45.0 * max(1.0, stats.worldScale * 0.5)
                     }
                 } else if invulnTimer <= 0 {
                     vm.hp = max(0, vm.hp - p.config.damageOnFail * stats.damageTakenMultiplier)
@@ -3411,17 +2770,18 @@ public final class OceanGameScene: SKScene {
                     cameraShakeTrauma = min(1.0, cameraShakeTrauma + 0.48)
                     spawnFloatingText(
                         x: sharkX,
-                        y: sharkY - 26,
+                        y: sharkY - 26.0 * max(1.0, stats.worldScale * 0.5),
                         text: vm.lang == "zh" ? "⚠️ 致命天敌! 需T\(p.config.tier)" : "⚠️ DEADLY! NEED T\(p.config.tier)",
                         color: UIColor(red: 248/255, green: 113/255, blue: 113/255, alpha: 1.0),
                         fontSize: 14
                     )
-                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    HapticFeedbackManager.shared.playNotification(.error)
+                    vm.flushTelemetryImmediate(timestamp: currentTime)
                 }
             }
 
-            let screenX = viewW * 0.5 + (p.x - cameraX) * seabedScale * zoom
-            let screenY = viewH * 0.5 - (p.y - cameraY) * seabedScale * zoom
+            let screenX = viewW * 0.5 + (p.x - cameraX) * zoom
+            let screenY = viewH * 0.5 - (p.y - cameraY) * zoom
             let inflateScale = 1.0 + p.inflateRatio * 0.38
             let baseSize = p.config.radius * GameRules.preyRadiusToDrawSize * visualScale * inflateScale * zoom
             if p.node.texture == nil,
@@ -3459,7 +2819,7 @@ public final class OceanGameScene: SKScene {
                 p.node.colorBlendFactor = 0.0
             }
 
-            applyPreySpineWaveWarp(to: p.node, prey: p)
+            applyPreySpineWaveWarp(to: p.node, prey: p, screenMaxDim: max(drawW, drawH), currentTime: currentTime)
             idx -= 1
         }
     }

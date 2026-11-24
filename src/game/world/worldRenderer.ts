@@ -1,4 +1,4 @@
-import { meterDepthToWorldY } from '../rules';
+import { MIN_RENDER_ZOOM_FLOOR, meterDepthToWorldY } from '../rules';
 import {
   WorldConfig,
   WORLD_UNITS_PER_METER,
@@ -11,6 +11,7 @@ import {
   getEngineFloorDepthAt,
   SEABED_TERRACE_TIERS,
   getShallowCoralAtollOutcropsForChunk,
+  isTerraceCellBreached,
 } from './terrainSystem';
 import {
   BiomeId,
@@ -434,6 +435,7 @@ export class WorldRenderer {
       viewH: number;
       renderZoom: number;
       relativePreyScale?: number;
+      breachedTerraceCells?: ReadonlySet<string>;
       nowMs?: number;
     },
     activeChunks: ReadonlyArray<GeneratedChunkData>
@@ -441,13 +443,9 @@ export class WorldRenderer {
     if (!activeChunks || activeChunks.length === 0) return 0;
     this.assetRegistry.ensureAtlasesLoaded();
 
-    const zoom = Math.max(0.25, viewport.renderZoom);
-    // 100% 真实生物体长同比例环境微缩：附着生物群落与海床生态随相对体长比例尺 (relativePreyScale: 1.00 -> 0.015) 同步缩小
-    const seabedScale = Number.isFinite(viewport.relativePreyScale)
-      ? Math.max(0.06, Math.min(1.0, viewport.relativePreyScale!))
-      : 1.0;
-    const halfW = viewport.viewW / (2 * zoom * seabedScale) + 260;
-    const halfH = viewport.viewH / (2 * zoom * seabedScale) + 260;
+    const zoom = Math.max(MIN_RENDER_ZOOM_FLOOR, viewport.renderZoom);
+    const halfW = viewport.viewW / (2 * zoom) + 260;
+    const halfH = viewport.viewH / (2 * zoom) + 260;
     const minEngineX = viewport.cameraEngineX - halfW;
     const maxEngineX = viewport.cameraEngineX + halfW;
     const minEngineY = viewport.cameraEngineY - halfH;
@@ -462,13 +460,9 @@ export class WorldRenderer {
     let drawnCount = 0;
 
     ctx.save();
-    // 以当前相机中心开启全环境等比几何微缩变换 (Isotropic Chunk Ecology Geometric Shrinking)
-    ctx.translate(viewport.cameraEngineX, viewport.cameraEngineY);
-    ctx.scale(seabedScale, seabedScale);
-    ctx.translate(-viewport.cameraEngineX, -viewport.cameraEngineY);
 
     // 0. 绘制全水深 9 级非均匀渐进间距连续阶梯海床 (`SEABED_TERRACE_TIERS`) 顶面附着生长的复合珊瑚礁盘、共生礁石与海草群落：
-    // 让玩家在浅海、暮光、半深海与深渊 (240m~18000m) 游动时始终有丰富的海底生态参照物，同时保持随水深逐级加宽的层间水平走廊 100% 畅通无阻！
+    // 自动跳过已被巨鲨撞碎的局部破损格，杜绝浮空装饰物；同时按真相机缩放自动剔除 <5px 微海草以稳守 60FPS。
     if (minEngineY <= 18000 && maxEngineY >= 240) {
       const minAtollChunkX = Math.floor((minEngineX * WORLD_UNITS_PER_METER) / WorldConfig.chunk.width);
       const maxAtollChunkX = Math.floor((maxEngineX * WORLD_UNITS_PER_METER) / WorldConfig.chunk.width);
@@ -478,6 +472,12 @@ export class WorldRenderer {
         for (let i = 0; i < outcrops.length; i++) {
           const item = outcrops[i];
           if (renderedIds.has(item.id)) continue;
+          if (
+            item.tierIndex !== undefined &&
+            isTerraceCellBreached(item.tierIndex, item.worldX, viewport.breachedTerraceCells)
+          ) {
+            continue;
+          }
           const ex = worldXToEngineX(item.worldX);
           const ey = item.floorY;
           if (
@@ -490,12 +490,15 @@ export class WorldRenderer {
           }
           if (
             skipDistantDecorations &&
-            Math.hypot(ex - viewport.cameraEngineX, ey - viewport.cameraEngineY) * seabedScale > 680
+            Math.hypot(ex - viewport.cameraEngineX, ey - viewport.cameraEngineY) * zoom > 680
           ) {
             continue;
           }
-          renderedIds.add(item.id);
           const scaledOutcropScale = item.scale;
+          if (item.type === 'seagrass' && 44 * scaledOutcropScale * zoom < 5) {
+            continue;
+          }
+          renderedIds.add(item.id);
 
           if (item.type === 'coral') {
             this.renderCompositeCoralReefMound(
@@ -578,14 +581,17 @@ export class WorldRenderer {
 
         if (
           skipDistantDecorations &&
-          Math.hypot(ex - viewport.cameraEngineX, floorEngineY - viewport.cameraEngineY) * seabedScale > 680
+          Math.hypot(ex - viewport.cameraEngineX, floorEngineY - viewport.cameraEngineY) * zoom > 680
         ) {
           continue;
         }
 
-        renderedIds.add(obj.id);
         const seedHash = hashToUint32(obj.id);
         const s = Math.max(0.72, Math.min(1.65, obj.scale ?? 1));
+        if (obj.type === 'seagrass' && 44 * s * zoom < 5) {
+          continue;
+        }
+        renderedIds.add(obj.id);
         const biomeId = (obj.biomeId as BiomeId) || 'coral_reef';
 
         // 1A. 珊瑚节点 -> 渲染完整写实珊瑚礁群落 (`ecology_coral_reef_cluster.png`)

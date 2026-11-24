@@ -29,6 +29,7 @@ public struct ParallaxLayerGrowthScales: Sendable {
 public struct ComputedSharkStats: Sendable {
     public let level: Int
     public let scale: Double
+    public let worldScale: Double
     public let relativePreyScale: Double
     public let cameraZoom: Double
     public let maxHp: Double
@@ -196,6 +197,18 @@ public enum GameRules {
     public static let preyRadiusToDrawSize: Double = 2.25
     public static let sharkEquivalentRadius: Double = 110.4 / 2.25 // 49.0667 (preserves 1:1 sharkParityScale ratio)
     public static let defaultPreySizeMultiplier: Double = 1.0
+    /// True 2D camera zoom lower bound at 45m+ Leviathan tier (1:1 parity with Web CAMERA_ZOOM_MIN)
+    public static let cameraZoomMin: Double = 0.22
+    /// Hard safety floor for render zoom projection
+    public static let minRenderZoomFloor: Double = 0.14
+
+    /// Computes true 2D camera zoom from shark's real body length (0.8m -> 1.00, 45m+ -> 0.22)
+    public static func computeTrueCameraZoom(realBodyLengthM: Double) -> Double {
+        let safeLen = realBodyLengthM.isFinite ? max(0.8, realBodyLengthM) : 0.8
+        let t = max(0.0, min(1.0, log(safeLen / 0.8) / log(45.0 / 0.8)))
+        let zoom = cameraZoomMin + (1.0 - cameraZoomMin) * pow(1.0 - t, 1.35)
+        return (zoom * 1000.0).rounded() / 1000.0
+    }
 
     /// XP required to advance from `level` to `level + 1` (matches src/game/rules.ts)
     public static func getXpRequiredForLevel(_ level: Int) -> Int {
@@ -392,8 +405,22 @@ public enum GameRules {
         return HuntingHeatBuff(heatLevel: 0, speedMultiplier: 1.0, scoreMultiplier: 1.0, labelKey: "hud_heat_lv0")
     }
 
-    /// Optical Far / Mid / Near background shrinking ratios coupled to shark growth (`relativePreyScale`: 1.00 -> 0.015)
-    /// Shrink weights: Near (0.42) > Ambient (0.33) > Mid (0.27) > Far (0.132) > Water (0.09)
+    /// Optical Far / Mid / Near background shrinking ratios driven by true camera zoom (`cameraZoom`: 1.00 -> 0.22)
+    public static func getParallaxLayerGrowthScalesFromZoom(cameraZoom: Double) -> ParallaxLayerGrowthScales {
+        let clampedZoom = max(cameraZoomMin, min(1.0, cameraZoom.isFinite ? cameraZoom : 1.0))
+        let growthProgress = min(1.0, max(0.0, (1.0 - clampedZoom) / (1.0 - cameraZoomMin)))
+        return ParallaxLayerGrowthScales(
+            growthProgress: growthProgress,
+            waterScale: 1.0 - growthProgress * 0.09,
+            farScale: 1.0 - growthProgress * 0.132,
+            midScale: 1.0 - growthProgress * 0.27,
+            ambientScale: 1.0 - growthProgress * 0.33,
+            nearScale: 1.0 - growthProgress * 0.42,
+            particleScale: 1.0 - growthProgress * 0.27
+        )
+    }
+
+    /// Legacy relativePreyScale wrapper (retained for compatibility)
     public static func getParallaxLayerGrowthScales(relativePreyScale: Double) -> ParallaxLayerGrowthScales {
         let clampedRel = max(0.015, min(1.0, relativePreyScale.isFinite ? relativePreyScale : 1.0))
         let growthProgress = min(1.0, max(0.0, (1.0 - clampedRel) / (1.0 - 0.015)))
@@ -1153,6 +1180,8 @@ public enum GameRules {
         public let graftEndMainY: Double
         public let graftFuseMainY: Double
         public let seedSalt: Int
+        /// Minimum real shark body length (m) required to shatter through this terrace tier (.infinity = indestructible deep crust)
+        public let shatterLengthM: Double
 
         public var baseDepth: Double { baseRidgeY }
         public var thicknessBase: Double { archTargetBaseY - baseRidgeY }
@@ -1165,65 +1194,166 @@ public enum GameRules {
             baseRidgeY: 414.0, minRidgeY: 332.0, maxRidgeY: 496.0, maxVisualRimY: 648.0,
             archTargetBaseY: 708.0, archMaxDepthY: 736.0, cellWidth: 1600.0, seamPhaseOffsetX: 0.0,
             skipZeroSeam: true, openingHalfWidth: 232.0, bowlHalfWidth: 416.0, bowlDropDepth: 148.0,
-            minMainFloorForOpening: 680.0, graftStartMainY: 560.0, graftEndMainY: 880.0, graftFuseMainY: 760.0, seedSalt: 613
+            minMainFloorForOpening: 680.0, graftStartMainY: 560.0, graftEndMainY: 880.0, graftFuseMainY: 760.0, seedSalt: 613,
+            shatterLengthM: 8.0
         ),
         SeabedTerraceTierSpec(
             tierIndex: 1, stripId: "rocky_shelf",
             baseRidgeY: 1220.0, minRidgeY: 1130.0, maxRidgeY: 1310.0, maxVisualRimY: 1475.0,
             archTargetBaseY: 1512.0, archMaxDepthY: 1545.0, cellWidth: 1800.0, seamPhaseOffsetX: 800.0,
             skipZeroSeam: false, openingHalfWidth: 248.0, bowlHalfWidth: 440.0, bowlDropDepth: 156.0,
-            minMainFloorForOpening: 1500.0, graftStartMainY: 1370.0, graftEndMainY: 1710.0, graftFuseMainY: 1575.0, seedSalt: 1619
+            minMainFloorForOpening: 1500.0, graftStartMainY: 1370.0, graftEndMainY: 1710.0, graftFuseMainY: 1575.0, seedSalt: 1619,
+            shatterLengthM: 12.0
         ),
         SeabedTerraceTierSpec(
             tierIndex: 2, stripId: "rocky_shelf",
             baseRidgeY: 2220.0, minRidgeY: 2120.0, maxRidgeY: 2320.0, maxVisualRimY: 2495.0,
             archTargetBaseY: 2532.0, archMaxDepthY: 2568.0, cellWidth: 2000.0, seamPhaseOffsetX: 350.0,
             skipZeroSeam: false, openingHalfWidth: 266.0, bowlHalfWidth: 468.0, bowlDropDepth: 164.0,
-            minMainFloorForOpening: 2520.0, graftStartMainY: 2380.0, graftEndMainY: 2750.0, graftFuseMainY: 2600.0, seedSalt: 2633
+            minMainFloorForOpening: 2520.0, graftStartMainY: 2380.0, graftEndMainY: 2750.0, graftFuseMainY: 2600.0, seedSalt: 2633,
+            shatterLengthM: 18.0
         ),
         SeabedTerraceTierSpec(
             tierIndex: 3, stripId: "underwater_canyon",
             baseRidgeY: 3460.0, minRidgeY: 3350.0, maxRidgeY: 3570.0, maxVisualRimY: 3755.0,
             archTargetBaseY: 3792.0, archMaxDepthY: 3832.0, cellWidth: 2200.0, seamPhaseOffsetX: 1100.0,
             skipZeroSeam: false, openingHalfWidth: 284.0, bowlHalfWidth: 496.0, bowlDropDepth: 172.0,
-            minMainFloorForOpening: 3780.0, graftStartMainY: 3630.0, graftEndMainY: 4030.0, graftFuseMainY: 3865.0, seedSalt: 3671
+            minMainFloorForOpening: 3780.0, graftStartMainY: 3630.0, graftEndMainY: 4030.0, graftFuseMainY: 3865.0, seedSalt: 3671,
+            shatterLengthM: 26.0
         ),
         SeabedTerraceTierSpec(
             tierIndex: 4, stripId: "underwater_canyon",
             baseRidgeY: 5040.0, minRidgeY: 4910.0, maxRidgeY: 5170.0, maxVisualRimY: 5365.0,
             archTargetBaseY: 5402.0, archMaxDepthY: 5446.0, cellWidth: 2400.0, seamPhaseOffsetX: 600.0,
             skipZeroSeam: false, openingHalfWidth: 302.0, bowlHalfWidth: 524.0, bowlDropDepth: 180.0,
-            minMainFloorForOpening: 5390.0, graftStartMainY: 5230.0, graftEndMainY: 5660.0, graftFuseMainY: 5480.0, seedSalt: 4723
+            minMainFloorForOpening: 5390.0, graftStartMainY: 5230.0, graftEndMainY: 5660.0, graftFuseMainY: 5480.0, seedSalt: 4723,
+            shatterLengthM: 36.0
         ),
         SeabedTerraceTierSpec(
             tierIndex: 5, stripId: "underwater_canyon",
             baseRidgeY: 7060.0, minRidgeY: 6910.0, maxRidgeY: 7210.0, maxVisualRimY: 7420.0,
             archTargetBaseY: 7456.0, archMaxDepthY: 7506.0, cellWidth: 2600.0, seamPhaseOffsetX: 1500.0,
             skipZeroSeam: false, openingHalfWidth: 324.0, bowlHalfWidth: 560.0, bowlDropDepth: 192.0,
-            minMainFloorForOpening: 7440.0, graftStartMainY: 7270.0, graftEndMainY: 7740.0, graftFuseMainY: 7545.0, seedSalt: 5801
+            minMainFloorForOpening: 7440.0, graftStartMainY: 7270.0, graftEndMainY: 7740.0, graftFuseMainY: 7545.0, seedSalt: 5801,
+            shatterLengthM: .infinity
         ),
         SeabedTerraceTierSpec(
             tierIndex: 6, stripId: "underwater_canyon",
             baseRidgeY: 9640.0, minRidgeY: 9470.0, maxRidgeY: 9810.0, maxVisualRimY: 10030.0,
             archTargetBaseY: 10066.0, archMaxDepthY: 10122.0, cellWidth: 2900.0, seamPhaseOffsetX: 700.0,
             skipZeroSeam: false, openingHalfWidth: 350.0, bowlHalfWidth: 604.0, bowlDropDepth: 206.0,
-            minMainFloorForOpening: 10050.0, graftStartMainY: 9880.0, graftEndMainY: 10380.0, graftFuseMainY: 10165.0, seedSalt: 6883
+            minMainFloorForOpening: 10050.0, graftStartMainY: 9880.0, graftEndMainY: 10380.0, graftFuseMainY: 10165.0, seedSalt: 6883,
+            shatterLengthM: .infinity
         ),
         SeabedTerraceTierSpec(
             tierIndex: 7, stripId: "deep_abyss",
             baseRidgeY: 12900.0, minRidgeY: 12710.0, maxRidgeY: 13090.0, maxVisualRimY: 13324.0,
             archTargetBaseY: 13360.0, archMaxDepthY: 13422.0, cellWidth: 3200.0, seamPhaseOffsetX: 1900.0,
             skipZeroSeam: false, openingHalfWidth: 380.0, bowlHalfWidth: 652.0, bowlDropDepth: 222.0,
-            minMainFloorForOpening: 13340.0, graftStartMainY: 13160.0, graftEndMainY: 13700.0, graftFuseMainY: 13470.0, seedSalt: 7949
+            minMainFloorForOpening: 13340.0, graftStartMainY: 13160.0, graftEndMainY: 13700.0, graftFuseMainY: 13470.0, seedSalt: 7949,
+            shatterLengthM: .infinity
         ),
         SeabedTerraceTierSpec(
             tierIndex: 8, stripId: "deep_abyss",
             baseRidgeY: 16900.0, minRidgeY: 16690.0, maxRidgeY: 17110.0, maxVisualRimY: 17360.0,
             archTargetBaseY: 17396.0, archMaxDepthY: 17464.0, cellWidth: 3600.0, seamPhaseOffsetX: 900.0,
             skipZeroSeam: false, openingHalfWidth: 416.0, bowlHalfWidth: 710.0, bowlDropDepth: 240.0,
-            minMainFloorForOpening: 17370.0, graftStartMainY: 17180.0, graftEndMainY: 17760.0, graftFuseMainY: 17515.0, seedSalt: 9013
+            minMainFloorForOpening: 17370.0, graftStartMainY: 17180.0, graftEndMainY: 17760.0, graftFuseMainY: 17515.0, seedSalt: 9013,
+            shatterLengthM: .infinity
         )
     ]
+
+    /// Horizontal cell width (world units) for breached upper-terrace cells shattered by giant sharks (1:1 parity with Web TERRACE_BREACH_CELL_WIDTH)
+    public static let terraceBreachCellWidth: Double = 120.0
+
+    public static func getTerraceBreachCellIndex(worldX: Double) -> Int {
+        return Int(floor(worldX / terraceBreachCellWidth))
+    }
+
+    public static func formatTerraceBreachKey(tierIndex: Int, cellIndex: Int) -> String {
+        return "\(tierIndex):\(cellIndex)"
+    }
+
+    public static func isTerraceCellBreached(
+        tierIndex: Int,
+        worldX: Double,
+        breachedCells: Set<String>?
+    ) -> Bool {
+        guard let cells = breachedCells, !cells.isEmpty else { return false }
+        return cells.contains(formatTerraceBreachKey(tierIndex: tierIndex, cellIndex: getTerraceBreachCellIndex(worldX: worldX)))
+    }
+
+    public static func canSharkShatterTerrace(tierIndex: Int, sharkLengthM: Double?) -> Bool {
+        guard let len = sharkLengthM, len.isFinite, tierIndex >= 0, tierIndex < seabedTerraceTiers.count else {
+            return false
+        }
+        return len >= seabedTerraceTiers[tierIndex].shatterLengthM
+    }
+
+    public struct SeabedCollisionOptions: Sendable {
+        public let sharkLengthM: Double?
+        public let breachedCells: Set<String>?
+
+        public init(sharkLengthM: Double? = nil, breachedCells: Set<String>? = nil) {
+            self.sharkLengthM = sharkLengthM
+            self.breachedCells = breachedCells
+        }
+    }
+
+    public struct TerraceShatterHit: Sendable {
+        public let tierIndex: Int
+        public let stripId: String
+        public let worldX: Double
+        public let worldY: Double
+        public let cellIndex: Int
+        public let isNewlyBreached: Bool
+    }
+
+    /// Detects whether a giant shark passed through any shatterable upper-terrace rock span during this frame
+    public static func detectShatterableTerraceHit(
+        prevX: Double,
+        prevY: Double,
+        nextX: Double,
+        nextY: Double,
+        entityRadius: Double,
+        sharkLengthM: Double,
+        breachedCells: Set<String>?
+    ) -> TerraceShatterHit? {
+        guard sharkLengthM.isFinite && sharkLengthM >= seabedTerraceTiers[0].shatterLengthM else {
+            return nil
+        }
+        let safeRadius = max(0.0, entityRadius)
+        let minY = min(prevY, nextY) - safeRadius * 0.72
+        let maxY = max(prevY, nextY) + safeRadius * 0.72
+        let midX = (prevX + nextX) * 0.5
+
+        for tIdx in 0..<seabedTerraceTiers.count {
+            let tierSpec = seabedTerraceTiers[tIdx]
+            if !canSharkShatterTerrace(tierIndex: tIdx, sharkLengthM: sharkLengthM) { continue }
+            if maxY < tierSpec.minRidgeY - 40.0 || minY > tierSpec.archMaxDepthY + 40.0 { continue }
+
+            let terrace = getSeabedTerraceAt(worldX: nextX, tierIndex: tIdx)
+            let activeSample = terrace.isPresent
+                ? terrace
+                : getSeabedTerraceAt(worldX: midX, tierIndex: tIdx)
+            guard activeSample.isPresent else { continue }
+
+            let hitWorldX = terrace.isPresent ? nextX : midX
+            if maxY >= activeSample.topY && minY <= activeSample.bottomArchY {
+                let cellIndex = getTerraceBreachCellIndex(worldX: hitWorldX)
+                let isNewlyBreached = !isTerraceCellBreached(tierIndex: tIdx, worldX: hitWorldX, breachedCells: breachedCells)
+                return TerraceShatterHit(
+                    tierIndex: tIdx,
+                    stripId: tierSpec.stripId,
+                    worldX: hitWorldX,
+                    worldY: (activeSample.topY + activeSample.bottomArchY) * 0.5,
+                    cellIndex: cellIndex,
+                    isNewlyBreached: isNewlyBreached
+                )
+            }
+        }
+        return nil
+    }
 
     public struct SeabedTerraceSample {
         public let isPresent: Bool
@@ -1432,6 +1562,8 @@ public enum GameRules {
         public let type: SeabedOutcropType
         public let variant: Int
         public let seed: Double
+        /// `nil` for main seafloor outcrops; `0...8` for seabed terrace outcrops (used to cull outcrops on shattered terrace cells)
+        public let terraceIndex: Int?
     }
 
     /// Generates deterministic, naturally proportioned seabed outcrops along both the main seafloor AND all 9 seabed terraces
@@ -1493,7 +1625,7 @@ public enum GameRules {
 
             placements.append(SeabedOutcropPlacement(
                 worldX: worldX, baseY: baseY, width: width, height: height,
-                type: type, variant: variant, seed: h1
+                type: type, variant: variant, seed: h1, terraceIndex: nil
             ))
         }
 
@@ -1545,7 +1677,7 @@ public enum GameRules {
 
                     placements.append(SeabedOutcropPlacement(
                         worldX: worldX, baseY: terrace.topY, width: width, height: height,
-                        type: type, variant: variant, seed: h1
+                        type: type, variant: variant, seed: h1, terraceIndex: tierIdx
                     ))
                 }
             }
@@ -1570,7 +1702,8 @@ public enum GameRules {
         vy: Double,
         entityRadius: Double,
         clearancePadding: Double = 6.0,
-        prevWorldY: Double? = nil
+        prevWorldY: Double? = nil,
+        options: SeabedCollisionOptions? = nil
     ) -> SeabedCollisionResult {
         let mainFloorY = getFloorDepthAt(worldX: worldX)
         let mainSlope = getTerrainSlopeAt(worldX: worldX)
@@ -1580,6 +1713,10 @@ public enum GameRules {
 
         // 1. Check all 9 seabed terraces (zero dead-zone inside [terraceTopMaxY, terraceUndersideMinY]!)
         for tierIdx in 0..<seabedTerraceTiers.count {
+            if canSharkShatterTerrace(tierIndex: tierIdx, sharkLengthM: options?.sharkLengthM)
+                || isTerraceCellBreached(tierIndex: tierIdx, worldX: worldX, breachedCells: options?.breachedCells) {
+                continue
+            }
             let spec = seabedTerraceTiers[tierIdx]
             let bandMinY = spec.baseDepth - 240.0 - clearance
             let bandMaxY = spec.baseDepth + spec.thicknessBase + 380.0 + clearance
@@ -1673,13 +1810,18 @@ public enum GameRules {
         prevY: Double,
         candX: Double,
         entityRadius: Double,
-        clearancePadding: Double
+        clearancePadding: Double,
+        options: SeabedCollisionOptions? = nil
     ) -> Bool {
         if abs(candX - prevX) < 1e-6 { return false }
         let clearance = max(0.0, entityRadius + clearancePadding)
         let candMainY = getFloorDepthAt(worldX: candX)
 
         for tierIdx in 0..<seabedTerraceTiers.count {
+            if canSharkShatterTerrace(tierIndex: tierIdx, sharkLengthM: options?.sharkLengthM)
+                || isTerraceCellBreached(tierIndex: tierIdx, worldX: candX, breachedCells: options?.breachedCells) {
+                continue
+            }
             let spec = seabedTerraceTiers[tierIdx]
             let bandMinY = spec.baseDepth - 240.0 - clearance
             let bandMaxY = spec.baseDepth + spec.thicknessBase + 380.0 + clearance
@@ -1721,7 +1863,8 @@ public enum GameRules {
         vx: Double,
         vy: Double,
         entityRadius: Double,
-        clearancePadding: Double = 6.0
+        clearancePadding: Double = 6.0,
+        options: SeabedCollisionOptions? = nil
     ) -> SeabedKineticStepResult {
         let totalDx = nextX - prevX
         let totalDy = nextY - prevY
@@ -1754,7 +1897,8 @@ public enum GameRules {
                 prevY: stepPrevY,
                 candX: rawTargetX,
                 entityRadius: entityRadius,
-                clearancePadding: clearancePadding
+                clearancePadding: clearancePadding,
+                options: options
             ) {
                 hitWallHorizontally = true
                 var lo = 0.0
@@ -1768,7 +1912,8 @@ public enum GameRules {
                         prevY: stepPrevY,
                         candX: cx,
                         entityRadius: entityRadius,
-                        clearancePadding: clearancePadding
+                        clearancePadding: clearancePadding,
+                        options: options
                     ) {
                         hi = mid
                     } else {
@@ -1785,7 +1930,8 @@ public enum GameRules {
                 vy: curVy,
                 entityRadius: entityRadius,
                 clearancePadding: clearancePadding,
-                prevWorldY: stepPrevY
+                prevWorldY: stepPrevY,
+                options: options
             )
 
             lastFloorY = col.floorY
@@ -1820,7 +1966,8 @@ public enum GameRules {
                     prevY: stepPrevY,
                     candX: finalStepX,
                     entityRadius: entityRadius,
-                    clearancePadding: clearancePadding
+                    clearancePadding: clearancePadding,
+                    options: options
                 ) {
                     finalStepX = targetX
                     hitWallHorizontally = true
@@ -1832,7 +1979,8 @@ public enum GameRules {
                     vy: curVy,
                     entityRadius: entityRadius,
                     clearancePadding: clearancePadding,
-                    prevWorldY: stepPrevY
+                    prevWorldY: stepPrevY,
+                    options: options
                 )
                 var finalStepY = secondCol.hitAtollUnderside ? secondCol.y : max(targetY, col.y)
 
@@ -1844,7 +1992,8 @@ public enum GameRules {
                         vy: curVy,
                         entityRadius: entityRadius,
                         clearancePadding: clearancePadding,
-                        prevWorldY: stepPrevY
+                        prevWorldY: stepPrevY,
+                        options: options
                     )
                     let startMinY = prevColAtStart.hitAtollUnderside ? prevColAtStart.y : stepPrevY
                     var lo = 0.0
@@ -1862,7 +2011,8 @@ public enum GameRules {
                             vy: curVy,
                             entityRadius: entityRadius,
                             clearancePadding: clearancePadding,
-                            prevWorldY: stepPrevY
+                            prevWorldY: stepPrevY,
+                            options: options
                         )
                         let candY = (candCol.hitAtollUnderside || candCol.hitSeabed) ? candCol.y : candRawY
                         let candDist = hypot(candX - stepPrevX, candY - stepPrevY)
@@ -1905,7 +2055,8 @@ public enum GameRules {
                     prevY: stepPrevY,
                     candX: finalStepX,
                     entityRadius: entityRadius,
-                    clearancePadding: clearancePadding
+                    clearancePadding: clearancePadding,
+                    options: options
                 ) {
                     finalStepX = targetX
                     hitWallHorizontally = true
@@ -1917,7 +2068,8 @@ public enum GameRules {
                     vy: curVy,
                     entityRadius: entityRadius,
                     clearancePadding: clearancePadding,
-                    prevWorldY: stepPrevY
+                    prevWorldY: stepPrevY,
+                    options: options
                 )
                 var finalStepY = secondCol.hitSeabed ? secondCol.y : min(targetY, col.y)
 
@@ -1929,7 +2081,8 @@ public enum GameRules {
                         vy: curVy,
                         entityRadius: entityRadius,
                         clearancePadding: clearancePadding,
-                        prevWorldY: stepPrevY
+                        prevWorldY: stepPrevY,
+                        options: options
                     )
                     let startMaxY = prevColAtStart.hitSeabed ? prevColAtStart.y : stepPrevY
                     var lo = 0.0
@@ -1947,7 +2100,8 @@ public enum GameRules {
                             vy: curVy,
                             entityRadius: entityRadius,
                             clearancePadding: clearancePadding,
-                            prevWorldY: stepPrevY
+                            prevWorldY: stepPrevY,
+                            options: options
                         )
                         let candY = (candCol.hitSeabed || candCol.hitAtollUnderside) ? candCol.y : candRawY
                         let candDist = hypot(candX - stepPrevX, candY - stepPrevY)
@@ -2046,7 +2200,8 @@ public enum GameRules {
         )
         let realBodyLengthM = form.realBodyLengthM * (1.0 + Double(inRunLevel - 1) * 0.025)
         let relativePreyScale = max(0.015, min(1.0, 0.8 / realBodyLengthM))
-        let cameraZoom = max(0.88, 1.0 / (1.0 + (scale - 1.0) * 0.42))
+        let cameraZoom = computeTrueCameraZoom(realBodyLengthM: realBodyLengthM)
+        let worldScale = ((scale / cameraZoom) * 1000.0).rounded() / 1000.0
 
         let hpDrainReduction = min(0.58, form.hpDrainReduction + upgradeDrainRed)
         let boostCostReduction = min(0.68, form.boostCostReduction + upgradeBoostRed)
@@ -2083,6 +2238,7 @@ public enum GameRules {
         return ComputedSharkStats(
             level: inRunLevel,
             scale: scale,
+            worldScale: worldScale,
             relativePreyScale: relativePreyScale,
             cameraZoom: cameraZoom,
             maxHp: maxHp,
@@ -2106,17 +2262,17 @@ public enum GameRules {
             boostSpeedMps: boostSpeedMps,
             viewportScale: viewportScale,
             minSpawnablePreyLengthM: minSpawnablePreyLengthM,
-            parallaxScales: getParallaxLayerGrowthScales(relativePreyScale: relativePreyScale)
+            parallaxScales: getParallaxLayerGrowthScalesFromZoom(cameraZoom: cameraZoom)
         )
     }
 
-    /// 100% 真实尺寸物理比例：严格按照真实体长比例 (preyLengthM / sharkLengthM) 进行显示
+    /// 100% 真实尺寸物理比例：在统一世界坐标系中以 `sharkStats.worldScale` 为基准严格保持 (preyLengthM / sharkLengthM) 线性比例
     public static func getPreyRelativeVisualScale(
         prey: PreyTierConfig,
         sharkStats: ComputedSharkStats,
         mutationVariant: PreyMutationVariant = .NONE
     ) -> Double {
-        let sharkParityScale = (sharkEquivalentRadius * sharkStats.scale) / max(1.0, prey.radius)
+        let sharkParityScale = (sharkEquivalentRadius * sharkStats.worldScale) / max(1.0, prey.radius)
         let sharkLengthM = max(0.6, sharkStats.realBodyLengthM)
         let preyLengthM = max(0.05, (prey.bodyLengthCm > 0 ? prey.bodyLengthCm : prey.radius * 2.5) / 100.0)
         let realRatio = preyLengthM / sharkLengthM
@@ -2126,6 +2282,38 @@ public enum GameRules {
         let targetRatio = realRatio * behemothMult * bossMult
 
         return sharkParityScale * targetRatio * defaultPreySizeMultiplier
+    }
+
+    /// Checks whether any non-hazard prey species meeting `minPreyLengthCm` inhabits `worldY` (for P1-2 shallow-depletion guidance)
+    public static func hasViablePreyAtDepth(worldY: Double, minPreyLengthCm: Double) -> Bool {
+        let isShallow = worldY <= 520.0
+        for p in GameConfigGenerated.preyTiers {
+            if p.isHazard { continue }
+            if isShallow && (p.isBoss || p.behavior == .EEL_CHARGER || p.behavior == .SUB_PATROL) { continue }
+            guard worldY >= p.minDepth && worldY <= p.maxDepth else { continue }
+            let lenCm = p.bodyLengthCm > 0 ? p.bodyLengthCm : p.radius * 2.5
+            if lenCm >= minPreyLengthCm {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Returns the shallowest worldY depth where prey >= `minPreyLengthCm` inhabit (nil if no species qualifies)
+    public static func getMinViableWorldYForShark(minPreyLengthCm: Double) -> Double? {
+        var best: Double? = nil
+        for p in GameConfigGenerated.preyTiers {
+            if p.isHazard { continue }
+            let lenCm = p.bodyLengthCm > 0 ? p.bodyLengthCm : p.radius * 2.5
+            if lenCm >= minPreyLengthCm {
+                if let cur = best {
+                    best = min(cur, p.minDepth)
+                } else {
+                    best = p.minDepth
+                }
+            }
+        }
+        return best
     }
 
     /// Collision encounter resolution (DEVOUR vs ARMOR_CRUSH vs NEED_BOOST vs DAMAGE)

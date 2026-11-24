@@ -1005,6 +1005,8 @@ export interface SeabedTerraceTierSpec {
   graftFuseMainY: number;
   /** 确定性噪声盐值 */
   seedSalt: number;
+  /** 巨鲨可撞碎并穿透该层阶梯海床的最小生物体长门槛 (m)；Infinity 表示永久不可破坏的深渊底岩 */
+  shatterLengthM: number;
 }
 
 /**
@@ -1036,6 +1038,7 @@ export const SEABED_TERRACE_TIERS: ReadonlyArray<SeabedTerraceTierSpec> = [
     graftEndMainY: 880,
     graftFuseMainY: 760,
     seedSalt: 613,
+    shatterLengthM: 8.0,
   },
   {
     tierIndex: 1,
@@ -1058,6 +1061,7 @@ export const SEABED_TERRACE_TIERS: ReadonlyArray<SeabedTerraceTierSpec> = [
     graftEndMainY: 1710,
     graftFuseMainY: 1575,
     seedSalt: 1619,
+    shatterLengthM: 12.0,
   },
   {
     tierIndex: 2,
@@ -1080,6 +1084,7 @@ export const SEABED_TERRACE_TIERS: ReadonlyArray<SeabedTerraceTierSpec> = [
     graftEndMainY: 2750,
     graftFuseMainY: 2600,
     seedSalt: 2633,
+    shatterLengthM: 18.0,
   },
   {
     tierIndex: 3,
@@ -1102,6 +1107,7 @@ export const SEABED_TERRACE_TIERS: ReadonlyArray<SeabedTerraceTierSpec> = [
     graftEndMainY: 4030,
     graftFuseMainY: 3865,
     seedSalt: 3671,
+    shatterLengthM: 26.0,
   },
   {
     tierIndex: 4,
@@ -1124,6 +1130,7 @@ export const SEABED_TERRACE_TIERS: ReadonlyArray<SeabedTerraceTierSpec> = [
     graftEndMainY: 5660,
     graftFuseMainY: 5480,
     seedSalt: 4723,
+    shatterLengthM: 36.0,
   },
   {
     tierIndex: 5,
@@ -1146,6 +1153,7 @@ export const SEABED_TERRACE_TIERS: ReadonlyArray<SeabedTerraceTierSpec> = [
     graftEndMainY: 7740,
     graftFuseMainY: 7545,
     seedSalt: 5801,
+    shatterLengthM: Infinity,
   },
   {
     tierIndex: 6,
@@ -1168,6 +1176,7 @@ export const SEABED_TERRACE_TIERS: ReadonlyArray<SeabedTerraceTierSpec> = [
     graftEndMainY: 10380,
     graftFuseMainY: 10165,
     seedSalt: 6883,
+    shatterLengthM: Infinity,
   },
   {
     tierIndex: 7,
@@ -1190,6 +1199,7 @@ export const SEABED_TERRACE_TIERS: ReadonlyArray<SeabedTerraceTierSpec> = [
     graftEndMainY: 13700,
     graftFuseMainY: 13470,
     seedSalt: 7949,
+    shatterLengthM: Infinity,
   },
   {
     tierIndex: 8,
@@ -1212,8 +1222,109 @@ export const SEABED_TERRACE_TIERS: ReadonlyArray<SeabedTerraceTierSpec> = [
     graftEndMainY: 17760,
     graftFuseMainY: 17515,
     seedSalt: 9013,
+    shatterLengthM: Infinity,
   },
 ];
+
+/** 巨鲨撞碎上层阶梯海床时的局部破损单元水平宽度 (world units) */
+export const TERRACE_BREACH_CELL_WIDTH = 120;
+
+export function getTerraceBreachCellIndex(worldX: number): number {
+  const idx = Math.floor(worldX / TERRACE_BREACH_CELL_WIDTH);
+  return idx === 0 ? 0 : idx;
+}
+
+export function formatTerraceBreachKey(tierIndex: number, cellIndex: number): string {
+  return `${tierIndex}:${cellIndex === 0 ? 0 : cellIndex}`;
+}
+
+export function isTerraceCellBreached(
+  tierIndex: number,
+  worldX: number,
+  breachedCells?: ReadonlySet<string>
+): boolean {
+  if (!breachedCells || breachedCells.size === 0) return false;
+  return breachedCells.has(
+    formatTerraceBreachKey(tierIndex, getTerraceBreachCellIndex(worldX))
+  );
+}
+
+export function canSharkShatterTerrace(
+  tierIndex: number,
+  sharkLengthM?: number
+): boolean {
+  if (sharkLengthM === undefined || !Number.isFinite(sharkLengthM)) return false;
+  const tier = SEABED_TERRACE_TIERS[tierIndex];
+  if (!tier) return false;
+  return sharkLengthM >= tier.shatterLengthM;
+}
+
+export interface SeabedCollisionOptions {
+  /** 当前实体的真实生物体长 (m)；仅玩家鲨鱼传入，达到上层阶梯破壁门槛时可穿透撞碎 */
+  sharkLengthM?: number;
+  /** 本局已被巨鲨撞碎的局部阶梯格集合（键格式 `${tierIndex}:${cellIndex}`） */
+  breachedCells?: ReadonlySet<string>;
+}
+
+export interface TerraceShatterHit {
+  tierIndex: number;
+  biomeId: BiomeId;
+  worldX: number;
+  worldY: number;
+  cellIndex: number;
+  isNewlyBreached: boolean;
+}
+
+/**
+ * 检测巨鲨在单帧位移区间内是否穿过了任意可撞碎的上层阶梯海床实心岩段。
+ */
+export function detectShatterableTerraceHit(
+  prevEngineX: number,
+  prevEngineY: number,
+  nextEngineX: number,
+  nextEngineY: number,
+  entityRadiusMeters: number,
+  sharkLengthM: number,
+  breachedCells?: ReadonlySet<string>,
+  config: WorldConfigType = WorldConfig
+): TerraceShatterHit | null {
+  if (!Number.isFinite(sharkLengthM) || sharkLengthM < SEABED_TERRACE_TIERS[0].shatterLengthM) {
+    return null;
+  }
+  const safeRadius = Math.max(0, entityRadiusMeters);
+  const minY = Math.min(prevEngineY, nextEngineY) - safeRadius * 0.72;
+  const maxY = Math.max(prevEngineY, nextEngineY) + safeRadius * 0.72;
+  const midX = (prevEngineX + nextEngineX) * 0.5;
+  const worldX = nextEngineX * WORLD_UNITS_PER_METER;
+  const midWorldX = midX * WORLD_UNITS_PER_METER;
+
+  for (let tIdx = 0; tIdx < SEABED_TERRACE_TIERS.length; tIdx++) {
+    const tierSpec = SEABED_TERRACE_TIERS[tIdx];
+    if (!canSharkShatterTerrace(tIdx, sharkLengthM)) continue;
+    if (maxY < tierSpec.minRidgeY - 40 || minY > tierSpec.archMaxDepthY + 40) continue;
+
+    const terrace = getSeabedTerraceAt(worldX, tIdx, config);
+    const activeSample = terrace.active
+      ? terrace
+      : getSeabedTerraceAt(midWorldX, tIdx, config);
+    if (!activeSample.active) continue;
+
+    const hitWorldX = terrace.active ? worldX : midWorldX;
+    if (maxY >= activeSample.topFloorY && minY <= activeSample.bottomArchY) {
+      const cellIndex = getTerraceBreachCellIndex(hitWorldX);
+      const isNewlyBreached = !isTerraceCellBreached(tIdx, hitWorldX, breachedCells);
+      return {
+        tierIndex: tIdx,
+        biomeId: tierSpec.biomeId,
+        worldX: hitWorldX,
+        worldY: (activeSample.topFloorY + activeSample.bottomArchY) * 0.5,
+        cellIndex,
+        isNewlyBreached,
+      };
+    }
+  }
+  return null;
+}
 
 export interface ShallowCoralAtollSample {
   /** 当前横坐标是否处于前景实心海床碰撞段内（弧形下潜洞口处为 false，允许自由向下/向上进出洞口） */
@@ -1689,7 +1800,8 @@ export function resolveSeabedCollision(
   entityRadiusMeters: number,
   vy: number,
   config: WorldConfigType = WorldConfig,
-  prevEngineY?: number
+  prevEngineY?: number,
+  options?: SeabedCollisionOptions
 ): SeabedCollisionResult {
   const worldX = engineX * WORLD_UNITS_PER_METER;
   const safeRadius = Math.max(0, entityRadiusMeters);
@@ -1703,8 +1815,11 @@ export function resolveSeabedCollision(
   const refY =
     prevEngineY !== undefined && Number.isFinite(prevEngineY) ? prevEngineY : engineY;
 
-  // 依次检查浅海及中层 5 级连续阶梯海床实心段（洞口区间 terrace.active === false，允许自由下潜与上浮）
+  // 依次检查浅海及中深层 9 级连续阶梯海床实心段（洞口、已撞碎破洞或巨鲨可撞碎层级自动放行）
   for (let tIdx = 0; tIdx < SEABED_TERRACE_TIERS.length; tIdx++) {
+    if (canSharkShatterTerrace(tIdx, options?.sharkLengthM)) continue;
+    if (isTerraceCellBreached(tIdx, worldX, options?.breachedCells)) continue;
+
     const tierSpec = SEABED_TERRACE_TIERS[tIdx];
     // 快速高度粗筛：若当前实体与参考点均远离该层海床高度带，则直接跳过
     const bandMinY = tierSpec.minRidgeY - safeRadius - 120;
@@ -1846,7 +1961,8 @@ function hitsTerraceVerticalWallHorizontally(
   prevEngineY: number,
   candEngineX: number,
   entityRadiusMeters: number,
-  config: WorldConfigType
+  config: WorldConfigType,
+  options?: SeabedCollisionOptions
 ): boolean {
   if (Math.abs(candEngineX - prevEngineX) < 1e-6) return false;
   const safeRadius = Math.max(0, entityRadiusMeters);
@@ -1855,6 +1971,9 @@ function hitsTerraceVerticalWallHorizontally(
   const candMainY = getEngineFloorDepthAt(candEngineX, config);
 
   for (let tIdx = 0; tIdx < SEABED_TERRACE_TIERS.length; tIdx++) {
+    if (canSharkShatterTerrace(tIdx, options?.sharkLengthM)) continue;
+    if (isTerraceCellBreached(tIdx, candWorldX, options?.breachedCells)) continue;
+
     const tierSpec = SEABED_TERRACE_TIERS[tIdx];
     const bandMinY = tierSpec.minRidgeY - safeRadius - 120;
     const bandMaxY = tierSpec.archMaxDepthY + safeRadius + 120;
@@ -1866,11 +1985,13 @@ function hitsTerraceVerticalWallHorizontally(
     if (!nextT.active) continue;
 
     const prevT = getSeabedTerraceAt(prevWorldX, tIdx, config);
+    const prevSolid =
+      prevT.active && !isTerraceCellBreached(tIdx, prevWorldX, options?.breachedCells);
     const candHasUnderCorridor = candMainY - nextT.bottomArchY > safeRadius * 1.25;
 
-    // Case A: 实体在洞口开阔水域水平越过洞唇壁面 (!prevT.active -> nextT.active)，
+    // Case A: 实体在洞口或破洞开阔水域水平越过洞唇壁面 (!prevSolid -> nextT.active)，
     // 且垂直位置正对着实心悬崖断面（或该处已嫁接为无洞下通道的实心山根）
-    if (!prevT.active) {
+    if (!prevSolid) {
       const insideVerticalCliff =
         prevEngineY > nextT.topFloorY - safeRadius * 0.15 &&
         (!candHasUnderCorridor || prevEngineY < nextT.bottomArchY + safeRadius * 0.35);
@@ -1898,7 +2019,8 @@ export function resolveSeabedKineticStep(
   vy: number,
   simDt: number,
   entityRadiusMeters: number,
-  config: WorldConfigType = WorldConfig
+  config: WorldConfigType = WorldConfig,
+  options?: SeabedCollisionOptions
 ): SeabedKineticStepResult {
   const dt = Math.max(1e-6, simDt);
   const intendedSpeed = Math.hypot(vx, vy);
@@ -1915,7 +2037,8 @@ export function resolveSeabedKineticStep(
       prevEngineY,
       rawNextX,
       entityRadiusMeters,
-      config
+      config,
+      options
     )
   ) {
     hitWallHorizontally = true;
@@ -1931,7 +2054,8 @@ export function resolveSeabedKineticStep(
           prevEngineY,
           candX,
           entityRadiusMeters,
-          config
+          config,
+          options
         )
       ) {
         hi = mid;
@@ -1949,7 +2073,8 @@ export function resolveSeabedKineticStep(
     entityRadiusMeters,
     vy,
     config,
-    prevEngineY
+    prevEngineY,
+    options
   );
 
   if (!initialCol.collided) {
@@ -1993,15 +2118,20 @@ export function resolveSeabedKineticStep(
       config
     );
     const nextMainFloorY = getEngineFloorDepthAt(finalX, config);
+    const nextTerraceSolid =
+      nextTerrace.active &&
+      !canSharkShatterTerrace(hitTierIdx, options?.sharkLengthM) &&
+      !isTerraceCellBreached(hitTierIdx, finalX * WORLD_UNITS_PER_METER, options?.breachedCells);
     if (
       hitsTerraceVerticalWallHorizontally(
         prevEngineX,
         prevEngineY,
         finalX,
         entityRadiusMeters,
-        config
+        config,
+        options
       ) ||
-      (nextTerrace.active &&
+      (nextTerraceSolid &&
         nextMainFloorY - nextTerrace.bottomArchY < entityRadiusMeters * 2 + 4)
     ) {
       finalX = stepTargetX;
@@ -2015,7 +2145,8 @@ export function resolveSeabedKineticStep(
       entityRadiusMeters,
       vy,
       config,
-      prevEngineY
+      prevEngineY,
+      options
     );
     let finalY = secondCol.collided
       ? secondCol.engineY
@@ -2042,7 +2173,8 @@ export function resolveSeabedKineticStep(
         entityRadiusMeters,
         vy,
         config,
-        prevEngineY
+        prevEngineY,
+        options
       );
       const startMinY = prevColAtStart.collided ? prevColAtStart.engineY : prevEngineY;
 
@@ -2065,7 +2197,8 @@ export function resolveSeabedKineticStep(
           entityRadiusMeters,
           vy,
           config,
-          prevEngineY
+          prevEngineY,
+          options
         );
         const candY = candCol.collided ? candCol.engineY : candRawY;
         const candDist = Math.hypot(candX - prevEngineX, candY - prevEngineY);
@@ -2157,7 +2290,8 @@ export function resolveSeabedKineticStep(
       prevEngineY,
       finalX,
       entityRadiusMeters,
-      config
+      config,
+      options
     )
   ) {
     finalX = stepTargetX;
@@ -2171,7 +2305,8 @@ export function resolveSeabedKineticStep(
     entityRadiusMeters,
     vy,
     config,
-    prevEngineY
+    prevEngineY,
+    options
   );
   let finalY = secondCol.collided ? secondCol.engineY : rawNextY;
 
@@ -2186,7 +2321,8 @@ export function resolveSeabedKineticStep(
       entityRadiusMeters,
       vy,
       config,
-      prevEngineY
+      prevEngineY,
+      options
     );
     const startMaxY = prevColAtStart.collided ? prevColAtStart.engineY : prevEngineY;
 
@@ -2206,7 +2342,8 @@ export function resolveSeabedKineticStep(
         entityRadiusMeters,
         vy,
         config,
-        prevEngineY
+        prevEngineY,
+        options
       );
       const candY = candCol.collided ? candCol.engineY : candRawY;
       const candDist = Math.hypot(candX - prevEngineX, candY - prevEngineY);

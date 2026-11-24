@@ -23,7 +23,7 @@ export const WorldConfig = {
   worldSeed: 123456789,
   generatorVersion: 1,
   bounds: { minDepth: 0, maxDepth: 20000, infiniteHorizontal: true },
-  chunk: { width: 3000, height: 1500, preloadAhead: 4, retainBehind: 2, maxActiveChunks: 10 },
+  chunk: { width: 3000, height: 1500, preloadAhead: 4, retainBehind: 2, maxActiveChunks: 20 },
   biome: { macroWidth: 30000, transitionWidth: 6000 },
   terrain: {
     sampleStepX: 100,
@@ -40,7 +40,7 @@ export const WorldConfig = {
     generationBudgetMsPerFrame: 2,
     maxCachedChunkRecords: 64,
     maxPooledObjectsPerType: 300,
-    maxQueueSize: 32,
+    maxQueueSize: 48,
   },
 } as const;
 

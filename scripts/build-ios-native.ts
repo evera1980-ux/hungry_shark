@@ -116,6 +116,7 @@ targets:
         excludes:
           - "Resources/Assets/*.png"
           - "Resources/Assets/*.jpg"
+          - "Resources/Assets/*.webp"
           - "Resources/Assets/*.json"
       - path: HungrySharkEvolution/Resources/Assets
         type: folder
@@ -139,7 +140,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         COMPRESS_PNG_FILES: NO
         STRIP_PNG_TEXT: NO
-        INFOPLIST_KEY_CFBundleDisplayName: "deepsea:evolution"
+        INFOPLIST_KEY_CFBundleDisplayName: "DeepSea Evolution"
         INFOPLIST_KEY_GADApplicationIdentifier: "${GOOGLE_ADS_CONFIG.admobAppId}"
         INFOPLIST_KEY_GADIsAdManagerApp: YES
         INFOPLIST_KEY_NSUserTrackingUsageDescription: "允许追踪以提供个性化深海狩猎激励视频广告体验"
@@ -184,7 +185,8 @@ let package = Package(
 
 function getResourceFileType(fileName: string): string {
   if (fileName.endsWith('.json')) return 'text.json';
-  if (fileName.endsWith('.jpg')) return 'image.jpeg';
+  if (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg')) return 'image.jpeg';
+  if (fileName.endsWith('.webp')) return 'file';
   return 'image.png';
 }
 
@@ -226,7 +228,11 @@ function generatePbxproj(swiftFiles: string[], assetFiles: string[]): string {
 
   const sortedAssets = [...assetFiles]
     .map((f) => f.trim())
-    .filter((f) => f.length > 0 && (f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.json')))
+    .filter(
+      (f) =>
+        f.length > 0 &&
+        (f.endsWith('.webp') || f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.json'))
+    )
     .sort();
 
   const assetBuildFiles = sortedAssets
@@ -465,7 +471,7 @@ ${swiftSourcePhaseEntries}
 				DEVELOPMENT_TEAM = 3N2FUK7M23;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "HungrySharkEvolution/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
+				INFOPLIST_KEY_CFBundleDisplayName = "DeepSea Evolution";
 				INFOPLIST_KEY_GADApplicationIdentifier = "${GOOGLE_ADS_CONFIG.admobAppId}";
 				INFOPLIST_KEY_GADIsAdManagerApp = YES;
 				INFOPLIST_KEY_NSUserTrackingUsageDescription = "Allow tracking to deliver personalized rewarded video ads.";
@@ -495,7 +501,7 @@ ${swiftSourcePhaseEntries}
 				DEVELOPMENT_TEAM = 3N2FUK7M23;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "HungrySharkEvolution/Info.plist";
-				INFOPLIST_KEY_CFBundleDisplayName = "deepsea:evolution";
+				INFOPLIST_KEY_CFBundleDisplayName = "DeepSea Evolution";
 				INFOPLIST_KEY_GADApplicationIdentifier = "${GOOGLE_ADS_CONFIG.admobAppId}";
 				INFOPLIST_KEY_GADIsAdManagerApp = YES;
 				INFOPLIST_KEY_NSUserTrackingUsageDescription = "Allow tracking to deliver personalized rewarded video ads.";
@@ -752,35 +758,53 @@ function main(): void {
   writeFileIfChanged(SHARED_JSON_PATH, jsonContent);
   copyIfChanged(SHARED_JSON_PATH, path.join(assetsDst, 'game_data.json'));
 
-  // 2. Sync art assets (aistudio PNG/JPG, 48 @3x sharks, 135 @3x prey + cyber_mine) & Launch Assets.xcassets
+  // 2. Sync compact WebP/PNG/JPG art assets (aistudio, 48 @3x sharks, 135 @3x prey + cyber_mine) & Launch Assets.xcassets
+  // iOS 16+ ImageIO natively decodes WebP, shrinking Resources/Assets from ~61MB legacy PNGs to ~6MB.
   const srcAssetsDir = path.join(ROOT_DIR, 'public', 'assets', 'aistudio');
   generateLaunchAssetsCatalog(APP_DIR, srcAssetsDir);
 
+  const expectedAssetFiles = new Set<string>([
+    'game_data.json',
+    // iOS-native hot-replaceable startup loading screen assets (preserved if present)
+    'loading_background.png',
+    'loading_logo.png',
+    'loading_mascot.png',
+  ]);
+
   let syncedImageCount = 0;
-  if (fs.existsSync(srcAssetsDir)) {
-    for (const file of fs.readdirSync(srcAssetsDir)) {
-      if (file.endsWith('.png') || file.endsWith('.jpg')) {
-        copyIfChanged(path.join(srcAssetsDir, file), path.join(assetsDst, file));
-        syncedImageCount++;
-      }
+  const syncAssetDir = (
+    dirPath: string,
+    predicate: (fileName: string) => boolean
+  ): void => {
+    if (!fs.existsSync(dirPath)) return;
+    for (const file of fs.readdirSync(dirPath)) {
+      if (!predicate(file)) continue;
+      copyIfChanged(path.join(dirPath, file), path.join(assetsDst, file));
+      expectedAssetFiles.add(file);
+      syncedImageCount++;
     }
-  }
-  const srcSharks3xDir = path.join(ROOT_DIR, 'public', 'assets', 'sharks_3x');
-  if (fs.existsSync(srcSharks3xDir)) {
-    for (const file of fs.readdirSync(srcSharks3xDir)) {
-      if (file.endsWith('.png')) {
-        copyIfChanged(path.join(srcSharks3xDir, file), path.join(assetsDst, file));
-        syncedImageCount++;
-      }
-    }
-  }
-  const srcPrey140Dir = path.join(ROOT_DIR, 'public', 'assets', 'prey_140');
-  if (fs.existsSync(srcPrey140Dir)) {
-    for (const file of fs.readdirSync(srcPrey140Dir)) {
-      if (file.endsWith('@3x.png')) {
-        copyIfChanged(path.join(srcPrey140Dir, file), path.join(assetsDst, file));
-        syncedImageCount++;
-      }
+  };
+
+  syncAssetDir(
+    srcAssetsDir,
+    (f) => f.endsWith('.webp') || f.endsWith('.png') || f.endsWith('.jpg')
+  );
+  syncAssetDir(
+    path.join(ROOT_DIR, 'public', 'assets', 'sharks_3x'),
+    (f) => f.endsWith('.webp') || f.endsWith('.png')
+  );
+  syncAssetDir(
+    path.join(ROOT_DIR, 'public', 'assets', 'prey_140'),
+    (f) => f.endsWith('@3x.webp') || f.endsWith('@3x.png')
+  );
+
+  // Prune obsolete legacy sprite sheets (sharks_ec921c3b, fish_24bdaa5a, fish2_fc857cfa),
+  // retired non-fish prey, unused parallax PNGs, and stale PNG duplicates replaced by WebP.
+  let prunedCount = 0;
+  for (const existing of fs.readdirSync(assetsDst)) {
+    if (!expectedAssetFiles.has(existing)) {
+      fs.rmSync(path.join(assetsDst, existing), { force: true });
+      prunedCount++;
     }
   }
 
@@ -790,7 +814,9 @@ function main(): void {
 
   const allBundledAssetFiles = fs
     .readdirSync(assetsDst)
-    .filter((f) => f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.json'));
+    .filter(
+      (f) => f.endsWith('.webp') || f.endsWith('.png') || f.endsWith('.jpg') || f.endsWith('.json')
+    );
   const pbxprojContent = generatePbxproj(swiftFiles, allBundledAssetFiles);
   validateOpenStepPbxproj(pbxprojContent);
   writeFileIfChanged(path.join(xcodeprojDir, 'project.pbxproj'), pbxprojContent);
@@ -806,7 +832,7 @@ function main(): void {
     `[sync:ios] ✅ Exported shared/game_data.json (schema v${payload.schemaVersion}: ${payload.sharkForms.length} sharks, ${payload.preyTiers.length} prey, ${Object.keys(payload.i18n.zh).length} i18n keys)`
   );
   console.log(
-    `[sync:ios] ✅ Synced ${syncedImageCount} PNG/JPG assets + game_data.json into ios-native/HungrySharkEvolution/Resources/Assets/`
+    `[sync:ios] ✅ Synced ${syncedImageCount} WebP/PNG/JPG assets + game_data.json into ios-native/HungrySharkEvolution/Resources/Assets/ (pruned ${prunedCount} obsolete legacy files)`
   );
   console.log(
     `[sync:ios] ✅ Updated project.pbxproj (${swiftFiles.length} native Swift sources preserved untouched, ${allBundledAssetFiles.length} bundled resources)`

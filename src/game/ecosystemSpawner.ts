@@ -16,6 +16,8 @@ export interface ViewportSpawnBounds {
   cameraX: number;
   cameraY: number;
   sharkVx?: number;
+  /** 当前真相机综合变焦倍率 (camera.zoom * aspectZoomFactor)，用于缩放视口外刷怪边距与集群间距 */
+  renderZoom?: number;
 }
 
 export class EcosystemSpawner {
@@ -204,8 +206,14 @@ export class EcosystemSpawner {
   ): void {
     this.gameTime += Math.max(0, deltaTime);
 
-    // 1. 清理距离玩家过远（超出视野 spawnRadius * 1.5）的鱼并回收重置
-    const cullThreshold = this.spawnRadius * 1.5;
+    // 1. 清理距离玩家过远的鱼并回收重置：
+    // 在真相机变焦（如 45m 巨鲨 zoom = 0.22，视口半宽 ~2900px）下，回收半径必须同步大于真实视口对角线半长，杜绝刚在屏幕外刷出就被立即误杀！
+    const cullThreshold = viewportBounds
+      ? Math.max(
+          this.spawnRadius * 1.5,
+          Math.hypot(viewportBounds.halfW, viewportBounds.halfH) * 1.55
+        )
+      : this.spawnRadius * 1.5;
     for (let i = activePreys.length - 1; i >= 0; i--) {
       const prey = activePreys[i];
       const dx = infiniteWorldManager.getShortestDeltaX(sharkX, prey.x);
@@ -335,6 +343,7 @@ export class EcosystemSpawner {
       const camX = viewportBounds?.cameraX ?? sharkX;
       const camY = viewportBounds?.cameraY ?? sharkY;
       const sVx = viewportBounds?.sharkVx ?? 0;
+      const effZoom = Math.max(0.14, viewportBounds?.renderZoom ?? 1.0);
 
       let spawnOnLeft: boolean;
       if (sVx > 45) {
@@ -347,7 +356,8 @@ export class EcosystemSpawner {
         spawnOnLeft = rng() < 0.5;
       }
 
-      const spawnMarginX = 75 + rng() * 115;
+      // 将屏幕外侧刷怪边距换算为真世界距离，确保无论 zoom=1.0 还是 zoom=0.22 均恒定落在屏外 80~220 屏幕像素处
+      const spawnMarginX = (80 + rng() * 140) / effZoom;
       const rawX = spawnOnLeft ? camX - halfW - spawnMarginX : camX + halfW + spawnMarginX;
       spawnX = infiniteWorldManager.wrapEntityX(rawX);
 
@@ -412,19 +422,23 @@ export class EcosystemSpawner {
       !chosenTier.isHazard &&
       rng() < clusterTriggerProb
     ) {
+      const clusterSpacingScale = Math.max(
+        1,
+        1 / Math.sqrt(Math.max(0.14, viewportBounds?.renderZoom ?? 1.0))
+      );
       const poissonSamples =
         proceduralOceanWorld.ecologyGenerator.samplePoissonDiskInCluster(
           {
             id: `prey_cluster_${this.nextUid}`,
             center: { x: spawnX, y: spawnY },
-            radius: 92,
+            radius: 92 * clusterSpacingScale,
             type: 'coral_reef',
             density: 0.75,
             seed: Math.floor(rng() * 0x7fffffff) + this.nextUid,
             biome: macroEval.primaryBiome,
             preferredPreyArchetype: 'REEF_SWARM',
           },
-          56,
+          56 * clusterSpacingScale,
           2
         );
       this.schoolClusterAnchor = {
@@ -437,9 +451,14 @@ export class EcosystemSpawner {
         remainingMates: 2,
         poissonPoints: poissonSamples.map((pt, idx) => ({
           x: infiniteWorldManager.wrapEntityX(
-            moveDir > 0 ? spawnX - (50 + idx * 45 + (rng() - 0.5) * 30) : spawnX + (50 + idx * 45 + (rng() - 0.5) * 30)
+            moveDir > 0
+              ? spawnX - (50 + idx * 45 + (rng() - 0.5) * 30) * clusterSpacingScale
+              : spawnX + (50 + idx * 45 + (rng() - 0.5) * 30) * clusterSpacingScale
           ),
-          y: Math.max(chosenTier.minDepth, Math.min(chosenTier.maxDepth, spawnY + (rng() - 0.5) * 44)),
+          y: Math.max(
+            chosenTier.minDepth,
+            Math.min(chosenTier.maxDepth, spawnY + (rng() - 0.5) * 44 * clusterSpacingScale)
+          ),
         })),
       };
     }
@@ -476,6 +495,80 @@ export class EcosystemSpawner {
    * 首局新手引导保护开关（开启时浅海前 3 条引导鱼仅刷 T1~T2 温顺小鱼）
    */
   public tutorialProtectionActive: boolean = false;
+
+  /**
+   * 查询指定世界水深 `depthY` 是否存在满足当前鲨鱼体长感知门槛 (`bodyLengthCm >= sharkLengthM * 13.3`) 的适口物种。
+   * 供浅海空海深潜引导与悬赏切换复用，与 `pickPreyConfigForDepth` 保持 100% 同源判定。
+   */
+  public hasViablePreyAtDepth(
+    depthY: number,
+    currentSharkLengthM?: number
+  ): boolean {
+    const allPreys = GAME_CONFIG.preyTiers.filter(
+      (p) => !p.isHazard && Boolean(p.externalPngUrl)
+    );
+    if (allPreys.length === 0) return false;
+
+    const depth = Math.max(25, depthY);
+    const isShallowZone = depth <= 520;
+    const habitatPool = allPreys.filter(
+      (p) => depth >= p.minDepth && depth <= p.maxDepth
+    );
+    const rawActivePool =
+      habitatPool.length > 0
+        ? habitatPool
+        : isShallowZone
+        ? allPreys.filter((p) => p.minDepth <= 520)
+        : depth > 1150
+        ? allPreys.filter((p) => p.maxDepth >= 1150)
+        : allPreys.filter((p) => p.minDepth >= 500 || p.maxDepth >= 800);
+
+    const sanctuaryFilteredPool = isShallowZone
+      ? rawActivePool.filter(
+          (p) =>
+            !p.isHazard &&
+            p.behavior !== 'EEL_CHARGER' &&
+            p.behavior !== 'SUB_PATROL' &&
+            p.behavior !== 'MINE_HAZARD' &&
+            p.behavior !== 'HEAVY_CRUISER' &&
+            p.behavior !== 'KRAKEN_BOSS'
+        )
+      : rawActivePool;
+    const baseActivePool =
+      sanctuaryFilteredPool.length > 0 ? sanctuaryFilteredPool : rawActivePool;
+
+    const minPreyLengthCm =
+      typeof currentSharkLengthM === 'number' && currentSharkLengthM > 0
+        ? currentSharkLengthM * 13.3
+        : 0;
+    if (minPreyLengthCm <= 0) {
+      return baseActivePool.length > 0;
+    }
+    return baseActivePool.some(
+      (p) => (p.bodyLengthCm ?? p.radius * 2.5) >= minPreyLengthCm
+    );
+  }
+
+  /**
+   * 返回当前体长鲨鱼最早能遇到适口猎物的最小世界水深 `worldY`（若全库无匹配则返回 null）。
+   */
+  public getMinViableWorldYForShark(
+    currentSharkLengthM?: number
+  ): number | null {
+    const minPreyLengthCm =
+      typeof currentSharkLengthM === 'number' && currentSharkLengthM > 0
+        ? currentSharkLengthM * 13.3
+        : 0;
+    let minWorldY = Infinity;
+    for (const p of GAME_CONFIG.preyTiers) {
+      if (p.isHazard || !p.externalPngUrl) continue;
+      if ((p.bodyLengthCm ?? p.radius * 2.5) < minPreyLengthCm) continue;
+      if (p.minDepth < minWorldY) {
+        minWorldY = p.minDepth;
+      }
+    }
+    return Number.isFinite(minWorldY) ? minWorldY : null;
+  }
 
   private pickPreyConfigForDepth(
     targetDepthY: number,

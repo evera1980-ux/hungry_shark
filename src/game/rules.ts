@@ -10,6 +10,8 @@ import { getSharkFormById } from './sharkEvolutionConfig';
 export interface ComputedSharkStats {
   level: number;
   scale: number;
+  /** True world-space body scale (scale / cameraZoom): 1.00x at 0.8m -> 5.82x at 45m */
+  worldScale?: number;
   relativePreyScale: number;
   cameraZoom: number;
   maxHp: number;
@@ -90,6 +92,30 @@ export const PREY_RADIUS_TO_DRAW_SIZE = 2.25;
 export const SHARK_EQUIVALENT_RADIUS =
   SHARK_BASE_DRAW_SIZE / PREY_RADIUS_TO_DRAW_SIZE; // 42.6667
 
+/** Lower bound for native 2D camera zoom at maximum leviathan body length (45m+) */
+export const CAMERA_ZOOM_MIN = 0.22;
+/** Render zoom safety floor accommodating portrait aspect scaling (0.22 * 0.74 = 0.163) */
+export const MIN_RENDER_ZOOM_FLOOR = 0.14;
+
+/**
+ * Computes the true native 2D camera zoom for a shark of biological length `realBodyLengthM` (0.8m -> 45.0m+).
+ * Smooth monotonic logarithmic curve: 1.000 at 0.8m starter fry -> 0.220 floor at 45.0m+ cosmic leviathan.
+ */
+export function computeTrueCameraZoom(realBodyLengthM: number): number {
+  const safeLen = Number.isFinite(realBodyLengthM)
+    ? Math.max(0.8, realBodyLengthM)
+    : 0.8;
+  const t = Math.max(
+    0,
+    Math.min(1, Math.log(safeLen / 0.8) / Math.log(45.0 / 0.8))
+  );
+  return Number(
+    (CAMERA_ZOOM_MIN + (1.0 - CAMERA_ZOOM_MIN) * Math.pow(1 - t, 1.35)).toFixed(
+      3
+    )
+  );
+}
+
 export function getEffectivePreyTier(
   prey: PreyTierConfig,
   mutationVariant: PreyMutationVariant = 'NONE'
@@ -125,16 +151,17 @@ export function getPreyRelativeVisualScale(
     Partial<
       Pick<
         ComputedSharkStats,
-        'scale' | 'canEatMines' | 'normalBiteTier' | 'realBodyLengthM'
+        'scale' | 'worldScale' | 'canEatMines' | 'normalBiteTier' | 'realBodyLengthM'
       >
     >,
   mutationVariant: PreyMutationVariant = 'NONE',
   _frenzyActive: boolean = false
 ): number {
-  const sharkScale = sharkStats.scale ?? 1.0;
-  // Scale factor at which `prey.radius * visualScale * 2.25 === 96 * sharkScale` (exact 1:1 visual parity with player shark)
+  // Single-scale world space: anchor prey directly to shark's worldScale (falling back to scale for legacy partial inputs)
+  const sharkWorldScale = sharkStats.worldScale ?? sharkStats.scale ?? 1.0;
+  // Scale factor at which `prey.radius * visualScale * 2.25 === 96 * sharkWorldScale` (exact 1:1 world & screen parity)
   const sharkParityScale =
-    (SHARK_EQUIVALENT_RADIUS * sharkScale) / Math.max(1, prey.radius);
+    (SHARK_EQUIVALENT_RADIUS * sharkWorldScale) / Math.max(1, prey.radius);
 
   const sharkLengthM = Math.max(0.6, sharkStats.realBodyLengthM ?? 1.5);
   const preyLengthM = (prey.bodyLengthCm ?? prey.radius * 2.5) / 100.0;
@@ -143,7 +170,7 @@ export function getPreyRelativeVisualScale(
 
   const behemothMult = mutationVariant === 'ABYSS_BEHEMOTH' ? 1.25 : 1.0;
   const bossMult = prey.isBoss ? 1.2 : 1.0;
-  // 100% 真实生物体长比例：屏幕绘制尺寸比例严格由 (preyLengthM / sharkLengthM) 决定
+  // 100% 真实生物体长比例：世界空间与屏幕空间绘制尺寸比例严格由 (preyLengthM / sharkLengthM) 决定
   const targetRatio = realRatio * behemothMult * bossMult;
 
   return Number(
@@ -189,6 +216,33 @@ export function getParallaxLayerGrowthScales(
   // 归一化成长微缩进度：初始幼鲨 (relativePreyScale = 1.00) 为 0，满阶终焉巨兽 (<= 0.018) 为 1.00
   const growthProgress = Number(
     Math.min(1, Math.max(0, (1.0 - clampedRel) / (1.0 - 0.015))).toFixed(3)
+  );
+
+  return {
+    growthProgress,
+    waterScale: Number((1.0 - growthProgress * 0.09).toFixed(3)),
+    farScale: Number((1.0 - growthProgress * 0.132).toFixed(3)),
+    midScale: Number((1.0 - growthProgress * 0.27).toFixed(3)),
+    ambientScale: Number((1.0 - growthProgress * 0.33).toFixed(3)),
+    nearScale: Number((1.0 - growthProgress * 0.42).toFixed(3)),
+    particleScale: Number((1.0 - growthProgress * 0.27).toFixed(3)),
+  };
+}
+
+/**
+ * Computes optical parallax layer shrink ratios directly from the true native camera zoom (`[CAMERA_ZOOM_MIN, 1.0]`).
+ */
+export function getParallaxLayerGrowthScalesFromZoom(
+  cameraZoom: number = 1.0
+): ParallaxLayerGrowthScales {
+  const clampedZoom = Number.isFinite(cameraZoom)
+    ? Math.max(CAMERA_ZOOM_MIN, Math.min(1.0, cameraZoom))
+    : 1.0;
+  const growthProgress = Number(
+    Math.min(
+      1,
+      Math.max(0, (1.0 - clampedZoom) / (1.0 - CAMERA_ZOOM_MIN))
+    ).toFixed(3)
   );
 
   return {
@@ -416,13 +470,13 @@ export function computeEvolvedSharkStats(
   const realBodyLengthM = Number(
     (form.realBodyLengthM * (1.0 + (inRunLevel - 1) * 0.025)).toFixed(2)
   );
-  // 100% 真实生物体长同比例环境微缩：以初代拟态小丑幼鲨 (0.8m) 为 1.000 基准，海床与猎物严格按 0.8 / realBodyLengthM 同步缩小
+  // 真实生物体长比例指标 (0.8 / realBodyLengthM)，保留供统计与生态度量使用
   const relativePreyScale = Number(
     Math.max(0.015, Math.min(1.0, 0.8 / realBodyLengthM)).toFixed(3)
   );
-  const cameraZoom = Number(
-    Math.max(0.88, 1.0 / (1 + (scale - 1) * 0.42)).toFixed(3)
-  );
+  // 原生 2D 真相机变焦倍率（1.000 at 0.8m -> 0.220 floor at 45m+）与单一世界空间体量 worldScale
+  const cameraZoom = computeTrueCameraZoom(realBodyLengthM);
+  const worldScale = Number((scale / cameraZoom).toFixed(3));
 
   const hpDrainReduction = Math.min(
     0.58,
@@ -581,6 +635,7 @@ export function computeEvolvedSharkStats(
   return {
     level: inRunLevel,
     scale,
+    worldScale,
     relativePreyScale,
     cameraZoom,
     maxHp,

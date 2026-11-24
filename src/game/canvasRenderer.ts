@@ -615,6 +615,7 @@ export function drawPreyEntity(
       normalBiteTier: sharkBiteTier,
       relativePreyScale,
       scale: sharkScale,
+      worldScale: sharkScale,
       canEatMines,
       realBodyLengthM,
     },
@@ -717,6 +718,10 @@ export function drawOffScreenRadarIndicators(
 ): void {
   const halfW = viewW / 2;
   const halfH = viewH / 2;
+  const radarRangeMult = 1 / Math.max(0.22, camera.zoom);
+  const maxRadarDist = 1650 * radarRangeMult;
+  const maxGoldenDist = 1250 * radarRangeMult;
+  const maxDangerDist = 880 * radarRangeMult;
   const bountyMarkers: RadarMarker[] = [];
   const goldenMarkers: RadarMarker[] = [];
   const dangerMarkers: RadarMarker[] = [];
@@ -733,7 +738,7 @@ export function drawOffScreenRadarIndicators(
     const screenDx = sx - halfW;
     const screenDy = sy - halfH;
     const worldDist = Math.hypot(prey.x - camera.x, prey.y - camera.y);
-    if (worldDist > 1650 || worldDist < 40) continue;
+    if (worldDist > maxRadarDist || worldDist < 40) continue;
 
     const isBounty = Boolean(targetPreyId && prey.config.id === targetPreyId);
     const effectiveTier = getEffectivePreyTier(
@@ -754,7 +759,7 @@ export function drawOffScreenRadarIndicators(
       prey.mutationVariant === 'GOLDEN_MUTANT' &&
       canEat &&
       !prey.config.isHazard &&
-      worldDist < 1250
+      worldDist < maxGoldenDist
     ) {
       goldenMarkers.push({
         prey,
@@ -769,7 +774,7 @@ export function drawOffScreenRadarIndicators(
         effectiveTier >= sharkBiteTier + 4 &&
         prey.config.tier >= 18) ||
         prey.mutationVariant === 'ABYSS_BEHEMOTH') &&
-      worldDist < 880
+      worldDist < maxDangerDist
     ) {
       dangerMarkers.push({
         prey,

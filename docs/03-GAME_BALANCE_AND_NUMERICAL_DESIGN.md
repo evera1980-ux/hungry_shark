@@ -1,7 +1,7 @@
 # 03. 核心数值策划与系统公式圣经 (Game Balance & Numerical Design)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-16
+> **最后更新**：2026-11-23
 > **关联约束**：修改 `src/game/rules.ts`、`src/game/sharkEvolutionConfig.ts`、`src/game/config.ts`、`src/game/preyDatabase140.ts` 或 `src/game/infiniteProgressionManager.ts` 中的任何数值参数或公式时，**必须在同一次提交中更新本文档对应的章节与表格**（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
@@ -312,11 +312,28 @@ $$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Fren
    - 视觉/捕猎感知门限为 $L_{\text{min}} = L_{\text{shark\_m}} \times 0.133$（对应屏幕尺寸 $< 16\text{px}$）；
    - 当出战鲨鱼体型极大时（如 18.5m 巨齿鲨，$L_{\text{min}} \approx 2.46\text{m}$），在阳光珊瑚浅水区（$0 \sim 35\text{m}$，生物多为 $10\sim 80\text{cm}$），**生态刷新器完全不刷新微型小鱼（`spawnPreyOffScreen` 返回 `null`）**；
    - 巨型掠食者在浅滩捕不到任何有价值的猎物，也看不到微型小鱼，物理级还原“龙游浅滩”与营养级生态跃迁，驱使巨兽潜入中深海与深渊捕食大型巨鲸与深海巨怪。
-4. **海床与猎物 100% 真实生物体长同比例动态微缩 (`seabedScale = relativePreyScale`)**：
-   - 为避免“鲨鱼体型在屏幕上受到视觉防遮挡保护（$\text{scale} \le 1.28$），但脚下海床礁石依然巨大如初、无法体现鲨鱼真正变大”的脱节感，海床地貌渲染器（`renderPhysicalSeabed` 与 `WorldRenderer.renderActiveChunkEntities`）将地貌与底栖生态的相对缩放因子 `seabedScale` 100% 严格绑定至猎物生物微缩比率：
-     $$\text{seabedScale} = \text{relativePreyScale} = \text{clamp}\left(\frac{0.8}{L_{\text{shark\_m}}},\; 0.015,\; 1.0\right)$$
-   - 海床表层厚度（`stripDrawH = max(16, 124 * seabedScale)`）、纹理周期（`tileSpanEngineX = max(90, 520 * seabedScale)`，防密集条纹走样）、多层地下沉积岩层（`bwStepY` / `subStepY` / `tierStepY`）、嵌壁巨石露头（`rScale`）、复合珊瑚礁群落（`clampedScale >= 0.06`）、海草巨藻、热液喷口与大型 POI 地标（$\ge 18\text{px}$）全面等比同缩；
-   - 在统一生物体长比例尺下，幼鲨（0.8m）穿行于 44px 的高耸珊瑚丛与厚重金沙台地，而进化为 45m 终极奥米茄巨兽时，脚下原本巨大的珊瑚礁与海床沉积地层同步微缩至 3~4px，真切呈现遮天巨兽巡游微缩海底平原的磅礴体量参照！
+4. **真相机变焦 + 单一 1:1 世界坐标系（P1-2 架构升级，彻底废除 `seabedScale` 微缩投影补丁）**：
+   - 废除此前 56× 线性海床微缩补丁（`seabedScale = 0.8 / L_shark`），回归**单一 1:1 世界空间 + 原生 2D 相机变焦**：
+     - **真相机变焦公式 (`computeTrueCameraZoom` in `src/game/rules.ts`)**：
+       $$\text{cameraZoom}(L) = \text{clamp}\left(\left(\frac{0.8}{\max(0.8, L)}\right)^{0.376},\; 0.22,\; 1.0\right)$$
+       （`CAMERA_ZOOM_MIN = 0.22`，叠加横竖屏 `aspectZoomFactor` 后的渲染变焦底线为 `MIN_RENDER_ZOOM_FLOOR = 0.14`）。代表体长对照：`0.8m -> 1.000`、`5.2m -> 0.495`、`18.5m -> 0.307`、`45.0m -> 0.220`。
+     - **世界空间缩放因子 (`worldScale`) 与严格线性猎物体长比守恒**：
+       $$\text{worldScale} = \frac{\text{scale}}{\text{cameraZoom}}$$
+       玩家鲨鱼与全部猎物均在单一 1:1 世界空间中以 `worldScale` 为基准绘制与碰撞，经原生相机变焦 `ctx.scale(cameraZoom)` 投影至屏幕后：
+       - 鲨鱼屏幕尺寸恒等于 $96 \times \text{worldScale} \times \text{cameraZoom} = 96 \times \text{scale}$（平滑压在 `1.00x ~ 1.28x` 黄金视野占比内，绝不占满屏幕）；
+       - 猎物屏幕尺寸严格满足线性生物体长比 $\frac{S_{\text{prey}}}{S_{\text{shark}}} = \frac{L_{\text{prey}}}{L_{\text{shark}}} \times \text{behemothMult} \times \text{bossMult}$，与物理碰撞盒 100% 同源对齐；
+       - 世界游动速度按 $V_{\text{world}} = V_{\text{screen}} / \text{cameraZoom}$ 换算，保证全进化阶段巡航/冲刺手感流畅且无任何相对海床漂移。
+5. **巨鲨撞碎上层阶梯海床规则 (`SEABED_TERRACE_TIERS[0..4].shatterLengthM`)**：
+   - 为避免体型庞大的高阶巨鲨（世界碰撞半径可达 `~112` 世界单位）被浅中层阶梯海床狭小洞口卡死，对浅海与中层前 5 级阶梯海床配置破壁体长门槛，深海 4 级（Tiers 5~8）与主连续海床保留为不可破坏基岩：
+     | 阶梯层级 | 深度带 | 破壁体长门槛 `shatterLengthM` | 行为规则 |
+     | :--- | :---: | :---: | :--- |
+     | `Tier 0` | `~414m`（珊瑚浅海） | **`8.0m`** | 达到门槛时无视阻挡并撞碎对应 `120` 宽局部单元，爆出珊瑚/礁岩碎屑与 `playRockShatter()` 音效 |
+     | `Tier 1` | `~1220m`（上暮光） | **`12.0m`** | 同上 |
+     | `Tier 2` | `~2220m`（中暮光） | **`18.0m`** | 同上 |
+     | `Tier 3` | `~3460m`（深暮光） | **`26.0m`** | 同上 |
+     | `Tier 4` | `~5040m`（半深海） | **`36.0m`** | 同上 |
+     | `Tier 5 ~ 8` & 主海床 | `7060m ~ 19800m` | **`Infinity`** | 永久不可破坏深渊玄武岩基岩（任何体长均执行正常碰撞滑行） |
+   - 保留 45m 巨鲨在浅海因 `minPreyLengthCm = L_shark * 13.3`（`~598.5cm`）呈现“浅海空海”生态：悬赏系统自动跳过过小小鱼而指派深海巨兽目标，且滞留无鱼浅海 `>= 1.5s` 后通过 HUD 深潜引导条精准指引下潜至可捕食深度（如 `750m+`）。
 
 ---
 
@@ -337,6 +354,7 @@ $$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Fren
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-23 | **P1-2 废除 `seabedScale` 双空间微缩投影，切换为原生 2D 真相机变焦（`CAMERA_ZOOM_MIN = 0.22`）+ 严守线性猎物体长比 + 巨鲨撞碎上层阶梯海床（`Tier 0~4: 8/12/18/26/36m`）+ 浅海空海深潜引导闭环**：① `computeTrueCameraZoom(L)` 按幂律 $(0.8/L)^{0.376}$ 平滑拉远至 `0.22` 下限，`stats.worldScale = scale / cameraZoom` 使鲨鱼与猎物在单一 1:1 世界空间同时满足视觉 === 碰撞与严格线性 $L_{\text{prey}}/L_{\text{shark}}$ 屏幕比例；② `SEABED_TERRACE_TIERS[0..4]` 接入体长破壁门槛与 `breachedTerraceCells` 破口追踪，消除巨鲨卡洞问题，同时 `Tier 5..8` 与主海床维持深渊基岩碰撞；③ 保持 45m 巨鲨浅海无适口猎物的生态跃迁设定，升级 `EcosystemSpawner` 广角视口回收/刷怪半径与 `rollTargetBountySpecies` 体长过滤，新增滞留 `>1.5s` 深潜 HUD 提示 | `src/game/rules.ts`, `src/game/world/terrainSystem.ts`, `src/game/ecosystemSpawner.ts`, `src/game/sim/types.ts`, `src/game/sim/stepSimulation.ts`, `src/game/sim/renderOceanWorld.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-20 | **生物力学体长与游动速度流体动力学协调重构（Biomechanical Swim Speed & Body Length Scaling Formula + Tail Cadence Coupling）**：① **定位并根除巨型鲨鱼屏幕游速塌缩缺陷**：在全环境等比微缩（`seabedScale = 0.8 / realBodyLengthM`，0.8m 幼鲨为 1.00，45m 巨兽降至 0.0178 即 56 倍缩小）体系下，原引擎世界速度（`moveSpeed = 140`）直接投影至屏幕后坍塌为 $V_{\text{visual}} = 140 \times \text{seabedScale} \approx 2.49 \sim 3.36\text{ px/s}$，导致终极巨兽在屏幕上移动自身体长需耗时 40 余秒（0.024 BL/s 龟速蠕动）而尾鳍却以 2.5Hz 疯狂摆动；② **视口屏幕目标速度与世界速度解耦换算**：在 `computeEvolvedSharkStats` 与 `computeSharkStats` 中引入生物体长成长因子 `lengthGrowthFactor = (realBodyLengthM / 0.8)^0.08`，屏幕视口目标速度定义为 $V_{\text{screen}} = V_{\text{base}} \times \text{lengthGrowthFactor} \times (1 + \text{speedBonus})$（0.8m 幼鲨常态 143px/s、冲刺 315px/s；45m 巨兽常态 260px/s、冲刺 574px/s，体现庞然巨物的磅礴动量与巡航推力）。引擎世界速度统一定义为 $V_{\text{world}} = V_{\text{screen}} / \text{curSeabedScale}$，使屏幕视觉位移严格恒等于 $V_{\text{screen}}$；③ **生物力学脊柱与尾摆节律缩放（Tail Cadence Factor）**：水生生物摆尾频率随体长按 $L^{-0.22}$ 幂律衰减，引入 `cadenceFactor = clamp((0.8 / L)^0.22, 0.42, 1.0)`。幼鲨摆尾频率 ~1.85Hz（轻快敏捷），终极巨神鲨摆尾频率平滑降至 ~0.77Hz（厚重威严、单次挥动推进巨大距离），彻底消除“小碎步狂摆但原地踏步”的视觉违和感；④ **海床物理碰撞半径与猎物 AI 速度同步缩放**：海床碰撞物理半径按 $(22 \times \text{scale}) / \text{curSeabedScale}$ 换算为真实物理尺度，猎物巡航/逃窜/冲撞速度及大嘴吸入速度统一按 `baseSpeed / curSeabedScale` 换算至微缩世界空间，确保全物种相对视口巡游速度与吞噬手感始终如一；⑤ **Web 与 iOS 原生 Swift 100% 契约对齐**：`src/App.tsx`、`src/game/rules.ts` 与 `scripts/build-ios-native.ts`、`GameRules.swift`、`OceanGameScene.swift` 同步全量适配，全量 45 项测试、TypeScript 零报错、Vite 构建及 Xcode 纯原生编译 100% PASS | `src/game/rules.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `ios-native/HungrySharkEvolution/Rendering/OceanGameScene.swift`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/02-DESIGN_SPEC.md` |
 | 2026-11-20 | **彻底消除冲刺逆流感与猎物相对海床漂移的同源坐标空间投影重构（Unified Shrunk Coordinate Projection & Zero Relative Velocity Drift）+ 随机游动方向与平滑随机刷新计时器（Organic Staggered Edge Spawning & Direction Decoupling）**：① **消除冲刺相对海床漂移**：定位并解决原海床地貌以相机为中心按 `seabedScale` 几何微缩（$\text{screenX}_{\text{seabed}} = \text{viewW}/2 + (wx - C_x) \cdot \text{seabedScale} \cdot \text{zoom}$）而猎物/掉落物/飘字直接使用未缩放世界坐标（$\text{screenX}_{\text{prey}} = \text{viewW}/2 + (px - C_x) \cdot 1.0 \cdot \text{zoom}$）引发的逆流后移缺陷。当鲨鱼以速度 $V_x$ 冲刺时，相对屏幕速度差为 $-V_x \cdot (1 - \text{seabedScale}) \cdot \text{zoom}$，导致巨兽形态下猎物以冲刺速度的 90% 相对海床向鲨鱼逆向漂移。在 Web（`App.tsx`）与 iOS 原生 SpriteKit（`OceanGameScene.swift`）中全面统一猎物、掉落物、浮动跳字至同源微缩空间：$\text{screenX} = \text{viewW}/2 + (X - C_x) \cdot \text{seabedScale} \cdot \text{zoom}$，物理判定与吸入口距离同步使用 $\text{effPrey} = \text{shark} + (P - \text{shark}) \cdot \text{seabedScale}$。数学保证 $\frac{d}{dt}(\text{screenX}_{\text{prey}} - \text{screenX}_{\text{seabed}}) = v_{\text{prey}} \cdot \text{seabedScale} \cdot \text{zoom}$，鲨鱼冲刺速度在微分中完全抵消，猎物与海床 100% 相对静止，冲刺漂移彻底降为零；② **猎物游动方向随机化**：解绑边缘刷新方向耦合，猎物生成后 50% 朝左、50% 朝右游动（`dir = rng() < 0.5 ? 1 : -1`），消除所有鱼类扑向玩家的刻板感；③ **平滑随机刷新计时器**：移除每帧紧凑出怪与单帧倾泻，引入累加计时器 `spawnTimer`（$0.35\text{s} \sim 0.88\text{s}$ 随机单条涌入），杜绝一波一波出怪的波次顿挫感 | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Rendering/OceanGameScene.swift`, `docs/02-DESIGN_SPEC.md`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-20 | **冲刺手感防逆流优化 + 屏幕边缘游入刷新系统（Screen-Edge Inward-Swimming Spawn System）**：① **冲刺手感防逆流优化**：将 `App.tsx` 冲刺加速度由迟缓的 `simDt * 7` 提升至极速即时响应的 `accelRate: isBoosting ? 28 : 18`，并将转向敏捷度提升至 `(isBoosting ? 15.0 : 12.0)`，彻底消除大角度转向时速度矢量落后于朝向导致的侧滑漂移与“逆水阻力”滞后感；在 `InfiniteWorldManager.ts` 与 Swift `OceanGameScene.swift` 中，当游速超过 240px/s 时将相机跟踪插值速度动态提升至 12.0+，消除高速位移下镜头的拖拽拉扯感；在 `parallaxBackground.ts` 与 iOS 端将环境微粒横向视差耦合系数由 `0.55` 降至 `0.16`（降低超 70% 倒灌飞窜速度），并将尾部喷射气泡调优为柔和自然尾迹气泡（频率降低至 40%，喷速降至 32~56px/s），彻底消除视觉上的强烈逆向水流冲击错觉；② **屏幕边缘游入刷新系统**：`ecosystemSpawner.ts`、`App.tsx` 与 iOS 原生 SpriteKit 统一重构，初始开局鱼及局内动态刷新猎物 100% 严格在视口左右屏幕边缘外侧（75px~180px）生成，游动速度矢量严格向视口内侧指向（左边缘生成 $vx > 0$ 向右游入，右边缘生成 $vx < 0$ 向左游入），使鱼群自然自屏幕边缘滑入视野，伴游鱼群（Poisson Disk 采样）锚定在领头鱼外侧同向跟随游入，并严格受限于物种原生水深带与海床碰撞限制，彻底杜绝在玩家身边瞬移刷新鱼群 | `src/game/infiniteWorldManager.ts`, `src/game/parallaxBackground.ts`, `src/game/ecosystemSpawner.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Rendering/OceanGameScene.swift`, `docs/02-DESIGN_SPEC.md`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |

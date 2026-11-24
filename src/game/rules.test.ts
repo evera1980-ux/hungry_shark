@@ -6,15 +6,20 @@ import { I18N, translate } from './i18n';
 import { GAME_CONFIG } from './config';
 import { PREY_140_RECORDS, getTierForPreyBodyLengthCm } from './preyDatabase140';
 import {
+  CAMERA_ZOOM_MIN,
+  MIN_RENDER_ZOOM_FLOOR,
+  computeTrueCameraZoom,
   computeEvolvedSharkStats,
   computeHuntingHeatBuff,
   resolvePreyEncounter,
   addEvolutionProgress,
   getDepthZone,
   getParallaxLayerGrowthScales,
+  getParallaxLayerGrowthScalesFromZoom,
   computeParallaxBiomeTransitionState,
   quinticSmoothstep,
 } from './rules';
+import { rollTargetBountySpecies } from './sim/types';
 import {
   createDefaultMetaSave,
   evaluateSharkUnlock,
@@ -696,16 +701,24 @@ test('Visual Size vs. Devourability Contract + Gold Frenzy Size Preservation Exc
           );
         }
 
-        // 100% 真实尺寸物理验证：绘制尺寸严格正比于真实体长
+        // 100% 真实尺寸物理验证：1:1 单一世界坐标与屏幕空间均严格正比于真实体长
         const expectedRealRatio =
           ((prey.bodyLengthCm ?? prey.radius * 2.5) / 100) /
           (normalStats.realBodyLengthM ?? 1.5);
         const variantMult = variant === 'ABYSS_BEHEMOTH' ? 1.25 : 1.0;
         const bossMult = prey.isBoss ? 1.2 : 1.0;
-        const actualDrawRatio = preyDrawSize / (96 * normalStats.scale);
+        const sharkWorldDrawSize =
+          96 * (normalStats.worldScale ?? normalStats.scale) * getDebugPreySizeMultiplier();
+        const actualWorldRatio = preyDrawSize / sharkWorldDrawSize;
+        const actualScreenRatio =
+          (preyDrawSize * normalStats.cameraZoom) / sharkDrawSize;
         assert.ok(
-          Math.abs(actualDrawRatio - expectedRealRatio * variantMult * bossMult) < 0.08,
-          `Prey ${prey.id} drawSize=${preyDrawSize.toFixed(1)} must 100% match physical body length ratio`
+          Math.abs(actualWorldRatio - expectedRealRatio * variantMult * bossMult) < 0.08,
+          `Prey ${prey.id} world drawSize=${preyDrawSize.toFixed(1)} must 100% match physical body length ratio`
+        );
+        assert.ok(
+          Math.abs(actualScreenRatio - expectedRealRatio * variantMult * bossMult) < 0.08,
+          `Prey ${prey.id} screen ratio=${actualScreenRatio.toFixed(3)} must 100% match physical body length ratio`
         );
       }
     }
@@ -1255,6 +1268,10 @@ import {
   getEngineFloorDepthAt,
   sampleSeabedAnchorAt,
   SEABED_TERRACE_TIERS,
+  canSharkShatterTerrace,
+  detectShatterableTerraceHit,
+  formatTerraceBreachKey,
+  isTerraceCellBreached,
   getSeabedTerraceAt,
   getShallowCoralAtollAt,
   getShallowCoralAtollOutcropsForChunk,
@@ -3390,25 +3407,41 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
     assert.ok(fs.existsSync(diskPath), `Missing world WebP asset file on disk: ${url}`);
     const stem = path.basename(url, path.extname(url));
     const hasIosCounterpart =
+      fs.existsSync(path.join(iosAssetsDir, `${stem}.webp`)) ||
       fs.existsSync(path.join(iosAssetsDir, `${stem}.png`)) ||
       fs.existsSync(path.join(iosAssetsDir, `${stem}.jpg`));
     assert.ok(
       hasIosCounterpart,
-      `Missing world PNG/JPG counterpart in iOS Resources/Assets for: ${stem}`
+      `Missing world WebP/PNG/JPG counterpart in iOS Resources/Assets for: ${stem}`
     );
   }
 
-  // Ensure all 48 @3x sharks, 135 @3x prey (including cyber_mine@3x.png), single wide title (title3_cae0290c.png), and UI/loading PNGs are present in ios-native/HungrySharkEvolution/Resources/Assets
+  // Ensure all 48 @3x sharks, 135 @3x prey (including cyber_mine@3x), single wide title (title3_cae0290c), and UI/loading assets are present in ios-native/HungrySharkEvolution/Resources/Assets
   const iosFiles = fs
     .readdirSync(iosAssetsDir)
-    .filter((f) => f.endsWith('.png') || f.endsWith('.jpg'));
+    .filter((f) => f.endsWith('.webp') || f.endsWith('.png') || f.endsWith('.jpg'));
   assert.ok(
-    iosFiles.length >= 226,
-    `Expected at least 226 bundled PNG/JPG assets in iOS Resources/Assets, found ${iosFiles.length}`
+    iosFiles.length >= 205,
+    `Expected at least 205 bundled WebP/PNG/JPG assets in iOS Resources/Assets, found ${iosFiles.length}`
   );
   assert.ok(
-    fs.existsSync(path.join(iosAssetsDir, 'cyber_mine@3x.png')),
-    'Missing cyber_mine@3x.png in iOS Resources/Assets'
+    fs.existsSync(path.join(iosAssetsDir, 'cyber_mine@3x.webp')) ||
+      fs.existsSync(path.join(iosAssetsDir, 'cyber_mine@3x.png')),
+    'Missing cyber_mine@3x WebP/PNG in iOS Resources/Assets'
+  );
+  // iOS-P0-3 invariant: legacy oversized sheets must stay pruned & total bundle must stay < 12MB
+  for (const legacy of ['sharks_ec921c3b.png', 'fish_24bdaa5a.png', 'fish2_fc857cfa.png']) {
+    assert.ok(
+      !fs.existsSync(path.join(iosAssetsDir, legacy)),
+      `Obsolete legacy sprite sheet must not exist in iOS Resources/Assets: ${legacy}`
+    );
+  }
+  const totalIosBytes = fs
+    .readdirSync(iosAssetsDir)
+    .reduce((sum, f) => sum + fs.statSync(path.join(iosAssetsDir, f)).size, 0);
+  assert.ok(
+    totalIosBytes < 12 * 1024 * 1024,
+    `iOS Resources/Assets must stay < 12MB after iOS-P0-3 slimming, found ${(totalIosBytes / 1048576).toFixed(2)}MB`
   );
 
   const pbxprojPath = path.resolve(
@@ -3417,11 +3450,18 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
   );
   const pbxContent = fs.readFileSync(pbxprojPath, 'utf8');
   for (const file of iosFiles) {
-    const header = fs.readFileSync(path.join(iosAssetsDir, file)).subarray(0, 4);
+    const raw = fs.readFileSync(path.join(iosAssetsDir, file));
+    const header = raw.subarray(0, 12);
     if (file.endsWith('.png')) {
       assert.ok(
         header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4e && header[3] === 0x47,
-        `File ${file} has .png extension but is not a valid PNG (magic bytes: ${header.toString('hex')})`
+        `File ${file} has .png extension but is not a valid PNG (magic bytes: ${header.subarray(0, 4).toString('hex')})`
+      );
+    } else if (file.endsWith('.webp')) {
+      assert.ok(
+        header.subarray(0, 4).toString('ascii') === 'RIFF' &&
+          header.subarray(8, 12).toString('ascii') === 'WEBP',
+        `File ${file} has .webp extension but is not a valid WebP`
       );
     }
     assert.ok(
@@ -3497,14 +3537,20 @@ test('134 Active Marine Prey Species + Cyber Mine: Authentic Biological Body Len
       );
     }
 
-    // Test with apex shark
+    // Test with apex shark (1:1 world space + true camera zoom screen parity)
     const scaleApex = getPreyRelativeVisualScale(prey, apexShark);
     const drawSizeApex = prey.radius * scaleApex * 2.25;
-    const sharkSizeApex = 96 * apexShark.scale * getDebugPreySizeMultiplier();
+    const sharkWorldSizeApex =
+      96 * (apexShark.worldScale ?? apexShark.scale) * getDebugPreySizeMultiplier();
+    const sharkScreenSizeApex = 96 * apexShark.scale * getDebugPreySizeMultiplier();
     if (!prey.isHazard) {
       assert.ok(
-        drawSizeApex <= sharkSizeApex * 0.64,
-        `Devoured by apex shark: ${prey.id} drawSize=${drawSizeApex} must be <= 64% of sharkSize=${sharkSizeApex}`
+        drawSizeApex <= sharkWorldSizeApex * 0.64,
+        `Devoured by apex shark: ${prey.id} world drawSize=${drawSizeApex} must be <= 64% of sharkWorldSize=${sharkWorldSizeApex}`
+      );
+      assert.ok(
+        drawSizeApex * apexShark.cameraZoom <= sharkScreenSizeApex * 0.64,
+        `Devoured by apex shark: ${prey.id} screen drawSize=${(drawSizeApex * apexShark.cameraZoom).toFixed(2)} must be <= 64% of sharkScreenSize=${sharkScreenSizeApex}`
       );
     }
   }
@@ -3851,6 +3897,247 @@ test('P0-2 Web Asset Slimming & Lazy-Loading: <12MB WebP bundle, zero legacy she
   assert.equal(ssmSource.includes('processAndSlicePrimaryImage'), false);
   assert.equal(ssmSource.includes('processAndSliceFish2Image'), false);
 });
+
+test('P1-2 True Native 2D Camera Zoom, Linear Prey Parity, Giant Shark Terrace Shattering & Zoomed Spawner Invariants', () => {
+  // 1. Monotonic true camera zoom curve from 0.8m starter (1.000) to 45m apex (CAMERA_ZOOM_MIN = 0.220)
+  assert.equal(CAMERA_ZOOM_MIN, 0.22);
+  assert.equal(MIN_RENDER_ZOOM_FLOOR, 0.14);
+  assert.equal(computeTrueCameraZoom(0.8), 1.0);
+  assert.equal(computeTrueCameraZoom(45.0), CAMERA_ZOOM_MIN);
+  assert.equal(computeTrueCameraZoom(60.0), CAMERA_ZOOM_MIN);
+
+  let prevZoom = 1.01;
+  for (const form of SHARK_EVOLUTION_FORMS) {
+    const stats = computeEvolvedSharkStats(1, form.id, 1, false);
+    assert.ok(
+      stats.cameraZoom >= CAMERA_ZOOM_MIN && stats.cameraZoom <= 1.0,
+      `${form.id} cameraZoom=${stats.cameraZoom} must stay within [${CAMERA_ZOOM_MIN}, 1.0]`
+    );
+    assert.ok(
+      stats.cameraZoom <= prevZoom + 1e-6,
+      `cameraZoom must decrease monotonically as shark grows (${form.id}: ${stats.cameraZoom} > ${prevZoom})`
+    );
+    prevZoom = stats.cameraZoom;
+
+    const expectedWorldScale = Number((stats.scale / stats.cameraZoom).toFixed(3));
+    assert.equal(
+      stats.worldScale,
+      expectedWorldScale,
+      `${form.id} worldScale must equal scale / cameraZoom`
+    );
+  }
+
+  // Verify parallax zoom growth scale helper
+  const pStart = getParallaxLayerGrowthScalesFromZoom(1.0);
+  const pApex = getParallaxLayerGrowthScalesFromZoom(CAMERA_ZOOM_MIN);
+  assert.equal(pStart.nearScale, 1.0);
+  assert.ok(pApex.nearScale < pApex.midScale && pApex.midScale < pApex.farScale);
+  assert.ok(pApex.nearScale >= 0.55 && pApex.nearScale <= 0.62);
+
+  // 2. Strict linear biological screen-size ratio parity at 0.8m, 4.0m, 18.5m, 45.0m
+  const testSharkIds = [
+    'shark_00_clown_fry',
+    'shark_16_great_white',
+    'shark_30_megalodon',
+    'shark_47_omega_devourer',
+  ];
+  const samplePrey = GAME_CONFIG.preyTiers.find((p) => p.id === 'PREY-201')!; // Sperm Whale
+  for (const sid of testSharkIds) {
+    const st = computeEvolvedSharkStats(1, sid, 1, false);
+    const vScale = getPreyRelativeVisualScale(samplePrey, st);
+    const preyScreenSize = samplePrey.radius * vScale * 2.25 * st.cameraZoom;
+    const sharkScreenSize = 96 * st.scale * getDebugPreySizeMultiplier();
+    const expectedRatio =
+      ((samplePrey.bodyLengthCm / 100) / st.realBodyLengthM!) *
+      (samplePrey.isBoss ? 1.2 : 1.0);
+    assert.ok(
+      Math.abs(preyScreenSize / sharkScreenSize - expectedRatio) < 0.02,
+      `Strict linear biological ratio failed for ${sid}`
+    );
+  }
+
+  // 3. Giant Shark Upper-Terrace Shattering (Tiers 0..4 shatterable; Tiers 5..8 solid bedrock)
+  assert.deepEqual(
+    SEABED_TERRACE_TIERS.map((t) => t.shatterLengthM),
+    [8.0, 12.0, 18.0, 26.0, 36.0, Infinity, Infinity, Infinity, Infinity]
+  );
+  assert.equal(canSharkShatterTerrace(0, 7.9), false);
+  assert.equal(canSharkShatterTerrace(0, 8.0), true);
+  assert.equal(canSharkShatterTerrace(4, 35.9), false);
+  assert.equal(canSharkShatterTerrace(4, 36.0), true);
+  assert.equal(canSharkShatterTerrace(5, 45.0), false);
+  assert.equal(canSharkShatterTerrace(8, 45.0), false);
+
+  // Locate a guaranteed solid x-coordinate on Tier 0 terrace (well above Main Continuous Seabed)
+  let tier0SolidX = 0;
+  let tier0Sample = getSeabedTerraceAt(0, 0);
+  let foundTier0 = false;
+  for (let wx = 0; wx <= 30000; wx += 40) {
+    const s = getSeabedTerraceAt(wx, 0);
+    if (s.active && s.bottomArchY - s.topFloorY > 60 && getFloorDepthAt(wx) > s.bottomArchY + 260) {
+      tier0SolidX = wx;
+      tier0Sample = s;
+      foundTier0 = true;
+      break;
+    }
+  }
+  assert.equal(foundTier0 && tier0Sample.active, true, 'Must locate a solid Tier 0 terrace segment above deep water');
+
+  const midTerraceY = (tier0Sample.topFloorY + tier0Sample.bottomArchY) * 0.5;
+  // Juvenile 0.8m shark must be blocked by solid Tier 0 terrace
+  const juvenileCol = resolveSeabedCollision(
+    tier0SolidX,
+    midTerraceY,
+    22,
+    120,
+    undefined,
+    tier0Sample.topFloorY - 40,
+    { sharkLengthM: 0.8 }
+  );
+  assert.equal(juvenileCol.collided, true, '0.8m juvenile shark must collide with Tier 0 terrace');
+
+  // 45m Omega shark passes straight through Tier 0 terrace without stopping and triggers shatter hit
+  const omegaCol = resolveSeabedCollision(
+    tier0SolidX,
+    midTerraceY,
+    110,
+    220,
+    undefined,
+    tier0Sample.topFloorY - 80,
+    { sharkLengthM: 45.0 }
+  );
+  assert.equal(omegaCol.collided, false, '45m Omega shark must bypass Tier 0 terrace collision');
+
+  const breached = new Set<string>();
+  const shatterHit = detectShatterableTerraceHit(
+    tier0SolidX,
+    tier0Sample.topFloorY - 80,
+    tier0SolidX,
+    midTerraceY,
+    110,
+    45.0,
+    breached
+  );
+  assert.ok(shatterHit !== null, '45m shark passing through Tier 0 must emit TerraceShatterHit');
+  assert.equal(shatterHit!.tierIndex, 0);
+  assert.equal(shatterHit!.isNewlyBreached, true);
+
+  // Mark breached cell -> now even a juvenile/prey entity passes through the breached gap!
+  breached.add(formatTerraceBreachKey(0, shatterHit!.cellIndex));
+  assert.equal(isTerraceCellBreached(0, tier0SolidX, breached), true);
+  const juvenileAfterBreach = resolveSeabedCollision(
+    tier0SolidX,
+    midTerraceY,
+    22,
+    120,
+    undefined,
+    tier0Sample.topFloorY - 40,
+    { sharkLengthM: 0.8, breachedCells: breached }
+  );
+  assert.equal(
+    juvenileAfterBreach.collided,
+    false,
+    'Once breached, even smaller entities pass cleanly through the shattered terrace cell'
+  );
+
+  // Tier 5 (7060m deep bedrock) must still block a 45m Omega shark
+  let tier5SolidX = 0;
+  let tier5Sample = getSeabedTerraceAt(0, 5);
+  let foundTier5 = false;
+  for (let wx = 0; wx <= 40000; wx += 40) {
+    const s = getSeabedTerraceAt(wx, 5);
+    if (s.active && s.bottomArchY - s.topFloorY > 60 && getFloorDepthAt(wx) > s.bottomArchY + 260) {
+      tier5SolidX = wx;
+      tier5Sample = s;
+      foundTier5 = true;
+      break;
+    }
+  }
+  assert.equal(foundTier5 && tier5Sample.active, true, 'Must locate a solid Tier 5 terrace segment above deep water');
+  const omegaTier5Col = resolveSeabedCollision(
+    tier5SolidX,
+    tier5Sample.topFloorY + 20,
+    110,
+    220,
+    undefined,
+    tier5Sample.topFloorY - 140,
+    { sharkLengthM: 45.0 }
+  );
+  assert.equal(
+    omegaTier5Col.collided,
+    true,
+    'Tier 5+ deep basalt terraces must remain solid bedrock even for 45m sharks'
+  );
+
+  // 4. EcosystemSpawner under zoomed-out 45m viewport (zoom = 0.22): off-screen spawn, zero premature culling, shallow depletion + deep viability
+  const zoomedSpawner = new EcosystemSpawner(20, 1650, 640);
+  const zoomedViewport = {
+    halfW: 640 / 0.22, // ~2909 world units
+    halfH: 360 / 0.22, // ~1636 world units
+    cameraX: 0,
+    cameraY: 5400,
+    sharkVx: 0,
+    renderZoom: 0.22,
+  };
+
+  // Shallow depletion preserved intentionally for 45m shark
+  assert.equal(zoomedSpawner.hasViablePreyAtDepth(220, 45.0), false);
+  assert.equal(zoomedSpawner.hasViablePreyAtDepth(5400, 45.0), true);
+  const minViableY45 = zoomedSpawner.getMinViableWorldYForShark(45.0);
+  assert.ok(
+    minViableY45 !== null && minViableY45 >= 4000,
+    `45m shark min viable depth must be in deep abyssal waters (>=4000), got ${minViableY45}`
+  );
+
+  // Spawning at deep abyssal depth under zoom=0.22 places prey strictly outside halfW and survives update() without premature cull!
+  const deepPreys: PreyEntity[] = [];
+  const spawnedAbyss = zoomedSpawner.spawnPreyOffScreen(
+    deepPreys,
+    0,
+    5400,
+    () => 0.4,
+    undefined,
+    0,
+    45.0,
+    zoomedViewport
+  );
+  assert.ok(spawnedAbyss !== null, '45m shark must spawn abyssal megafauna at worldY=5400');
+  assert.ok(
+    Math.abs(spawnedAbyss!.x) > zoomedViewport.halfW,
+    `Spawned prey x=${spawnedAbyss!.x} must start outside zoomed halfW=${zoomedViewport.halfW.toFixed(0)}`
+  );
+  assert.ok(
+    (spawnedAbyss!.config.bodyLengthCm ?? 0) >= 45.0 * 13.3,
+    'Spawned abyssal prey must satisfy 45m trophic length threshold'
+  );
+
+  zoomedSpawner.update(0.016, deepPreys, 0, 5400, () => 0.4, 0, 45.0, zoomedViewport);
+  assert.ok(
+    deepPreys.includes(spawnedAbyss!),
+    'Newly off-screen spawned prey at zoom=0.22 must NOT be immediately culled on next update()'
+  );
+
+  // Bounty roller respects minPreyLengthCm for 45m giant shark in shallow water (assigns abyssal megafauna instead of shallow minnow)
+  const giantBounty = rollTargetBountySpecies(48, 220, undefined, 45.0 * 13.3);
+  assert.ok(
+    (giantBounty.bodyLengthCm ?? 0) >= 45.0 * 13.3,
+    `45m giant shark bounty ${giantBounty.id} (${giantBounty.bodyLengthCm}cm) must meet minPreyLengthCm=${(45.0 * 13.3).toFixed(1)}cm`
+  );
+
+  // 5. Verify zero legacy seabedScale projection patches remain in renderOceanWorld & stepSimulation
+  const renderSrc = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/game/sim/renderOceanWorld.ts'),
+    'utf8'
+  );
+  const stepSrc = fs.readFileSync(
+    path.resolve(process.cwd(), 'src/game/sim/stepSimulation.ts'),
+    'utf8'
+  );
+  assert.equal(renderSrc.includes('seabedScale'), false);
+  assert.equal(stepSrc.includes('curSeabedScale'), false);
+  assert.equal(stepSrc.includes('effPreyX'), false);
+});
+
 
 
 

@@ -13,9 +13,9 @@
 | **已生成透明 PNG 数量** | **140 / 140**（完成率 `100.0%`） |
 | **当前已生成到（最后完成）** | **PREY-210（蓝鲸幼体/亚成体，1200×317 @3x）** |
 | **下次继续生成起点（断点续传）** | **🎉 全部 140 条已生成完毕** |
-| **资产输出目录** | `/public/assets/prey_140/PREY-XXX.png`（原图去底） & `/public/assets/prey_140/PREY-XXX@3x.png`（iPhone `@3x` Retina 216 DPI） |
+| **资产输出目录** | Web 运行时：`/public/assets/prey_140/PREY-XXX@3x.webp` + `cyber_mine@3x.webp`（离线紧致预裁切 `<=420px` 高保真 WebP，135 项共 `2.0 MB`）；iOS 原生 Bundle：`ios-native/HungrySharkEvolution/Resources/Assets/PREY-XXX@3x.png`（`@3x` Retina 216 DPI PNG） |
 | **进度 JSON 索引** | `/public/assets/prey_140/progress.json` |
-| **双端游戏实装状态（2026-11-19）** | **现役 134 种海洋生物 + `cyber_mine`（135 项）已在 Web 与 iOS 原生双端全量实装 100% 真实尺寸显示、体长动态 T 阶位体系与边缘去白边纯净优化（Defringe Pipeline）**：① 彻底移除人工尺寸缩放与扭曲，猎物在屏幕上的像素尺寸严格等于出战鲨鱼像素尺寸 $\times (L_{\text{prey}} / L_{\text{shark}})$；② 咬合阶位废除固定每阶 3 鱼的粗暴分配，改由 `getTierForPreyBodyLengthCm` 纯动态匹配 48 阶鲨鱼真实体长门槛（0.8m~45.0m），现役物种自然分布于 T1..T32；③ 全量实装 `scripts/defringe-prey-sprites.ts` 专业级去衬底管线：清除 43,328 个外围幽灵白点，执行 117,290 个半透明边缘像素的深海身体色彩反向外扩（Color Dilation），彻底消除巨型鲸鱼群（蓝鲸/座头鲸/抹香鲸/虎鲸）在深水背景下的发光白毛边，100% 完美保留虎鲸眼斑白腹与生物内部原生纹理 |
+| **双端游戏实装状态（2026-11-23）** | **现役 134 种海洋生物 + `cyber_mine`（135 项）已在 Web 与 iOS 原生双端全量实装 100% 真实尺寸显示、体长动态 T 阶位体系、边缘去白边纯净优化（Defringe Pipeline）与 Web 端预裁切 WebP 按水深带懒加载（P0-2）**：① 猎物在屏幕上的像素尺寸严格等于出战鲨鱼像素尺寸 $\times (L_{\text{prey}} / L_{\text{shark}})$；② 咬合阶位由 `getTierForPreyBodyLengthCm` 纯动态匹配 48 阶鲨鱼真实体长门槛（0.8m~45.0m）；③ 全量实装 `scripts/defringe-prey-sprites.ts` 与 `scripts/optimize-web-assets.ts` 离线紧致裁切 + WebP 转换，彻底消除主线程 `getImageData` 逐像素裁切卡顿，并按 `400m` 水深桶动态懒加载当前深度带物种 |
 
 ## 字段说明
 

@@ -18,6 +18,7 @@ targets:
         excludes:
           - "Resources/Assets/*.png"
           - "Resources/Assets/*.jpg"
+          - "Resources/Assets/*.webp"
           - "Resources/Assets/*.json"
       - path: HungrySharkEvolution/Resources/Assets
         type: folder
@@ -41,7 +42,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         COMPRESS_PNG_FILES: NO
         STRIP_PNG_TEXT: NO
-        INFOPLIST_KEY_CFBundleDisplayName: "deepsea:evolution"
+        INFOPLIST_KEY_CFBundleDisplayName: "DeepSea Evolution"
         INFOPLIST_KEY_GADApplicationIdentifier: "ca-app-pub-9273669553362347~9016886171"
         INFOPLIST_KEY_GADIsAdManagerApp: YES
         INFOPLIST_KEY_NSUserTrackingUsageDescription: "允许追踪以提供个性化深海狩猎激励视频广告体验"

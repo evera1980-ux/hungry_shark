@@ -1,7 +1,7 @@
 # 04. 多人协同开发、自动化测试与 Vercel 部署手册 (Collaboration & Deployment)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-21
+> **最后更新**：2026-11-23
 > **关联约束**：修改 `package.json`、`.npmrc`、`vite.config.ts`、测试脚本或部署流程时，必须同步更新本文档（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
@@ -22,6 +22,7 @@
 | `npm run lint` | 运行 `tsc --noEmit` 全量 TypeScript 类型检查 |
 | `npm run build` | 执行生产环境打包，产物输出至 `dist/` 目录 |
 | `npm run preview` | 本地预览 `dist/` 生产构建产物 |
+| `npm run optimize:assets` | **离线 Web 资源预裁切与 WebP 瘦身管线（P0-2）**：将 135 种猎物、48 阶鲨鱼与 18 项 UI/水体/海床/世界图集离线裁切透明边并编码为高保真 WebP（`public/assets/` 总包体 `4.5 MB`），保留 `ios-native/` 下的原生 PNG/JPG 不变 |
 | `npm run sync:ios` / `npm run build:ios` | **跨端数据与资源同步（Shared JSON Data Contract）**：从 Web TypeScript 唯一数据源导出 `shared/game_data.json` 并同步至 `ios-native/HungrySharkEvolution/Resources/Assets/`，同步全部 PNG/JPG 资源并刷新 Xcode `project.pbxproj` / `project.yml`（**不再覆盖任何 Swift 源码**） |
 
 ---
@@ -129,4 +130,4 @@ npm run sync:ios   # 或兼容别名 npm run build:ios
 | 2026-11-14 | **新增 `npm run build:seabed`（`scripts/build-seabed-strips.ts`）4 张独立写实透明背景高分辨率海床 PNG 生成管线**：将 `world_seabed_strips_1794473245165.jpg` 替换为 4 张独立的 `2048×1152`（`@3x` 216 DPI）写实透明背景 PNG（`seabed_strip_coral_reef.png`、`seabed_strip_rocky_shelf.png`、`seabed_strip_underwater_canyon.png`、`seabed_strip_deep_abyss.png`），无需切图即可在 Web 与 iOS 原生工程中直接加载 | `package.json`, `scripts/build-seabed-strips.ts`, `src/game/worldGenerationSystem.ts`, `scripts/build-ios-native.ts`, `docs/04-COLLABORATION_AND_DEPLOYMENT.md` |
 | 2026-11-14 | **iOS 原生 Xcode 工程 1:1 同步 1.0x 物理海床、多层地下岩层、向下弧形洞口、9 层非均匀间距海床阶梯与双向防穿透物理碰撞**：① 在 `scripts/build-ios-native.ts` 中同步生成 `GameRules.swift` 的 9 层海床阶梯配置 `seabedTerraceTiers`（`414m` ~ `16,900m` 间距随深度递增）、`getFloorDepthAt`、`getSeabedTerraceAt`、`getSeabedOutcropsForChunk` 与双向子步进物理碰撞 `resolveSeabedCollision` / `resolveSeabedKineticStep`；② 在 `SpriteAtlasManager.swift` 中新增 `.jpg` 图集加载与切分管线（`world_seabed_strips_1794473245165.jpg` 表层海床与地下基岩层 `sliceSeabedSubStratum`、`world_ecology_atlas_1794473252524.jpg` 16 种珊瑚/海草/热液喷口、`world_pois_atlas_1794473250443.jpg` 10 种海底遗迹地标、以及 140 种 `@3x` 猎物独立透明 PNG 优先直载）；③ 在 `OceanGameScene.swift` 中使用 `SKWarpGeometryGrid` 实时渲染 1.0x 世界空间连续海床、地下岩层、向下弧形洞口与复合珊瑚群落，并在 `npm run build:ios` 中自动拷贝全部 `.png` 与 `.jpg` 资源至 `ios-native/HungrySharkEvolution/Resources/Assets/` | `scripts/build-ios-native.ts`, `ios-native/`, `docs/04-COLLABORATION_AND_DEPLOYMENT.md`, `docs/05-CROSS_PLATFORM_MOBILE_PORTING_GUIDE.md` |
 | 2026-11-21 | **P2-2 跨端同步架构升级为 Shared JSON Data Contract（`npm run sync:ios`）**：移除 `scripts/build-ios-native.ts` 中 12,000 行 TS 字符串拼接 Swift 源码模板（瘦身至 ~440 行），新增 `src/game/sharedGameData.ts` 导出 `shared/game_data.json` 并注册至 Xcode `project.pbxproj`；`GameConfigGenerated.swift` 重构为 ~255 行 `JSONDecoder` 轻量加载器；`ios-native/` 下所有 `.swift` 文件正式转为独立源码维护且永不被同步脚本覆写 | `src/game/sharedGameData.ts`, `shared/game_data.json`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift`, `ios-native/project.yml`, `package.json`, `src/game/rules.test.ts` |
-
+| 2026-11-23 | **P0-2 Web 资源包体瘦身（61 MB → 4.5 MB）与加载链路优化**：新增 `npm run optimize:assets`（`scripts/optimize-web-assets.ts`）离线预裁切透明边并全量转 WebP，移除 `sharks_ec921c3b.png` / `fish_24bdaa5a.png` / `fish2_fc857cfa.png` 冗余加载与主线程 `getImageData` 猎物裁切，新增按深度带懒加载与鲨鱼按需加载契约单测（47/47 通过） | `package.json`, `scripts/optimize-web-assets.ts`, `scripts/build-ios-native.ts`, `src/game/spriteSheetManager.ts`, `src/game/rules.test.ts` |

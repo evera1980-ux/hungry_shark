@@ -1,6 +1,8 @@
 import {
+  CAMERA_ZOOM_MIN,
+  MIN_RENDER_ZOOM_FLOOR,
   computeParallaxBiomeTransitionState,
-  getParallaxLayerGrowthScales,
+  getParallaxLayerGrowthScalesFromZoom,
   quinticSmoothstep,
   worldYToMeterDepth,
 } from './rules';
@@ -1594,24 +1596,23 @@ export class ParallaxBackground {
       this.load();
     }
 
-    const targetRelScale = Number.isFinite(relativePreyScale)
-      ? Math.max(0.015, Math.min(1.0, relativePreyScale))
-      : 1.0;
+    const effZoom = Math.max(MIN_RENDER_ZOOM_FLOOR, renderZoom);
+    const targetZoomForParallax = Number.isFinite(relativePreyScale)
+      ? Math.max(CAMERA_ZOOM_MIN, Math.min(1.0, relativePreyScale))
+      : Math.max(CAMERA_ZOOM_MIN, Math.min(1.0, effZoom));
     if (
       dt <= 0 ||
-      Math.abs(targetRelScale - this.smoothedRelativePreyScale) > 0.45
+      Math.abs(targetZoomForParallax - this.smoothedRelativePreyScale) > 0.45
     ) {
-      this.smoothedRelativePreyScale = targetRelScale;
+      this.smoothedRelativePreyScale = targetZoomForParallax;
     } else {
       const lerpFactor = Math.min(1, dt * 4.5);
       this.smoothedRelativePreyScale +=
-        (targetRelScale - this.smoothedRelativePreyScale) * lerpFactor;
+        (targetZoomForParallax - this.smoothedRelativePreyScale) * lerpFactor;
     }
-    const bgScales = getParallaxLayerGrowthScales(
+    const bgScales = getParallaxLayerGrowthScalesFromZoom(
       this.smoothedRelativePreyScale
     );
-
-    const effZoom = Math.max(0.35, renderZoom);
     const rawDepthY = Math.max(0, sharkY);
     if (
       this.smoothedDepthRefY < 0 ||

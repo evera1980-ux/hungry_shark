@@ -7104,7 +7104,9 @@
       "gameover_sub": "本局捕食与基因进化数据统计",
       "stat_survival": "存活时长",
       "stat_peak_combo": "最高连击",
-      "btn_play_again": "再次捕食"
+      "btn_play_again": "再次捕食",
+      "hud_deep_dive_cue": "浅海缺乏巨兽猎物 · 撞穿海床潜入深海 (≥ {depth}m)",
+      "hud_deep_dive_sub": "深渊常驻巨型掠食猎物群落"
     },
     "en": {
       "game_title": "deepsea:evolution",
@@ -7367,7 +7369,9 @@
       "gameover_sub": "Predation & Genetic Evolution Summary",
       "stat_survival": "Survival Time",
       "stat_peak_combo": "Peak Combo",
-      "btn_play_again": "HUNT AGAIN"
+      "btn_play_again": "HUNT AGAIN",
+      "hud_deep_dive_cue": "SHALLOWS DEPLETED · SHATTER SEABED & DIVE DEEP (≥ {depth}m)",
+      "hud_deep_dive_sub": "Abyssal megafauna hunting grounds below"
     }
   }
 }

@@ -507,6 +507,45 @@ export const InGameHudOverlay: React.FC<InGameHudOverlayProps> = ({
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* Non-Blocking Deep-Dive Guidance Cue for Giant Sharks in Prey-Depleted Shallow Zones */}
+                <AnimatePresence>
+                  {tutorialStep === 'DONE' &&
+                    hudState.deepDivePromptMeters !== null && (
+                      <motion.div
+                        key="deep-dive-cue"
+                        data-testid="hud-deep-dive-cue"
+                        initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                        transition={{ duration: 0.24 }}
+                        className="pointer-events-none flex flex-col items-center px-3.5 py-1.5 rounded-xl bg-slate-950/78 border border-cyan-400/40 shadow-[0_6px_22px_rgba(8,145,178,0.32)] backdrop-blur-sm max-w-[92vw]"
+                      >
+                        <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-display font-extrabold text-cyan-200 hud-stroke leading-tight">
+                          <svg
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                            className="w-3.5 h-3.5 text-cyan-300 animate-bounce shrink-0"
+                            aria-hidden="true"
+                          >
+                            <path
+                              fillRule="evenodd"
+                              d="M10 3a.75.75 0 01.75.75v9.69l3.22-3.22a.75.75 0 111.06 1.06l-4.5 4.5a.75.75 0 01-1.06 0l-4.5-4.5a.75.75 0 111.06-1.06l3.22 3.22V3.75A.75.75 0 0110 3z"
+                              clipRule="evenodd"
+                            />
+                          </svg>
+                          <span>
+                            {t('hud_deep_dive_cue', {
+                              depth: hudState.deepDivePromptMeters,
+                            })}
+                          </span>
+                        </div>
+                        <span className="text-[9.5px] sm:text-[10.5px] font-display font-medium text-sky-300/85 leading-snug mt-0.5 text-center">
+                          {t('hud_deep_dive_sub')}
+                        </span>
+                      </motion.div>
+                    )}
+                </AnimatePresence>
               </div>
             </div>
 

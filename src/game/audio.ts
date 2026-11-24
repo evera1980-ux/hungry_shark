@@ -2,6 +2,7 @@ class SoundSystem {
   private ctx: AudioContext | null = null;
   public muted: boolean = false;
   private lastBoostSoundTime: number = 0;
+  private lastRockShatterSoundTime: number = 0;
 
   private getContext(): AudioContext | null {
     if (this.muted || typeof window === 'undefined') return null;
@@ -174,6 +175,35 @@ class SoundSystem {
     gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.016);
 
     this.connectAndSchedule(ctx, osc, gain, now, now + 0.017);
+  }
+
+  /** Heavy underwater rock & coral terrace shatter crunch for giant sharks */
+  public playRockShatter(): void {
+    const ctx = this.getContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    if (now - this.lastRockShatterSoundTime < 0.13) return;
+    this.lastRockShatterSoundTime = now;
+
+    // 1. Sub-bass rock fracture impact rumble
+    const rumble = ctx.createOscillator();
+    const rumbleGain = ctx.createGain();
+    rumble.type = 'sawtooth';
+    rumble.frequency.setValueAtTime(118 + Math.random() * 24, now);
+    rumble.frequency.exponentialRampToValueAtTime(34, now + 0.24);
+    rumbleGain.gain.setValueAtTime(0.24, now);
+    rumbleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.26);
+    this.connectAndSchedule(ctx, rumble, rumbleGain, now, now + 0.26);
+
+    // 2. Coral & limestone crack overtone
+    const crack = ctx.createOscillator();
+    const crackGain = ctx.createGain();
+    crack.type = 'triangle';
+    crack.frequency.setValueAtTime(340 + Math.random() * 90, now + 0.015);
+    crack.frequency.exponentialRampToValueAtTime(88, now + 0.14);
+    crackGain.gain.setValueAtTime(0.16, now + 0.015);
+    crackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    this.connectAndSchedule(ctx, crack, crackGain, now + 0.015, now + 0.15);
   }
 }
 

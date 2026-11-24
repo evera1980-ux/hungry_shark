@@ -1,5 +1,5 @@
 import { worldAssetRegistry } from './worldAssetRegistry';
-import { quinticSmoothstep } from '../rules';
+import { MIN_RENDER_ZOOM_FLOOR, quinticSmoothstep } from '../rules';
 import {
   WorldConfig,
   WorldConfigType,
@@ -13,17 +13,16 @@ import {
   getTerrainSamples,
   SEABED_TERRACE_TIERS,
   getSeabedTerraceAt,
+  isTerraceCellBreached,
 } from './terrainSystem';
 
 /**
- * 规范第 0.6 & 11 节：在 1.0x 世界空间渲染可碰撞的实体海床地壳层与多层《world_seabed_strips》手绘轮廓材质
+ * 规范第 0.6 & 11 节：在 1.0x 单一真实世界空间渲染可碰撞的实体海床地壳层与多层《world_seabed_strips》手绘轮廓材质
  * 同时绘制：
- * 1) 浅海与中层 5 级连续阶梯海床 (`SEABED_TERRACE_TIERS`) 与向远处弧形弯曲的下潜洞口（取消悬空立柱，各层海床 100% 连续不断开，可向下游动区呈现向远处弯曲的下潜蓝洞/深海洞口，解决中层巨大空间缺乏参照物的问题）；
+ * 1) 全水深 9 级连续阶梯海床 (`SEABED_TERRACE_TIERS`) 与向远处弧形弯曲的下潜洞口（支持巨鲨撞碎上层阶梯留下的破口）；
  * 2) 连续主海床 (`getTerrainSamples(chunkX)`) 及 4 条手绘海床轮廓材质带 (`coral_reef` / `rocky_shelf` / `underwater_canyon` / `deep_abyss`)。
  */
 const scratchSeabedRenderPoints: TerrainSamplePoint[] = [];
-let lastSeabedRelativeScale = 1.0;
-let seabedRelativeScalePhaseOffset = 0.0;
 
 export function renderPhysicalSeabed(
   ctx: CanvasRenderingContext2D,
@@ -34,19 +33,18 @@ export function renderPhysicalSeabed(
     viewH: number;
     renderZoom: number;
     relativePreyScale?: number;
+    breachedTerraceCells?: ReadonlySet<string>;
     config?: WorldConfigType;
   }
 ): void {
   const config = params.config ?? WorldConfig;
-  const zoom = Math.max(0.25, params.renderZoom);
-  // 100% 真实生物体长同比例全环境微缩：海床长度(X)、高度(Y)、洞口与地质构造严格随相对比例尺 (seabedScale) 各向同性等比缩小
-  const seabedScale = Number.isFinite(params.relativePreyScale)
-    ? Math.max(0.06, Math.min(1.0, params.relativePreyScale!))
-    : 1.0;
-  const halfSpanEngineX = params.viewW / (2 * zoom * seabedScale) + 180;
-  const halfSpanEngineY = params.viewH / (2 * zoom * seabedScale) + 180;
+  const zoom = Math.max(MIN_RENDER_ZOOM_FLOOR, params.renderZoom);
+  const halfSpanEngineX = params.viewW / (2 * zoom) + 180;
+  const halfSpanEngineY = params.viewH / (2 * zoom) + 180;
   const minEngineY = params.cameraEngineY - halfSpanEngineY;
   const maxEngineY = params.cameraEngineY + halfSpanEngineY;
+  const lowDetailLod = zoom < 0.45;
+  const skipEmbeddedMicroRocks = zoom < 0.35;
 
   // 若当前相机视野完全处于浅海环礁与海床最浅可能深度之上，则快速跳过
   const minPossibleFloorEngineY = Math.min(
@@ -100,7 +98,7 @@ export function renderPhysicalSeabed(
     const sh = stripCanvas.height;
     if (sw <= 2 || sh <= 2) return;
 
-    const u0 = ((((ex0 / tileSpan) + seabedRelativeScalePhaseOffset + uPhaseOffset) % 1) + 1) % 1;
+    const u0 = ((((ex0 / tileSpan) + uPhaseOffset) % 1) + 1) % 1;
     const uSpan = Math.min(0.95, segW / tileSpan);
     const sx = Math.min(sw - 1, Math.floor(u0 * sw));
     const totalSw = Math.max(2, Math.round(uSpan * sw));
@@ -155,14 +153,10 @@ export function renderPhysicalSeabed(
   };
 
   // ==========================================================================
-  // 以当前相机中心开启全环境等比几何微缩变换 (Isotropic Seabed Geometric Shrinking Transform)
-  // 海床长度 (X)、起伏高度 (Y)、洞口跨度与深度 100% 严格同比例动态微缩，彻底消除海床扁平拉伸
+  // 单一 1:1 真实世界空间绘制（缩放完全交由外层原生 Canvas 2D 真相机矩阵处理）
   // ==========================================================================
   ctx.save();
   try {
-  ctx.translate(params.cameraEngineX, params.cameraEngineY);
-  ctx.scale(seabedScale, seabedScale);
-  ctx.translate(-params.cameraEngineX, -params.cameraEngineY);
 
   // ==========================================================================
   // A. 绘制浅海与中层 5 级连续阶梯海床 (`SEABED_TERRACE_TIERS`) 与向远处弯曲的弧形下潜洞口
@@ -246,7 +240,7 @@ export function renderPhysicalSeabed(
         const bowlRightX = seamWorldX + bowlSpan;
         if (bowlRightX < leftWorldX - 60 || bowlLeftX > rightWorldX + 60) continue;
 
-        const bowlSteps = 28;
+        const bowlSteps = lowDetailLod ? 16 : 28;
         const bowlSegW = (bowlRightX - bowlLeftX) / bowlSteps;
         const bowlPts: Array<{
           x: number;
@@ -502,7 +496,7 @@ export function renderPhysicalSeabed(
           continue;
         }
 
-        const stepCount = 36;
+        const stepCount = lowDetailLod ? 20 : 36;
         const segW = (segEndX - segStartX) / stepCount;
         const allPts: Array<{
           x: number;
@@ -517,8 +511,10 @@ export function renderPhysicalSeabed(
           const wx = segStartX + s * segW;
           const mainFloorY = getFloorDepthAt(wx, config);
           const sample = getSeabedTerraceAt(wx, tIdx, config);
-          // 仅在主海床下潜至 > graftStartMainY - 20m 时启用当前层海床段（含 20m 锚定山根）
-          const valid = mainFloorY > tier.graftStartMainY - 20;
+          // 仅在主海床下潜至 > graftStartMainY - 20m 且该格未被巨鲨撞碎时绘制前景实心岩段
+          const valid =
+            mainFloorY > tier.graftStartMainY - 20 &&
+            !isTerraceCellBreached(tIdx, wx, params.breachedTerraceCells);
           allPts.push({
             x: wx / WORLD_UNITS_PER_METER,
             topY: sample.topFloorY,
@@ -621,7 +617,12 @@ export function renderPhysicalSeabed(
                 }
 
                 // 在海床断面内按确定性哈希镶嵌阶梯砂岩与巨石 (`mossy_slab` / `basalt_boulder` / `jagged_spire`)
-                if (archThick > 155 && (i & 1) === 0 && (rockSlab || rockBoulder || rockSpire)) {
+                if (
+                  !skipEmbeddedMicroRocks &&
+                  archThick > 155 &&
+                  (i & 1) === 0 &&
+                  (rockSlab || rockBoulder || rockSpire)
+                ) {
                   const rHash = mixSubsystemSeed(
                     config.worldSeed,
                     config.generatorVersion,
@@ -792,8 +793,8 @@ export function renderPhysicalSeabed(
     worldYToEngineY(config.bounds.maxDepth) + 160
   );
 
-  // 计算每 100m 网格段内的 4×25m 自然山脊样条插值高度（端点 subT=0/1 严格对齐物理碰撞节点，段内消除 100px 直线折角）
-  const SUB_STEPS = 4;
+  // 计算每 100m 网格段内的自然山脊样条插值高度（高倍拉远 zoom < 0.45 时自适应降采样为 2 段，稳守 60FPS）
+  const SUB_STEPS = lowDetailLod ? 2 : 4;
   const evalSubSegmentEngineY = (segIdx: number, subStep: number): number => {
     const p0 = samplePoints[segIdx];
     const p1 = samplePoints[segIdx + 1];
@@ -1019,9 +1020,9 @@ export function renderPhysicalSeabed(
         }
       }
 
-      // 2.3 山体断面内嵌阶梯岩块与巨石露头（当山体在视野内露出高度 > 160px 时，按确定性哈希镶嵌手绘阶梯岩架）
+      // 2.3 山体断面内嵌阶梯岩块与巨石露头（当山体在视野内露出高度 > 160px 且非极远镜头时，按确定性哈希镶嵌手绘阶梯岩架）
       const visMountainH = maxEngineY - minSegEy;
-      if (visMountainH > 160 && (rockSlab || rockBoulder || rockSpire)) {
+      if (!skipEmbeddedMicroRocks && visMountainH > 160 && (rockSlab || rockBoulder || rockSpire)) {
         const segGridIdx = Math.round(ex0 / 100);
         const segHash = mixSubsystemSeed(
           config.worldSeed,
@@ -1114,7 +1115,11 @@ export function renderPhysicalSeabed(
             ) {
               const midWorldX = (prevSubX + nextSubX) * 0.5 * WORLD_UNITS_PER_METER;
               const terraceHere = getSeabedTerraceAt(midWorldX, tIdx, config);
-              if (terraceHere.active && terraceHere.topFloorY < segDepthM - 4) {
+              if (
+                terraceHere.active &&
+                !isTerraceCellBreached(tIdx, midWorldX, params.breachedTerraceCells) &&
+                terraceHere.topFloorY < segDepthM - 4
+              ) {
                 const fadeInEnd = tier.graftStartMainY + 52;
                 const fadeOutStart = tier.graftFuseMainY - 42;
                 const tierAlpha =

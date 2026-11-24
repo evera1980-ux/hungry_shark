@@ -175,8 +175,15 @@ public struct UiBannerButtonView<LeftContent: View>: View {
 /// Top-Left Frameless Avatar & Angled HP/Boost Bar (`buttons_16e3a0cf.png`: UI_PLATE_AVATAR_BAR)
 public struct UiAvatarDataBarView: View {
     @ObservedObject var vm: GameViewModel
+    @ObservedObject var telemetry: HudTelemetryStore
     @ObservedObject private var atlasManager = SpriteAtlasManager.shared
     public var height: CGFloat = 68
+
+    public init(vm: GameViewModel, height: CGFloat = 68) {
+        self._vm = ObservedObject(wrappedValue: vm)
+        self._telemetry = ObservedObject(wrappedValue: vm.telemetry)
+        self.height = height
+    }
 
     public var body: some View {
         let _ = atlasManager.atlasRevision
@@ -187,9 +194,9 @@ public struct UiAvatarDataBarView: View {
         let innerD = height * (metrics.innerDiaPctH / 100.0)
         let outerD = height * (metrics.outerDiaPctH / 100.0)
 
-        let hpPct = max(0.0, min(1.0, vm.hp / max(1.0, vm.maxHp)))
-        let ghostPct = max(hpPct, min(1.0, vm.ghostHpPct / 100.0))
-        let energyPct = max(0.0, min(1.0, vm.energy / max(1.0, vm.maxEnergy)))
+        let hpPct = max(0.0, min(1.0, telemetry.hp / max(1.0, telemetry.maxHp)))
+        let ghostPct = max(hpPct, min(1.0, telemetry.ghostHpPct / 100.0))
+        let energyPct = max(0.0, min(1.0, telemetry.energy / max(1.0, telemetry.maxEnergy)))
         let xpPct = max(0.0, min(1.0, Double(vm.xp) / Double(max(1, vm.xpRequired))))
         let nextTarget = GameRules.getNextEvolutionTarget(save: vm.save)
         let evoReady = nextTarget?.check.canUnlockNow ?? false
@@ -314,7 +321,7 @@ public struct UiAvatarDataBarView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.72)
                             Spacer(minLength: 2)
-                            Text("\(Int(vm.hp))/\(Int(vm.maxHp))")
+                            Text("\(Int(telemetry.hp))/\(Int(telemetry.maxHp))")
                                 .font(.system(size: 7.5, weight: .black, design: .monospaced))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
@@ -891,9 +898,7 @@ public struct ContentView: View {
         s.scaleMode = .resizeFill
         return s
     }()
-    @State private var knobOffset: CGSize = .zero
-    @GestureState private var isJoystickDragging: Bool = false
-    @GestureState private var isBoostDragging: Bool = false
+    @State private var joystickResetToken: Int = 0
 
     public init() {
         GADInfoPlistRuntimePatch.installIfNeeded()
@@ -921,40 +926,27 @@ public struct ContentView: View {
             }
         }
         .statusBarHidden(true)
-        .onChange(of: isJoystickDragging) { dragging in
-            if !dragging {
-                knobOffset = .zero
-                vm.joyDx = 0
-                vm.joyDy = 0
-                vm.joyActive = false
-            }
-        }
-        .onChange(of: isBoostDragging) { dragging in
-            if !dragging {
-                vm.isBoostingHeld = false
-            }
-        }
         .onChange(of: vm.gameState) { _ in
-            knobOffset = .zero
+            joystickResetToken &+= 1
             vm.resetInputState()
         }
         .onChange(of: vm.runSequenceId) { _ in
-            knobOffset = .zero
+            joystickResetToken &+= 1
             vm.resetInputState()
         }
         .onChange(of: vm.showEvolutionAtlas) { shown in
             if shown {
-                knobOffset = .zero
+                joystickResetToken &+= 1
                 vm.resetInputState()
             }
         }
     }
 
     private var oceanSpriteCanvasLayer: some View {
-        SpriteView(scene: scene, preferredFramesPerSecond: 120)
+        SpriteView(scene: scene, preferredFramesPerSecond: 60)
             .ignoresSafeArea()
             .onAppear {
-                atlasManager.startAsyncPreloadIfNeeded()
+                atlasManager.startAsyncPreloadIfNeeded(initialSharkId: vm.activeSharkId)
                 scene.viewModel = vm
                 scene.refreshSharkTexture()
             }
@@ -985,7 +977,7 @@ public struct ContentView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
 
-                hudRow2Overlays
+                HudRow2StatusOverlayView(vm: vm, telemetry: vm.telemetry)
                     .allowsHitTesting(false)
                 Spacer()
             }
@@ -993,7 +985,7 @@ public struct ContentView: View {
             VStack {
                 Spacer()
                 HStack(alignment: .bottom) {
-                    sonarJoystick
+                    SonarJoystickView(vm: vm, resetToken: joystickResetToken)
                         .padding(.leading, 26)
                         .padding(.bottom, 18)
                     Spacer(minLength: 6)
@@ -1208,11 +1200,7 @@ public struct ContentView: View {
                     .foregroundColor(Color(red: 253/255, green: 224/255, blue: 71/255))
             }
             Text("·").foregroundColor(.gray.opacity(0.6))
-            HStack(spacing: 3) {
-                UiAtlasIconView(iconKey: "UI_ICON_DEPTH", size: iconSz)
-                Text("\(vm.depthMeters)m")
-                    .foregroundColor(vm.depthMeters >= 1150 ? .pink : (vm.depthMeters >= 520 ? .purple : .cyan))
-            }
+            TelemetryDepthReadoutView(telemetry: vm.telemetry, iconSize: iconSz)
             Text("·").foregroundColor(.gray.opacity(0.6))
             // Target Bounty Fish
             HStack(spacing: 3) {
@@ -1258,52 +1246,6 @@ public struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - HUD Row 2 (Compact Combo & Frenzy Pills docked right under Top Telemetry Bar)
-    private var hudRow2Overlays: some View {
-        HStack(spacing: 8) {
-            if vm.comboCount > 1 {
-                let comboText = vm.t(
-                    "hud_combo",
-                    [
-                        "count": "\(vm.comboCount)",
-                        "mult": String(format: "%.1f", vm.huntingHeatBuff.scoreMultiplier)
-                    ]
-                )
-                HStack(spacing: 4) {
-                    UiAtlasIconView(iconKey: "UI_ICON_COMBO_FIRE", size: 15)
-                    Text(comboText)
-                        .font(.system(size: 10, weight: .black))
-                        .foregroundColor(.white)
-                    if vm.huntingHeatBuff.heatLevel > 0 {
-                        Text("· \(vm.t(vm.huntingHeatBuff.labelKey)) ⚡+\(Int((vm.huntingHeatBuff.speedMultiplier - 1.0) * 100))%")
-                            .font(.system(size: 9, weight: .heavy))
-                            .foregroundColor(.yellow)
-                    }
-                }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 2.5)
-                .background(
-                    Capsule()
-                        .fill(LinearGradient(colors: [.orange.opacity(0.84), .red.opacity(0.84)], startPoint: .leading, endPoint: .trailing))
-                        .overlay(Capsule().stroke(Color.yellow.opacity(0.85), lineWidth: 1))
-                )
-            }
-
-            if vm.frenzyActive {
-                Text("🔥 \(vm.t("hud_frenzy")) · \(String(format: "%.1fs", vm.frenzyTimer))")
-                    .font(.system(size: 10, weight: .black))
-                    .foregroundColor(.yellow)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 2.5)
-                    .background(
-                        Capsule()
-                            .fill(Color.red.opacity(0.84))
-                            .overlay(Capsule().stroke(Color.yellow, lineWidth: 1))
-                    )
-            }
-        }
-    }
-
     // MARK: - Bottom-Center Compact Onboarding Guide Pill (Never blocks the swimming shark!)
     private var onboardingBottomBanner: some View {
         HStack(spacing: 7) {
@@ -1326,9 +1268,7 @@ public struct ContentView: View {
                     .foregroundColor(.yellow)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                Text(String(format: "(%.1f/1.2s)", vm.onboardingBoostSeconds))
-                    .font(.system(size: 10, weight: .black, design: .monospaced))
-                    .foregroundColor(.white)
+                OnboardingBoostProgressLabel(telemetry: vm.telemetry)
             } else if vm.onboardingStep == .HANDS_ON_UPGRADE {
                 Text("💪")
                     .font(.system(size: 11))
@@ -1368,58 +1308,6 @@ public struct ContentView: View {
                 .fill(Color(red: 2/255, green: 12/255, blue: 32/255).opacity(0.82))
                 .overlay(Capsule().stroke(Color.cyan.opacity(0.5), lineWidth: 1))
         )
-    }
-
-    // MARK: - Bottom-Left Sonar Virtual Joystick (using UI_JOYSTICK_BASE & UI_JOYSTICK_KNOB from icons_f5128c12.png)
-    private var sonarJoystick: some View {
-        ZStack {
-            // Outer Sonar Base Ring from icons_f5128c12.png
-            UiAtlasIconView(iconKey: "UI_JOYSTICK_BASE", size: 118)
-                .opacity(vm.joyActive ? 0.96 : 0.78)
-
-            // Crosshair subtle ticks
-            Circle()
-                .stroke(Color.cyan.opacity(vm.joyActive ? 0.45 : 0.18), lineWidth: 1)
-                .frame(width: 82, height: 82)
-
-            // Draggable Inner Sonar Core Knob from icons_f5128c12.png
-            UiAtlasIconView(iconKey: "UI_JOYSTICK_KNOB", size: 58)
-                .shadow(color: .cyan.opacity(vm.joyActive ? 0.85 : 0.35), radius: 8)
-                .offset(knobOffset)
-        }
-        .frame(width: 124, height: 124)
-        .contentShape(Circle())
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .updating($isJoystickDragging) { _, state, _ in
-                    state = true
-                }
-                .onChanged { value in
-                    let maxR: CGFloat = 42
-                    let dx = value.translation.width
-                    let dy = value.translation.height
-                    let dist = max(0.001, hypot(dx, dy))
-                    let clampedDist = min(maxR, dist)
-                    let nx = dx / dist
-                    let ny = dy / dist
-                    knobOffset = CGSize(width: nx * clampedDist, height: ny * clampedDist)
-                    vm.joyDx = nx * (clampedDist / maxR)
-                    vm.joyDy = ny * (clampedDist / maxR)
-                    vm.joyActive = true
-                }
-                .onEnded { _ in
-                    knobOffset = .zero
-                    vm.joyDx = 0
-                    vm.joyDy = 0
-                    vm.joyActive = false
-                }
-        )
-        .onDisappear {
-            knobOffset = .zero
-            vm.joyDx = 0
-            vm.joyDy = 0
-            vm.joyActive = false
-        }
     }
 
 public struct FixedEvolutionHudButton: View {
@@ -1578,7 +1466,6 @@ public struct FixedEvolutionHudButton: View {
         let canUpgrade = vm.activeUpgradeLevel < 10 && vm.save.bankedCoins >= upCoinCost && vm.save.bankedGenes >= upGeneCost
         let nextTarget = GameRules.getNextEvolutionTarget(save: vm.save)
         let evoReady = nextTarget?.check.canUnlockNow ?? false
-        let energyPct = max(0.0, min(1.0, vm.energy / max(1.0, vm.maxEnergy)))
 
         return ZStack(alignment: .bottomTrailing) {
             // 0. Fixed Evolution Button directly above Body Upgrade (x: -4, y: -164)
@@ -1643,63 +1530,8 @@ public struct FixedEvolutionHudButton: View {
             }
             .offset(x: -4, y: -98)
 
-            // 4. Primary Bottom-Right Anchor: Hold-to-Boost Medallion (UI_BTN_BOOST + Circular Energy Ring)
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: vm.isBoostingHeld
-                                ? [Color.cyan.opacity(0.65), Color.blue.opacity(0.92)]
-                                : [Color(red: 12/255, green: 34/255, blue: 68/255).opacity(0.88), Color(red: 2/255, green: 8/255, blue: 23/255).opacity(0.95)],
-                            center: .center,
-                            startRadius: 4,
-                            endRadius: 42
-                        )
-                    )
-                    .frame(width: 82, height: 82)
-
-                // Circular Energy Ring
-                Circle()
-                    .stroke(Color.white.opacity(0.14), lineWidth: 4)
-                    .frame(width: 76, height: 76)
-                Circle()
-                    .trim(from: 0, to: CGFloat(energyPct))
-                    .stroke(
-                        vm.frenzyActive ? Color.yellow : Color.cyan,
-                        style: StrokeStyle(lineWidth: 4, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-                    .frame(width: 76, height: 76)
-
-                UiAtlasIconView(iconKey: "UI_BTN_BOOST", size: 62)
-                    .scaleEffect(vm.isBoostingHeld ? 0.92 : 1.0)
-
-                VStack {
-                    Spacer()
-                    Text(vm.t("hud_mobile_boost"))
-                        .font(.system(size: 10, weight: .black))
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.black.opacity(0.78)))
-                }
-                .frame(height: 84)
-            }
-            .frame(width: 84, height: 84)
-            .contentShape(Circle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .updating($isBoostDragging) { _, state, _ in
-                        state = true
-                    }
-                    .onChanged { _ in vm.isBoostingHeld = true }
-                    .onEnded { _ in vm.isBoostingHeld = false }
-            )
-            .onDisappear {
-                vm.isBoostingHeld = false
-            }
+            // 4. Primary Bottom-Right Anchor: Isolated Hold-to-Boost Medallion (iOS-P1-1)
+            BoostMedallionView(vm: vm, telemetry: vm.telemetry)
         }
     }
 

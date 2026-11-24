@@ -1,6 +1,7 @@
 import { GAME_CONFIG } from '../config';
 import {
   addEvolutionProgress,
+  CAMERA_ZOOM_MIN,
   computeHuntingHeatBuff,
   getDepthZone,
   getDebugPreySizeMultiplier,
@@ -9,6 +10,7 @@ import {
   getGoldOverdriveCost,
   getPreyRelativeVisualScale,
   getXpRequiredForLevel,
+  MIN_RENDER_ZOOM_FLOOR,
   resolvePreyEncounter,
 } from '../rules';
 import {
@@ -24,13 +26,15 @@ import {
 } from '../sharkEvolutionConfig';
 import { soundFX } from '../audio';
 import { adManager } from '../adManager';
-import { parallaxBackground } from '../parallaxBackground';
 import { spriteSheetManager } from '../spriteSheetManager';
 import {
+  detectShatterableTerraceHit,
   engineXToWorldX,
+  formatTerraceBreachKey,
   meterDepthToWorldY,
   resolveSeabedCollision,
   resolveSeabedKineticStep,
+  TERRACE_BREACH_CELL_WIDTH,
   worldChunkLifecycleManager,
   worldYToMeterDepth,
 } from '../worldGenerationSystem';
@@ -156,19 +160,22 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
         shark.facingScaleX +=
           (shark.facingDir - shark.facingScaleX) * Math.min(1, dt * 13.5);
 
-        const curSeabedScale = Math.max(
-          0.015,
-          Math.min(1.0, parallaxBackground.getSmoothedRelativePreyScale())
+        const titleCamZoom = Math.max(
+          CAMERA_ZOOM_MIN,
+          shark.stats.cameraZoom
         );
+        const titleWorldScale = shark.stats.worldScale ?? shark.stats.scale;
         const patrolSpeed =
-          ((shark.stats.moveSpeed || 280) * 0.62) / curSeabedScale;
+          ((shark.stats.moveSpeed || 280) * 0.62) / titleCamZoom;
         shark.vx +=
           (Math.cos(shark.angle) * patrolSpeed - shark.vx) * Math.min(1, dt * 7);
         shark.vy +=
           (Math.sin(shark.angle) * patrolSpeed - shark.vy) * Math.min(1, dt * 7);
 
+        const minTitleY = Math.max(190, 22 * titleWorldScale + 75);
+        const maxTitleY = Math.max(375, minTitleY + 140);
         shark.x = infiniteWorldManager.wrapEntityX(shark.x + shark.vx * dt);
-        shark.y = Math.max(190, Math.min(375, shark.y + shark.vy * dt));
+        shark.y = Math.max(minTitleY, Math.min(maxTitleY, shark.y + shark.vy * dt));
 
         const cadenceFactor = Math.max(
           0.42,
@@ -178,11 +185,11 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           )
         );
         const speedNorm =
-          (Math.hypot(shark.vx, shark.vy) * curSeabedScale) /
+          (Math.hypot(shark.vx, shark.vy) * titleCamZoom) /
           Math.max(180, shark.stats.moveSpeed || 280);
         shark.swimPhase += dt * (4.8 + speedNorm * 6.8) * cadenceFactor;
 
-        sim.camera.zoom = 1.15;
+        sim.camera.zoom = Math.max(0.26, shark.stats.cameraZoom * 1.15);
         // Keep the hero shark vertically centered (50% viewport height) on the title screen
         sim.camera.x = shark.x;
         sim.camera.y = shark.y;
@@ -341,6 +348,11 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
         const isBoosting =
           wantsBoost && (shark.energy > 2 || shark.frenzyTimer > 0);
 
+        const worldScale = shark.stats.worldScale ?? shark.stats.scale;
+        const zoomFactor = Math.max(CAMERA_ZOOM_MIN, shark.stats.cameraZoom);
+        const invZoom = 1 / zoomFactor;
+        const fxScale = Math.max(1, Math.sqrt(worldScale));
+
         if (isBoosting) {
           shark.energy = Math.max(
             0,
@@ -370,7 +382,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
               soundFX.playEvolution();
               spawnFloatText(
                 shark.x,
-                shark.y - 48,
+                shark.y - 48 * worldScale,
                 'float_supply_drop',
                 langRef.current === 'zh'
                   ? '🎁 新手补给 +80🪙 +20🧬!'
@@ -380,16 +392,16 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
               );
             }
           }
-          // 柔和尾迹气泡：消除过强后坐力式向后喷射气泡带来的“逆向水流冲击”错觉
+          // 柔和尾迹气泡（按真实世界体长 worldScale 锚定尾尖位置与粒子尺寸）
           if (Math.random() < 0.4) {
-            const tailX = shark.x - Math.cos(shark.angle) * 44 * shark.stats.scale;
-            const tailY = shark.y - Math.sin(shark.angle) * 44 * shark.stats.scale;
+            const tailX = shark.x - Math.cos(shark.angle) * 44 * worldScale;
+            const tailY = shark.y - Math.sin(shark.angle) * 44 * worldScale;
             spawnParticle(
-              tailX + (Math.random() - 0.5) * 8,
-              tailY + (Math.random() - 0.5) * 8,
-              -Math.cos(shark.angle) * (32 + Math.random() * 24),
-              -Math.sin(shark.angle) * (32 + Math.random() * 24),
-              2.2 + Math.random() * 2.8,
+              tailX + (Math.random() - 0.5) * 8 * fxScale,
+              tailY + (Math.random() - 0.5) * 8 * fxScale,
+              -Math.cos(shark.angle) * (32 + Math.random() * 24) * fxScale,
+              -Math.sin(shark.angle) * (32 + Math.random() * 24) * fxScale,
+              (2.2 + Math.random() * 2.8) * fxScale,
               0.38,
               shark.frenzyTimer > 0 ? '#fde047' : '#38bdf8',
               'BUBBLE'
@@ -401,7 +413,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             shark.score,
             activeSharkForm.row
           );
-          const surfaceBreatherBonus = shark.y < 48 ? 18 : 0;
+          const surfaceBreatherBonus = shark.y < 48 * worldScale ? 18 : 0;
           const boostRegenMult = shark.stats.boostRegenMultiplier ?? 1.0;
           shark.energy = Math.min(
             shark.stats.maxEnergy,
@@ -413,23 +425,18 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           );
         }
 
-        const curSeabedScale = Math.max(
-          0.015,
-          Math.min(1.0, parallaxBackground.getSmoothedRelativePreyScale())
-        );
-        // Keep shark stationary in place when joystick / directional controls are not active
+        // 真相机变焦下的单一 1:1 世界速度：保持各体长鲨鱼在屏幕上的巡航/冲刺体感速度一致
         const targetScreenSpeed = isBoosting
           ? shark.stats.boostSpeed
           : inputMag > 0.08
           ? shark.stats.moveSpeed * Math.min(1, Math.max(0.55, inputMag))
           : 0;
-        const targetSpeed = targetScreenSpeed / curSeabedScale;
+        const targetSpeed = targetScreenSpeed * invZoom;
 
         if (targetSpeed === 0) {
           shark.vx = 0;
           shark.vy = 0;
         } else {
-          // 冲刺状态下使用超灵敏即时响应加速度 (28.0) 且转向时矢量紧密贴合朝向，彻底消除漂移滞后与逆向阻水手感
           const accelRate = isBoosting ? 28 : 18;
           shark.vx += (Math.cos(shark.angle) * targetSpeed - shark.vx) * Math.min(1, simDt * accelRate);
           shark.vy += (Math.sin(shark.angle) * targetSpeed - shark.vy) * Math.min(1, simDt * accelRate);
@@ -441,15 +448,22 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           }
         }
 
-        // 阶段 B：1.0x 世界层连续海床与浅海镂空珊瑚环礁拱台切向等速物理碰撞解算
-        // 严格将沿斜坡上坡/下坡及洞口向下斜线水平移动的位移投影至单位切向量并守恒二维步长，彻底消除顺地形/沿洞口斜线移动的速度叠加！
+        // 单一 1:1 世界海床物理碰撞解算 + 巨鲨撞碎上层阶梯海床 (Tiers 0~4)
+        const sharkRadiusWorld = 22 * worldScale;
+        const prevSharkX = shark.x;
+        const prevSharkY = shark.y;
         const sharkStep = resolveSeabedKineticStep(
           shark.x,
           shark.y,
           shark.vx,
           shark.vy,
           simDt,
-          (22 * shark.stats.scale) / curSeabedScale
+          sharkRadiusWorld,
+          undefined,
+          {
+            sharkLengthM: shark.stats.realBodyLengthM,
+            breachedCells: sim.breachedTerraceCells,
+          }
         );
         shark.x = sharkStep.engineX;
         shark.y = sharkStep.engineY;
@@ -464,13 +478,78 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           }
         }
 
+        // 检测巨鲨是否撞穿可破碎的上层阶梯海床，写入局部破口集合并触发碎岩反馈
+        const shatterHit = detectShatterableTerraceHit(
+          prevSharkX,
+          prevSharkY,
+          shark.x,
+          shark.y,
+          sharkRadiusWorld,
+          shark.stats.realBodyLengthM ?? 0.8,
+          sim.breachedTerraceCells
+        );
+        if (shatterHit) {
+          const cellSpan = Math.max(
+            1,
+            Math.ceil(sharkRadiusWorld / TERRACE_BREACH_CELL_WIDTH)
+          );
+          for (
+            let c = shatterHit.cellIndex - cellSpan;
+            c <= shatterHit.cellIndex + cellSpan;
+            c++
+          ) {
+            const key = formatTerraceBreachKey(shatterHit.tierIndex, c);
+            if (!sim.breachedTerraceCells.has(key)) {
+              if (sim.breachedTerraceCells.size >= 512) {
+                const oldest = sim.breachedTerraceCells.values().next().value;
+                if (oldest !== undefined) {
+                  sim.breachedTerraceCells.delete(oldest);
+                }
+              }
+              sim.breachedTerraceCells.add(key);
+            }
+          }
+          if (shatterHit.isNewlyBreached) {
+            shark.vx *= 0.92;
+            shark.vy *= 0.92;
+            shark.cameraShakeTrauma = Math.max(shark.cameraShakeTrauma, 0.28);
+            soundFX.playRockShatter();
+            const isCoralTier = shatterHit.biomeId === 'coral_reef';
+            for (let d = 0; d < 18; d++) {
+              const ang = (d * Math.PI * 2) / 18 + (Math.random() - 0.5) * 0.45;
+              const spd = (95 + Math.random() * 190) * fxScale;
+              const isBubble = d % 3 === 0;
+              spawnParticle(
+                shark.x + Math.cos(ang) * sharkRadiusWorld * 0.45,
+                shark.y + Math.sin(ang) * sharkRadiusWorld * 0.45,
+                Math.cos(ang) * spd,
+                Math.sin(ang) * spd,
+                (isBubble ? 4 + Math.random() * 4 : 5.5 + Math.random() * 5.5) * fxScale,
+                0.55 + Math.random() * 0.35,
+                isBubble
+                  ? '#bae6fd'
+                  : isCoralTier
+                  ? d % 2 === 0
+                    ? '#d97706'
+                    : '#f59e0b'
+                  : d % 2 === 0
+                  ? '#64748b'
+                  : '#94a3b8',
+                isBubble ? 'BUBBLE' : 'SPARK'
+              );
+            }
+          }
+        }
+
         // 模块 A：无限世界与动态边界控制器 (InfiniteWorldManager)
         infiniteWorldManager.update(dt, shark, sim.camera);
         sim.camera.zoom +=
-          (shark.stats.cameraZoom - sim.camera.zoom) * Math.min(1, dt * 3.5);
-        // 海平面镜头上界锚定：当鲨鱼游向海平面 (shark.y -> 0) 时，镜头顶部锚定在海面水体不再向上穿出天空，
-        // 让鲨鱼在屏幕内真实游向顶部海面波浪，同时保持远景海水与远景礁石静止稳定
-        const effCamZoom = Math.max(0.35, sim.camera.zoom * aspectZoomFactor);
+          (shark.stats.cameraZoom - sim.camera.zoom) * Math.min(1, dt * 4.2);
+        // 海平面镜头上界锚定：允许真相机变焦降至 MIN_RENDER_ZOOM_FLOOR (0.14)
+        const effCamZoom = Math.max(
+          MIN_RENDER_ZOOM_FLOOR,
+          sim.camera.zoom * aspectZoomFactor
+        );
         const minSurfaceCameraY = Math.max(72, (viewH * 0.5 - 76) / effCamZoom);
         if (sim.camera.y < minSurfaceCameraY) {
           sim.camera.y = minSurfaceCameraY;
@@ -484,6 +563,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           cameraX: sim.camera.x,
           cameraY: sim.camera.y,
           sharkVx: shark.vx,
+          renderZoom: effCamZoom,
         };
 
         const currentDepthMeters = worldYToMeterDepth(shark.y);
@@ -499,7 +579,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           shark.reachedTwilight = true;
           spawnFloatText(
             shark.x,
-            shark.y - 46,
+            shark.y - 46 * worldScale,
             'float_zone_twilight',
             '',
             '#38bdf8',
@@ -510,7 +590,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           shark.cameraShakeTrauma = Math.max(shark.cameraShakeTrauma, 0.35);
           spawnFloatText(
             shark.x,
-            shark.y - 46,
+            shark.y - 46 * worldScale,
             'float_zone_abyss',
             '',
             '#c084fc',
@@ -527,7 +607,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           )
         );
         const speedNorm =
-          (Math.hypot(shark.vx, shark.vy) * curSeabedScale) /
+          (Math.hypot(shark.vx, shark.vy) * zoomFactor) /
           Math.max(180, shark.stats.moveSpeed || 280);
         const boostCadenceBonus =
           isBoosting || shark.frenzyTimer > 0 ? 4.2 : 0;
@@ -556,15 +636,47 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           );
         }
 
-        // Switch bounty target to a native species of the current depth zone if shark leaves habitat
-        if (
-          shark.y < sim.targetBounty.preyConfig.minDepth - 140 ||
-          shark.y > sim.targetBounty.preyConfig.maxDepth + 140
-        ) {
+        // 巨鲨浅海空海检测与深潜引导计时：保持巨鲨浅海无鱼可吃状态，滞留 >1.5s 触发 HUD 下潜提示
+        const minPreyLengthCm = (shark.stats.realBodyLengthM ?? 0.8) * 13.3;
+        const hasViableFoodHere = ecosystemSpawner.hasViablePreyAtDepth(
+          shark.y,
+          shark.stats.realBodyLengthM
+        );
+        if (!hasViableFoodHere) {
+          sim.shallowDepletionTimer += dt;
+          if (sim.shallowDepletionTimer >= 1.5) {
+            const minViableY = ecosystemSpawner.getMinViableWorldYForShark(
+              shark.stats.realBodyLengthM
+            );
+            sim.deepDiveTargetMeters =
+              minViableY !== null
+                ? Math.max(
+                    100,
+                    Math.ceil(worldYToMeterDepth(minViableY) / 50) * 50
+                  )
+                : 750;
+          }
+        } else {
+          sim.shallowDepletionTimer = 0;
+          sim.deepDiveTargetMeters = null;
+        }
+
+        // Switch bounty target if too small for giant shark OR shark leaves habitat while viable prey exist at current depth
+        const currentBountyLenCm =
+          sim.targetBounty.preyConfig.bodyLengthCm ??
+          sim.targetBounty.preyConfig.radius * 2.5;
+        const bountyTooSmall =
+          minPreyLengthCm > 0 && currentBountyLenCm < minPreyLengthCm;
+        const leftBountyHabitat =
+          hasViableFoodHere &&
+          (shark.y < sim.targetBounty.preyConfig.minDepth - 140 ||
+            shark.y > sim.targetBounty.preyConfig.maxDepth + 140);
+        if (bountyTooSmall || leftBountyHabitat) {
           const zoneNativeTarget = rollTargetBountyConfig(
             shark.stats.biteTier,
             shark.y,
-            sim.targetBounty.preyConfig.id
+            sim.targetBounty.preyConfig.id,
+            minPreyLengthCm
           );
           sim.targetBounty = {
             preyConfig: zoneNativeTarget,
@@ -588,22 +700,21 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           curViewportBounds
         );
 
-        // Mouth & Front-Body hitbox world coordinates
-        const mouthX = shark.x + Math.cos(shark.angle) * 32 * shark.stats.scale;
-        const mouthY = shark.y + Math.sin(shark.angle) * 32 * shark.stats.scale;
-        const frontBodyX = shark.x + Math.cos(shark.angle) * 10 * shark.stats.scale;
-        const frontBodyY = shark.y + Math.sin(shark.angle) * 10 * shark.stats.scale;
-        const mouthRadius = 28 * shark.stats.scale;
+        // Mouth & Front-Body hitbox in 1:1 world space (scaled by worldScale)
+        const mouthX = shark.x + Math.cos(shark.angle) * 32 * worldScale;
+        const mouthY = shark.y + Math.sin(shark.angle) * 32 * worldScale;
+        const frontBodyX = shark.x + Math.cos(shark.angle) * 10 * worldScale;
+        const frontBodyY = shark.y + Math.sin(shark.angle) * 10 * worldScale;
+        const mouthRadius = 28 * worldScale;
+        const aiDistScale = Math.max(1, Math.sqrt(worldScale));
         const atlasBonus = getGlobalAtlasBonuses(metaSaveRef.current);
 
         // Update Prey AI, Jaw Suction Assist & Check Mouth Devour Collision
         for (let i = sim.preyList.length - 1; i >= 0; i--) {
           const prey = sim.preyList[i];
 
-          // 物理判定与视觉渲染坐标严格同源对齐（共用相对海床微缩比例尺，彻底消除冲刺逆流漂移与吃鱼错位）
-          const effPreyX = shark.x + (prey.x - shark.x) * curSeabedScale;
-          const effPreyY = shark.y + (prey.y - shark.y) * curSeabedScale;
-          const distToShark = Math.hypot(shark.x - effPreyX, shark.y - effPreyY);
+          // 1:1 单一世界坐标判定：视觉绘制与物理碰撞共享完全一致的 (prey.x, prey.y) 与 visualPreyScale
+          const distToShark = Math.hypot(shark.x - prey.x, shark.y - prey.y);
           const visualPreyScale = getPreyRelativeVisualScale(
             prey.config,
             shark.stats,
@@ -618,28 +729,28 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             (shark.frenzyTimer > 0 || shark.stats.biteTier >= effectivePreyTier) &&
             (!prey.config.isHazard || Boolean(shark.stats.canEatMines));
           const renderedPreyRadius = prey.config.radius * visualPreyScale;
-          // Generous jaw suction & bite floor on shrunk edible fish so eating tiny minnows stays effortless
+          // Generous jaw suction & bite floor on shrunk edible fish so eating small prey stays responsive
           const eatHitRadius = Math.max(
             renderedPreyRadius,
-            18 * shark.stats.scale
+            18 * worldScale
           );
           const jawSuctionMult = shark.stats.jawSuctionMultiplier ?? 1.0;
           const suctionRadius =
             mouthRadius * 2.15 * jawSuctionMult + eatHitRadius;
-          const distToMouthPre = Math.hypot(mouthX - effPreyX, mouthY - effPreyY);
+          const distToMouthPre = Math.hypot(mouthX - prey.x, mouthY - prey.y);
           const inJawSuctionZone =
             canEatNow && !prey.config.isHazard && distToMouthPre < suctionRadius;
 
-          // Distinct AI Behavior Policies per Prey Archetype (with organic curved trajectories)
+          // Distinct AI Behavior Policies per Prey Archetype (natural 1:1 world speeds)
           const dirSign = prey.vx >= 0 ? 1 : -1;
           const uidSeed = (prey.uid % 17) * 0.37;
-          const worldPreySpeed = prey.config.baseSpeed / curSeabedScale;
+          const worldPreySpeed = prey.config.baseSpeed;
           switch (prey.config.behavior) {
             case 'DRIFT_SWARM': {
               // Pulsing jellyfish bell-jet propulsion + horizontal current weave
               const pulse = Math.sin(prey.phase * 1.6 + uidSeed);
               prey.vx = dirSign * worldPreySpeed * (0.65 + 0.35 * Math.cos(prey.phase * 0.7));
-              prey.vy = ((pulse > 0 ? -pulse * 36 : -pulse * 18) + Math.cos(prey.phase * 0.85) * 14) / curSeabedScale;
+              prey.vy = (pulse > 0 ? -pulse * 36 : -pulse * 18) + Math.cos(prey.phase * 0.85) * 14;
               break;
             }
             case 'SCHOOL_FLEE': {
@@ -649,7 +760,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                   ? 0.55
                   : 1.2;
               if (
-                distToShark < 210 &&
+                distToShark < 210 * aiDistScale &&
                 shark.stats.biteTier >= effectivePreyTier &&
                 !inJawSuctionZone
               ) {
@@ -671,7 +782,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
               break;
             }
             case 'PUFFER_INFLATE': {
-              prey.isInflated = distToShark < 190;
+              prey.isInflated = distToShark < 190 * aiDistScale;
               if (prey.isInflated && !inJawSuctionZone) {
                 const fleeAngle =
                   Math.atan2(prey.y - shark.y, prey.x - shark.x) +
@@ -682,14 +793,14 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 // Gentle buoyant cruising trajectory
                 prey.vx = dirSign * worldPreySpeed * (0.9 + 0.1 * Math.cos(prey.phase * 0.65));
                 prey.vy =
-                  (Math.sin(prey.phase * 0.85 + uidSeed) * 14 +
-                  Math.cos(prey.phase * 0.5) * 6) / curSeabedScale;
+                  Math.sin(prey.phase * 0.85 + uidSeed) * 14 +
+                  Math.cos(prey.phase * 0.5) * 6;
               }
               break;
             }
             case 'SUB_PATROL': {
               prey.vx = dirSign * worldPreySpeed * (0.94 + 0.06 * Math.sin(prey.phase * 0.5));
-              prey.vy = (Math.cos(prey.phase * 0.65 + uidSeed) * 18) / curSeabedScale;
+              prey.vy = Math.cos(prey.phase * 0.65 + uidSeed) * 18;
               break;
             }
             case 'EEL_CHARGER': {
@@ -697,10 +808,10 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
               if (shark.y <= 520 || prey.y <= 520) {
                 prey.telegraphTimer = 0;
                 prey.vx = dirSign * worldPreySpeed * 0.9;
-                prey.vy = (Math.sin(prey.phase * 0.95 + uidSeed) * 16) / curSeabedScale;
+                prey.vy = Math.sin(prey.phase * 0.95 + uidSeed) * 16;
                 break;
               }
-              if (distToShark < 290 && prey.telegraphTimer <= 0) {
+              if (distToShark < 290 * aiDistScale && prey.telegraphTimer <= 0) {
                 prey.telegraphTimer = 0.55;
               }
               if (prey.telegraphTimer > 0) {
@@ -712,14 +823,14 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 }
               } else {
                 // Smooth horizontal glide while patrolling
-                prey.vy = (Math.sin(prey.phase * 1.05 + uidSeed) * 18) / curSeabedScale;
+                prey.vy = Math.sin(prey.phase * 1.05 + uidSeed) * 18;
               }
               break;
             }
             case 'MINE_HAZARD': {
-              prey.vx = (Math.sin(prey.phase * 0.6 + uidSeed) * 10) / curSeabedScale;
-              prey.vy = (Math.cos(prey.phase * 0.9 + uidSeed) * 10) / curSeabedScale;
-              if (distToShark < 150) {
+              prey.vx = Math.sin(prey.phase * 0.6 + uidSeed) * 10;
+              prey.vy = Math.cos(prey.phase * 0.9 + uidSeed) * 10;
+              if (distToShark < 150 * aiDistScale) {
                 prey.telegraphTimer = 0.4;
               } else {
                 prey.telegraphTimer = Math.max(0, prey.telegraphTimer - simDt);
@@ -728,7 +839,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             }
             case 'HEAVY_CRUISER':
             case 'KRAKEN_BOSS': {
-              if (distToShark < 420) {
+              if (distToShark < 420 * aiDistScale) {
                 const dirAngle = Math.atan2(shark.y - prey.y, shark.x - prey.x);
                 const isAggressiveApex =
                   shark.y > 520 &&
@@ -747,7 +858,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
               } else {
                 // Smooth horizontal glide when patrolling
                 prey.vx = dirSign * worldPreySpeed * (0.92 + 0.08 * Math.cos(prey.phase * 0.55));
-                prey.vy = (Math.sin(prey.phase * 0.75 + uidSeed) * 16) / curSeabedScale;
+                prey.vy = Math.sin(prey.phase * 0.75 + uidSeed) * 16;
               }
               break;
             }
@@ -758,21 +869,20 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             0.55,
             Math.min(
               2.2,
-              (Math.hypot(prey.vx, prey.vy) * curSeabedScale) /
+              Math.hypot(prey.vx, prey.vy) /
                 Math.max(25, prey.config.baseSpeed)
             )
           );
           prey.phase += simDt * (1.85 + preySpeedRatio * 1.75);
 
-          // P0-3 Jaw Suction Pull: smoothly pull edible prey into the shark's open jaws when close
+          // P0-3 Jaw Suction Pull: smoothly pull edible prey into the shark's open jaws in 1:1 world space
           if (inJawSuctionZone) {
             const pullRatio = Math.max(0, 1 - distToMouthPre / suctionRadius);
             const sharkSpeed = Math.hypot(shark.vx, shark.vy);
             const suctionSpeed =
-              ((220 + sharkSpeed * curSeabedScale * 0.65) *
-                (0.45 + pullRatio * 0.75)) /
-              curSeabedScale;
-            const pullAngle = Math.atan2(mouthY - effPreyY, mouthX - effPreyX);
+              (220 * invZoom + sharkSpeed * 0.65) *
+              (0.45 + pullRatio * 0.75);
+            const pullAngle = Math.atan2(mouthY - prey.y, mouthX - prey.x);
             prey.x += Math.cos(pullAngle) * suctionSpeed * simDt;
             prey.y += Math.sin(pullAngle) * suctionSpeed * simDt;
             shark.biteAnim = Math.max(shark.biteAnim, 0.35 * pullRatio);
@@ -783,11 +893,11 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             shark.frenzyTimer > 0 &&
             prey.config.tier <= 12 &&
             !prey.config.isHazard &&
-            distToShark < shark.stats.magnetRadius * 0.72
+            distToShark < shark.stats.magnetRadius * invZoom * 0.72
           ) {
-            const pullAngle = Math.atan2(mouthY - effPreyY, mouthX - effPreyX);
-            prey.x += Math.cos(pullAngle) * (165 / curSeabedScale) * simDt;
-            prey.y += Math.sin(pullAngle) * (165 / curSeabedScale) * simDt;
+            const pullAngle = Math.atan2(mouthY - prey.y, mouthX - prey.x);
+            prey.x += Math.cos(pullAngle) * (165 * invZoom) * simDt;
+            prey.y += Math.sin(pullAngle) * (165 * invZoom) * simDt;
           }
 
           const prevPreyX = prey.x;
@@ -805,13 +915,15 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             prey.y = maxHabitatY;
             prey.vy = -Math.abs(prey.vy) * 0.65;
           }
+          // 猎物遵守完整阶梯海床碰撞，但可通过已被巨鲨撞碎的破口区间
           const preySeabedCollision = resolveSeabedCollision(
             prey.x,
             prey.y,
             renderedPreyRadius,
             prey.vy,
             undefined,
-            prevPreyY
+            prevPreyY,
+            { breachedCells: sim.breachedTerraceCells }
           );
           if (preySeabedCollision.collided) {
             prey.x = infiniteWorldManager.wrapEntityX(
@@ -821,16 +933,14 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             prey.vy = preySeabedCollision.vy;
           }
 
-          // Check collision with Shark Mouth / Front-Body (including +1T~+3T Boost Armor-Crush)
+          // Check collision with Shark Mouth / Front-Body in 1:1 world space
           const canBoostCrushNow =
             isBoosting &&
             !prey.config.isHazard &&
             effectivePreyTier <= shark.stats.biteTier + 3;
           const canBiteConnect = canEatNow || canBoostCrushNow;
-          const postEffX = shark.x + (prey.x - shark.x) * curSeabedScale;
-          const postEffY = shark.y + (prey.y - shark.y) * curSeabedScale;
-          const distToMouth = Math.hypot(mouthX - postEffX, mouthY - postEffY);
-          const distToFrontBody = Math.hypot(frontBodyX - postEffX, frontBodyY - postEffY);
+          const distToMouth = Math.hypot(mouthX - prey.x, mouthY - prey.y);
+          const distToFrontBody = Math.hypot(frontBodyX - prey.x, frontBodyY - prey.y);
           const effectiveHitDist = canBiteConnect
             ? Math.min(distToMouth, distToFrontBody * 0.95)
             : distToMouth;
@@ -978,13 +1088,13 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 10 + Math.min(24, Math.ceil(prey.config.tier * 0.45));
               for (let b = 0; b < burstCount; b++) {
                 const ang = (b * Math.PI * 2) / burstCount + Math.random() * 0.4;
-                const spd = 60 + Math.random() * 140;
+                const spd = (60 + Math.random() * 140) * fxScale;
                 spawnParticle(
                   prey.x,
                   prey.y,
                   Math.cos(ang) * spd,
                   Math.sin(ang) * spd,
-                  4 + Math.random() * 5,
+                  (4 + Math.random() * 5) * fxScale,
                   0.55 + Math.random() * 0.35,
                   b % 2 === 0 ? '#4ade80' : '#2dd4bf',
                   b % 3 === 0 ? 'DNA' : 'SLIME'
@@ -1026,8 +1136,8 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 spawnPickup(
                   prey.x,
                   prey.y,
-                  Math.cos(ang) * 95,
-                  Math.sin(ang) * 95,
+                  Math.cos(ang) * 95 * fxScale,
+                  Math.sin(ang) * 95 * fxScale,
                   dropKind,
                   basePickupVal
                 );
@@ -1037,7 +1147,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 shark.comboCount >= 2 ? ` · x${shark.comboCount}🔥` : '';
               spawnFloatText(
                 prey.x,
-                prey.y - 16,
+                prey.y - 16 * worldScale,
                 outcome.floatTextKey,
                 `+${finalScoreGain}${comboSuffix}`,
                 outcome.isCrit || shark.comboCount >= 5 ? '#fde047' : '#4ade80',
@@ -1066,7 +1176,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                   shark.coins += bountyCoins;
                   spawnFloatText(
                     shark.x,
-                    shark.y - 38,
+                    shark.y - 38 * worldScale,
                     'float_target_bounty',
                     `+${bountyBonusScore} 🎯 (+${bountyGenes}🧬)`,
                     '#38bdf8',
@@ -1075,7 +1185,8 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                   const nextTarget = rollTargetBountyConfig(
                     shark.stats.biteTier,
                     shark.y,
-                    prey.config.id
+                    prey.config.id,
+                    minPreyLengthCm
                   );
                   sim.targetBounty = {
                     preyConfig: nextTarget,
@@ -1089,7 +1200,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                     const candidate = sim.preyList[k];
                     if (candidate.uid === prey.uid) continue;
                     const dist = Math.hypot(candidate.x - shark.x, candidate.y - shark.y);
-                    if (dist > 480) {
+                    if (dist > 480 * invZoom) {
                       candidate.config = nextTarget;
                       candidate.y = Math.max(
                         Math.max(25, nextTarget.minDepth),
@@ -1122,7 +1233,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 soundFX.playEvolution();
                 spawnFloatText(
                   shark.x,
-                  shark.y - 44,
+                  shark.y - 44 * worldScale,
                   'float_evo_ready',
                   `LV.${shark.level} (+HP/体型!)`,
                   '#38bdf8',
@@ -1143,10 +1254,10 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
               );
             } else {
               // Oversized Prey or Active Mine Hazard -> Respect 0.55s Invulnerability Frames (i-frames)
-              const bounceAngle = Math.atan2(shark.y - postEffY, shark.x - postEffX);
+              const bounceAngle = Math.atan2(shark.y - prey.y, shark.x - prey.x);
               if (shark.invulnerableTimer > 0) {
-                shark.x += Math.cos(bounceAngle) * 10;
-                shark.y += Math.sin(bounceAngle) * 10;
+                shark.x += Math.cos(bounceAngle) * 10 * invZoom;
+                shark.y += Math.sin(bounceAngle) * 10 * invZoom;
                 continue;
               }
 
@@ -1158,15 +1269,15 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
               shark.hitstopTimer = 0.055;
               shark.cameraShakeTrauma = 0.65;
 
-              shark.vx = Math.cos(bounceAngle) * outcome.knockbackForce;
-              shark.vy = Math.sin(bounceAngle) * outcome.knockbackForce;
-              shark.x += Math.cos(bounceAngle) * 18;
-              shark.y += Math.sin(bounceAngle) * 18;
+              shark.vx = Math.cos(bounceAngle) * outcome.knockbackForce * invZoom;
+              shark.vy = Math.sin(bounceAngle) * outcome.knockbackForce * invZoom;
+              shark.x += Math.cos(bounceAngle) * 18 * invZoom;
+              shark.y += Math.sin(bounceAngle) * 18 * invZoom;
 
               soundFX.playHit();
               spawnFloatText(
                 shark.x,
-                shark.y - 25,
+                shark.y - 25 * worldScale,
                 outcome.floatTextKey,
                 `${scaledDamage} HP`,
                 '#fb7185',
@@ -1179,9 +1290,9 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                   spawnParticle(
                     prey.x,
                     prey.y,
-                    Math.cos(ang) * 190,
-                    Math.sin(ang) * 190,
-                    5,
+                    Math.cos(ang) * 190 * fxScale,
+                    Math.sin(ang) * 190 * fxScale,
+                    5 * fxScale,
                     0.5,
                     '#fbbf24',
                     'SPARK'
@@ -1202,14 +1313,14 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           }
         }
 
-        // Update Pickups (Magnet Pull toward Shark + Hunting Heat Magnet Bonus)
+        // Update Pickups (Magnet Pull toward Shark + Hunting Heat Magnet Bonus in 1:1 world space)
         const activeFormForHeat = getSharkFormById(shark.sharkFormId);
         const currentHeatBuff = computeHuntingHeatBuff(
           shark.score,
           activeFormForHeat.row
         );
         const effectiveMagnetRadius =
-          shark.stats.magnetRadius + currentHeatBuff.magnetRadiusBonus;
+          (shark.stats.magnetRadius + currentHeatBuff.magnetRadiusBonus) * invZoom;
         for (const pk of sim.pickups) {
           if (!pk.active) continue;
           pk.phase += simDt * 4;
@@ -1219,7 +1330,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           const dist = Math.hypot(shark.x - pk.x, shark.y - pk.y);
           if (dist < effectiveMagnetRadius) {
             const pullAngle = Math.atan2(shark.y - pk.y, shark.x - pk.x);
-            const pullSpeed = 380 + (effectiveMagnetRadius - dist) * 2.2;
+            const pullSpeed = 380 * invZoom + (effectiveMagnetRadius - dist) * 2.2;
             pk.vx = Math.cos(pullAngle) * pullSpeed;
             pk.vy = Math.sin(pullAngle) * pullSpeed;
           }
@@ -1227,7 +1338,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           pk.x += pk.vx * simDt;
           pk.y += pk.vy * simDt;
 
-          if (dist < 34 * shark.stats.scale) {
+          if (dist < 34 * worldScale) {
             pk.active = false;
             soundFX.playCoin();
             if (pk.kind === 'COIN') {
@@ -1249,7 +1360,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             continue;
           }
           p.x += p.vx * dt;
-          p.y += p.vy * dt - 18 * dt;
+          p.y += p.vy * dt - 18 * fxScale * dt;
           p.vx *= 0.95;
           p.vy *= 0.95;
         }
@@ -1262,7 +1373,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             ft.active = false;
             continue;
           }
-          ft.y += ft.vy * dt;
+          ft.y += ft.vy * invZoom * dt;
         }
 
         // Direct 60Hz DOM Bar Width Updates (Zero React Re-render Overhead)
@@ -1394,7 +1505,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             soundFX.playEvolution();
             spawnFloatText(
               shark.x,
-              shark.y - 54,
+              shark.y - 54 * worldScale,
               'float_evo_ready',
               `${topNewTier.badgeIcon} ${
                 langRef.current === 'zh'
@@ -1495,6 +1606,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             bodyUpgradeGeneCost: upgGeneCost,
             heatLevel: hudHeat.heatLevel,
             masteryCrownTier: liveMastery.newCrownTier,
+            deepDivePromptMeters: sim.deepDiveTargetMeters,
           });
           setLiveActivePreyCount(sim.preyList.length);
         }

@@ -145,6 +145,7 @@ export interface HudStateSnapshot {
   bodyUpgradeGeneCost: number;
   heatLevel: number;
   masteryCrownTier: number;
+  deepDivePromptMeters: number | null;
 }
 
 export interface SharkSimState {
@@ -219,6 +220,12 @@ export interface SharkSimState {
     progress: number;
     required: number;
   };
+  /** 本局已被巨鲨撞碎的上层阶梯海床局部单元集合 (`${tierIndex}:${cellIndex}`) */
+  breachedTerraceCells: Set<string>;
+  /** 巨鲨滞留在无适口猎物的浅海区域的累计时长 (s) */
+  shallowDepletionTimer: number;
+  /** 浅海空海时向 HUD 展示的建议下潜目标深度 (m)，有猎物时为 null */
+  deepDiveTargetMeters: number | null;
 }
 
 export interface HudDomBarRefs {
@@ -275,7 +282,8 @@ export interface SimEngineHost {
   rollTargetBountyConfig: (
     maxBiteTier: number,
     currentDepth: number,
-    excludeId?: string
+    excludeId?: string,
+    minPreyLengthCm?: number
   ) => PreyTierConfig;
   createPreyEntity: (nearSharkX?: number, nearSharkY?: number) => PreyEntity;
   recomputeSharkStats: (
@@ -355,6 +363,7 @@ export function createInitialHudState(initialSave: SharkMetaSaveData): HudStateS
     bodyUpgradeGeneCost: upgGeneCost,
     heatLevel: 0,
     masteryCrownTier: initialSave.sharkMasteryTiers?.[activeForm.id] ?? 0,
+    deepDivePromptMeters: null,
   };
 }
 
@@ -472,6 +481,9 @@ export function createInitialSimState(metaSave: SharkMetaSaveData): SharkSimStat
       progress: 0,
       required: 2,
     },
+    breachedTerraceCells: new Set<string>(),
+    shallowDepletionTimer: 0,
+    deepDiveTargetMeters: null,
   };
 }
 
@@ -548,7 +560,8 @@ export function spawnPooledFloatText(
 export function rollTargetBountySpecies(
   maxBiteTier: number,
   currentDepth: number,
-  excludeId?: string
+  excludeId?: string,
+  minPreyLengthCm: number = 0
 ): PreyTierConfig {
   const isShallow = currentDepth <= 520;
   const effectiveMaxTier = isShallow
@@ -557,11 +570,29 @@ export function rollTargetBountySpecies(
   const realPreyOnly = GAME_CONFIG.preyTiers.filter(
     (p) => !p.isHazard && Boolean(p.externalPngUrl)
   );
-  const edible = realPreyOnly.filter(
+  // 巨鲨体型感知过滤：确保悬赏目标体长满足 minPreyLengthCm，避免给 45m 巨鲨指派永远不会在浅海刷出的小鱼
+  const sizeEligible =
+    minPreyLengthCm > 0
+      ? realPreyOnly.filter(
+          (p) => (p.bodyLengthCm ?? p.radius * 2.5) >= minPreyLengthCm
+        )
+      : realPreyOnly;
+  const activeRealPool = sizeEligible.length > 0 ? sizeEligible : realPreyOnly;
+
+  // 若当前处于浅海且巨鲨体型已大到浅海无任何适口物种，则跨越浅海阶位限制，从最浅的深海适口物种中选取悬赏以引导下潜
+  const hasShallowSizeMatch =
+    !isShallow ||
+    activeRealPool.some((p) => p.minDepth <= 520 && p.tier <= effectiveMaxTier);
+  const bountyMaxTier = hasShallowSizeMatch
+    ? effectiveMaxTier
+    : Math.max(8, maxBiteTier);
+
+  const edible = activeRealPool.filter(
     (p) =>
-      p.tier <= effectiveMaxTier &&
+      p.tier <= bountyMaxTier &&
       p.id !== excludeId &&
       (!isShallow ||
+        !hasShallowSizeMatch ||
         (p.behavior !== 'EEL_CHARGER' &&
           p.behavior !== 'SUB_PATROL' &&
           p.behavior !== 'HEAVY_CRUISER' &&
@@ -573,13 +604,21 @@ export function rollTargetBountySpecies(
   const nearNative = edible.filter(
     (p) => currentDepth >= p.minDepth - 80 && currentDepth <= p.maxDepth + 80
   );
-  const pool =
-    strictNative.length > 0
-      ? strictNative
-      : nearNative.length > 0
-      ? nearNative
-      : edible;
-  if (pool.length === 0) return realPreyOnly[0] ?? GAME_CONFIG.preyTiers[0];
+  let pool: PreyTierConfig[];
+  if (strictNative.length > 0) {
+    pool = strictNative;
+  } else if (nearNative.length > 0) {
+    pool = nearNative;
+  } else if (minPreyLengthCm > 0 && edible.length > 0) {
+    // 浅海空海时优先挑选距当前深度最近的深海适口猎物作为引导悬赏
+    const sortedByDepth = [...edible].sort(
+      (a, b) => Math.abs(a.minDepth - currentDepth) - Math.abs(b.minDepth - currentDepth)
+    );
+    pool = sortedByDepth.slice(0, Math.min(4, sortedByDepth.length));
+  } else {
+    pool = edible;
+  }
+  if (pool.length === 0) return activeRealPool[0] ?? GAME_CONFIG.preyTiers[0];
   return pool[Math.floor(Math.random() * pool.length)];
 }
 

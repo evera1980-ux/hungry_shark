@@ -340,8 +340,18 @@ export default function App() {
   );
 
   const rollTargetBountyConfig = useCallback(
-    (maxBiteTier: number, currentDepth: number, excludeId?: string): PreyTierConfig =>
-      rollTargetBountySpecies(maxBiteTier, currentDepth, excludeId),
+    (
+      maxBiteTier: number,
+      currentDepth: number,
+      excludeId?: string,
+      minPreyLengthCm?: number
+    ): PreyTierConfig =>
+      rollTargetBountySpecies(
+        maxBiteTier,
+        currentDepth,
+        excludeId,
+        minPreyLengthCm
+      ),
     []
   );
 
@@ -436,9 +446,13 @@ export default function App() {
         unlockedCount
       );
 
+      const initWorldScale = stats.worldScale ?? stats.scale;
+      const spawnY = Math.max(220, Math.round(22 * initWorldScale + 95));
+      const spawnDepthMeters = Math.max(22, Math.round(spawnY * 0.1));
+
       sim.shark = {
         x: 0,
-        y: 220,
+        y: spawnY,
         vx: 0,
         vy: 0,
         angle: 0,
@@ -453,7 +467,7 @@ export default function App() {
         score: 0,
         genes: save.bankedGenes,
         coins: save.bankedCoins,
-        maxDepthReached: 22,
+        maxDepthReached: spawnDepthMeters,
         preyEatenCount: 0,
         frenzyTimer: withMaxMechaTrial ? 4.5 : 0,
         hitFlashTimer: 0,
@@ -476,6 +490,9 @@ export default function App() {
       sim.camera.x = sim.shark.x;
       sim.camera.y = sim.shark.y;
       sim.camera.zoom = stats.cameraZoom;
+      sim.breachedTerraceCells.clear();
+      sim.shallowDepletionTimer = 0;
+      sim.deepDiveTargetMeters = null;
 
       clearAllInputs();
 
@@ -483,7 +500,13 @@ export default function App() {
       sim.pickups.forEach((pk) => (pk.active = false));
       sim.floatTexts.forEach((ft) => (ft.active = false));
 
-      const firstTargetConfig = rollTargetBountyConfig(stats.biteTier, 220);
+      const minPreyLengthCm = (stats.realBodyLengthM ?? 0.8) * 13.3;
+      const firstTargetConfig = rollTargetBountyConfig(
+        stats.biteTier,
+        spawnY,
+        undefined,
+        minPreyLengthCm
+      );
       sim.targetBounty = {
         preyConfig: firstTargetConfig,
         progress: 0,
@@ -523,6 +546,7 @@ export default function App() {
         cameraX: sim.shark.x,
         cameraY: sim.shark.y,
         sharkVx: 0,
+        renderZoom: sim.camera.zoom || 1,
       };
 
       for (let i = 0; i < targetMaxPreys; i++) {
@@ -575,7 +599,7 @@ export default function App() {
         score: 0,
         genes: save.bankedGenes,
         coins: save.bankedCoins,
-        depth: 22,
+        depth: spawnDepthMeters,
         zoneKey: 'zone_shallow',
         biteTier: stats.biteTier,
         frenzyTimer: withMaxMechaTrial ? 4.5 : 0,
@@ -606,6 +630,7 @@ export default function App() {
         bodyUpgradeGeneCost: upgGeneCost,
         heatLevel: 0,
         masteryCrownTier: save.sharkMasteryTiers?.[chosenSharkId] ?? 0,
+        deepDivePromptMeters: null,
       });
 
       if (withMaxMechaTrial) {

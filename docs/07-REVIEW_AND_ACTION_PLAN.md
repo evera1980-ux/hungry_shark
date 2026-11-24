@@ -27,12 +27,12 @@
 
 ### P0 · 立即止血（上线硬阻塞项）
 - [x] **P0-1**：清理 5,583 行孤儿死代码 & 恢复 `tsc --noEmit` 0 Error 绿灯
-- [ ] **P0-2**：Web 资源包体瘦身（61 MB → < 10 MB）& 消除启动期重复加载与主线程 `getImageData` 卡顿
+- [x] **P0-2**：Web 资源包体瘦身（61 MB → < 10 MB）& 消除启动期重复加载与主线程 `getImageData` 卡顿
 - [ ] **P0-3**：修复 `adManager.ts` 跨平台广告位配置错误、补齐频控与防白嫖兜底
 
 ### P1 · 上线前必做（核心体验与架构稳固）
 - [ ] **P1-1**：重平衡 135 种猎物的 `T1 ~ T48` 阶位分布（消除 T1 拥挤与 T37~T48 生态真空）
-- [ ] **P1-2**：修正 `0.8m -> 45.0m` 巨鲨缩放与浅海“空海死区”（分段对数缩放 + 巨鲨专属浅海/深渊目标）
+- [x] **P1-2**：修正 `0.8m -> 45.0m` 巨鲨缩放与浅海空海闭环（废除微缩投影补丁、回归真相机变焦 + 撞碎上层阶梯海床 + 浅海深潜引导）
 - [x] **P1-3**：拆分上帝文件（`worldGenerationSystem.ts` / `App.tsx`）并同步刷新 `AGENTS.md` 与 `docs/`
 - [ ] **P1-4**：补齐听觉闭环（浅海/暮光/深渊 3 层自适应环境音与 BGM + 黄金狂热变奏 + 连击音阶爬升）
 
@@ -60,7 +60,7 @@
 
 ---
 
-### [ ] P0-2 · 资源瘦身（61MB → <10MB）与加载链路优化
+### [x] P0-2 · 资源瘦身（61MB → <10MB）与加载链路优化
 - **当前问题**：
   - `public/assets/` 高达 61 MB；启动同时拉取 `sharks_ec921c3b.png`（7.2 MB）+ 48 张 `sharks_3x`（7.0 MB）+ 已废弃的 `fish_24bdaa5a.png`（1.1 MB）+ `fish2_fc857cfa.png`（1.2 MB）。
   - 后台加载 134 张 `prey_140`（19 MB）时在主线程调用 `cropAndScalePreyImage()` 逐像素 `getImageData` 裁切透明边。
@@ -69,12 +69,12 @@
   - **方案 A（推荐）**：离线脚本预裁切透明边 + 全部资产转 WebP（背景/鲨鱼/猎物）+ 移除冗余旧图集加载 + 按深度带懒加载猎物与按需加载鲨鱼。
   - **方案 B**：离线裁切后直接按深度带打包为 3~4 张 WebP Texture Atlas（进一步把 182 个请求降到 <10 个）。
   - **方案 C**：最小改动，仅移除冗余旧图集加载并将大图转 WebP，保留单图结构。
-- **决策记录**：`待决策`
+- **决策记录**：**采用方案 A（2026-11-23 执行完成）** — 新增 `npm run optimize:assets`（`scripts/optimize-web-assets.ts`），离线对 135 项猎物（`PREY-001..210` + `cyber_mine`）与 48 阶鲨鱼（`shark_form_00..47`）执行非透明紧致包围盒裁切（`+2px` pad，上限 `420px` 宽）与高保真 WebP 编码，并将 18 项 UI/水幕/海床/生态/POI 图集全面转为 WebP、提取独立 `devour_fx.webp`（`6.7 KB`），清理全部冗余旧图，使 `public/assets/` 从 **61.18 MB（373 文件）降至 4.50 MB（202 文件，-92.6%）**（`ios-native/` 原生 PNG/JPG 保持 100% 不变）；重构 `spriteSheetManager.ts` 移除主线程 `cropAndScalePreyImage`（`getImageData` 逐像素裁切）及旧图集切片器，实装按水深带量化桶懒加载猎物（`selectPreyIdsForDepthBand` / `preloadPreyForDepth`）与按需加载鲨鱼（`ensureSharkLoaded` / `ensureSharkWindowLoaded`，首屏仅加载出战鲨鱼与下一阶目标共 2 张鲨鱼 + 浅海带猎物，首屏资源传输仅 `~2.55 MB`）。
 - **验收标准（DoD）**：
-  - [ ] `public/assets/` 总体积降至 `< 12 MB`（首屏必需资源 `< 3 MB`）
-  - [ ] 运行时不再加载 `sharks_ec921c3b.png`、`fish_24bdaa5a.png`、`fish2_fc857cfa.png`
-  - [ ] 运行时移除 `prey_140` 主线程 `getImageData` 逐像素裁切
-  - [ ] 画面清晰度与碰撞盒贴合度无回归
+  - [x] `public/assets/` 总体积降至 `< 12 MB`（实测 **4.50 MB**，首屏必需资源实测 **2.55 MB** `< 3 MB`）
+  - [x] 运行时不再加载 `sharks_ec921c3b.png`、`fish_24bdaa5a.png`、`fish2_fc857cfa.png`
+  - [x] 运行时移除 `prey_140` 主线程 `getImageData` 逐像素裁切
+  - [x] 画面清晰度与碰撞盒贴合度无回归（离线 `+2px` 紧致裁切与原运行时包围盒一致）
 
 ---
 
@@ -109,16 +109,19 @@
 
 ---
 
-### [ ] P1-2 · 修正 45m 巨鲨缩放与浅海空海问题
+### [x] P1-2 · 修正 45m 巨鲨缩放与浅海空海问题
 - **当前问题**：
-  - 线性缩放导致 `45m` 鲨鱼阶段背景与海床缩小 56 倍，细节坍塌；浅海因 `L_min` 过滤导致无鱼可吃。
-- **可选方案**：
-  - **方案 A（推荐）**：采用**分段对数缩放（Logarithmic World Scale）**限制海床最小缩放底线（例如 `>= 0.22`），同时为巨鲨在浅海动态投放水面船只、潜艇编队、巨型猎食群，消除空海死区。
-  - **方案 B**：保留真实体长缩放，但为巨鲨开启“浅海鱼群聚合（把小鱼打包成可吞噬鱼群球）”机制。
-- **决策记录**：`待决策`
+  - 原 `seabedScale = 0.8 / realBodyLengthM` 双空间微缩投影补丁导致 `45m` 鲨鱼阶段海床与珊瑚被缩小 56 倍坍塌成噪点，且在浅海出现无提示的空海死区与阶梯洞口卡死风险。
+- **决策记录**：**2026-11-23 按用户确认的四项核心支柱执行完成** —
+  1. **废除 `seabedScale` 微缩投影补丁，回归单一 1:1 世界空间 + 原生 2D 真相机变焦**：在 `rules.ts` 新增 `CAMERA_ZOOM_MIN = 0.22`、`MIN_RENDER_ZOOM_FLOOR = 0.14`、`computeTrueCameraZoom(L)` 与 `stats.worldScale = scale / cameraZoom`，全量清除 `renderOceanWorld.ts` / `stepSimulation.ts` / `seabedRenderer.ts` / `worldRenderer.ts` 中的双空间缩放补丁，并将 `WorldConfig.chunk.maxActiveChunks` 扩容至 `20` 配合 `zoom < 0.45` 自适应海床与植被 LOD。
+  2. **猎物保持严格线性生物体长比**：`getPreyRelativeVisualScale` 锚定 `worldScale`，经原生相机变焦投影后严格守恒 `preyScreenSize / sharkScreenSize === (L_prey / L_shark) * bossMult` 且视觉 === 碰撞 100% 同源。
+  3. **巨鲨撞碎上层浅海阶梯海床（Tiers 0~4）**：为 `SEABED_TERRACE_TIERS[0..4]` 注入体长破壁门槛（`8m/12m/18m/26m/36m`）与 `breachedTerraceCells` 破口追踪，撞穿时触发碎岩粒子、`soundFX.playRockShatter()` 与镜头震动，同时保留 `Tiers 5~8` 与主海床为深渊不可破坏基岩。
+  4. **保持 45m 巨鲨浅海无鱼状态并建立深潜引导闭环**：维持 `minPreyLengthCm = L_shark * 13.3` 迫使巨鲨下潜深海；对齐 `EcosystemSpawner` 在 `zoom = 0.22` 广角视口下的屏外刷怪与回收半径，升级 `rollTargetBountySpecies` 按 `minPreyLengthCm` 过滤并优先指向深海适口猎物，并在 `InGameHudOverlay` 增加滞留浅海 `> 1.5s` 触发的非阻断双语深潜 HUD 提示。
 - **验收标准（DoD）**：
-  - [ ] 45m 终极鲨鱼在浅海/中层/深渊三个深度带均保持清晰海床纹理与持续可吞噬密度
-  - [ ] 新增巨鲨生态密度自动化单测覆盖浅海与深渊场景
+  - [x] 全链路彻底移除 `seabedScale` / `effPreyX` 双空间投影补丁，45m 巨鲨在 `cameraZoom = 0.22` 原生 2D 变焦下保持清晰海床纹理与 20-Chunk 无缝覆盖
+  - [x] 猎物在全进化阶段保持严格线性体长比与视觉-碰撞同源对齐
+  - [x] 达到破壁体长的巨鲨可无阻碍撞碎 `Tier 0~4` 上层阶梯海床，`Tier 5~8` 与主海床保持不可破坏基岩碰撞
+  - [x] `rules.test.ts` 新增 P1-2 全量单测（真相机变焦、线性体长比、阶梯破壁、广角刷怪/防误回收、浅海空海与深海生态校验，48/48 全绿）
 
 ---
 
@@ -182,3 +185,5 @@
 | 2026-11-21 | P0-1 | 执行方案 A：删除 6 个孤儿文件 + `OrganCanvasPreview` + `src/game/legacy/`，并清理 `config`/`rules`/`canvasRenderer`/`spriteSheetManager`/`i18n` 中的全部旧外挂器官代码 | `[x]` | `tsc --noEmit` 0 Error；`rules.test.ts` 45/45 通过；`npm run build` 成功 |
 | 2026-11-21 | P2-2 | 执行方案 1（Shared JSON Data Contract）：新增 `src/game/sharedGameData.ts` 导出 `shared/game_data.json`，`GameConfigGenerated.swift` 重构为 ~255 行 JSON `Codable` 加载器，`scripts/build-ios-native.ts` 瘦身至 ~440 行并停止覆写 Swift 源码，新增 `npm run sync:ios` 与跨端契约单测 | `[x]` | `npm run sync:ios` 成功；`rules.test.ts` 46/46 通过；`tsc --noEmit` 0 Error；`npm run build` 成功 |
 | 2026-11-22 | P1-3 | 拆分 `worldGenerationSystem.ts`（11,285→15 行 + `world/` 11 模块）与 `App.tsx`（5,448→1,607 行 + `sim/` 4 引擎模块 + `components/game/` 5 视图覆盖层）；修复浏览器验收捕获的 `seabedRenderer.ts` `ctx.save()` 栈泄漏；同步刷新 `AGENTS.md` 与 `docs/00/01/07` | `[x]` | `rules.test.ts` 46/46 通过；`tsc --noEmit` 0 Error；`npm run build` 成功；无头 Chromium Title/Playing/Pause 三态验证 0 Error |
+| 2026-11-23 | P0-2 | 执行方案 A：新增 `scripts/optimize-web-assets.ts`（`npm run optimize:assets`）离线预裁切透明边并全量转 WebP（`public/assets/` 61.18 MB → 4.50 MB，-92.6%）；移除 `sharks_ec921c3b.png` / `fish_24bdaa5a.png` / `fish2_fc857cfa.png` 重复加载与主线程 `getImageData` 猎物裁切；实装按水深带懒加载猎物与按需加载鲨鱼 | `[x]` | `rules.test.ts` 47/47 通过；`tsc --noEmit` 0 Error；`npm run build` 成功；首屏网络资源实测 2.55 MB（2 张鲨鱼 + 浅海带猎物，0 旧图集，0 404） |
+| 2026-11-23 | P1-2 | 废除 `seabedScale` 微缩投影补丁，全面回归单一 1:1 世界坐标 + 原生 2D 真相机变焦（`CAMERA_ZOOM_MIN = 0.22` / `worldScale = scale / cameraZoom`）+ 严守线性猎物体长比 + 巨鲨撞碎上层阶梯海床（`Tier 0~4: 8/12/18/26/36m`，`breachedTerraceCells`）+ 保持浅海空海并实装广角视口刷怪/回收同步与双语 HUD 深潜引导 | `[x]` | `rules.test.ts` 48/48 通过；`npm run sync:ios` 同步；`tsc --noEmit` 0 Error；`npm run build` 成功 |

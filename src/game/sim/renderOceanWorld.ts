@@ -1,5 +1,6 @@
 import { GAME_CONFIG } from '../config';
 import { Lang, translate } from '../i18n';
+import { MIN_RENDER_ZOOM_FLOOR } from '../rules';
 import { spriteSheetManager } from '../spriteSheetManager';
 import {
   drawOffScreenRadarIndicators,
@@ -9,14 +10,12 @@ import {
 import { parallaxBackground } from '../parallaxBackground';
 import {
   engineXToWorldX,
-  getWorldDebugEnabled,
   renderPhysicalSeabed,
   worldChunkLifecycleManager,
   worldDebug,
   worldPersistence,
   worldRenderer,
 } from '../worldGenerationSystem';
-import { infiniteWorldManager } from '../infiniteWorldManager';
 import { GameState, SharkSimState } from './types';
 
 export interface RenderOceanWorldParams {
@@ -55,13 +54,17 @@ export function renderOceanWorld(params: RenderOceanWorldParams): void {
   const shark = sim.shark;
 
       // ==================== 2. RENDER OCEAN WORLD ====================
-      const renderZoom = sim.camera.zoom * aspectZoomFactor;
+      const renderZoom = Math.max(
+        MIN_RENDER_ZOOM_FLOOR,
+        sim.camera.zoom * aspectZoomFactor
+      );
+      const sharkWorldScale = shark.stats.worldScale ?? shark.stats.scale;
 
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.save();
       ctx.scale(scaleX, scaleY);
 
-      // 5-Layer Multi-Plane Depth-Continuous Ocean Environment (with Far/Mid/Near optical growth shrinking)
+      // 5-Layer Multi-Plane Depth-Continuous Ocean Environment (optical depth scaling driven by true cameraZoom)
       parallaxBackground.render(
         ctx,
         sim.camera.x,
@@ -72,10 +75,10 @@ export function renderOceanWorld(params: RenderOceanWorldParams): void {
         dt,
         sim.camera.y,
         renderZoom,
-        shark.stats.relativePreyScale
+        sim.camera.zoom
       );
 
-      // Camera transform with trauma-squared screen shake
+      // Camera transform with trauma-squared screen shake (Single Native 2D Camera Matrix)
       const shakeMag =
         shark.cameraShakeTrauma * shark.cameraShakeTrauma * 18;
       const shakeX = (Math.random() - 0.5) * 2 * shakeMag;
@@ -91,7 +94,7 @@ export function renderOceanWorld(params: RenderOceanWorldParams): void {
       const minY = sim.camera.y - viewH / (2 * renderZoom) - cullMargin;
       const maxY = sim.camera.y + viewH / (2 * renderZoom) + cullMargin;
 
-      const halfSpanX = Math.ceil(viewW / Math.max(0.35, renderZoom) * 0.55) + 180;
+      const halfSpanX = Math.ceil((viewW / renderZoom) * 0.55) + 180;
       const surfStart = Math.floor((sim.camera.x - halfSpanX) / 120) * 120;
       const surfEnd = Math.ceil((sim.camera.x + halfSpanX) / 120) * 120;
 
@@ -131,26 +134,23 @@ export function renderOceanWorld(params: RenderOceanWorldParams): void {
         }
       }
 
-      // 阶段 B：渲染 1.0x 世界层连续可碰撞海床（与 resolveSeabedCollision / getFloorDepthAt 严格同源，且随鲨鱼成长按 relativePreyScale 同步缩小）
-      const smoothedSeabedScale =
-        parallaxBackground.getSmoothedRelativePreyScale();
+      // 阶段 B：单一 1:1 世界空间渲染连续可碰撞主海床与 9 级阶梯海床（含巨鲨破壁缺口与缩放 LOD）
       renderPhysicalSeabed(ctx, {
         cameraEngineX: sim.camera.x,
         cameraEngineY: sim.camera.y,
         viewW,
         viewH,
         renderZoom,
-        relativePreyScale: smoothedSeabedScale,
+        breachedTerraceCells: sim.breachedTerraceCells,
       });
 
-      // 阶段 E/F/G：更新 2D Chunk 生命周期窗口（方向性预加载 + 帧预算 2ms + Active 上限 10）并渲染 1.0x 世界层激活态 POI 与海床生态物
+      // 阶段 E/F/G：更新 2D Chunk 生命周期窗口（方向性预加载 + 帧预算 2ms + Active 上限 20）并渲染 1:1 世界层激活态 POI 与海床生态物
       worldPersistence.setPlayerPosition(
         engineXToWorldX(shark.x),
         shark.y
       );
-      const clampedWorldSeabedScale = Math.max(0.06, Math.min(1.0, smoothedSeabedScale));
-      const chunkHalfW = viewW / (2 * renderZoom * clampedWorldSeabedScale) + cullMargin;
-      const chunkHalfH = viewH / (2 * renderZoom * clampedWorldSeabedScale) + cullMargin;
+      const chunkHalfW = viewW / (2 * renderZoom) + cullMargin;
+      const chunkHalfH = viewH / (2 * renderZoom) + cullMargin;
       const { activeChunks } = worldChunkLifecycleManager.updateForViewport(
         {
           minWorldX: engineXToWorldX(sim.camera.x - chunkHalfW),
@@ -169,31 +169,28 @@ export function renderOceanWorld(params: RenderOceanWorldParams): void {
           viewH,
           renderZoom,
           nowMs: now,
-          relativePreyScale: smoothedSeabedScale,
+          breachedTerraceCells: sim.breachedTerraceCells,
         },
         activeChunks
       );
 
-      // Render 3D Spinning Gold Coins & Faceted DNA Crystals using sliced UI Icon Atlas sprites (scaled in equal proportion with world)
+      // Render 3D Spinning Gold Coins & Faceted DNA Crystals in true 1:1 world space (with gentle zoom readability boost)
       const coinSprite = spriteSheetManager.getUiIconFrame('UI_ICON_COIN');
       const geneSprite = spriteSheetManager.getUiIconFrame('UI_ICON_GENE');
-      const pickupVisualScale = Math.max(0.18, Math.min(1.0, smoothedSeabedScale * 1.25));
-      const preyCullHalfW = (viewW * 0.5) / (renderZoom * clampedWorldSeabedScale) + 120;
-      const preyCullHalfH = (viewH * 0.5) / (renderZoom * clampedWorldSeabedScale) + 120;
+      const pickupVisualScale = Math.min(2.6, 1 / Math.pow(renderZoom, 0.72));
+      const entityCullHalfW = (viewW * 0.5) / renderZoom + 180;
+      const entityCullHalfH = (viewH * 0.5) / renderZoom + 180;
       for (const pk of sim.pickups) {
         if (
           !pk.active ||
-          Math.abs(pk.x - sim.camera.x) > preyCullHalfW ||
-          Math.abs(pk.y - sim.camera.y) > preyCullHalfH
+          Math.abs(pk.x - sim.camera.x) > entityCullHalfW ||
+          Math.abs(pk.y - sim.camera.y) > entityCullHalfH
         ) {
           continue;
         }
         ctx.save();
-        const bobY = Math.sin(pk.phase) * 3.5;
-        // 投影至微缩世界层空间，与海床 100% 相对静止，消除冲刺漂移
-        const effPkX = sim.camera.x + (pk.x - sim.camera.x) * smoothedSeabedScale;
-        const effPkY = sim.camera.y + (pk.y - sim.camera.y) * smoothedSeabedScale;
-        ctx.translate(effPkX, effPkY + bobY);
+        const bobY = Math.sin(pk.phase) * (3.5 * pickupVisualScale);
+        ctx.translate(pk.x, pk.y + bobY);
         ctx.scale(pickupVisualScale, pickupVisualScale);
 
         if (pk.kind === 'COIN') {
@@ -243,7 +240,7 @@ export function renderOceanWorld(params: RenderOceanWorldParams): void {
         ctx.restore();
       }
 
-      // Render Prey Entities within camera frustum
+      // Render Prey Entities within camera frustum (direct 1:1 world coordinates, zero per-frame allocations)
       const isBoosting =
         (sim.input.boostPointerHeld ||
           sim.input.rightMouseBoostHeld ||
@@ -252,34 +249,30 @@ export function renderOceanWorld(params: RenderOceanWorldParams): void {
 
       for (const prey of sim.preyList) {
         if (
-          Math.abs(prey.x - sim.camera.x) <= preyCullHalfW &&
-          Math.abs(prey.y - sim.camera.y) <= preyCullHalfH
+          Math.abs(prey.x - sim.camera.x) <= entityCullHalfW &&
+          Math.abs(prey.y - sim.camera.y) <= entityCullHalfH
         ) {
-          // 统一微缩空间投影：猎物与海床严格共用 (camera + (world - camera) * scale) 几何空间，彻底消除冲刺时相对海床的逆流后移
-          const effPreyX = sim.camera.x + (prey.x - sim.camera.x) * smoothedSeabedScale;
-          const effPreyY = sim.camera.y + (prey.y - sim.camera.y) * smoothedSeabedScale;
-          const visualPrey = { ...prey, x: effPreyX, y: effPreyY };
           drawPreyEntity(
             ctx,
-            visualPrey,
+            prey,
             shark.stats.normalBiteTier ?? shark.stats.biteTier,
             shark.frenzyTimer > 0,
             sim.targetBounty.preyConfig.id,
             isBoosting,
             shark.stats.relativePreyScale,
-            shark.stats.scale,
+            sharkWorldScale,
             Boolean(shark.stats.canEatMines),
             shark.stats.realBodyLengthM ?? 1.5
           );
         }
       }
 
-      // Render Player's Evolved Shark Form (from 48-shark evolution matrix)
+      // Render Player's Evolved Shark Form in true world scale (from 48-shark evolution matrix)
       drawSharkWithOrgans(ctx, {
         x: shark.x,
         y: shark.y,
         angle: shark.angle,
-        scale: shark.stats.scale,
+        scale: sharkWorldScale,
         swimPhase: shark.swimPhase,
         biteAnim: shark.biteAnim,
         isBoosting,
@@ -312,16 +305,15 @@ export function renderOceanWorld(params: RenderOceanWorldParams): void {
         ctx.restore();
       }
 
-      // Render Bilingual Floating Combat Texts
+      // Render Bilingual Floating Combat Texts (anchored in 1:1 world space, counter-scaled for crisp screen readability)
+      const invFloatZoom = 1 / renderZoom;
       for (const ft of sim.floatTexts) {
         if (!ft.active) continue;
         const alpha = Math.max(0, ft.life / ft.maxLife);
         ctx.save();
         ctx.globalAlpha = alpha;
-        const effFtX = sim.camera.x + (ft.x - sim.camera.x) * smoothedSeabedScale;
-        const effFtY = sim.camera.y + (ft.y - sim.camera.y) * smoothedSeabedScale;
-        ctx.translate(effFtX, effFtY);
-        ctx.scale(ft.scale, ft.scale);
+        ctx.translate(ft.x, ft.y);
+        ctx.scale(ft.scale * invFloatZoom, ft.scale * invFloatZoom);
         ctx.font = '800 16px "Outfit", "Noto Sans SC", sans-serif';
         ctx.textAlign = 'center';
         ctx.strokeStyle = 'rgba(2, 6, 23, 0.92)';

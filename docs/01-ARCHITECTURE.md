@@ -1,7 +1,7 @@
 # 01. 项目系统架构与模块说明书 (System Architecture)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-22
+> **最后更新**：2026-11-23
 > **关联约束**：修改任何模块划分、文件职责、主循环状态或存档 Schema 时，必须同步更新本文档（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
@@ -122,9 +122,11 @@
 
 ### 3.2 第二层：独立纯 TS 60FPS 零 GC 仿真与渲染引擎 (`src/game/sim/SharkGameEngine.ts` + `simRef.current`)
 - 60FPS 物理步进（`src/game/sim/stepSimulation.ts`）与 Canvas 渲染（`src/game/sim/renderOceanWorld.ts`）已彻底从 `App.tsx` 中剥离为纯 TypeScript 引擎 `SharkGameEngine`，零 React 依赖，由 `App.tsx` 通过 `SimEngineHost` 桥接传入 `simRef` 与节流 HUD setter：
-  - `shark`：玩家鲨鱼坐标、速度、角度、转向角速度 `turnRate`、水平朝向与 2.5D 透视翻转系数（`facingDir` / `facingScaleX`）、生命值、饥饿延迟黄条 `ghostHp`、冲刺能量、局内等级 `level`、经验 `xp`、当前形态 `sharkFormId` 及合成属性 `stats`。
-  - `preyList`：当前活跃的海洋猎物与深水雷列表。
-  - `particles`（容量 160）、`pickups`（容量 80）、`floatTexts`（容量 36）：**预分配环形对象池（Ring-Buffer Object Pools）**，通过游标（`particleCursor` / `pickupCursor` / `floatCursor`）循环覆写，`requestAnimationFrame` 期间零内存分配、零 GC 卡顿。
+  - `shark`：玩家鲨鱼坐标、速度、角度、转向角速度 `turnRate`、水平朝向与 2.5D 透视翻转系数（`facingDir` / `facingScaleX`）、生命值、饥饿延迟黄条 `ghostHp`、冲刺能量、局内等级 `level`、经验 `xp`、当前形态 `sharkFormId` 及合成属性 `stats`（含真相机变焦 `cameraZoom ∈ [0.22, 1.0]` 与单一 1:1 世界体长缩放 `worldScale = scale / cameraZoom`）。
+  - `breachedTerraceCells`（`Set<string>`，容量上限 512 LRU）：记录本局被巨鲨（体长达到 Tier 0~4 破壁门槛 `8m/12m/18m/26m/36m`）撞碎的上层阶梯海床局部单元（`120` 世界单位宽），供碰撞解算与海床/生态渲染同源跳过。
+  - `shallowDepletionTimer` / `deepDiveTargetMeters`：追踪巨鲨在无适口猎物的浅海滞留时长（`>= 1.5s` 触发非阻断式 HUD 深潜引导提示）。
+  - `preyList`：当前活跃的海洋猎物与深水雷列表（全部运行于单一 1:1 世界坐标系，已彻底废除双空间 `seabedScale` 微缩投影补丁）。
+  - `particles`（容量 220）、`pickups`（容量 65）、`floatTexts`（容量 36）：**预分配环形对象池（Ring-Buffer Object Pools）**，通过游标（`particleCursor` / `pickupCursor` / `floatCursor`）循环覆写，`requestAnimationFrame` 期间零内存分配、零 GC 卡顿。
   - `input`：键盘按键集合、鼠标/触控转向坐标、虚拟摇杆向量（`joyDx`, `joyDy`）以及**独立隔离的多指触控 ID**（`joyPointerId`, `canvasPointerId`, `boostPointerId`）。
 
 ### 3.3 第三层：React 边缘 HUD 与图谱弹窗层 (`hudState` & `metaSave`)
@@ -179,6 +181,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-23 | **P1-2 彻底废除 `seabedScale` 微缩投影补丁，全面回归单一 1:1 世界坐标 + 原生 2D 真相机变焦 + 巨鲨撞碎上层阶梯海床（Tiers 0~4）+ 浅海空海深潜闭环**：① 在 `rules.ts` 新增 `CAMERA_ZOOM_MIN = 0.22`、`MIN_RENDER_ZOOM_FLOOR = 0.14`、`computeTrueCameraZoom(realBodyLengthM)` 与 `stats.worldScale = scale / cameraZoom`，全实体与海床统一运行于单一 1:1 世界坐标系并仅由原生 `ctx.scale(renderZoom)` 驱动变焦，彻底删除 `renderOceanWorld.ts` / `stepSimulation.ts` / `seabedRenderer.ts` / `worldRenderer.ts` 中所有 `seabedScale` 与 `effPreyX/Y` 双空间投影补丁；② 将 `WorldConfig.chunk.maxActiveChunks` 由 `10` 扩容至 `20`（`maxQueueSize: 32 -> 48`），保障 `zoom = 0.22` 巨幅广角视口下的无缝 Chunk 覆盖，并在 `seabedRenderer.ts` / `worldRenderer.ts` 加入低缩放 LOD 抽稀；③ 在 `terrainSystem.ts` 为 `SEABED_TERRACE_TIERS[0..4]` 引入 `shatterLengthM`（`8/12/18/26/36m`）与 `breachedTerraceCells` 破壁单元机制，巨鲨撞穿浅中层阶梯海床时触发碎岩粒子、`soundFX.playRockShatter()` 与镜头震动，同时保留 `Tiers 5..8` 及主海床为不可破坏深渊基岩；④ 对齐 `EcosystemSpawner` 在 `zoom = 0.22` 广角视口下的屏外刷新边距与回收阈值，保留 45m 巨鲨浅海无鱼状态，同步升级 `rollTargetBountySpecies`（按 `minPreyLengthCm` 过滤）并在 `InGameHudOverlay` 新增非阻断式双语深潜引导提示 | `src/game/rules.ts`, `src/game/world/worldCore.ts`, `src/game/world/terrainSystem.ts`, `src/game/world/seabedRenderer.ts`, `src/game/world/worldRenderer.ts`, `src/game/parallaxBackground.ts`, `src/game/canvasRenderer.ts`, `src/game/ecosystemSpawner.ts`, `src/game/audio.ts`, `src/game/i18n.ts`, `src/game/sim/types.ts`, `src/game/sim/stepSimulation.ts`, `src/game/sim/renderOceanWorld.ts`, `src/App.tsx`, `src/components/game/InGameHudOverlay.tsx`, `src/game/rules.test.ts` |
 | 2026-11-22 | **P1-3 拆分两大上帝文件（`worldGenerationSystem.ts` + `App.tsx`）并同步文档体系 + 修复浅海海床 Canvas `ctx.save()` 栈泄漏**：① 将原 11,285 行 `src/game/worldGenerationSystem.ts` 按职责拆分为 `src/game/world/` 下 11 个严格无环子模块（`worldCore` / `terrainSystem` / `biomeSystem` / `ecologyAndPoi` / `chunkStateAndPersistence` / `worldAssetRegistry` / `seabedRenderer` / `worldRenderer` / `chunkLifecycleManager` / `worldDebug` / `proceduralWorldSystem`），原入口瘦身为 15 行向后兼容 Barrel；② 将原 5,448 行 `src/App.tsx` 拆分为 4 个纯 TS 60FPS 引擎模块（`src/game/sim/{types,SharkGameEngine,stepSimulation,renderOceanWorld}.ts`）与 5 个薄层 React UI 覆盖层（`src/components/game/{DebugPanel,TitleScreen,InGameHud,PauseModal,GameOverModal}Overlay.tsx`），`App.tsx` 瘦身至 1,607 行；③ 实测浏览器验收捕获并修复 `seabedRenderer.ts` 在浅海提前 `return` 及函数尾部遗漏外层 `ctx.restore()` 导致相机矩阵逐帧累乘的渲染缺陷，补充 `try/finally` 栈守恒与 `renderOceanWorld.ts` 每帧 `setTransform` 归零保护；④ 全面刷新 `AGENTS.md`、`docs/00`、`docs/01`、`docs/07` 消除过期规范漂移 | `src/game/worldGenerationSystem.ts`, `src/game/world/*.ts`, `src/game/sim/*.ts`, `src/components/game/*.tsx`, `src/App.tsx`, `AGENTS.md`, `docs/00-AI_CONSTRAINTS.md`, `docs/01-ARCHITECTURE.md`, `docs/07-REVIEW_AND_ACTION_PLAN.md` |
 | 2026-11-21 | **P2-2 跨端同步架构解耦（共享 JSON 数据契约替代 12,422 行 TS 字符串拼 Swift）**：① 新增 `src/game/sharedGameData.ts` 纯函数构建器，导出 `shared/game_data.json`（含 48 阶鲨鱼、135 项猎物、4 血统元数据、UI 切片坐标、261 条双语词典、世界常量与广告配置）；② 将 `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift` 由 6,489 行生成字面量重构为 ~255 行 `JSONDecoder` 轻量加载器，100% 保持原公开 Swift API 不变；③ 将 `scripts/build-ios-native.ts` 从 12,423 行瘦身至 ~440 行，仅负责导出 JSON、同步资源与刷新 `project.pbxproj`（动态扫描 `.swift` 并注册 `game_data.json`），**永不覆盖原生 Swift 源码**；④ `rules.test.ts` 新增跨端 JSON 契约一致性单测 | `src/game/sharedGameData.ts`, `shared/game_data.json`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift`, `ios-native/HungrySharkEvolution.xcodeproj/project.pbxproj`, `ios-native/project.yml`, `package.json`, `src/game/rules.test.ts` |
 | 2026-11-21 | **P0-1 死代码与遗留器官系统大扫除（恢复 `tsc --noEmit` 0 Error 绿灯）**：① 删除半途回滚残留的 6 个孤儿文件（`useSharkSimulation.ts` 与 `InGameHud/GameOverModal/TitleScreen/PauseModal/DebugPanel.tsx`，共 5,583 行）；② 彻底移除早期外挂器官系统遗留文件（`OrganCanvasPreview.tsx`、`src/game/legacy/organSystem.ts`）以及 `config.ts`、`rules.ts`、`canvasRenderer.ts`、`spriteSheetManager.ts`、`i18n.ts` 中的死代码与冗余分支，并将 `rules.test.ts` 对应断言全部迁移至现役 48 阶本体进化公式 `computeEvolvedSharkStats()` | `src/game/config.ts`, `src/game/rules.ts`, `src/game/canvasRenderer.ts`, `src/game/spriteSheetManager.ts`, `src/game/i18n.ts`, `src/game/rules.test.ts`, `docs/01-ARCHITECTURE.md`, `docs/07-REVIEW_AND_ACTION_PLAN.md` |
