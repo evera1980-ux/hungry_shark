@@ -47,7 +47,7 @@ public struct UIKitSonarJoystickView: UIViewRepresentable {
         uiView.onDraggingStateChange = onDraggingStateChange
         if context.coordinator.lastResetToken != resetToken {
             context.coordinator.lastResetToken = resetToken
-            uiView.forceReset()
+            uiView.forceReset(deferCallback: true)
         }
     }
 
@@ -140,11 +140,11 @@ public final class TouchJoystickPadUIView: UIView {
     public override func willMove(toWindow newWindow: UIWindow?) {
         super.willMove(toWindow: newWindow)
         if newWindow == nil {
-            forceReset()
+            forceReset(deferCallback: true)
         }
     }
 
-    public func forceReset() {
+    public func forceReset(deferCallback: Bool = false) {
         let wasActive = activeTouch != nil
         activeTouch = nil
         CATransaction.begin()
@@ -156,7 +156,13 @@ public final class TouchJoystickPadUIView: UIView {
         CATransaction.commit()
         onVectorChange?(0, 0, false)
         if wasActive {
-            onDraggingStateChange?(false)
+            if deferCallback {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onDraggingStateChange?(false)
+                }
+            } else {
+                onDraggingStateChange?(false)
+            }
         }
     }
 
@@ -241,7 +247,7 @@ public struct UIKitHoldTouchOverlay: UIViewRepresentable {
         uiView.onPressChange = onPressChange
         if context.coordinator.lastResetToken != resetToken {
             context.coordinator.lastResetToken = resetToken
-            uiView.forceReset()
+            uiView.forceReset(deferCallback: true)
         }
     }
 
@@ -280,15 +286,21 @@ public final class HoldTouchPadUIView: UIView {
     public override func willMove(toWindow newWindow: UIWindow?) {
         super.willMove(toWindow: newWindow)
         if newWindow == nil {
-            forceReset()
+            forceReset(deferCallback: true)
         }
     }
 
-    public func forceReset() {
+    public func forceReset(deferCallback: Bool = false) {
         let wasActive = activeTouch != nil
         activeTouch = nil
         if wasActive {
-            onPressChange?(false)
+            if deferCallback {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onPressChange?(false)
+                }
+            } else {
+                onPressChange?(false)
+            }
         }
     }
 

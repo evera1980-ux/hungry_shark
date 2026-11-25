@@ -208,11 +208,12 @@ public struct UiAvatarDataBarView: View {
     public var body: some View {
         let _ = atlasManager.atlasRevision
         let metrics = atlasManager.avatarBarHollowMetrics
-        let width = height * metrics.aspectRatio
+        let safeAspect = metrics.aspectRatio.isFinite ? max(1.5, min(5.0, metrics.aspectRatio)) : 2.85
+        let width = height * safeAspect
         let holeCx = width * (metrics.cxPct / 100.0)
         let holeCy = height * (metrics.cyPct / 100.0)
-        let innerD = height * (metrics.innerDiaPctH / 100.0)
-        let outerD = height * (metrics.outerDiaPctH / 100.0)
+        let innerD = max(12.0, height * (metrics.innerDiaPctH / 100.0))
+        let outerD = max(16.0, height * (metrics.outerDiaPctH / 100.0))
 
         let hpPct = max(0.0, min(1.0, telemetry.hp / max(1.0, telemetry.maxHp)))
         let ghostPct = max(hpPct, min(1.0, telemetry.ghostHpPct / 100.0))

@@ -263,10 +263,10 @@ public final class OceanAudioEngine {
         let abyssWeight = max(0.0, min(1.0, (depthM - 750.0) / 1100.0))
         let twilightWeight = max(0.0, min(1.0, 1.0 - shallowWeight - abyssWeight))
 
-        let masterBedScale = 0.14
+        let masterBedScale = 0.22
         ambientShallowPlayer.volume = Float(shallowWeight * masterBedScale)
-        ambientTwilightPlayer.volume = Float(twilightWeight * masterBedScale * 0.95)
-        ambientAbyssPlayer.volume = Float(abyssWeight * masterBedScale * 0.90)
+        ambientTwilightPlayer.volume = Float(twilightWeight * masterBedScale * 0.92)
+        ambientAbyssPlayer.volume = Float(abyssWeight * masterBedScale * 0.88)
     }
 
     // MARK: - Gameplay & UI Sound Effects
@@ -377,29 +377,36 @@ public final class OceanAudioEngine {
         buffers["ui_tick"] = makeSweepBuffer(duration: 0.036, startHz: 780.0, endHz: 420.0, peakAmp: 0.28, isTriangle: false)
         buffers["wheel_detent"] = makeSweepBuffer(duration: 0.018, startHz: 1120.0, endHz: 340.0, peakAmp: 0.22, isTriangle: true)
 
-        // Seamless 4.0-second filtered underwater current beds (zero low-frequency sine oscillator hum!)
-        buffers["amb_shallow"] = makeAmbientBedBuffer(
-            duration: 4.0,
-            lowCutHz: 240.0,
-            highCutHz: 780.0,
-            swellHz: 0.5,
-            shimmerDepth: 0.28,
+        // Seamless 6.0-second submerged underwater ambience (sparse rising bubbles + soft distant deep-water harmonics;
+        // zero surface wave/surf noise and zero continuous low-frequency drone hum).
+        buffers["amb_shallow"] = makeUnderwaterAmbienceBuffer(
+            duration: 6.0,
+            bubbleCount: 11,
+            minBubbleHz: 330.0,
+            maxBubbleHz: 610.0,
+            bubbleGain: 0.16,
+            harmonicFreqHz: nil,
+            harmonicGain: 0.0,
             seed: 0x1029_3847
         )
-        buffers["amb_twilight"] = makeAmbientBedBuffer(
-            duration: 4.0,
-            lowCutHz: 190.0,
-            highCutHz: 540.0,
-            swellHz: 0.25,
-            shimmerDepth: 0.34,
+        buffers["amb_twilight"] = makeUnderwaterAmbienceBuffer(
+            duration: 6.0,
+            bubbleCount: 7,
+            minBubbleHz: 210.0,
+            maxBubbleHz: 370.0,
+            bubbleGain: 0.14,
+            harmonicFreqHz: 293.66,
+            harmonicGain: 0.055,
             seed: 0x5678_1234
         )
-        buffers["amb_abyss"] = makeAmbientBedBuffer(
-            duration: 4.0,
-            lowCutHz: 160.0,
-            highCutHz: 390.0,
-            swellHz: 0.25,
-            shimmerDepth: 0.38,
+        buffers["amb_abyss"] = makeUnderwaterAmbienceBuffer(
+            duration: 6.0,
+            bubbleCount: 4,
+            minBubbleHz: 155.0,
+            maxBubbleHz: 235.0,
+            bubbleGain: 0.12,
+            harmonicFreqHz: 174.61,
+            harmonicGain: 0.070,
             seed: 0x9ABC_DEF1
         )
     }
@@ -591,60 +598,71 @@ public final class OceanAudioEngine {
         return buf
     }
 
-    /// Generates a seamless band-limited underwater water-current bed (no low-frequency sine drone hum).
-    private func makeAmbientBedBuffer(
+    /// Generates a calm submerged underwater ambience loop built purely from sparse Minnaert micro-bubbles
+    /// and optional soft fading deep-water harmonic shimmer (zero surface wave/surf white noise, zero drone hum).
+    private func makeUnderwaterAmbienceBuffer(
         duration: Double,
-        lowCutHz: Double,
-        highCutHz: Double,
-        swellHz: Double,
-        shimmerDepth: Double,
+        bubbleCount: Int,
+        minBubbleHz: Double,
+        maxBubbleHz: Double,
+        bubbleGain: Double,
+        harmonicFreqHz: Double?,
+        harmonicGain: Double,
         seed: UInt32
     ) -> AVAudioPCMBuffer? {
         guard let buf = allocateBuffer(duration: duration), let ch = buf.floatChannelData?[0] else { return nil }
         let n = Int(buf.frameLength)
-        let exactDur = Double(n) / sampleRate
-        let lfoF = max(1.0, (swellHz * exactDur).rounded()) / exactDur
-        let dt = 1.0 / sampleRate
-        let hpRc = 1.0 / (2.0 * .pi * lowCutHz)
-        let hpAlpha = hpRc / (hpRc + dt)
-        let lpRc = 1.0 / (2.0 * .pi * highCutHz)
-        let lpAlpha = dt / (lpRc + dt)
-
         var raw = [Double](repeating: 0.0, count: n)
-        var rng = seed
-        var prevX = 0.0
-        var hpY = 0.0
-        var lp1 = 0.0
-        var lp2 = 0.0
 
-        // Warm up filters with 0.25s preroll so start/end match smoothly
-        let warmup = Int(sampleRate * 0.25)
-        for idx in 0..<(n + warmup) {
+        var rng = seed
+        func nextUnit() -> Double {
             rng = rng &* 1664525 &+ 1013904223
-            let white = (Double(rng >> 16) / 32768.0) - 1.0
-            hpY = hpAlpha * (hpY + white - prevX)
-            prevX = white
-            lp1 += lpAlpha * (hpY - lp1)
-            lp2 += lpAlpha * (lp1 - lp2)
-            if idx >= warmup {
-                let sampleIdx = idx - warmup
-                let t = Double(sampleIdx) / sampleRate
-                let swell = 0.74 + shimmerDepth * (0.5 + 0.5 * sin(2.0 * .pi * lfoF * t))
-                raw[sampleIdx] = lp2 * swell * 0.65
+            return Double(rng >> 16) / 65536.0
+        }
+
+        // 1. Sparse submerged underwater bubble droplets (wrapped cleanly across the loop boundary)
+        for idx in 0..<max(0, bubbleCount) {
+            let slotBase = (Double(idx) + 0.15 + nextUnit() * 0.70) / Double(max(1, bubbleCount))
+            let startSample = Int((slotBase * Double(n)).rounded()) % n
+            let bubbleDur = 0.032 + nextUnit() * 0.030
+            let lenSamples = max(64, Int((bubbleDur * sampleRate).rounded()))
+            let startHz = minBubbleHz + nextUnit() * (maxBubbleHz - minBubbleHz)
+            let pitchSweep = 1.38 + nextUnit() * 0.32
+            let localGain = bubbleGain * (0.65 + nextUnit() * 0.35)
+
+            var phase = 0.0
+            for j in 0..<lenSamples {
+                let t = Double(j) / sampleRate
+                let u = Double(j) / Double(lenSamples)
+                let hz = startHz * pow(pitchSweep, u)
+                phase += hz / sampleRate
+                let attack = min(1.0, t / 0.0045)
+                let decay = exp(-u * 4.8) * (1.0 - u)
+                let sample = sin(2.0 * .pi * phase) * attack * decay * localGain
+                raw[(startSample + j) % n] += sample
             }
         }
 
-        // Crossfade 0.25s seam window with raised-cosine weights for click-free infinite looping
-        let fadeLen = min(n / 4, Int(sampleRate * 0.25))
-        for i in 0..<fadeLen {
-            let w = 0.5 - 0.5 * cos(.pi * Double(i) / Double(fadeLen))
-            let tailIdx = n - fadeLen + i
-            let blended = raw[tailIdx] * (1.0 - w) + raw[i] * w
-            raw[i] = blended
+        // 2. Optional distant deep-water harmonic shimmer (fades from 0 -> peak -> 0 over ~2.6s, plenty of quiet rest)
+        if let f0 = harmonicFreqHz, harmonicGain > 0.0 {
+            let swellStart = Int((Double(n) * 0.22).rounded())
+            let swellLen = min(n / 2, Int((sampleRate * 2.6).rounded()))
+            var p1 = 0.0
+            var p2 = 0.0
+            for j in 0..<swellLen {
+                let u = Double(j) / Double(swellLen)
+                let win = sin(.pi * u)
+                let env = win * win
+                let vibrato = 1.0 + 0.004 * sin(2.0 * .pi * 0.65 * (Double(j) / sampleRate))
+                p1 += (f0 * vibrato) / sampleRate
+                p2 += (f0 * 1.5 * vibrato) / sampleRate
+                let tone = sin(2.0 * .pi * p1) * 0.76 + sin(2.0 * .pi * p2) * 0.24
+                raw[(swellStart + j) % n] += tone * env * harmonicGain
+            }
         }
 
         for i in 0..<n {
-            ch[i] = Float(max(-0.45, min(0.45, raw[i])))
+            ch[i] = Float(max(-0.35, min(0.35, raw[i])))
         }
         return buf
     }

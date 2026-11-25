@@ -94,18 +94,24 @@ public struct BoostMedallionView: View {
             .allowsHitTesting(false)
 
             UIKitHoldTouchOverlay(resetToken: resetToken) { pressing in
-                isBoostHolding = pressing
+                if isBoostHolding != pressing {
+                    isBoostHolding = pressing
+                }
                 vm.isBoostingHeld = pressing
             }
             .frame(width: 84, height: 84)
         }
         .frame(width: 84, height: 84)
         .onChange(of: resetToken) { _ in
-            isBoostHolding = false
+            if isBoostHolding {
+                isBoostHolding = false
+            }
             vm.isBoostingHeld = false
         }
         .onDisappear {
-            isBoostHolding = false
+            if isBoostHolding {
+                isBoostHolding = false
+            }
             vm.isBoostingHeld = false
         }
     }

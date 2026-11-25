@@ -27,29 +27,35 @@ public struct ContentView: View {
                 // 0. Base Abyssal Backdrop (#061528) so the root container is never black
                 Color(red: 6.0 / 255.0, green: 21.0 / 255.0, blue: 40.0 / 255.0)
                     .ignoresSafeArea()
+                    .zIndex(0)
 
                 // 1. Native Metal-Accelerated SpriteKit Ocean Canvas (Zero WebView!)
                 oceanSpriteCanvasLayer
+                    .zIndex(1)
 
-                // 2. Active Gameplay or Title Screen HUD Layer
+                // 2. Active Gameplay or Title Screen HUD Layer (strictly above SKView/CAMetalLayer)
                 activeStateHudLayer(geo: geo, isCompactH: isCompactH)
+                    .zIndex(10)
 
                 // 3. Pause, GameOver & 48-Shark Evolution Atlas Modals
                 modalAndAtlasLayer(geo: geo)
+                    .zIndex(30)
 
                 // 4. Ad Connection, Ad Alert & Layer 2 Dynamic Startup Loading Overlay
                 systemAndStartupOverlayLayer
+                    .zIndex(100)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
         .ignoresSafeArea()
         .statusBarHidden(true)
-        .onChange(of: vm.gameState) { _ in
-            joystickResetToken &+= 1
+        .onChange(of: vm.gameState) { newState in
             vm.resetInputState()
+            if newState != "playing" {
+                joystickResetToken &+= 1
+            }
         }
         .onChange(of: vm.runSequenceId) { _ in
-            joystickResetToken &+= 1
             vm.resetInputState()
         }
         .onChange(of: vm.showEvolutionAtlas) { shown in
@@ -153,99 +159,111 @@ public struct ContentView: View {
         let cornerBottom: CGFloat = 12.0
         let centerBannerBottom = max(14.0, rawBottom)
 
-        if vm.gameState == "playing" {
-            VStack(spacing: 3) {
-                HStack(alignment: .top, spacing: 8) {
-                    UiAvatarDataBarView(vm: vm, height: isCompactH ? 56 : 64)
-                    Spacer(minLength: 4)
-                    telemetryPill(isCompact: isCompactH)
-                    Spacer(minLength: 4)
-                    pauseMedallionButton
-                }
-                .padding(.leading, hudLead)
-                .padding(.trailing, hudTrail)
-                .padding(.top, hudTop)
-
-                HudRow2StatusOverlayView(vm: vm, telemetry: vm.telemetry)
-                    .allowsHitTesting(false)
-                Spacer()
-            }
-
-            VStack {
-                Spacer()
-                HStack(alignment: .bottom) {
-                    SonarJoystickView(vm: vm, resetToken: joystickResetToken)
-                        .padding(.leading, hudLead)
-                        .padding(.bottom, cornerBottom)
-                    Spacer(minLength: 6)
-                    if vm.onboardingStep != .DONE {
-                        onboardingBottomBanner
-                            .padding(.bottom, centerBannerBottom)
-                    }
-                    Spacer(minLength: 6)
-                    mobaSkillFan(rawSafeTrail: rawTrail)
-                        .padding(.trailing, hudTrail)
-                        .padding(.bottom, cornerBottom)
-                }
-            }
-        } else if vm.gameState == "title" {
-            titleScreenOverlay(geo: geo, hudLead: hudLead, hudTrail: hudTrail, hudTop: hudTop, rawBottom: rawBottom)
-        }
-    }
-
-    @ViewBuilder
-    private func modalAndAtlasLayer(geo: GeometryProxy) -> some View {
-        if vm.gameState == "paused" {
-            pauseModalOverlay(geo: geo)
-        }
-        if vm.gameState == "gameover" {
-            gameOverModalOverlay(geo: geo)
-        }
-        if vm.showEvolutionAtlas {
-            EvolutionAtlasSheetView(vm: vm)
-                .transition(.opacity)
-                .zIndex(50)
-        }
-    }
-
-    @ViewBuilder
-    private var systemAndStartupOverlayLayer: some View {
-        if adManager.isConnectingAd {
+        switch vm.gameState {
+        case "playing":
             ZStack {
-                Color.black.opacity(0.72).ignoresSafeArea()
-                VStack(spacing: 14) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: .yellow))
-                        .scaleEffect(1.6)
-                    Text(vm.lang == "zh" ? "正在连接 Google 激励视频广告..." : "Connecting to Google Video Ad...")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                    Text(vm.lang == "zh" ? "广告准备中，即将为您全屏播放" : "Preparing full-screen player...")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
+                VStack(spacing: 3) {
+                    HStack(alignment: .top, spacing: 8) {
+                        UiAvatarDataBarView(vm: vm, height: isCompactH ? 56 : 64)
+                        Spacer(minLength: 4)
+                        telemetryPill(isCompact: isCompactH)
+                        Spacer(minLength: 4)
+                        pauseMedallionButton
+                    }
+                    .padding(.leading, hudLead)
+                    .padding(.trailing, hudTrail)
+                    .padding(.top, hudTop)
+
+                    HudRow2StatusOverlayView(vm: vm, telemetry: vm.telemetry)
+                        .allowsHitTesting(false)
+                    Spacer()
                 }
-                .padding(24)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(Color(red: 15.0 / 255.0, green: 23.0 / 255.0, blue: 42.0 / 255.0).opacity(0.96))
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.yellow.opacity(0.7), lineWidth: 1.5))
-                )
+
+                VStack {
+                    Spacer()
+                    HStack(alignment: .bottom) {
+                        SonarJoystickView(vm: vm, resetToken: joystickResetToken)
+                            .padding(.leading, hudLead)
+                            .padding(.bottom, cornerBottom)
+                        Spacer(minLength: 6)
+                        if vm.onboardingStep != .DONE {
+                            onboardingBottomBanner
+                                .padding(.bottom, centerBannerBottom)
+                        }
+                        Spacer(minLength: 6)
+                        mobaSkillFan(rawSafeTrail: rawTrail)
+                            .padding(.trailing, hudTrail)
+                            .padding(.bottom, cornerBottom)
+                    }
+                }
             }
-            .zIndex(75)
-            .transition(.opacity)
-        }
+            .frame(width: geo.size.width, height: geo.size.height)
+            .id("hud_playing")
 
-        if let msg = vm.adUnavailableMessage {
-            adUnavailableAlertModal(message: msg)
-                .zIndex(85)
-                .transition(.opacity.combined(with: .scale(scale: 0.95)))
-        }
+        case "title":
+            titleScreenOverlay(geo: geo, hudLead: hudLead, hudTrail: hudTrail, hudTop: hudTop, rawBottom: rawBottom)
+                .id("hud_title")
 
-        if !atlasManager.isReady {
-            StartupLoadingView(vm: vm, atlasManager: atlasManager)
-                .zIndex(200)
-                .allowsHitTesting(!atlasManager.isReady)
+        default:
+            EmptyView()
+        }
+    }
+
+    private func modalAndAtlasLayer(geo: GeometryProxy) -> some View {
+        ZStack {
+            if vm.gameState == "paused" {
+                pauseModalOverlay(geo: geo)
+            }
+            if vm.gameState == "gameover" {
+                gameOverModalOverlay(geo: geo)
+            }
+            if vm.showEvolutionAtlas {
+                EvolutionAtlasSheetView(vm: vm)
+                    .transition(.opacity)
+                    .zIndex(50)
+            }
+        }
+    }
+
+    private var systemAndStartupOverlayLayer: some View {
+        ZStack {
+            if adManager.isConnectingAd {
+                ZStack {
+                    Color.black.opacity(0.72).ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .yellow))
+                            .scaleEffect(1.6)
+                        Text(vm.lang == "zh" ? "正在连接 Google 激励视频广告..." : "Connecting to Google Video Ad...")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                        Text(vm.lang == "zh" ? "广告准备中，即将为您全屏播放" : "Preparing full-screen player...")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding(24)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color(red: 15.0 / 255.0, green: 23.0 / 255.0, blue: 42.0 / 255.0).opacity(0.96))
+                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.yellow.opacity(0.7), lineWidth: 1.5))
+                    )
+                }
+                .zIndex(75)
                 .transition(.opacity)
+            }
+
+            if let msg = vm.adUnavailableMessage {
+                adUnavailableAlertModal(message: msg)
+                    .zIndex(85)
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            }
+
+            if !atlasManager.isReady {
+                StartupLoadingView(vm: vm, atlasManager: atlasManager)
+                    .zIndex(200)
+                    .allowsHitTesting(!atlasManager.isReady)
+                    .transition(.opacity)
+            }
         }
     }
 

@@ -135,8 +135,23 @@ public struct FixedEvolutionHudButton: View {
             .frame(width: 58, height: 60)
             .scaleEffect(evoReady && isPulsing ? 1.08 : 1.0)
             .onAppear {
-                withAnimation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true)) {
-                    isPulsing = true
+                if evoReady {
+                    withAnimation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true)) {
+                        isPulsing = true
+                    }
+                } else {
+                    isPulsing = false
+                }
+            }
+            .onChange(of: evoReady) { ready in
+                if ready {
+                    withAnimation(.easeInOut(duration: 0.65).repeatForever(autoreverses: true)) {
+                        isPulsing = true
+                    }
+                } else {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        isPulsing = false
+                    }
                 }
             }
         }
