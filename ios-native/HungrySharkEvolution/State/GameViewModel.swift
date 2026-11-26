@@ -40,11 +40,38 @@ public final class GameViewModel: ObservableObject {
     public var comboTimer: Double = 0
     public var frenzyTimer: Double = 0
 
-    // Target Bounty & Golden Mutant Charge
+    // Target Bounty, Golden Mutant Charge & Economy Runtime State
     @Published public var targetBountyPreyId: String = "PREY-001"
     @Published public var targetBountyCaptured: Int = 0
     @Published public var goldenMutantCharge: Int = 0
-    public let goldenMutantNeed: Int = 5
+    @Published public var announcedCrownTier: Int = 0
+    @Published public var crownHudToastText: String? = nil
+
+    public var runSurvivalElapsedSec: Double = 0.0
+    public var globalDifficultyMultiplier: Double = 1.0
+    public var frenzyCooldownRemaining: Double = 0.0
+    public var genePityMissStreak: Int = 0
+    public var pendingSkillInvulnSec: Double = 0.0
+    public var pendingInterstitialCheck: Bool = false
+
+    public var targetBountyRequired: Int {
+        DomainConfigs.economyPredation.bounty.requiredKills
+    }
+
+    public var trialConfig: TrialSharkAdConfig {
+        DomainConfigs.adsAndMonetization.placements.TRIAL_SHARK
+    }
+
+    public var currentSupplyDropReward: SupplyDropRowRewardConfig {
+        let maxRow = DomainConfigs.maxUnlockedRow(unlockedSharkIds: save.unlockedSharkIds)
+        return DomainConfigs.supplyDropReward(forMaxUnlockedRow: maxRow)
+    }
+
+    public var goldenMutantNeed: Int {
+        let cfg = DomainConfigs.economyPredation.frenzy
+        let reduction = currentStats.goldenMutantReduction
+        return max(cfg.minChargeFloor, cfg.goldenChargeRequired - reduction)
+    }
 
     // 3-Step Interactive Onboarding Tutorial
     @Published public var onboardingStep: OnboardingStep = .EAT_SMALL_FISH
@@ -56,6 +83,7 @@ public final class GameViewModel: ObservableObject {
     // GameOver Revive & Settlement
     @Published public var reviveOffered: Bool = false
     private var reviveUsedInCurrentRun: Bool = false
+    private var hasSettledCurrentRun: Bool = false
     @Published public var runSurvivalSec: Int = 0
     @Published public var runCoinsEarned: Int = 0
     @Published public var runGenesEarned: Int = 0
@@ -119,29 +147,40 @@ public final class GameViewModel: ObservableObject {
         )
     }
 
-    private let saveKey = "hungry_shark_48_meta_save_v2"
-    private let onboardingDoneKey = "hungry_shark_onboarding_v2_done"
+    private let userDefaults: UserDefaults
+    private let saveKey: String
+    private let onboardingDoneKey: String
 
-    public init() {
+    public init(
+        userDefaults: UserDefaults = .standard,
+        saveKey: String = "hungry_shark_48_meta_save_v2",
+        onboardingDoneKey: String = "hungry_shark_onboarding_v2_done",
+        preloadAds: Bool = true
+    ) {
+        self.userDefaults = userDefaults
+        self.saveKey = saveKey
+        self.onboardingDoneKey = onboardingDoneKey
         GADInfoPlistRuntimePatch.installIfNeeded()
-        if let data = UserDefaults.standard.data(forKey: saveKey),
+        if let data = userDefaults.data(forKey: saveKey),
            let decoded = try? JSONDecoder().decode(SharkMetaSaveData.self, from: data) {
             self.save = decoded
         } else {
             self.save = SharkMetaSaveData.createDefault()
         }
-        if UserDefaults.standard.bool(forKey: onboardingDoneKey) {
+        if userDefaults.bool(forKey: onboardingDoneKey) {
             self.onboardingStep = .DONE
         }
         OceanAudioEngine.shared.setMuted(!self.save.soundEnabled)
         recomputeCurrentSharkStats()
         pickNewBountyPrey()
-        GoogleAdMobManager.shared.startSDKAndPreload()
+        if preloadAds {
+            GoogleAdMobManager.shared.startSDKAndPreload()
+        }
     }
 
     public func persistSave() {
         if let data = try? JSONEncoder().encode(save) {
-            UserDefaults.standard.set(data, forKey: saveKey)
+            userDefaults.set(data, forKey: saveKey)
         }
     }
 
@@ -191,6 +230,26 @@ public final class GameViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Unified Permanent-Progress Eligibility Gate (D1 + D2)
+    public var isActiveTrialInRun: Bool {
+        (gameState == "playing" || gameState == "paused") && trialSharkIdForRun != nil
+    }
+
+    public var permanentProgressContext: PermanentProgressRunContext {
+        PermanentProgressRunContext(
+            isTrial: trialSharkIdForRun != nil,
+            activeInRun: gameState == "playing" || gameState == "paused"
+        )
+    }
+
+    public var permanentProgressEligibility: PermanentProgressEligibility {
+        GameRules.getPermanentProgressEligibility(permanentProgressContext)
+    }
+
+    public var isEligibleForPermanentProgress: Bool {
+        GameRules.isEligibleForPermanentProgress(permanentProgressContext)
+    }
+
     // MARK: - Active Shark & Computed Stats
     public var activeSharkId: String {
         trialSharkIdForRun ?? save.selectedSharkId
@@ -203,9 +262,14 @@ public final class GameViewModel: ObservableObject {
 
     public var activeUpgradeLevel: Int {
         if trialSharkIdForRun != nil {
-            return max(5, save.sharkUpgradeLevels[activeSharkId] ?? 5)
+            let trialLv = DomainConfigs.adsAndMonetization.placements.TRIAL_SHARK.trialUpgradeLevel
+            return max(trialLv, save.sharkUpgradeLevels[activeSharkId] ?? trialLv)
         }
         return save.sharkUpgradeLevels[activeSharkId] ?? 1
+    }
+
+    public var globalAtlasBonuses: GlobalAtlasBonuses {
+        GameRules.getGlobalAtlasBonuses(save: save)
     }
 
     public var currentStats: ComputedSharkStats {
@@ -214,8 +278,9 @@ public final class GameViewModel: ObservableObject {
             sharkFormId: activeSharkId,
             upgradeLevel: activeUpgradeLevel,
             frenzyActive: frenzyActive,
-            globalDifficultyMultiplier: 1.0,
-            unlockedCount: save.unlockedSharkIds.count
+            globalDifficultyMultiplier: globalDifficultyMultiplier,
+            unlockedCount: save.unlockedSharkIds.count,
+            totalCrownCount: globalAtlasBonuses.totalMasteryCrowns
         )
     }
 
@@ -285,22 +350,30 @@ public final class GameViewModel: ObservableObject {
 
     // MARK: - Run Lifecycle
     public var nextShowcaseSharkForm: SharkFormConfig {
-        if let nextTarget = GameRules.getNextEvolutionTarget(save: save) {
-            return nextTarget.form
-        }
-        return GameConfigGenerated.sharkForms.last ?? GameConfigGenerated.sharkForms[0]
+        DomainConfigs.trialTargetSharkForm(unlockedSharkIds: save.unlockedSharkIds)
     }
 
     public func startNewRun(trialSharkId: String? = nil) {
         resetInputState()
         trialSharkIdForRun = trialSharkId
-        inRunLevel = trialSharkId != nil ? 5 : 1
+        hasSettledCurrentRun = false
+        let tCfg = DomainConfigs.adsAndMonetization.placements.TRIAL_SHARK
+        inRunLevel = trialSharkId != nil ? tCfg.trialInRunLevel : 1
         xp = 0
         score = 0
         comboCount = 0
         comboTimer = 0
-        frenzyActive = false
-        frenzyTimer = 0
+        runSurvivalElapsedSec = 0.0
+        globalDifficultyMultiplier = 1.0
+        frenzyCooldownRemaining = 0.0
+        genePityMissStreak = 0
+        pendingSkillInvulnSec = 0.0
+        announcedCrownTier = 0
+        crownHudToastText = nil
+        goldenMutantCharge = 0
+        let trialStartFrenzy = (trialSharkId != nil && tCfg.initialFrenzyDurationSec > 0) ? tCfg.initialFrenzyDurationSec : 0.0
+        frenzyActive = trialStartFrenzy > 0.0
+        frenzyTimer = trialStartFrenzy
         goldOverdriveUseCount = 0
         geneSurgeUseCount = 0
         runSurvivalSec = 0
@@ -327,7 +400,8 @@ public final class GameViewModel: ObservableObject {
         xpRequired = GameRules.getXpRequiredForLevel(inRunLevel)
         pickNewBountyPrey(currentWorldY: initSpawnY)
 
-        save.totalRuns += 1
+        let runCtx = PermanentProgressRunContext(isTrial: trialSharkId != nil, activeInRun: true)
+        GameRules.recordFormalRunStarted(runContext: runCtx, save: &save)
         persistSave()
         flushTelemetryImmediate()
         SpriteAtlasManager.shared.prewarmSharkWindow(selectedSharkId: activeSharkId)
@@ -358,6 +432,7 @@ public final class GameViewModel: ObservableObject {
         deepDivePromptMeters = nil
         gameState = "title"
         recomputeCurrentSharkStats()
+        persistSave()
         flushTelemetryImmediate()
         playUiTick()
     }
@@ -388,37 +463,82 @@ public final class GameViewModel: ObservableObject {
     }
 
     public func finalizeRunSettlement() {
+        guard !hasSettledCurrentRun else { return }
+        hasSettledCurrentRun = true
+
         let activeId = activeSharkId
+        let eligibility = permanentProgressEligibility
         let settlement = GameRules.settleSharkScoreMastery(
             sharkId: activeId,
             runScore: score,
-            save: save
+            save: save,
+            runContext: permanentProgressContext
         )
-        save.sharkBestScores[activeId] = settlement.newBestScore
-        save.sharkMasteryTiers[activeId] = settlement.newMasteryTier
-        if settlement.totalBonusCoins > 0 {
-            save.bankedCoins += settlement.totalBonusCoins
-        }
-        if settlement.totalBonusGenes > 0 {
-            save.bankedGenes += settlement.totalBonusGenes
+
+        if eligibility.allowSharkMasteryAndCrown {
+            save.sharkBestScores[activeId] = settlement.newBestScore
+            save.sharkMasteryTiers[activeId] = settlement.newMasteryTier
+            if settlement.totalBonusCoins > 0 {
+                save.bankedCoins += settlement.totalBonusCoins
+            }
+            if settlement.totalBonusGenes > 0 {
+                save.bankedGenes += settlement.totalBonusGenes
+            }
         }
         lastMasterySettlement = settlement
         persistSave()
+        if eligibility.allowRunRecords && GoogleAdMobManager.shared.canShowInterstitial(totalRunsCompleted: save.totalRuns) {
+            pendingInterstitialCheck = true
+        }
+    }
+
+    public func checkCrownMilestoneHudNotice() {
+        guard DomainConfigs.crownMastery.hudUnlockNotificationOnly,
+              permanentProgressEligibility.allowSharkMasteryAndCrown else { return }
+        let activeId = activeSharkId
+        let prevTier = save.sharkMasteryTiers[activeId] ?? 0
+        let seenTier = max(prevTier, announcedCrownTier)
+        let config = GameRules.getSharkMasteryConfig(form: activeSharkForm)
+        for t in config.tiers where t.tier > seenTier && score >= t.targetScore {
+            announcedCrownTier = t.tier
+            let title = lang == "zh" ? t.labelZh : t.labelEn
+            crownHudToastText = lang == "zh"
+                ? "👑 达成 \(title)（结算时发放奖励）"
+                : "👑 \(title) UNLOCKED (Paid on Settlement)"
+        }
+    }
+
+    public func updateTimeDifficulty(elapsedSec: Double) {
+        let diffCfg = DomainConfigs.worldAndProgression.timeDifficulty
+        guard elapsedSec > 0, diffCfg.intervalSec > 0 else {
+            globalDifficultyMultiplier = 1.0
+            return
+        }
+        let steps = floor(elapsedSec / diffCfg.intervalSec)
+        let nextMult = min(diffCfg.maxDifficultyMultiplier, 1.0 + steps * diffCfg.ratePerInterval)
+        if abs(nextMult - globalDifficultyMultiplier) > 0.0001 {
+            globalDifficultyMultiplier = nextMult
+        }
     }
 
     // MARK: - In-Run Skills & Upgrades
     public func triggerGoldFrenzy() {
         let form = activeSharkForm
+        let skillCfg = DomainConfigs.economyPredation.activeSkills.goldOverdrive
         let cost = GameRules.getGoldOverdriveCost(useCount: goldOverdriveUseCount, generationRow: form.row)
-        guard save.bankedCoins >= cost && !frenzyActive else { return }
+        guard save.bankedCoins >= cost, (!frenzyActive || !skillCfg.blockWhileFrenzy) else { return }
         save.bankedCoins -= cost
         goldOverdriveUseCount += 1
         frenzyActive = true
-        frenzyTimer = GameConfigGenerated.frenzyDuration + currentStats.frenzyDurationBonus
-        hp = maxHp
-        ghostHpPct = 100
-        energy = maxEnergy
+        frenzyCooldownRemaining = 0.0
         recomputeCurrentSharkStats()
+        frenzyTimer = skillCfg.durationSec + currentStats.frenzyDurationBonus
+        let healAmt = (maxHp * skillCfg.healMaxHpPct).rounded()
+        hp = min(maxHp, hp + healAmt)
+        ghostHpPct = max(0, min(100, (hp / max(1, maxHp)) * 100.0))
+        energy = max(energy, min(maxEnergy, maxEnergy * skillCfg.energyRestorePct))
+        pendingSkillInvulnSec = max(pendingSkillInvulnSec, skillCfg.invulnDurationSec)
+        flushTelemetryImmediate()
         persistSave()
         HapticFeedbackManager.shared.playHeavy(minInterval: 0.08)
         if save.soundEnabled {
@@ -428,31 +548,35 @@ public final class GameViewModel: ObservableObject {
 
     public func triggerGeneSurge() {
         let form = activeSharkForm
+        let skillCfg = DomainConfigs.economyPredation.activeSkills.geneSurge
         let cost = GameRules.getGeneSurgeCost(level: inRunLevel, useCount: geneSurgeUseCount, generationRow: form.row)
         guard save.bankedGenes >= cost else { return }
         save.bankedGenes -= cost
         geneSurgeUseCount += 1
-        let bonusXp = Int((Double(xpRequired) * 0.55).rounded())
+        let bonusXp = Int((Double(xpRequired) * skillCfg.xpGrantRatio).rounded())
         _ = addXp(bonusXp)
-        hp = min(maxHp, hp + 35)
-        energy = maxEnergy
+        let healAmt = max(Double(skillCfg.healMinFlat), (maxHp * skillCfg.healMaxHpPct).rounded())
+        hp = min(maxHp, hp + healAmt)
+        energy = max(energy, min(maxEnergy, maxEnergy * skillCfg.energyRestorePct))
         flushTelemetryImmediate()
         persistSave()
         playSuccessSound()
     }
 
     public func upgradeActiveSharkBody() {
+        guard permanentProgressEligibility.allowSharkUnlockAndUpgrade else { return }
         _ = upgradeSharkForm(activeSharkForm)
         if onboardingStep == .HANDS_ON_UPGRADE {
             onboardingHandsOnUpgraded = true
             onboardingStep = .CELEBRATE
             onboardingCelebrationTimer = 3.2
-            UserDefaults.standard.set(true, forKey: onboardingDoneKey)
+            userDefaults.set(true, forKey: onboardingDoneKey)
         }
     }
 
     @discardableResult
     public func upgradeSharkForm(_ form: SharkFormConfig) -> Bool {
+        guard permanentProgressEligibility.allowSharkUnlockAndUpgrade else { return false }
         let curLv = save.sharkUpgradeLevels[form.id] ?? 1
         guard curLv < 10 else { return false }
         let coinCost = GameRules.getSharkUpgradeCoinCost(form: form, currentLevel: curLv)
@@ -474,7 +598,12 @@ public final class GameViewModel: ObservableObject {
 
     @discardableResult
     public func unlockSharkForm(_ form: SharkFormConfig) -> Bool {
-        let check = GameRules.evaluateSharkUnlock(form: form, save: save)
+        guard permanentProgressEligibility.allowSharkUnlockAndUpgrade else { return false }
+        let check = GameRules.evaluateSharkUnlockForRun(
+            form: form,
+            save: save,
+            runContext: permanentProgressContext
+        )
         guard check.canUnlockNow else { return false }
         save.bankedCoins -= form.unlockCoins
         save.bankedGenes -= form.unlockGenes
@@ -500,6 +629,7 @@ public final class GameViewModel: ObservableObject {
     }
 
     public func selectSharkForm(_ form: SharkFormConfig) {
+        guard permanentProgressEligibility.allowSharkUnlockAndUpgrade else { return }
         guard save.unlockedSharkIds.contains(form.id) else { return }
         save.selectedSharkId = form.id
         trialSharkIdForRun = nil
@@ -510,6 +640,7 @@ public final class GameViewModel: ObservableObject {
     }
 
     public func evolveToNextReadySharkInRun() {
+        guard permanentProgressEligibility.allowSharkUnlockAndUpgrade else { return }
         guard let nextTarget = GameRules.getNextEvolutionTarget(save: save),
               nextTarget.check.canUnlockNow else { return }
         _ = unlockSharkForm(nextTarget.form)
@@ -517,18 +648,24 @@ public final class GameViewModel: ObservableObject {
 
     @discardableResult
     public func addXp(_ amount: Int) -> Bool {
+        let lvlCfg = DomainConfigs.worldAndProgression.inRunLevelProgression
         xp += amount
         var leveledUp = false
         while xp >= xpRequired {
             xp -= xpRequired
             inRunLevel += 1
             leveledUp = true
-            if inRunLevel > save.bestInRunLevel {
-                save.bestInRunLevel = inRunLevel
+            if GameRules.recordPermanentRunProgress(
+                save: &save,
+                runContext: permanentProgressContext,
+                inRunLevel: inRunLevel,
+                maxDepthMeters: Double(runMaxDepth)
+            ) {
+                persistSave()
             }
             recomputeCurrentSharkStats()
-            hp = min(maxHp, hp + maxHp * 0.38)
-            energy = min(maxEnergy, energy + maxEnergy * 0.50)
+            hp = min(maxHp, hp + maxHp * lvlCfg.levelUpHealMaxHpPct)
+            energy = min(maxEnergy, energy + maxEnergy * lvlCfg.levelUpEnergyRestorePct)
             flushTelemetryImmediate()
             HapticFeedbackManager.shared.playNotification(.success, minInterval: 0.08)
             if save.soundEnabled {
@@ -540,7 +677,7 @@ public final class GameViewModel: ObservableObject {
 
     // MARK: - Onboarding Controls
     public func restartOnboardingTutorial() {
-        UserDefaults.standard.set(false, forKey: onboardingDoneKey)
+        userDefaults.set(false, forKey: onboardingDoneKey)
         onboardingStep = .EAT_SMALL_FISH
         onboardingEatCount = 0
         onboardingBoostSeconds = 0
@@ -553,13 +690,24 @@ public final class GameViewModel: ObservableObject {
     }
 
     public func skipOnboardingTutorial() {
-        UserDefaults.standard.set(true, forKey: onboardingDoneKey)
+        userDefaults.set(true, forKey: onboardingDoneKey)
         onboardingStep = .DONE
         playUiTick()
     }
 
     // MARK: - Google AdMob Rewarded Video (iOS Native Zero-Simulation)
     public func showRewardedAd(kind: SimRewardedAdKind) {
+        if kind == .DOUBLE_SETTLEMENT {
+            guard permanentProgressEligibility.allowDoubleSettlementAd,
+                  !settlementDoubled,
+                  (runCoinsEarned > 0 || runGenesEarned > 0) else {
+                return
+            }
+        } else if kind == .REVIVE {
+            guard reviveOffered && !reviveUsedInCurrentRun else {
+                return
+            }
+        }
         GoogleAdMobManager.shared.showRewardedAd(
             kind: kind,
             onReward: { [weak self] in
@@ -588,29 +736,46 @@ public final class GameViewModel: ObservableObject {
     }
 
     public func grantAdReward(for kind: SimRewardedAdKind) {
+        let placements = DomainConfigs.adsAndMonetization.placements
         switch kind {
         case .REVIVE:
+            let cfg = placements.REVIVE
+            guard !reviveUsedInCurrentRun else { return }
             resetInputState()
             reviveUsedInCurrentRun = true
             reviveOffered = false
             frenzyActive = true
+            frenzyCooldownRemaining = 0.0
             recomputeCurrentSharkStats()
-            frenzyTimer = GameConfigGenerated.frenzyDuration + currentStats.frenzyDurationBonus
-            hp = maxHp
+            frenzyTimer = cfg.frenzyDurationSec + currentStats.frenzyDurationBonus
+            hp = min(maxHp, max(hp, maxHp * cfg.hpRestorePct))
             ghostHpPct = 100
-            energy = maxEnergy
+            energy = min(maxEnergy, max(energy, maxEnergy * cfg.energyRestorePct))
+            pendingSkillInvulnSec = max(pendingSkillInvulnSec, cfg.invulnDurationSec)
             flushTelemetryImmediate()
             gameState = "playing"
         case .DOUBLE_SETTLEMENT:
-            if !settlementDoubled {
-                settlementDoubled = true
-                save.bankedCoins += max(30, runCoinsEarned)
-                save.bankedGenes += max(5, runGenesEarned)
-                persistSave()
+            let cfg = placements.DOUBLE_SETTLEMENT
+            guard permanentProgressEligibility.allowDoubleSettlementAd,
+                  !settlementDoubled,
+                  (runCoinsEarned > 0 || runGenesEarned > 0) else {
+                return
             }
+            settlementDoubled = true
+            let extraFactor = max(0.0, cfg.multiplier - 1.0)
+            let bonusCoins = Int((Double(runCoinsEarned) * extraFactor).rounded())
+            let bonusGenes = Int((Double(runGenesEarned) * extraFactor).rounded())
+            if bonusCoins > 0 {
+                save.bankedCoins += bonusCoins
+            }
+            if bonusGenes > 0 {
+                save.bankedGenes += bonusGenes
+            }
+            persistSave()
         case .SUPPLY_DROP:
-            save.bankedCoins += 300
-            save.bankedGenes += 25
+            let drop = currentSupplyDropReward
+            save.bankedCoins += drop.coins
+            save.bankedGenes += drop.genes
             persistSave()
         case .TRIAL_SHARK:
             let showcase = nextShowcaseSharkForm

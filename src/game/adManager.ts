@@ -1,48 +1,225 @@
+import adsConfigJson from '../../shared/configs/ads_and_monetization_config.json';
+import sharkEvolutionJson from '../../shared/configs/shark_evolution_config.json';
+
 export type AdPlacement =
-  | 'EVO_CLAIM_ALL'
-  | 'REVIVE_FRENZY'
-  | 'TRIAL_MAX_MECHA'
-  | 'GENE_SUPPLY_DROP';
+  | 'DOUBLE_SETTLEMENT'
+  | 'REVIVE'
+  | 'TRIAL_SHARK'
+  | 'SUPPLY_DROP';
+
+export type AdFrequencyKey = AdPlacement | 'INTERSTITIAL';
 
 export type AdPlatformEnv = 'admob' | 'h5_ads' | 'wx' | 'tt' | 'web';
 
+export type AdBlockReason =
+  | 'COOLDOWN'
+  | 'DAILY_CAP'
+  | 'IN_FLIGHT'
+  | 'UNCONFIGURED_AD_UNIT'
+  | 'AD_UNAVAILABLE'
+  | 'DISMISSED'
+  | 'NO_WINDOW';
+
+export interface AdErrorInfo {
+  placement: AdFrequencyKey;
+  reason: AdBlockReason;
+  retryAfterMs?: number;
+  remainingToday?: number;
+  messageZh: string;
+  messageEn: string;
+}
+
+export interface AdAvailability {
+  allowed: boolean;
+  reason?: 'COOLDOWN' | 'DAILY_CAP' | 'IN_FLIGHT';
+  retryAfterMs: number;
+  remainingToday: number;
+  dailyCap: number;
+}
+
+export interface AdPlacementRule {
+  cooldownMs: number;
+  dailyCap: number;
+}
+
+export const ADS_AND_MONETIZATION_CONFIG = adsConfigJson;
+
+export const AD_PLACEMENT_RULES: Record<AdFrequencyKey, AdPlacementRule> = {
+  DOUBLE_SETTLEMENT: {
+    cooldownMs: adsConfigJson.placements.DOUBLE_SETTLEMENT.cooldownSec * 1000,
+    dailyCap: adsConfigJson.placements.DOUBLE_SETTLEMENT.dailyCap,
+  },
+  REVIVE: {
+    cooldownMs: adsConfigJson.placements.REVIVE.cooldownSec * 1000,
+    dailyCap: adsConfigJson.placements.REVIVE.dailyCap,
+  },
+  TRIAL_SHARK: {
+    cooldownMs: adsConfigJson.placements.TRIAL_SHARK.cooldownSec * 1000,
+    dailyCap: adsConfigJson.placements.TRIAL_SHARK.dailyCap,
+  },
+  SUPPLY_DROP: {
+    cooldownMs: adsConfigJson.placements.SUPPLY_DROP.cooldownSec * 1000,
+    dailyCap: adsConfigJson.placements.SUPPLY_DROP.dailyCap,
+  },
+  INTERSTITIAL: {
+    cooldownMs: adsConfigJson.placements.INTERSTITIAL.cooldownSec * 1000,
+    dailyCap: adsConfigJson.placements.INTERSTITIAL.dailyCap,
+  },
+};
+
+export function getScaledSupplyDropReward(maxUnlockedRow: number): {
+  row: number;
+  generation: number;
+  coins: number;
+  genes: number;
+} {
+  const table = adsConfigJson.placements.SUPPLY_DROP.rewardsByMaxUnlockedRow;
+  const clampedRow = Math.max(0, Math.min(table.length - 1, Math.floor(maxUnlockedRow)));
+  return table[clampedRow];
+}
+
+export function getMaxUnlockedRowFromSave(unlockedSharkIds: readonly string[]): number {
+  let maxRow = 0;
+  for (const id of unlockedSharkIds) {
+    const found = sharkEvolutionJson.sharks.find((s) => s.id === id);
+    if (found && found.row > maxRow) {
+      maxRow = found.row;
+    }
+  }
+  return maxRow;
+}
+
+export function getTrialTargetSharkSpec(unlockedSharkIds: readonly string[]): {
+  sharkId: string;
+  upgradeLevel: number;
+  inRunLevel: number;
+  initialFrenzyDurationSec: number;
+} {
+  const trialCfg = adsConfigJson.placements.TRIAL_SHARK;
+  const ownedSet = new Set(unlockedSharkIds);
+  const nextUnowned =
+    trialCfg.targetMode === 'next_unowned_shark'
+      ? sharkEvolutionJson.sharks.find((s) => !ownedSet.has(s.id))
+      : undefined;
+  const chosenId = nextUnowned?.id ?? trialCfg.fallbackSharkId;
+  return {
+    sharkId: chosenId,
+    upgradeLevel: trialCfg.trialUpgradeLevel,
+    inRunLevel: trialCfg.trialInRunLevel,
+    initialFrenzyDurationSec: trialCfg.initialFrenzyDurationSec,
+  };
+}
+
+export function getOnboardingStarterGiftConfig(): {
+  enabled: boolean;
+  coins: number;
+  genes: number;
+  oneTimeOnly: boolean;
+} {
+  return adsConfigJson.onboardingStarterGift;
+}
+
+function readEnv(key: string): string | undefined {
+  try {
+    if (typeof import.meta !== 'undefined') {
+      const metaEnv = (import.meta as unknown as { env?: Record<string, unknown> }).env;
+      if (metaEnv && typeof metaEnv[key] === 'string' && metaEnv[key]) {
+        return metaEnv[key] as string;
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  try {
+    if (typeof process !== 'undefined' && process.env && process.env[key]) {
+      return process.env[key];
+    }
+  } catch {
+    // Ignore
+  }
+  return undefined;
+}
+
+function isViteDevMode(): boolean {
+  try {
+    if (typeof import.meta !== 'undefined') {
+      const metaEnv = (import.meta as unknown as { env?: Record<string, unknown> }).env;
+      if (metaEnv && metaEnv.DEV === true) {
+        return true;
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  return false;
+}
+
 /**
  * Single Source of Truth for Google AdMob (iOS / Android) & Google H5 Games Ads (AdSense for Games).
- * Synced automatically into `./ios-native/` via `npm run build:ios`.
+ * Synced automatically into `./ios-native/` via `npm run sync:ios`.
  */
 export const GOOGLE_ADS_CONFIG = {
   /** Google AdMob App ID (Android / iOS) */
   admobAppId:
-    (typeof import.meta !== 'undefined' &&
-      (import.meta as unknown as { env?: Record<string, string> }).env
-        ?.VITE_GOOGLE_ADMOB_APP_ID) ||
-    'ca-app-pub-9273669553362347~9016886171',
+    readEnv('VITE_GOOGLE_ADMOB_APP_ID') ||
+    adsConfigJson.providers.admobAppId,
 
   /** Google AdMob Rewarded Video Ad Unit ID */
   admobRewardedAdUnitId:
-    (typeof import.meta !== 'undefined' &&
-      (import.meta as unknown as { env?: Record<string, string> }).env
-        ?.VITE_GOOGLE_ADMOB_REWARDED_AD_UNIT_ID) ||
-    'ca-app-pub-9273669553362347/8698331137',
+    readEnv('VITE_GOOGLE_ADMOB_REWARDED_AD_UNIT_ID') ||
+    adsConfigJson.providers.admobRewardedAdUnitId,
+
+  /** Google AdMob Interstitial Ad Unit ID (strictly separate from Rewarded Video) */
+  admobInterstitialAdUnitId:
+    readEnv('VITE_GOOGLE_ADMOB_INTERSTITIAL_AD_UNIT_ID') ||
+    adsConfigJson.providers.admobInterstitialAdUnitId,
 
   /** Google AdMob Official iOS Rewarded Video Backup Unit ID (used only when production unit returns No-Fill in Simulator/Dev) */
-  admobIosBackupRewardedAdUnitId: 'ca-app-pub-3940256099942544/1712485313',
+  admobIosBackupRewardedAdUnitId:
+    adsConfigJson.providers.admobIosBackupRewardedAdUnitId,
 
   /** Google AdSense for Games / H5 Games Ads Client ID (Publisher ID) */
   h5ClientId:
-    (typeof import.meta !== 'undefined' &&
-      (import.meta as unknown as { env?: Record<string, string> }).env
-        ?.VITE_GOOGLE_H5_CLIENT_ID) ||
-    'ca-pub-9273669553362347',
+    readEnv('VITE_GOOGLE_H5_CLIENT_ID') ||
+    adsConfigJson.providers.h5ClientId,
 
   /** Google IMA HTML5 VAST Rewarded Video Tag (serves real Google video ads in web/iframe environments) */
-  imaVastTagUrl:
-    'https://pubads.g.doubleclick.net/gampad/ads?iu=/21775744923/external/single_preroll_skippable&sz=640x480&ciu_szs=300x250,728x90&gdfp_req=1&output=vast&unviewed_position_start=1&env=vp&impl=s',
+  imaVastTagUrl: adsConfigJson.providers.imaVastTagUrl,
 
   /** Google Cloud sample video stream fallback if browser adblocker blocks DoubleClick VAST XML */
-  fallbackVideoStreamUrl:
-    'https://storage.googleapis.com/gvabox/media/samples/stock.mp4',
+  fallbackVideoStreamUrl: adsConfigJson.providers.fallbackVideoStreamUrl,
 } as const;
+
+/**
+ * Per-platform AdUnit IDs — WeChat & Douyin Mini-Games use strictly independent Unit IDs
+ * configured via env vars and NEVER fall back to Google AdMob IDs.
+ */
+export const PLATFORM_ADS_CONFIG = {
+  admob: {
+    rewardedAdUnitId: GOOGLE_ADS_CONFIG.admobRewardedAdUnitId,
+    interstitialAdUnitId: GOOGLE_ADS_CONFIG.admobInterstitialAdUnitId,
+  },
+  wx: {
+    rewardedAdUnitId: readEnv('VITE_WX_REWARDED_AD_UNIT_ID') || '',
+    interstitialAdUnitId: readEnv('VITE_WX_INTERSTITIAL_AD_UNIT_ID') || '',
+  },
+  tt: {
+    rewardedAdUnitId: readEnv('VITE_TT_REWARDED_AD_UNIT_ID') || '',
+    interstitialAdUnitId: readEnv('VITE_TT_INTERSTITIAL_AD_UNIT_ID') || '',
+  },
+} as const;
+
+export function resolvePlatformAdUnitId(
+  platform: 'admob' | 'wx' | 'tt',
+  format: 'rewarded' | 'interstitial',
+  overrideUnitId?: string
+): string {
+  if (overrideUnitId && overrideUnitId.trim().length > 0) {
+    return overrideUnitId.trim();
+  }
+  const entry = PLATFORM_ADS_CONFIG[platform];
+  return format === 'rewarded' ? entry.rewardedAdUnitId : entry.interstitialAdUnitId;
+}
 
 interface MiniGameVideoAd {
   show: () => Promise<void>;
@@ -98,6 +275,8 @@ interface CapacitorAdMobPlugin {
   initialize?: (opts?: { initializeForTesting?: boolean }) => Promise<void>;
   prepareRewardVideoAd?: (opts: { adId: string }) => Promise<void>;
   showRewardVideoAd?: () => Promise<{ type?: string; amount?: number }>;
+  prepareInterstitial?: (opts: { adId: string }) => Promise<void>;
+  showInterstitial?: () => Promise<void>;
 }
 
 // Google IMA HTML5 SDK minimal types
@@ -151,7 +330,7 @@ export interface GoogleImaNamespace {
     NORMAL: string;
     FULLSCREEN: string;
   };
-   AdsRenderingSettings: new () => {
+  AdsRenderingSettings: new () => {
     restoreCustomPlaybackStateOnAdBreakComplete: boolean;
     enablePreloading: boolean;
   };
@@ -178,6 +357,82 @@ declare global {
         show?: () => Promise<void>;
       };
     };
+    __ENABLE_AD_SIMULATOR__?: boolean;
+  }
+}
+
+interface PersistedFrequencyState {
+  dateKey: string;
+  lastShownAt: Partial<Record<AdFrequencyKey, number>>;
+  dailyCounts: Partial<Record<AdFrequencyKey, number>>;
+}
+
+const FREQ_STORAGE_KEY = 'hs_ad_freq_v1';
+
+function getTodayDateKey(nowMs: number = Date.now()): string {
+  const d = new Date(nowMs);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function buildErrorInfo(
+  placement: AdFrequencyKey,
+  reason: AdBlockReason,
+  retryAfterMs?: number,
+  remainingToday?: number
+): AdErrorInfo {
+  switch (reason) {
+    case 'COOLDOWN': {
+      const sec = Math.max(1, Math.ceil((retryAfterMs ?? 1000) / 1000));
+      return {
+        placement,
+        reason,
+        retryAfterMs,
+        remainingToday,
+        messageZh: `广告冷却中，请 ${sec} 秒后再试`,
+        messageEn: `Ad cooling down, retry in ${sec}s`,
+      };
+    }
+    case 'DAILY_CAP':
+      return {
+        placement,
+        reason,
+        remainingToday: 0,
+        messageZh: '今日该广告次数已达上限，明天再来吧',
+        messageEn: 'Daily ad limit reached for today',
+      };
+    case 'IN_FLIGHT':
+      return {
+        placement,
+        reason,
+        messageZh: '广告正在加载中，请稍候',
+        messageEn: 'Ad is already loading',
+      };
+    case 'UNCONFIGURED_AD_UNIT':
+      return {
+        placement,
+        reason,
+        messageZh: '当前平台广告位未配置，暂不可用',
+        messageEn: 'Ad unit not configured for this platform',
+      };
+    case 'DISMISSED':
+      return {
+        placement,
+        reason,
+        messageZh: '需完整观看广告才能领取奖励',
+        messageEn: 'Watch the full ad to claim reward',
+      };
+    case 'NO_WINDOW':
+    case 'AD_UNAVAILABLE':
+    default:
+      return {
+        placement,
+        reason,
+        messageZh: '暂无可用广告，请检查网络后重试',
+        messageEn: 'No ad available right now, please try again later',
+      };
   }
 }
 
@@ -185,11 +440,158 @@ export class AdManager {
   private webVideoAdRunner:
     | ((placement: AdPlacement, onReward: () => void, onCancel?: () => void) => void)
     | null = null;
+  private errorHandler: ((err: AdErrorInfo) => void) | null = null;
   private h5AdsReady = false;
   private admobInitialized = false;
+  private inFlight = false;
+  private devSimulatorOverride: boolean | null = null;
+  private freqState: PersistedFrequencyState;
 
   constructor() {
+    this.freqState = this.loadFrequencyState();
     this.initGoogleAdsRuntime();
+  }
+
+  private loadFrequencyState(nowMs: number = Date.now()): PersistedFrequencyState {
+    const today = getTodayDateKey(nowMs);
+    const empty: PersistedFrequencyState = {
+      dateKey: today,
+      lastShownAt: {},
+      dailyCounts: {},
+    };
+    if (typeof localStorage === 'undefined') return empty;
+    try {
+      const raw = localStorage.getItem(FREQ_STORAGE_KEY);
+      if (!raw) return empty;
+      const parsed = JSON.parse(raw) as Partial<PersistedFrequencyState>;
+      if (!parsed || parsed.dateKey !== today) {
+        return empty;
+      }
+      return {
+        dateKey: today,
+        lastShownAt: parsed.lastShownAt ?? {},
+        dailyCounts: parsed.dailyCounts ?? {},
+      };
+    } catch {
+      return empty;
+    }
+  }
+
+  private saveFrequencyState(): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(FREQ_STORAGE_KEY, JSON.stringify(this.freqState));
+    } catch {
+      // Ignore storage quota errors
+    }
+  }
+
+  private ensureTodayState(nowMs: number): void {
+    const today = getTodayDateKey(nowMs);
+    if (this.freqState.dateKey !== today) {
+      this.freqState = {
+        dateKey: today,
+        lastShownAt: {},
+        dailyCounts: {},
+      };
+      this.saveFrequencyState();
+    }
+  }
+
+  public resetFrequencyStateForTests(): void {
+    this.inFlight = false;
+    this.freqState = {
+      dateKey: getTodayDateKey(),
+      lastShownAt: {},
+      dailyCounts: {},
+    };
+    this.saveFrequencyState();
+  }
+
+  public setDevSimulatorEnabled(enabled: boolean | null): void {
+    this.devSimulatorOverride = enabled;
+  }
+
+  public isDevSimulatorEnabled(): boolean {
+    if (this.devSimulatorOverride !== null) {
+      return this.devSimulatorOverride;
+    }
+    const envFlag = readEnv('VITE_ENABLE_AD_SIMULATOR');
+    if (envFlag === 'true') return true;
+    if (envFlag === 'false') return false;
+    if (typeof window !== 'undefined' && window.__ENABLE_AD_SIMULATOR__ === true) {
+      return true;
+    }
+    return isViteDevMode();
+  }
+
+  public canShowAd(key: AdFrequencyKey, nowMs: number = Date.now()): AdAvailability {
+    this.ensureTodayState(nowMs);
+    const rule = AD_PLACEMENT_RULES[key];
+    const usedToday = this.freqState.dailyCounts[key] ?? 0;
+    const remainingToday = Math.max(0, rule.dailyCap - usedToday);
+
+    if (this.inFlight) {
+      return {
+        allowed: false,
+        reason: 'IN_FLIGHT',
+        retryAfterMs: 0,
+        remainingToday,
+        dailyCap: rule.dailyCap,
+      };
+    }
+
+    if (usedToday >= rule.dailyCap) {
+      return {
+        allowed: false,
+        reason: 'DAILY_CAP',
+        retryAfterMs: 0,
+        remainingToday: 0,
+        dailyCap: rule.dailyCap,
+      };
+    }
+
+    const lastAt = this.freqState.lastShownAt[key] ?? 0;
+    const elapsed = nowMs - lastAt;
+    if (lastAt > 0 && elapsed < rule.cooldownMs) {
+      return {
+        allowed: false,
+        reason: 'COOLDOWN',
+        retryAfterMs: rule.cooldownMs - elapsed,
+        remainingToday,
+        dailyCap: rule.dailyCap,
+      };
+    }
+
+    return {
+      allowed: true,
+      retryAfterMs: 0,
+      remainingToday,
+      dailyCap: rule.dailyCap,
+    };
+  }
+
+  private recordAdImpression(key: AdFrequencyKey, nowMs: number = Date.now()): void {
+    this.ensureTodayState(nowMs);
+    this.freqState.lastShownAt[key] = nowMs;
+    this.freqState.dailyCounts[key] = (this.freqState.dailyCounts[key] ?? 0) + 1;
+    this.saveFrequencyState();
+  }
+
+  private emitError(
+    placement: AdFrequencyKey,
+    reason: AdBlockReason,
+    onError?: (err: AdErrorInfo) => void,
+    retryAfterMs?: number,
+    remainingToday?: number
+  ): void {
+    const info = buildErrorInfo(placement, reason, retryAfterMs, remainingToday);
+    if (onError) {
+      onError(info);
+    }
+    if (this.errorHandler) {
+      this.errorHandler(info);
+    }
   }
 
   private initGoogleAdsRuntime(): void {
@@ -222,8 +624,16 @@ export class AdManager {
     }
   }
 
+  public getInterstitialProtectedRunsCount(): number {
+    return adsConfigJson.placements.INTERSTITIAL.starterProtectedRuns;
+  }
+
   public getConfig() {
     return GOOGLE_ADS_CONFIG;
+  }
+
+  public getPlatformConfig() {
+    return PLATFORM_ADS_CONFIG;
   }
 
   public detectPlatform(): AdPlatformEnv {
@@ -249,83 +659,137 @@ export class AdManager {
     this.webVideoAdRunner = runner;
   }
 
+  public registerErrorHandler(handler: ((err: AdErrorInfo) => void) | null): void {
+    this.errorHandler = handler;
+  }
+
   private runWebVideoAdPlayer(
     placement: AdPlacement,
-    onReward: () => void,
-    onCancel?: () => void
+    onSuccess: () => void,
+    onCancel?: () => void,
+    onError?: (err: AdErrorInfo) => void
   ): void {
-    if (this.webVideoAdRunner) {
-      this.webVideoAdRunner(placement, onReward, onCancel);
-    } else {
-      onReward();
+    if (this.webVideoAdRunner && this.isDevSimulatorEnabled()) {
+      this.webVideoAdRunner(
+        placement,
+        () => {
+          this.inFlight = false;
+          this.recordAdImpression(placement);
+          onSuccess();
+        },
+        () => {
+          this.inFlight = false;
+          this.emitError(placement, 'DISMISSED', onError);
+          if (onCancel) onCancel();
+        }
+      );
+      return;
     }
+
+    // Production / unsimulated fallback: NEVER grant free reward!
+    this.inFlight = false;
+    this.emitError(placement, 'AD_UNAVAILABLE', onError);
+    if (onCancel) onCancel();
   }
 
   public showRewardedVideoAd(
     placement: AdPlacement,
     onReward: () => void,
-    onCancel?: () => void
+    onCancel?: () => void,
+    onError?: (err: AdErrorInfo) => void
   ): void {
     if (typeof window === 'undefined') {
-      onReward();
+      this.emitError(placement, 'NO_WINDOW', onError);
+      if (onCancel) onCancel();
       return;
     }
 
-    // 1. Native AdMob Plugin Bridge (Capacitor / Cordova) using GOOGLE_ADMOB_REWARDED_AD_UNIT_ID
+    const avail = this.canShowAd(placement);
+    if (!avail.allowed) {
+      this.emitError(
+        placement,
+        avail.reason ?? 'COOLDOWN',
+        onError,
+        avail.retryAfterMs,
+        avail.remainingToday
+      );
+      if (onCancel) onCancel();
+      return;
+    }
+
+    this.inFlight = true;
+    const settleReward = () => {
+      this.inFlight = false;
+      this.recordAdImpression(placement);
+      onReward();
+    };
+    const settleCancel = (reason: AdBlockReason = 'DISMISSED') => {
+      this.inFlight = false;
+      this.emitError(placement, reason, onError);
+      if (onCancel) onCancel();
+    };
+
+    // 1. Native AdMob Plugin Bridge (Capacitor / Cordova)
     const capAdMob = window.Capacitor?.Plugins?.AdMob;
     if (
       capAdMob &&
       typeof capAdMob.prepareRewardVideoAd === 'function' &&
       typeof capAdMob.showRewardVideoAd === 'function'
     ) {
+      const admobUnitId = resolvePlatformAdUnitId('admob', 'rewarded');
       capAdMob
-        .prepareRewardVideoAd({ adId: GOOGLE_ADS_CONFIG.admobRewardedAdUnitId })
+        .prepareRewardVideoAd({ adId: admobUnitId })
         .then(() => capAdMob.showRewardVideoAd!())
         .then(() => {
-          onReward();
+          settleReward();
         })
         .catch(() => {
-          this.runWebVideoAdPlayer(placement, onReward, onCancel);
+          this.runWebVideoAdPlayer(placement, onReward, onCancel, onError);
         });
       return;
     }
 
     // 2. WeChat Mini-Game (window.wx) or Douyin Mini-Game (window.tt)
     const env = this.detectPlatform();
-    const sdk = env === 'wx' ? window.wx : env === 'tt' ? window.tt : undefined;
-    if (sdk && typeof sdk.createRewardedVideoAd === 'function') {
-      try {
-        const videoAd = sdk.createRewardedVideoAd({
-          adUnitId: GOOGLE_ADS_CONFIG.admobRewardedAdUnitId,
-        });
-        const handleClose = (res: { isEnded: boolean }) => {
-          if (videoAd.offClose) videoAd.offClose(handleClose);
-          if (res && res.isEnded) {
-            onReward();
-          } else if (onCancel) {
-            onCancel();
-          }
-        };
-        videoAd.onClose(handleClose);
-        videoAd
-          .show()
-          .catch(() => {
-            videoAd
-              .load()
-              .then(() => videoAd.show())
-              .catch(() => {
-                this.runWebVideoAdPlayer(placement, onReward, onCancel);
-              });
-          });
+    if (env === 'wx' || env === 'tt') {
+      const sdk = env === 'wx' ? window.wx : window.tt;
+      const miniGameUnitId = resolvePlatformAdUnitId(env, 'rewarded');
+      if (!miniGameUnitId) {
+        settleCancel('UNCONFIGURED_AD_UNIT');
         return;
-      } catch {
-        // Fall through to Google H5 Games Ads / IMA SDK
+      }
+      if (sdk && typeof sdk.createRewardedVideoAd === 'function') {
+        try {
+          const videoAd = sdk.createRewardedVideoAd({ adUnitId: miniGameUnitId });
+          const handleClose = (res: { isEnded: boolean }) => {
+            if (videoAd.offClose) videoAd.offClose(handleClose);
+            if (res && res.isEnded) {
+              settleReward();
+            } else {
+              settleCancel('DISMISSED');
+            }
+          };
+          videoAd.onClose(handleClose);
+          videoAd
+            .show()
+            .catch(() => {
+              videoAd
+                .load()
+                .then(() => videoAd.show())
+                .catch(() => {
+                  if (videoAd.offClose) videoAd.offClose(handleClose);
+                  settleCancel('AD_UNAVAILABLE');
+                });
+            });
+          return;
+        } catch {
+          settleCancel('AD_UNAVAILABLE');
+          return;
+        }
       }
     }
 
-    // 3. Google AdSense for Games / H5 Games Ads Placement API (ca-pub-9273669553362347)
-    // Only invoke adBreak first if adsbygoogle script has loaded and we are not blocked in an iframe;
-    // otherwise launch the Google IMA HTML5 Video Ad Player immediately.
+    // 3. Google AdSense for Games / H5 Games Ads Placement API
     if (typeof window.adBreak === 'function' && this.h5AdsReady) {
       let settled = false;
       let adStartedShowing = false;
@@ -333,7 +797,7 @@ export class AdManager {
       const watchdog = window.setTimeout(() => {
         if (!settled && !adStartedShowing) {
           settled = true;
-          this.runWebVideoAdPlayer(placement, onReward, onCancel);
+          this.runWebVideoAdPlayer(placement, onReward, onCancel, onError);
         }
       }, 650);
 
@@ -342,7 +806,6 @@ export class AdManager {
           type: 'reward',
           name: placement.toLowerCase(),
           beforeReward: (showAdFn) => {
-            console.log('[AdManager] 🎬 Google H5 Ad presenting now...');
             adStartedShowing = true;
             window.clearTimeout(watchdog);
             showAdFn();
@@ -350,70 +813,97 @@ export class AdManager {
           adViewed: () => {
             if (settled) return;
             settled = true;
-            console.log('[AdManager] 🎁 Google H5 Ad watched completely, reward granted!');
             window.clearTimeout(watchdog);
-            onReward();
+            settleReward();
           },
           adDismissed: () => {
             if (settled) return;
             settled = true;
-            console.log('[AdManager] ❌ Google H5 Ad dismissed by user.');
             window.clearTimeout(watchdog);
-            if (onCancel) onCancel();
+            settleCancel('DISMISSED');
           },
           adBreakDone: (placementInfo) => {
             if (settled) return;
             settled = true;
             window.clearTimeout(watchdog);
-            console.log(`[AdManager] ℹ️ Google H5 Ad break done. Status: ${placementInfo?.breakStatus}`);
             if (placementInfo?.breakStatus === 'viewed') {
-              onReward();
+              settleReward();
             } else if (placementInfo?.breakStatus === 'dismissed') {
-              if (onCancel) onCancel();
+              settleCancel('DISMISSED');
             } else {
-              // H5 adBreak returned notReady/noAdPreloaded -> Launch Google IMA HTML5 Video Ad Player
-              this.runWebVideoAdPlayer(placement, onReward, onCancel);
+              this.runWebVideoAdPlayer(placement, onReward, onCancel, onError);
             }
           },
         });
         return;
-      } catch (err) {
-        console.error('[AdManager] ❌ Error triggering window.adBreak:', err);
+      } catch {
         window.clearTimeout(watchdog);
       }
     }
 
-    // 4. Launch Google IMA HTML5 Video Ad Player (serves real VAST video ads via google.ima.AdsLoader)
-    this.runWebVideoAdPlayer(placement, onReward, onCancel);
+    // 4. Dev-only Browser Simulator / VAST fallback (never grants free reward in prod)
+    this.runWebVideoAdPlayer(placement, onReward, onCancel, onError);
   }
 
-  public showInterstitialAd(
-    adUnitId: string = GOOGLE_ADS_CONFIG.admobRewardedAdUnitId
-  ): void {
-    if (typeof window === 'undefined') return;
+  public showInterstitialAd(overrideAdUnitId?: string): boolean {
+    if (typeof window === 'undefined') return false;
 
+    const avail = this.canShowAd('INTERSTITIAL');
+    if (!avail.allowed) {
+      return false;
+    }
+
+    // 1. Native Capacitor AdMob Interstitial
+    const capAdMob = window.Capacitor?.Plugins?.AdMob;
+    if (
+      capAdMob &&
+      typeof capAdMob.prepareInterstitial === 'function' &&
+      typeof capAdMob.showInterstitial === 'function'
+    ) {
+      const adId = resolvePlatformAdUnitId('admob', 'interstitial', overrideAdUnitId);
+      this.recordAdImpression('INTERSTITIAL');
+      capAdMob
+        .prepareInterstitial({ adId })
+        .then(() => capAdMob.showInterstitial!())
+        .catch(() => {});
+      return true;
+    }
+
+    // 2. WeChat / Douyin Mini-Game Interstitial (strictly uses wx/tt interstitial Unit ID)
     const env = this.detectPlatform();
-    const sdk = env === 'wx' ? window.wx : env === 'tt' ? window.tt : undefined;
-    if (sdk && typeof sdk.createInterstitialAd === 'function') {
-      try {
-        const interstitialAd = sdk.createInterstitialAd({ adUnitId });
-        interstitialAd.show().catch(() => {});
-        return;
-      } catch {
-        // Ignore interstitial errors
+    if (env === 'wx' || env === 'tt') {
+      const sdk = env === 'wx' ? window.wx : window.tt;
+      const adUnitId = resolvePlatformAdUnitId(env, 'interstitial', overrideAdUnitId);
+      if (!adUnitId) {
+        return false;
+      }
+      if (sdk && typeof sdk.createInterstitialAd === 'function') {
+        try {
+          const interstitialAd = sdk.createInterstitialAd({ adUnitId });
+          this.recordAdImpression('INTERSTITIAL');
+          interstitialAd.show().catch(() => {});
+          return true;
+        } catch {
+          return false;
+        }
       }
     }
 
-    if (typeof window.adBreak === 'function') {
+    // 3. Google H5 Games Ads Interstitial
+    if (typeof window.adBreak === 'function' && this.h5AdsReady) {
       try {
+        this.recordAdImpression('INTERSTITIAL');
         window.adBreak({
           type: 'next',
           name: 'settlement_interstitial',
         });
+        return true;
       } catch {
-        // Ignore
+        return false;
       }
     }
+
+    return false;
   }
 }
 

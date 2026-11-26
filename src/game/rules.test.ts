@@ -3,14 +3,29 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { I18N, translate } from './i18n';
+import {
+  AdManager,
+  AD_PLACEMENT_RULES,
+  ADS_AND_MONETIZATION_CONFIG,
+  GOOGLE_ADS_CONFIG,
+  PLATFORM_ADS_CONFIG,
+  getScaledSupplyDropReward,
+  getTrialTargetSharkSpec,
+  resolvePlatformAdUnitId,
+} from './adManager';
 import { GAME_CONFIG } from './config';
 import { PREY_140_RECORDS, getTierForPreyBodyLengthCm } from './preyDatabase140';
 import {
   CAMERA_ZOOM_MIN,
   MIN_RENDER_ZOOM_FLOOR,
+  ECONOMY_PREDATION_CONFIG,
+  WORLD_CONFIG,
+  buildPredationRewardPlan,
+  collectPickupEntity,
   computeTrueCameraZoom,
   computeEvolvedSharkStats,
   computeHuntingHeatBuff,
+  getRequiredArmorHits,
   resolvePreyEncounter,
   addEvolutionProgress,
   getDepthZone,
@@ -19,16 +34,27 @@ import {
   computeParallaxBiomeTransitionState,
   quinticSmoothstep,
 } from './rules';
-import { rollTargetBountySpecies } from './sim/types';
 import {
+  createInitialSimState,
+  rollTargetBountySpecies,
+  spawnPooledPickup,
+} from './sim/types';
+import {
+  claimOnboardingStarterGift,
   createDefaultMetaSave,
   evaluateSharkUnlock,
+  evaluateSharkUnlockForRun,
   getGlobalAtlasBonuses,
   getNextEvolutionTarget,
+  getPermanentProgressEligibility,
   getSharkFormById,
   getSharkMasteryConfig,
   getSharkUpgradeCost,
   getSharkUpgradeGeneCost,
+  isEligibleForPermanentProgress,
+  loadSharkMetaSave,
+  recordFormalRunStarted,
+  recordPermanentRunProgress,
   settleSharkScoreMastery,
   SHARK_EVOLUTION_FORMS,
 } from './sharkEvolutionConfig';
@@ -80,8 +106,8 @@ test('I18N dictionary has complete and matching keys in both zh and en', () => {
   );
 });
 
-test('GAME_CONFIG has 135 target prey & hazard entries (134 active marine species + cyber_mine) with complete bilingual I18N keys', () => {
-  assert.equal(GAME_CONFIG.preyTiers.length, 135);
+test('GAME_CONFIG has 235 target prey & hazard entries (234 active marine species + cyber_mine) with complete bilingual I18N keys', () => {
+  assert.equal(GAME_CONFIG.preyTiers.length, 235);
 
   // Every prey species nameKey exists in I18N
   for (const prey of GAME_CONFIG.preyTiers) {
@@ -234,7 +260,7 @@ test('EcosystemSpawner maintains default maxActivePreys=20, recycles distant pre
 
 import { InfiniteProgressionManager } from './infiniteProgressionManager';
 
-test('InfiniteProgressionManager increases globalDifficultyMultiplier by 10% every 60s and scales prey values', () => {
+test('InfiniteProgressionManager increases globalDifficultyMultiplier by +0.05 every 60s (capped at 2.20x) and scales prey values', () => {
   const prog = new InfiniteProgressionManager();
   assert.equal(prog.globalDifficultyMultiplier, 1.0);
   assert.equal(prog.getScaledPreyValue(100), 100);
@@ -243,22 +269,22 @@ test('InfiniteProgressionManager increases globalDifficultyMultiplier by 10% eve
   prog.update(59);
   assert.equal(prog.globalDifficultyMultiplier, 1.0);
 
-  // Advance 2s (total 61s) -> 1.1
+  // Advance 2s (total 61s) -> 1.05
   prog.update(2);
-  assert.equal(prog.globalDifficultyMultiplier, 1.1);
-  assert.equal(prog.getScaledPreyValue(100), 110);
+  assert.equal(prog.globalDifficultyMultiplier, 1.05);
+  assert.equal(prog.getScaledPreyValue(100), 103);
 
-  // Advance 120s (total 181s -> 3 full minutes) -> 1.3
+  // Advance 120s (total 181s -> 3 full minutes) -> 1.15
   prog.update(120);
-  assert.equal(prog.globalDifficultyMultiplier, 1.3);
-  assert.equal(prog.getScaledPreyValue(200), 260);
+  assert.equal(prog.globalDifficultyMultiplier, 1.15);
+  assert.equal(prog.getScaledPreyValue(200), 219);
 
-  // Frenzy stacks & mutation variants
-  assert.equal(prog.addFrenzyStack(), 1.25);
-  assert.equal(prog.addFrenzyStack(), 1.5);
-  assert.equal(prog.rollPreyMutation(10000, () => 0.01), 'GOLDEN_MUTANT');
-  assert.equal(prog.rollPreyMutation(10000, () => 0.12), 'ABYSS_BEHEMOTH');
-  assert.equal(prog.rollPreyMutation(10000, () => 0.95), 'NONE');
+  // D4-A: frenzy stack inflation removed (stays at fixed 2.0x scoreMultiplier) & unified mutations (Abyss Behemoth requires T>=8 or depth>=220m)
+  assert.equal(prog.addFrenzyStack(), 2.0);
+  assert.equal(prog.addFrenzyStack(), 2.0);
+  assert.equal(prog.rollPreyMutation(10000, () => 0.01, 1, 50), 'GOLDEN_MUTANT');
+  assert.equal(prog.rollPreyMutation(500000, () => 0.12, 8, 300), 'ABYSS_BEHEMOTH');
+  assert.equal(prog.rollPreyMutation(500000, () => 0.95, 8, 300), 'NONE');
 });
 
 import {
@@ -316,18 +342,17 @@ test('Senior Numerical Tuning: body upgrade scaling, Abyss Behemoth armor tier, 
   longSpawner.update(400, dummyPreys, 0, 500, () => 0.5);
   assert.equal(longSpawner.getScaleMultiplier(), 1.65);
 
-  // 6. Anti-Snowball Verification:
-  // (a) Initial 12s protection + 8 Golden Mutants required + 25s post-frenzy cooldown
+  // 6. Anti-Snowball Verification (D4-A: 8s protection + 6 Golden Mutants + 15s cooldown)
   const progMgr = new InfiniteProgressionManager();
   progMgr.reset();
-  assert.equal(progMgr.frenzyCooldownTimer, 12);
-  assert.equal(progMgr.registerGoldenMutantDevoured(), false, 'Cannot charge frenzy during 12s initial cooldown');
-  progMgr.update(12.5);
-  for (let i = 0; i < 7; i++) {
+  assert.equal(progMgr.frenzyCooldownTimer, 8);
+  assert.equal(progMgr.registerGoldenMutantDevoured(), false, 'Cannot charge frenzy during 8s initial cooldown');
+  progMgr.update(8.5);
+  for (let i = 0; i < 5; i++) {
     assert.equal(progMgr.registerGoldenMutantDevoured(), false, `Golden mutant #${i + 1} should not trigger frenzy yet`);
   }
-  assert.equal(progMgr.registerGoldenMutantDevoured(), true, '8th Golden Mutant after cooldown triggers frenzy');
-  assert.equal(progMgr.frenzyCooldownTimer, 25, 'Post-frenzy cooldown set to 25s');
+  assert.equal(progMgr.registerGoldenMutantDevoured(), true, '6th Golden Mutant after cooldown triggers frenzy');
+  assert.equal(progMgr.frenzyCooldownTimer, 15, 'Post-frenzy cooldown set to 15s');
 
   // (b) Deep-sea hazards (Naval Mines) ALWAYS explode outside of Gold Frenzy for non-immune sharks
   const midApexShark = computeEvolvedSharkStats(12, 'shark_15_abyss_tentacle', 5, false);
@@ -470,38 +495,41 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
   assert.equal(initialEval.levelMet, false);
   assert.equal(initialEval.canUnlockNow, false);
 
-  // Verify that for any shark k > 0 (e.g. #8 Blacktip Pelagic Shark), its default prerequisite parent is shark #(k-1) (#7 Steel-Plated Patrol Shark)
+  // Verify that for row=0 shark #7 Steel Patrol, its prerequisite parent is #6 Reef Runner, while row=1 #8 Blacktip prioritizes unlocked vertical parent #0 Clown Fry
+  const steelPatrol = getSharkFormById('shark_07_steel_patrol');
+  const steelEval = evaluateSharkUnlock(steelPatrol, save, 0, 0, 1, 150);
+  assert.equal(steelEval.bestParentId, 'shark_06_hammerhead_pup');
+  assert.equal(steelEval.bestParentIndex, 6);
   const blacktipForm = getSharkFormById('shark_08_blacktip_reef');
   const blacktipEval = evaluateSharkUnlock(blacktipForm, save, 0, 0, 1, 150);
-  assert.equal(blacktipEval.bestParentId, 'shark_07_steel_patrol');
-  assert.equal(blacktipEval.bestParentIndex, 7);
-  assert.equal(blacktipEval.bestParentNameZh, '重铆钢甲巡逻鲨');
+  assert.equal(blacktipEval.bestParentId, 'shark_00_clown_fry');
+  assert.equal(blacktipEval.bestParentIndex, 0);
 
   // Verify Prehistoric Megalodon (#25 shark_24_megalodon, row=3, col=0) exact gates, dual-parent unlock paths, and row-wrap next target
   const megalodonForm = getSharkFormById('shark_24_megalodon');
   assert.equal(megalodonForm.index, 24);
   assert.equal(megalodonForm.row, 3);
   assert.equal(megalodonForm.col, 0);
-  assert.equal(megalodonForm.reqParentUpgradeLevel, 6);
-  assert.equal(megalodonForm.reqMaxInRunLevel, 10);
+  assert.equal(megalodonForm.reqParentUpgradeLevel, 5);
+  assert.equal(megalodonForm.reqMaxInRunLevel, 9);
   assert.equal(megalodonForm.reqMaxDepth, 850);
-  assert.equal(megalodonForm.unlockCoins, 3800);
+  assert.equal(megalodonForm.unlockCoins, 4750);
   assert.equal(megalodonForm.unlockGenes, 720);
 
   // Row-wrap next target: when playing #24 Cthulhu Mindflayer Shark (row=2, col=7), next target is #25 Prehistoric Megalodon
   const nextFromCthulhu = getNextEvolutionTarget('shark_23_mindflayer_shark', save);
   assert.equal(nextFromCthulhu?.id, 'shark_24_megalodon');
 
-  // Dual-parent path: default displayed parent is #24 Cthulhu Mindflayer Shark (index 23), while either #24 at Lv.6 OR #17 Great White (row=2, col=0) at Lv.6 satisfies the parent gate
+  // Dual-parent path: default displayed parent is #24 Cthulhu Mindflayer Shark (index 23), while either #24 at Lv.5 OR #17 Great White (row=2, col=0) at Lv.5 satisfies the parent gate
   const megaSave = createDefaultMetaSave();
-  const megaInitialEval = evaluateSharkUnlock(megalodonForm, megaSave, 3800, 720, 10, 850);
+  const megaInitialEval = evaluateSharkUnlock(megalodonForm, megaSave, 4750, 720, 9, 850);
   assert.equal(megaInitialEval.bestParentId, 'shark_23_mindflayer_shark');
   assert.equal(megaInitialEval.bestParentNameZh, '克苏鲁夺心章鱼鲨');
   assert.equal(megaInitialEval.parentMet, false);
 
   megaSave.unlockedSharkIds.push('shark_16_great_white');
-  megaSave.sharkUpgradeLevels['shark_16_great_white'] = 6;
-  const megaReadyEval = evaluateSharkUnlock(megalodonForm, megaSave, 3800, 720, 10, 850);
+  megaSave.sharkUpgradeLevels['shark_16_great_white'] = 5;
+  const megaReadyEval = evaluateSharkUnlock(megalodonForm, megaSave, 4750, 720, 9, 850);
   assert.equal(megaReadyEval.parentMet, true);
   assert.equal(megaReadyEval.bestParentId, 'shark_16_great_white');
   assert.equal(megaReadyEval.canUnlockNow, true);
@@ -534,16 +562,18 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
 
   const statsLv1 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false, 1.0, 1);
   const statsLv3 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 3, false, 1.0, 1);
-  const statsLv6 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 6, false, 1.0, 1);
+  const statsLv5 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 5, false, 1.0, 1);
+  const statsLv9 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 9, false, 1.0, 1);
   const statsLv10 = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 10, false, 1.0, 1);
-  const statsLv10InRun9 = computeEvolvedSharkStats(9, 'shark_00_clown_fry', 10, false, 1.0, 1);
+  const statsLv10InRun12 = computeEvolvedSharkStats(12, 'shark_00_clown_fry', 10, false, 1.0, 1);
 
-  assert.ok(statsLv6.maxHp > statsLv1.maxHp, 'Body upgrade Lv.6 increases Max HP');
-  assert.ok(statsLv10.moveSpeed > statsLv6.moveSpeed, 'Body upgrade Lv.10 increases Swim Speed');
-  assert.equal(statsLv3.biteTier, statsLv1.biteTier + 1, 'Body upgrade Lv.3 grants +1 Bite Tier breakthrough');
-  assert.equal(statsLv6.biteTier, statsLv1.biteTier + 2, 'Body upgrade Lv.6 grants +2 Bite Tier breakthrough');
-  assert.equal(statsLv10.biteTier, statsLv1.biteTier + 3, 'Body upgrade Lv.10 grants +3 total Bite Tier breakthrough');
-  assert.equal(statsLv10InRun9.biteTier, statsLv1.biteTier + 6, 'Body upgrade Lv.10 (+3T) + In-Run Lv.9 (+3T) grants +6T cross-generation hunting');
+  assert.ok(statsLv5.maxHp > statsLv3.maxHp, 'Body upgrade Lv.5 increases Max HP (+6% breakthrough)');
+  assert.ok(statsLv10.moveSpeed > statsLv5.moveSpeed, 'Body upgrade Lv.10 increases Swim Speed');
+  assert.equal(statsLv3.biteTier, statsLv1.biteTier, 'D7-1 U-B: Lv.3 stays at base biteTier (genes aligned at Lv.5/Lv.10)');
+  assert.equal(statsLv5.biteTier, statsLv1.biteTier + 1, 'D7-1 U-B: Body upgrade Lv.5 grants +1 Bite Tier breakthrough');
+  assert.equal(statsLv9.biteTier, statsLv1.biteTier + 1, 'D7-1 U-B: Lv.9 holds +1 Bite Tier until Lv.10 gate');
+  assert.equal(statsLv10.biteTier, statsLv1.biteTier + 2, 'D7-1 U-B: Body upgrade Lv.10 grants +2 total Bite Tier breakthrough');
+  assert.equal(statsLv10InRun12.biteTier, statsLv1.biteTier + 6, 'D7-1 U-B: Body upgrade Lv.10 (+2T) + In-Run Lv.12 (+4T) grants +6T cross-generation hunting');
 
   // 4. Verify Tier VI Cosmic Apex Form (#47 Omega Devourer) has canEatMines and massive stats while keeping relativePreyScale shrinking
   const omegaStats = computeEvolvedSharkStats(8, 'shark_47_omega_devourer', 10, false, 1.0, 48);
@@ -558,51 +588,67 @@ test('48-Shark Body Evolution System: 6x8 matrix, triple-gate unlock, body upgra
   const omegaMineOutcome = resolvePreyEncounter(omegaStats, tier6Mine, false, false, 'NONE', 1.0);
   assert.equal(omegaMineOutcome.canDevour, true, 'Shark with canEatMines (Tier V+ Mecha/Omega) devours naval mines safely');
 
-  // 5. Verify Global Atlas Collection Bonus scales with unlocked count
+  // 5. Verify Global Atlas Collection & Crown Passive Bonuses (D3-A: +0.35% Score, +0.20% HP per crown, 0% reward mult)
   const bonus1 = getGlobalAtlasBonuses(save);
   const fullSave = createDefaultMetaSave();
   fullSave.unlockedSharkIds = SHARK_EVOLUTION_FORMS.map((f) => f.id);
+  fullSave.sharkMasteryTiers = { shark_00_clown_fry: 3 };
   const bonus48 = getGlobalAtlasBonuses(fullSave);
   assert.ok(bonus48.hpMultiplier > bonus1.hpMultiplier);
   assert.ok(bonus48.rewardMultiplier > bonus1.rewardMultiplier);
+  assert.equal(bonus48.scoreBonus, Number((3 * 0.0035).toFixed(4)));
 
-  // 6. Verify Per-Shark Mastery Crowns (Bronze/Silver/Gold), Trial Isolation, and One-Time First-Clear Gene Rewards
+  // 6. Verify Per-Shark Mastery Crowns (Bronze/Silver/Gold), Trial Isolation, and D3-A Coin + Gene Rewards
   const masteryTiers = getSharkMasteryConfig(clownForm);
   assert.equal(masteryTiers.length, 3);
-  assert.equal(masteryTiers[0].scoreThreshold, 3500);
-  assert.equal(masteryTiers[0].geneReward, 12);
+  assert.equal(masteryTiers[0].scoreThreshold, 3000);
+  assert.equal(masteryTiers[0].coinReward, 8);
+  assert.equal(masteryTiers[0].geneReward, 6);
 
   // (a) Trial runs must NEVER record personal best scores or claim mastery crowns
   const trialResult = settleSharkScoreMastery('shark_45_mecha_leviathan', 999999, true, save);
+  assert.equal(trialResult.coinsAwarded, 0, 'Trial run must award 0 mastery coins');
   assert.equal(trialResult.genesAwarded, 0, 'Trial run must award 0 mastery genes');
   assert.equal(trialResult.newCrownTier, 0, 'Trial run must not unlock mastery crowns');
   assert.equal(trialResult.isNewRecord, false, 'Trial run must not set personal best score');
 
-  // (b) Reaching Bronze threshold (3500) on #01 Clown Fry awards 12 Genes once, and 0 on repeat runs
+  // (b) Reaching Bronze threshold (3000) on #01 Clown Fry awards 8C + 6G once, and 0 on repeat runs
   const bronzeSettle = settleSharkScoreMastery('shark_00_clown_fry', 4200, false, save);
   assert.equal(bronzeSettle.newCrownTier, 1);
-  assert.equal(bronzeSettle.genesAwarded, 12);
+  assert.equal(bronzeSettle.coinsAwarded, 8);
+  assert.equal(bronzeSettle.genesAwarded, 6);
   assert.equal(bronzeSettle.isNewRecord, true);
 
   const repeatBronze = settleSharkScoreMastery('shark_00_clown_fry', 4000, false, bronzeSettle.updatedSave);
+  assert.equal(repeatBronze.coinsAwarded, 0);
   assert.equal(repeatBronze.genesAwarded, 0, 'Repeating same mastery tier must not award duplicate genes');
   assert.equal(repeatBronze.newCrownTier, 1);
 
-  // (c) Jumping from Bronze (1) directly to Gold (3) awards Silver + Gold genes together once
+  // (c) Jumping from Bronze (1) directly to Gold (3) awards Silver + Gold rewards together once
   const goldSettle = settleSharkScoreMastery('shark_00_clown_fry', 20000, false, bronzeSettle.updatedSave);
   assert.equal(goldSettle.newCrownTier, 3);
+  assert.equal(
+    goldSettle.coinsAwarded,
+    masteryTiers[1].coinReward + masteryTiers[2].coinReward
+  );
   assert.equal(
     goldSettle.genesAwarded,
     masteryTiers[1].geneReward + masteryTiers[2].geneReward
   );
 
-  // 7. Verify In-Run Hunting Heat Buff passive scaling
-  const heat0 = computeHuntingHeatBuff(0, 0);
-  const heatMax = computeHuntingHeatBuff(50000, 0);
+  // 7. Verify Combo-Driven Hunting Heat Buff passive scaling (D5-A: 0/4/10/18/28 combos)
+  const heat0 = computeHuntingHeatBuff(0);
+  const heat2 = computeHuntingHeatBuff(10);
+  const heatMax = computeHuntingHeatBuff(28);
   assert.equal(heat0.heatLevel, 0);
-  assert.equal(heatMax.heatLevel, 5);
+  assert.equal(heat0.scoreMultiplier, 1.0);
+  assert.equal(heat2.heatLevel, 2);
+  assert.equal(heat2.scoreMultiplier, 1.2);
+  assert.equal(heat2.magnetRadiusBonus, 40);
+  assert.equal(heatMax.heatLevel, 4);
+  assert.equal(heatMax.scoreMultiplier, 1.45);
   assert.equal(heatMax.magnetRadiusBonus, 80);
-  assert.equal(heatMax.energyRegenBonus, 11);
+  assert.equal(heatMax.energyRegenBonus, 10);
 });
 
 test('Visual Size vs. Devourability Contract + Gold Frenzy Size Preservation Exception', () => {
@@ -796,7 +842,11 @@ test('Senior QA Audit: 48-Shark Panel Stats, Trait Descriptions, and Gameplay Ca
   assert.equal(cyberAlloy.mineDamageTakenMultiplier, 0.6, '#21 Cyber Alloy reduces mine explosion damage by 40%');
   assert.equal(earthGolem.knockbackMultiplier, 0.5, '#30 Earth Golem reduces knockback by 50%');
   assert.equal(paladinShark.damageTakenMultiplier, 0.5, '#44 Celestial Paladin reduces all damage by 50%');
-  assert.equal( paladinShark.coinYieldMultiplier, Number((1.6 * 2.0).toFixed(2)), '#44 Celestial Paladin doubles coin yield on top of Gen VI bonus');
+  assert.equal(
+    paladinShark.coinYieldMultiplier,
+    Number((1.6 * getSharkFormById('shark_44_celestial_paladin').traits.coinYieldTraitMult).toFixed(2)),
+    '#44 Celestial Paladin applies converged coin yield trait on top of Gen VI bonus'
+  );
 
   const stdBossHit = resolvePreyEncounter(standardTier2, tier8Boss, false, false, 'NONE', 1.0);
   const bullBossHit = resolvePreyEncounter(bullShark, tier8Boss, false, false, 'NONE', 1.0);
@@ -808,12 +858,13 @@ test('Senior QA Audit: 48-Shark Panel Stats, Trait Descriptions, and Gameplay Ca
   const golemMineHit = resolvePreyEncounter(earthGolem, tier6Mine, false, false, 'NONE', 1.0);
   assert.equal(golemMineHit.knockbackForce, 220, 'Earth Golem halves mine knockback from 440 to 220');
 
-  // Verify #39 Kraken Hydra 2x Boss Slayer reward
+  // Verify #39 Kraken Hydra converged 1.5x Boss Slayer reward
   const dreadnoughtStats = computeEvolvedSharkStats(1, 'shark_36_dreadnought_cannon', 1, false, 1.0, 1);
   const stdBossEat = resolvePreyEncounter(dreadnoughtStats, tier8Boss, false, false, 'NONE', 1.0);
   const krakenBossEat = resolvePreyEncounter(krakenShark, tier8Boss, false, false, 'NONE', 1.0);
-  assert.equal(krakenBossEat.coinGain, stdBossEat.coinGain * 2, '#39 Kraken Hydra doubles Boss coin reward');
-  assert.equal(krakenBossEat.geneGain, stdBossEat.geneGain * 2, '#39 Kraken Hydra doubles Boss gene reward');
+  const bossMult = getSharkFormById('shark_39_kraken_hydra').traits.bossRewardMult;
+  assert.equal(krakenBossEat.coinGain, Math.round(stdBossEat.coinGain * bossMult), '#39 Kraken Hydra scales Boss coin reward');
+  assert.equal(krakenBossEat.geneGain, Math.round(stdBossEat.geneGain * bossMult), '#39 Kraken Hydra scales Boss gene reward');
 });
 
 test('Biomechanical Swimming Gait Classification & Anatomical Spine Envelope Invariants', () => {
@@ -3267,9 +3318,9 @@ test('Undulating Mountain Range Seabed (Zero Flat or Diagonal Straight Lines), U
   }
 });
 
-test('134 Active Marine Prey Species + Cyber Mine: Non-Fish Mammal Exclusion, Asset Presence, Depth Stratification & Body-Size Deep Trend', () => {
-  assert.equal(PREY_140_RECORDS.length, 134);
-  assert.equal(GAME_CONFIG.preyTiers.length, 135);
+test('234 Active Marine Prey Species + Cyber Mine: Non-Fish Mammal Exclusion, Asset Presence, Depth Stratification & Body-Size Deep Trend', () => {
+  assert.equal(PREY_140_RECORDS.length, 234);
+  assert.equal(GAME_CONFIG.preyTiers.length, 235);
 
   const byId = Object.fromEntries(GAME_CONFIG.preyTiers.map((p) => [p.id, p]));
   assert.ok(byId['cyber_mine'], 'cyber_mine must remain retained');
@@ -3324,9 +3375,9 @@ test('134 Active Marine Prey Species + Cyber Mine: Non-Fish Mammal Exclusion, As
     );
   }
 
-  // 4. Verify 134 real @3x prey species are distributed 100% according to biological body length
+  // 4. Verify 234 real @3x prey species are distributed 100% according to biological body length
   const realPreyOnly = GAME_CONFIG.preyTiers.filter((p) => !p.isHazard);
-  assert.equal(realPreyOnly.length, 134);
+  assert.equal(realPreyOnly.length, 234);
   for (const prey of realPreyOnly) {
     assert.equal(
       prey.tier,
@@ -3475,9 +3526,9 @@ test('World ecology atlas points to the 4x4 grid sheet (not a standalone cluster
   }
 });
 
-test('134 Active Marine Prey Species + Cyber Mine: Authentic Biological Body Length, Independent Swimming Speeds & Visual-Hitbox Scaling Invariants', () => {
+test('234 Active Marine Prey Species + Cyber Mine: Authentic Biological Body Length, Independent Swimming Speeds & Visual-Hitbox Scaling Invariants', () => {
   const allPrey = GAME_CONFIG.preyTiers;
-  assert.equal(allPrey.length, 135);
+  assert.equal(allPrey.length, 235);
 
   const uniqueSpeeds = new Set(allPrey.map((p) => p.baseSpeed));
   assert.ok(
@@ -3544,13 +3595,14 @@ test('134 Active Marine Prey Species + Cyber Mine: Authentic Biological Body Len
       96 * (apexShark.worldScale ?? apexShark.scale) * getDebugPreySizeMultiplier();
     const sharkScreenSizeApex = 96 * apexShark.scale * getDebugPreySizeMultiplier();
     if (!prey.isHazard) {
+      const maxEdibleWorldRatio = prey.isBoss ? 1.26 : 1.05;
       assert.ok(
-        drawSizeApex <= sharkWorldSizeApex * 0.64,
-        `Devoured by apex shark: ${prey.id} world drawSize=${drawSizeApex} must be <= 64% of sharkWorldSize=${sharkWorldSizeApex}`
+        drawSizeApex <= sharkWorldSizeApex * maxEdibleWorldRatio,
+        `Devoured by apex shark: ${prey.id} world drawSize=${drawSizeApex} must be <= ${Math.round(maxEdibleWorldRatio * 100)}% of sharkWorldSize=${sharkWorldSizeApex}`
       );
       assert.ok(
-        drawSizeApex * apexShark.cameraZoom <= sharkScreenSizeApex * 0.64,
-        `Devoured by apex shark: ${prey.id} screen drawSize=${(drawSizeApex * apexShark.cameraZoom).toFixed(2)} must be <= 64% of sharkScreenSize=${sharkScreenSizeApex}`
+        drawSizeApex * apexShark.cameraZoom <= sharkScreenSizeApex * maxEdibleWorldRatio,
+        `Devoured by apex shark: ${prey.id} screen drawSize=${(drawSizeApex * apexShark.cameraZoom).toFixed(2)} must be <= ${Math.round(maxEdibleWorldRatio * 100)}% of sharkScreenSize=${sharkScreenSizeApex}`
       );
     }
   }
@@ -3743,7 +3795,7 @@ test('Cross-Platform Shared Game Data Contract (Web TS <-> shared/game_data.json
 
   assert.equal(parsed.schemaVersion, SHARED_GAME_DATA_SCHEMA_VERSION);
   assert.equal(parsed.sharkForms.length, 48);
-  assert.equal(parsed.preyTiers.length, 135);
+  assert.equal(parsed.preyTiers.length, 235);
   assert.deepEqual(
     Object.keys(parsed.lineageMeta).sort(),
     ['APEX_BIO', 'CYBER_MECHA', 'ELDER_ABYSS', 'ELEMENTAL_CORE']
@@ -3800,6 +3852,42 @@ test('Cross-Platform Shared Game Data Contract (Web TS <-> shared/game_data.json
     ),
     'game_data.json PBXFileReference must use text.json and SOURCE_ROOT path'
   );
+
+  // Verify all 6 domain config JSONs exist cleanly, match iOS bundled Resources byte-for-byte, and appear in project.pbxproj + DomainConfigs.swift
+  const domainConfigNames = [
+    'world_and_progression_config.json',
+    'shark_evolution_config.json',
+    'prey_ecology_config.json',
+    'economy_predation_config.json',
+    'crown_mastery_config.json',
+    'ads_and_monetization_config.json',
+  ];
+  for (const cfgFile of domainConfigNames) {
+    const srcCfgPath = path.resolve(process.cwd(), 'shared/configs', cfgFile);
+    const iosCfgPath = path.resolve(
+      process.cwd(),
+      'ios-native/HungrySharkEvolution/Resources/Assets',
+      cfgFile
+    );
+    assert.ok(fs.existsSync(srcCfgPath), `Missing shared/configs/${cfgFile}`);
+    assert.ok(fs.existsSync(iosCfgPath), `Missing iOS Resources/Assets/${cfgFile} (run npm run sync:ios)`);
+    assert.equal(
+      fs.readFileSync(iosCfgPath, 'utf8'),
+      fs.readFileSync(srcCfgPath, 'utf8'),
+      `iOS bundled ${cfgFile} must match shared/configs/${cfgFile} byte-for-byte`
+    );
+    assert.ok(
+      pbxContent.includes(`/* ${cfgFile} in Resources */`),
+      `${cfgFile} must be registered in project.pbxproj`
+    );
+  }
+  const domainSwiftPath = path.resolve(
+    process.cwd(),
+    'ios-native/HungrySharkEvolution/Core/DomainConfigs.swift'
+  );
+  assert.ok(fs.existsSync(domainSwiftPath), 'DomainConfigs.swift must exist');
+  const domainSwiftSrc = fs.readFileSync(domainSwiftPath, 'utf8');
+  assert.ok(domainSwiftSrc.includes('JSONDecoder().decode('));
 });
 
 test('P0-2 Web Asset Slimming & Lazy-Loading: <12MB WebP bundle, zero legacy sheets, zero prey getImageData trim, depth-band & shark window selectors', () => {
@@ -4137,6 +4225,642 @@ test('P1-2 True Native 2D Camera Zoom, Linear Prey Parity, Giant Shark Terrace S
   assert.equal(stepSrc.includes('curSeabedScale'), false);
   assert.equal(stepSrc.includes('effPreyX'), false);
 });
+
+test('P0-3 AdManager Compliance: separate Unit IDs, zero wx/tt AdMob leakage, frequency cap & no free-reward fallback', () => {
+  // 1. Rewarded & Interstitial AdMob Unit IDs must be strictly distinct
+  assert.notEqual(
+    GOOGLE_ADS_CONFIG.admobRewardedAdUnitId,
+    GOOGLE_ADS_CONFIG.admobInterstitialAdUnitId,
+    'AdMob Interstitial Unit ID must not reuse Rewarded Video Unit ID'
+  );
+  assert.equal(
+    resolvePlatformAdUnitId('admob', 'interstitial'),
+    GOOGLE_ADS_CONFIG.admobInterstitialAdUnitId
+  );
+
+  // 2. WeChat & Douyin platforms must NEVER fall back to Google AdMob IDs
+  for (const plat of ['wx', 'tt'] as const) {
+    for (const fmt of ['rewarded', 'interstitial'] as const) {
+      const resolved = resolvePlatformAdUnitId(plat, fmt);
+      assert.equal(
+        resolved.includes('ca-app-pub'),
+        false,
+        `${plat} ${fmt} must never leak Google AdMob ID`
+      );
+      assert.equal(resolved, PLATFORM_ADS_CONFIG[plat][fmt === 'rewarded' ? 'rewardedAdUnitId' : 'interstitialAdUnitId']);
+    }
+  }
+
+  // 3. No window -> never grants free reward
+  const mgr = new AdManager();
+  mgr.resetFrequencyStateForTests();
+  let rewarded = false;
+  let canceled = false;
+  let errReason: string | undefined;
+  mgr.showRewardedVideoAd(
+    'REVIVE',
+    () => {
+      rewarded = true;
+    },
+    () => {
+      canceled = true;
+    },
+    (err) => {
+      errReason = err.reason;
+    }
+  );
+  assert.equal(rewarded, false, 'Must never grant free reward when window is unavailable');
+  assert.equal(canceled, true);
+  assert.equal(errReason, 'NO_WINDOW');
+
+  // 4. Mock browser window: production mode (dev simulator disabled) must NEVER grant free reward
+  const origWindow = (globalThis as Record<string, unknown>).window;
+  try {
+    (globalThis as Record<string, unknown>).window = {
+      setTimeout: globalThis.setTimeout.bind(globalThis),
+      clearTimeout: globalThis.clearTimeout.bind(globalThis),
+    };
+
+    mgr.resetFrequencyStateForTests();
+    mgr.setDevSimulatorEnabled(false);
+    mgr.registerBrowserSimulator((_p, onReward) => onReward());
+
+    rewarded = false;
+    canceled = false;
+    errReason = undefined;
+    mgr.showRewardedVideoAd(
+      'DOUBLE_SETTLEMENT',
+      () => {
+        rewarded = true;
+      },
+      () => {
+        canceled = true;
+      },
+      (err) => {
+        errReason = err.reason;
+      }
+    );
+    assert.equal(rewarded, false, 'Production mode must NEVER grant free reward when real ad SDK is absent');
+    assert.equal(canceled, true);
+    assert.equal(errReason, 'AD_UNAVAILABLE');
+
+    // 5. Mock WeChat SDK with unconfigured Unit ID -> rejects cleanly without calling createRewardedVideoAd
+    let wxCreateCalled = false;
+    (globalThis as Record<string, unknown>).window = {
+      wx: {
+        createRewardedVideoAd: () => {
+          wxCreateCalled = true;
+          return {
+            show: () => Promise.resolve(),
+            load: () => Promise.resolve(),
+            onClose: () => {},
+          };
+        },
+      },
+    };
+    rewarded = false;
+    errReason = undefined;
+    mgr.showRewardedVideoAd(
+      'SUPPLY_DROP',
+      () => {
+        rewarded = true;
+      },
+      undefined,
+      (err) => {
+        errReason = err.reason;
+      }
+    );
+    assert.equal(wxCreateCalled, false, 'Unconfigured wx adUnitId must not invoke wx.createRewardedVideoAd');
+    assert.equal(rewarded, false);
+    assert.equal(errReason, 'UNCONFIGURED_AD_UNIT');
+
+    // 6. Dev simulator enabled -> grants reward and triggers Cooldown & Daily Cap
+    (globalThis as Record<string, unknown>).window = {};
+    mgr.resetFrequencyStateForTests();
+    mgr.setDevSimulatorEnabled(true);
+    mgr.registerBrowserSimulator((_p, onReward) => onReward());
+
+    rewarded = false;
+    mgr.showRewardedVideoAd('TRIAL_SHARK', () => {
+      rewarded = true;
+    });
+    assert.equal(rewarded, true, 'Explicit dev simulator should grant reward upon simulated completion');
+
+    // Immediate second call must be blocked by COOLDOWN
+    const availAfterFirst = mgr.canShowAd('TRIAL_SHARK');
+    assert.equal(availAfterFirst.allowed, false);
+    assert.equal(availAfterFirst.reason, 'COOLDOWN');
+    assert.equal(
+      availAfterFirst.remainingToday,
+      AD_PLACEMENT_RULES.TRIAL_SHARK.dailyCap - 1
+    );
+
+    let secondRewarded = false;
+    let secondErrReason: string | undefined;
+    mgr.showRewardedVideoAd(
+      'TRIAL_SHARK',
+      () => {
+        secondRewarded = true;
+      },
+      undefined,
+      (err) => {
+        secondErrReason = err.reason;
+      }
+    );
+    assert.equal(secondRewarded, false, 'Cooldown must block immediate repeat ad');
+    assert.equal(secondErrReason, 'COOLDOWN');
+  } finally {
+    mgr.setDevSimulatorEnabled(null);
+    mgr.resetFrequencyStateForTests();
+    if (origWindow === undefined) {
+      delete (globalThis as Record<string, unknown>).window;
+    } else {
+      (globalThis as Record<string, unknown>).window = origWindow;
+    }
+  }
+});
+
+test('P1-1 Ecology Rebalance: 100 pink abyssal species fill T37..T48 (<50% single-tier share, continuous deep spawning & WebP assets)', () => {
+  const allPrey = GAME_CONFIG.preyTiers;
+  assert.equal(allPrey.length, 235);
+
+  // 1. No single tier holds >= 50% of all species
+  const tierCounts: Record<number, number> = {};
+  for (const p of allPrey) {
+    tierCounts[p.tier] = (tierCounts[p.tier] ?? 0) + 1;
+  }
+  const maxTierShare = Math.max(...Object.values(tierCounts)) / allPrey.length;
+  assert.ok(
+    maxTierShare < 0.5,
+    `No single tier may hold >= 50% of prey species, got ${(maxTierShare * 100).toFixed(1)}%`
+  );
+
+  // 2. Every tier in T37..T48 has >= 8 distinct species totaling exactly 100 new pink variants (PREY-301..PREY-400)
+  const pinkSpecies = allPrey.filter((p) => /^PREY-3\d{2}$|^PREY-400$/.test(p.id));
+  assert.equal(pinkSpecies.length, 100, 'Expected exact 100 new T37..T48 species (PREY-301..PREY-400)');
+  for (let t = 37; t <= 48; t++) {
+    const countInTier = pinkSpecies.filter((p) => p.tier === t).length;
+    assert.ok(
+      countInTier >= 8 && countInTier <= 9,
+      `Expected 8..9 species in T${t}, got ${countInTier}`
+    );
+  }
+
+  // 3. All 100 T37..T48 species reside strictly in real >=4,000m (>=10,000px worldY) abyssal/hadal zones (never at 1,000m!)
+  const starterShallowIds = new Set(selectPreyIdsForDepthBand(0, 380));
+  for (const p of pinkSpecies) {
+    assert.ok(
+      p.minDepth >= 10000 && p.maxDepth === 20000,
+      `${p.id} must reside in abyss/hadal worldY [>=10000..20000] (>=4000m HUD), got [${p.minDepth}..${p.maxDepth}]`
+    );
+    assert.ok(
+      worldYToMeterDepth(p.minDepth) >= 4000,
+      `${p.id} real HUD minDepth must be >= 4000m, got ${worldYToMeterDepth(p.minDepth)}m`
+    );
+    assert.equal(starterShallowIds.has(p.id), false, `${p.id} must not eagerly load in 0m starter shallow band`);
+  }
+
+  // 4. Ecosystem progression transitions smoothly from armor-crush (+1T..+3T) to deadly (+4T+) to devourable across Gen 5..6
+  const t36Shark = computeEvolvedSharkStats(1, SHARK_EVOLUTION_FORMS[35].id, 1, false);
+  const t37Prey = pinkSpecies.find((p) => p.tier === 37)!;
+  const t40Prey = pinkSpecies.find((p) => p.tier === 40)!;
+  const t48Prey = pinkSpecies.find((p) => p.tier === 48)!;
+
+  assert.equal(resolvePreyEncounter(t36Shark, t37Prey, false, false).encounterState, 'NEED_BOOST');
+  assert.equal(resolvePreyEncounter(t36Shark, t37Prey, false, true).encounterState, 'ARMOR_CRUSH');
+  assert.equal(resolvePreyEncounter(t36Shark, t40Prey, false, true).encounterState, 'DEADLY_PREDATOR');
+
+  const t48Shark = computeEvolvedSharkStats(1, SHARK_EVOLUTION_FORMS[47].id, 1, false);
+  assert.equal(resolvePreyEncounter(t48Shark, t48Prey, false, false).encounterState, 'DEVOUR');
+
+  // 5. Verify 1000m (6000px) & 2000m (7333px) NEVER spawn T37..T48 giants, while >=4500m (11500px+) & hadal (17500px) DO!
+  const spawner = new EcosystemSpawner(20, 1650, 640);
+  const bagMid: PreyEntity[] = [];
+  for (const midWorldY of [6000, 7333]) {
+    for (let i = 0; i < 60; i++) {
+      const spawned = spawner.spawnPreyOffScreen(
+        bagMid,
+        0,
+        midWorldY,
+        () => ((i * 19 + 5) % 97) / 97,
+        undefined,
+        0,
+        45.0,
+        { halfW: 2900, halfH: 1636, cameraX: 0, cameraY: midWorldY, renderZoom: 0.22 }
+      );
+      if (spawned) {
+        assert.ok(
+          spawned.config.tier < 37,
+          `Mid-deep worldY=${midWorldY} (${worldYToMeterDepth(midWorldY)}m) must NOT spawn T37+ giant (${spawned.config.id}, T${spawned.config.tier})`
+        );
+      }
+    }
+  }
+
+  const spawnedDeepTiers = new Set<number>();
+  const bagDeep: PreyEntity[] = [];
+  for (let i = 0; i < 80; i++) {
+    const spawned = spawner.spawnPreyOffScreen(
+      bagDeep,
+      0,
+      17200,
+      () => ((i * 17 + 3) % 97) / 97,
+      [50, 120],
+      0,
+      45.0
+    );
+    if (spawned) spawnedDeepTiers.add(spawned.config.tier);
+  }
+  assert.ok(
+    Array.from(spawnedDeepTiers).some((t) => t >= 42),
+    `Hadal trench at 17200px (${worldYToMeterDepth(17200)}m) must spawn T42+ megafauna, got tiers: ${Array.from(spawnedDeepTiers).join(',')}`
+  );
+});
+
+test('Task 02 P0-1: Single-source predation reward plan, pickup deduplication, duplicate prey guard & RunSummary accuracy', () => {
+  const starterStats = computeEvolvedSharkStats(1, 'shark_00_clown_fry', 1, false, 1.0, 1);
+  const t1PreyCfg = GAME_CONFIG.preyTiers.find((p) => !p.isHazard && p.tier === 1)!;
+  const t28PreyCfg = GAME_CONFIG.preyTiers.find((p) => !p.isHazard && p.tier >= 28)!;
+  const bossPreyCfg = GAME_CONFIG.preyTiers.find((p) => p.isBoss) ?? t28PreyCfg;
+
+  // 1. Ordinary predation settles ONCE via spawned pickups (never direct + pickup double-credit),
+  //    and T1..T17 fish with geneValue > 0 produce DNA_CRYSTAL pickups instead of 0%.
+  const sim = createInitialSimState(createDefaultMetaSave());
+  const runSummary = {
+    coins: sim.shark.coins,
+    genes: sim.shark.genes,
+    score: 0,
+    runCoinsEarned: 0,
+    runGenesEarned: 0,
+  };
+  const settledUids = sim.settledPreyUids;
+
+  const t1Prey = { uid: 101, config: t1PreyCfg, mutationVariant: 'NONE' as const, scaleMultiplier: 1.0 };
+  const t1Outcome = resolvePreyEncounter(starterStats, t1PreyCfg, false, false, 'NONE', 1.0);
+  const plan1 = buildPredationRewardPlan(
+    t1Prey,
+    t1Outcome,
+    { effectiveCoinMult: 1.0, effectiveGeneMult: 1.0, finalScoreGain: t1Outcome.scoreGain },
+    settledUids,
+    { pityMissStreak: 0, rng: () => 0.1 }
+  );
+  assert.equal(plan1.settled, true);
+  assert.ok(plan1.totalCoins >= 1);
+  assert.ok(plan1.totalGenes >= 1);
+
+  const coinSum = plan1.pickups.filter((p) => p.kind === 'COIN').reduce((s, p) => s + p.value, 0);
+  const geneSum = plan1.pickups.filter((p) => p.kind === 'DNA_CRYSTAL').reduce((s, p) => s + p.value, 0);
+  assert.equal(coinSum, plan1.totalCoins, 'Spawned COIN pickups must sum strictly to single-source totalCoins');
+  assert.equal(geneSum, plan1.totalGenes, 'T1 prey must spawn DNA_CRYSTAL pickups summing strictly to totalGenes');
+
+  // Spawn into pooled pickups and collect each once
+  for (const drop of plan1.pickups) {
+    spawnPooledPickup(sim, 0, 220, 0, 0, drop.kind, drop.value);
+  }
+  const activePickups = sim.pickups.filter((pk) => pk.active);
+  assert.equal(activePickups.length, plan1.pickups.length);
+
+  for (const pk of activePickups) {
+    const firstCollect = collectPickupEntity(pk, runSummary);
+    assert.equal(firstCollect.collected, true);
+    // 2. Duplicate pickup collision must grant 0 coins, 0 genes, 0 score
+    const dupCollect = collectPickupEntity(pk, runSummary);
+    assert.equal(dupCollect.collected, false);
+    assert.equal(dupCollect.coinsAdded, 0);
+    assert.equal(dupCollect.genesAdded, 0);
+    assert.equal(dupCollect.scoreAdded, 0);
+  }
+  assert.equal(runSummary.runCoinsEarned, plan1.totalCoins, 'RunSummary coinsEarned must equal single-source predation payout');
+  assert.equal(runSummary.runGenesEarned, plan1.totalGenes, 'RunSummary genesEarned must equal single-source predation payout');
+
+  // 3. Duplicate predation event (same prey object or same uid) must never settle twice
+  const dupByFlag = buildPredationRewardPlan(
+    t1Prey,
+    t1Outcome,
+    { effectiveCoinMult: 1.0, effectiveGeneMult: 1.0, finalScoreGain: t1Outcome.scoreGain },
+    settledUids
+  );
+  assert.equal(dupByFlag.settled, false);
+  assert.equal(dupByFlag.pickups.length, 0);
+
+  const dupByUid = buildPredationRewardPlan(
+    { uid: 101, config: t1PreyCfg, mutationVariant: 'NONE', scaleMultiplier: 1.0 },
+    t1Outcome,
+    { effectiveCoinMult: 1.0, effectiveGeneMult: 1.0, finalScoreGain: t1Outcome.scoreGain },
+    settledUids
+  );
+  assert.equal(dupByUid.settled, false, 'Same prey uid must never settle twice');
+
+  // Special prey (GOLDEN_MUTANT, ABYSS_BEHEMOTH, ARMOR_CRUSH, Boss) follow the exact same single-source pipeline
+  const apexStats = computeEvolvedSharkStats(10, 'shark_47_omega_devourer', 10, false, 1.0, 48);
+  const goldenPrey = { uid: 102, config: t28PreyCfg, mutationVariant: 'GOLDEN_MUTANT' as const, scaleMultiplier: 1.0 };
+  const goldenOut = resolvePreyEncounter(apexStats, t28PreyCfg, false, false, 'GOLDEN_MUTANT', 1.0);
+  const goldenPlan = buildPredationRewardPlan(
+    goldenPrey,
+    goldenOut,
+    { effectiveCoinMult: 2.0, effectiveGeneMult: 2.0, finalScoreGain: goldenOut.scoreGain },
+    settledUids
+  );
+  assert.equal(goldenPlan.settled, true);
+  assert.equal(
+    goldenPlan.pickups.filter((p) => p.kind === 'COIN').reduce((s, p) => s + p.value, 0),
+    goldenPlan.totalCoins
+  );
+  assert.equal(
+    goldenPlan.pickups.filter((p) => p.kind === 'DNA_CRYSTAL').reduce((s, p) => s + p.value, 0),
+    goldenPlan.totalGenes
+  );
+
+  const crushShark = computeEvolvedSharkStats(1, SHARK_EVOLUTION_FORMS[Math.max(0, t28PreyCfg.tier - 2)].id, 1, false);
+  const armorOut = resolvePreyEncounter(crushShark, t28PreyCfg, false, true, 'ABYSS_BEHEMOTH', 1.0);
+  if (armorOut.canDevour) {
+    const behemothPlan = buildPredationRewardPlan(
+      { uid: 103, config: bossPreyCfg, mutationVariant: 'ABYSS_BEHEMOTH', scaleMultiplier: 1.0 },
+      armorOut,
+      { effectiveCoinMult: 1.5, effectiveGeneMult: 1.5, finalScoreGain: armorOut.scoreGain },
+      settledUids
+    );
+    assert.equal(behemothPlan.settled, true);
+    assert.equal(
+      behemothPlan.pickups.filter((p) => p.kind === 'DNA_CRYSTAL').reduce((s, p) => s + p.value, 0),
+      behemothPlan.totalGenes
+    );
+  }
+
+  // RunSummary remains accurate even if the player spends banked coins mid-run
+  runSummary.coins -= 50;
+  assert.equal(runSummary.runCoinsEarned, plan1.totalCoins, 'Mid-run spending must not erase runCoinsEarned');
+});
+
+test('Task 02 P0-2 / P0-4 / P0-7: Unified Trial permanent-progress gate, unlock isolation & onboarding one-time gift', () => {
+  // Unified eligibility gate contract
+  assert.equal(isEligibleForPermanentProgress({ trialActive: false }), true);
+  assert.equal(isEligibleForPermanentProgress({ trialActive: true }), false);
+  assert.equal(isEligibleForPermanentProgress({ trialActive: false, sandboxOrCheatMode: true }), false);
+
+  const inTrialGate = getPermanentProgressEligibility({ trialActive: true, activeInRun: true });
+  assert.equal(inTrialGate.eligible, false);
+  assert.equal(inTrialGate.allowRunRecords, false);
+  assert.equal(inTrialGate.allowSharkMasteryAndCrown, false);
+  assert.equal(inTrialGate.allowSharkUnlockAndUpgrade, false);
+  assert.equal(inTrialGate.allowAchievements, false);
+  assert.equal(inTrialGate.allowMissions, false);
+  assert.equal(inTrialGate.allowEncyclopediaDiscovery, false);
+  assert.equal(inTrialGate.allowRunCountIncrement, false);
+  assert.equal(inTrialGate.allowDoubleSettlementAd, false);
+  assert.equal(inTrialGate.allowTrialCurrencyCarryOver, true, 'D1: Trial pickups/bounty currency carry-over stays allowed');
+
+  // 4 & 5. Trial reaching high level (Lv.18) and deep ocean (5000m) must NEVER pollute save or unlock higher sharks
+  let save = createDefaultMetaSave();
+  save.sharkUpgradeLevels['shark_00_clown_fry'] = 10;
+  save.bankedCoins = 999_999;
+  save.bankedGenes = 999_999;
+
+  const afterTrialRunStart = recordFormalRunStarted({ trialActive: true, activeInRun: true }, save);
+  assert.equal(afterTrialRunStart.totalRunsPlayed, 0, 'Trial must not increment totalRunsPlayed');
+
+  const afterTrialRecords = recordPermanentRunProgress(
+    afterTrialRunStart,
+    { trialActive: true, activeInRun: true },
+    18,
+    5000
+  );
+  assert.equal(afterTrialRecords.bestInRunLevel, 1, 'Trial Lv.18 must not overwrite bestInRunLevel');
+  assert.equal(afterTrialRecords.bestDepthReached, 200, 'Trial 5000m must not overwrite bestDepthReached');
+
+  // Mid-Trial and Post-Trial unlock check must NOT borrow Trial Lv.18 / 5000m to unlock shark #8 (reqMaxInRunLevel=4, reqMaxDepth=300)
+  const gen2Form = SHARK_EVOLUTION_FORMS[8];
+  const trialParentSave = {
+    ...afterTrialRecords,
+    unlockedSharkIds: SHARK_EVOLUTION_FORMS.slice(0, 8).map((f) => f.id),
+    sharkUpgradeLevels: Object.fromEntries(SHARK_EVOLUTION_FORMS.slice(0, 8).map((f) => [f.id, 10])),
+  };
+  const midTrialEval = evaluateSharkUnlockForRun(
+    gen2Form,
+    trialParentSave,
+    { trialActive: true, activeInRun: true },
+    0,
+    0,
+    18,
+    5000
+  );
+  assert.equal(midTrialEval.canUnlockNow, false, 'Active Trial must block mid-run unlock');
+  assert.equal(midTrialEval.levelMet, false, 'Trial Lv.18 must not satisfy levelMet');
+  assert.equal(midTrialEval.depthMet, false, 'Trial 5000m must not satisfy depthMet');
+
+  const postTrialEval = evaluateSharkUnlockForRun(
+    gen2Form,
+    trialParentSave,
+    { trialActive: true, activeInRun: false },
+    0,
+    0,
+    18,
+    5000
+  );
+  assert.equal(postTrialEval.canUnlockNow, false, 'Post-Trial gameover must still reject Trial Lv.18 / 5000m for unlock gates');
+
+  // 6 & 7. Trial completing Crown score threshold awards 0 mastery rewards and writes 0 records
+  const mechaForm = SHARK_EVOLUTION_FORMS[41];
+  const mechaGoldThreshold = getSharkMasteryConfig(mechaForm)[2].scoreThreshold;
+  const trialMastery = settleSharkScoreMastery(mechaForm.id, mechaGoldThreshold + 10000, true, trialParentSave);
+  assert.equal(trialMastery.genesAwarded, 0);
+  assert.equal(trialMastery.newCrownTier, 0);
+  assert.equal(trialMastery.isNewRecord, false);
+  assert.equal(trialMastery.updatedSave.sharkBestScores?.[mechaForm.id] ?? 0, 0);
+  assert.equal(trialMastery.updatedSave.sharkMasteryTiers?.[mechaForm.id] ?? 0, 0);
+
+  // 8. Normal run updates records, increments totalRunsPlayed once, unlocks sharks legitimately, and claims Mastery once
+  let normalSave = recordFormalRunStarted({ trialActive: false, activeInRun: true }, trialParentSave);
+  assert.equal(normalSave.totalRunsPlayed, 1);
+  normalSave = recordPermanentRunProgress(normalSave, { trialActive: false, activeInRun: true }, 10, 800);
+  assert.equal(normalSave.bestInRunLevel, 10);
+  assert.equal(normalSave.bestDepthReached, 800);
+
+  const normalEval = evaluateSharkUnlockForRun(
+    gen2Form,
+    normalSave,
+    { trialActive: false, activeInRun: true },
+    0,
+    0,
+    10,
+    800
+  );
+  assert.equal(normalEval.canUnlockNow, true, 'Normal run meeting gates unlocks shark cleanly');
+
+  const normalMastery = settleSharkScoreMastery('shark_00_clown_fry', 20000, false, normalSave);
+  assert.equal(normalMastery.newCrownTier, 3);
+  assert.ok(normalMastery.genesAwarded > 0);
+  assert.equal(normalMastery.isNewRecord, true);
+
+  // P0-2 Onboarding starter gift can only be claimed ONCE (replay tutorial grants 0) + legacy save compatibility
+  const freshSave = createDefaultMetaSave();
+  const claim1 = claimOnboardingStarterGift(freshSave, 80, 20);
+  assert.equal(claim1.granted, true);
+  assert.equal(claim1.updatedSave.bankedCoins, freshSave.bankedCoins + 80);
+  assert.equal(claim1.updatedSave.bankedGenes, freshSave.bankedGenes + 20);
+  assert.equal(claim1.updatedSave.onboardingGiftClaimed, true);
+
+  const claim2 = claimOnboardingStarterGift(claim1.updatedSave, 80, 20);
+  assert.equal(claim2.granted, false, 'Replaying onboarding tutorial must NEVER grant starter gift twice');
+  assert.equal(claim2.updatedSave.bankedCoins, claim1.updatedSave.bankedCoins);
+  assert.equal(claim2.updatedSave.bankedGenes, claim1.updatedSave.bankedGenes);
+
+  // Legacy save compatibility (without onboardingGiftClaimed field)
+  const store = new Map<string, string>();
+  store.set(
+    'hungry_shark_evo_meta_v1',
+    JSON.stringify({
+      version: 1,
+      bankedCoins: 500,
+      bankedGenes: 60,
+      unlockedSharkIds: ['shark_00_clown_fry'],
+      selectedSharkId: 'shark_00_clown_fry',
+      sharkUpgradeLevels: { shark_00_clown_fry: 3 },
+      bestInRunLevel: 4,
+      bestDepthReached: 240,
+      totalRunsPlayed: 2,
+    })
+  );
+  const origWindow = (globalThis as { window?: unknown }).window;
+  try {
+    (globalThis as { window: unknown }).window = {
+      localStorage: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => store.set(k, v),
+      },
+    };
+    const migratedSave = loadSharkMetaSave();
+    assert.equal(migratedSave.onboardingGiftClaimed, true, 'Legacy progressed save defaults onboardingGiftClaimed=true');
+  } finally {
+    (globalThis as { window?: unknown }).window = origWindow;
+  }
+});
+
+test('Task 05 D3~D8 Approved Rules & Config-Driven Architecture Verification', () => {
+  // 1. D5-A Starter Save Defaults (120C / 20G / 200m) + #0 gene clamp minRef=12 -> 32G full Lv.10
+  const def = createDefaultMetaSave();
+  assert.equal(def.bankedCoins, 120);
+  assert.equal(def.bankedGenes, 20);
+  assert.equal(def.bestDepthReached, 200);
+  const clown = getSharkFormById('shark_00_clown_fry');
+  assert.equal(
+    getSharkUpgradeGeneCost(clown, 4) + getSharkUpgradeGeneCost(clown, 9),
+    32,
+    '#0 full Lv.10 genes = 10 + 22 = 32G'
+  );
+
+  // 2. D7-1 (U-B) + D7-2 (Lv.15): 0 negative Bite Tier transitions & monotonically bounded gates
+  let negTransitions = 0;
+  for (let i = 1; i < SHARK_EVOLUTION_FORMS.length; i++) {
+    const prev = SHARK_EVOLUTION_FORMS[i - 1];
+    const cur = SHARK_EVOLUTION_FORMS[i];
+    const prevReqStats = computeEvolvedSharkStats(1, prev.id, cur.reqParentUpgradeLevel, false, 1.0, i);
+    const curLv1Stats = computeEvolvedSharkStats(1, cur.id, 1, false, 1.0, i + 1);
+    if ((curLv1Stats.normalBiteTier ?? curLv1Stats.biteTier) < (prevReqStats.normalBiteTier ?? prevReqStats.biteTier)) {
+      negTransitions++;
+    }
+    assert.ok(cur.baseHp >= prev.baseHp, `${cur.id} baseHp must be >= ${prev.id}`);
+  }
+  assert.equal(negTransitions, 0, 'D7-1 U-B must eliminate all negative Bite Tier transitions');
+  assert.ok(
+    SHARK_EVOLUTION_FORMS[47].reqMaxInRunLevel <= 15,
+    'D7-2 Lv.15 cap keeps #47 unlock level <= 15'
+  );
+
+  // 3. D3-A Crowns Total (44,940C / 9,619G; G1~G3 11,238C / 2,659G)
+  let totalCrownC = 0;
+  let totalCrownG = 0;
+  let g13CrownC = 0;
+  let g13CrownG = 0;
+  for (const s of SHARK_EVOLUTION_FORMS) {
+    const tiers = getSharkMasteryConfig(s);
+    const c = tiers.reduce((acc, t) => acc + t.coinReward, 0);
+    const g = tiers.reduce((acc, t) => acc + t.geneReward, 0);
+    totalCrownC += c;
+    totalCrownG += g;
+    if (s.row <= 2) {
+      g13CrownC += c;
+      g13CrownG += g;
+    }
+  }
+  assert.equal(totalCrownC, 44_940);
+  assert.equal(totalCrownG, 9_619);
+  assert.equal(g13CrownC, 11_238);
+  assert.equal(g13CrownG, 2_659);
+
+  // 4. D4-A 2-hit Boss/Behemoth Armor Crush vs 1-hit Normal + #28 Void Lightning reduction
+  const t3Prey = GAME_CONFIG.preyTiers.find((p) => !p.isHazard && !p.isBoss && p.tier === 3)!;
+  const bossPrey = GAME_CONFIG.preyTiers.find((p) => p.isBoss)!;
+  assert.equal(getRequiredArmorHits(t3Prey, 'NONE'), 1);
+  assert.equal(getRequiredArmorHits(t3Prey, 'ABYSS_BEHEMOTH'), 2);
+  assert.equal(getRequiredArmorHits(bossPrey, 'NONE'), 2);
+  const voidLightningStats = computeEvolvedSharkStats(1, 'shark_28_void_lightning', 1);
+  assert.equal(voidLightningStats.goldenMutantReduction, 1);
+
+  // 5. D6-X Gene Scarcity Stratified Chance + Pity Counter (T1..17: 30%/3, T18+: 45%/2)
+  const lowPrey = GAME_CONFIG.preyTiers.find((p) => !p.isHazard && !p.isBoss && p.tier <= 17 && p.geneValue > 0)!;
+  const highPrey = GAME_CONFIG.preyTiers.find((p) => !p.isHazard && !p.isBoss && p.tier >= 18 && p.geneValue > 0)!;
+  const maxStats = computeEvolvedSharkStats(15, 'shark_47_omega_devourer', 10, false, 1.0, 48);
+
+  const pityLow = { pityMissStreak: 0, rng: () => 0.99 };
+  for (let miss = 0; miss < 3; miss++) {
+    const out = resolvePreyEncounter(maxStats, lowPrey, false, false, 'NONE', 1.0);
+    const plan = buildPredationRewardPlan(
+      { uid: 5000 + miss, config: lowPrey, mutationVariant: 'NONE', scaleMultiplier: 1.0 },
+      out,
+      { effectiveCoinMult: 1.0, effectiveGeneMult: 1.0, finalScoreGain: out.scoreGain },
+      undefined,
+      pityLow
+    );
+    assert.equal(plan.totalGenes, 0, 'Ordinary miss must drop 0 genes (no Math.max(1) floor)');
+  }
+  assert.equal(pityLow.pityMissStreak, 3);
+  const guaranteedLow = buildPredationRewardPlan(
+    { uid: 5004, config: lowPrey, mutationVariant: 'NONE', scaleMultiplier: 1.0 },
+    resolvePreyEncounter(maxStats, lowPrey, false, false, 'NONE', 1.0),
+    { effectiveCoinMult: 1.0, effectiveGeneMult: 1.0, finalScoreGain: 10 },
+    undefined,
+    pityLow
+  );
+  assert.ok(guaranteedLow.totalGenes >= 1, 'T1..17 4th kill after 3 misses must guarantee DNA drop');
+  assert.equal(pityLow.pityMissStreak, 0);
+
+  const pityHigh = { pityMissStreak: 0, rng: () => 0.99 };
+  for (let miss = 0; miss < 2; miss++) {
+    buildPredationRewardPlan(
+      { uid: 6000 + miss, config: highPrey, mutationVariant: 'NONE', scaleMultiplier: 1.0 },
+      resolvePreyEncounter(maxStats, highPrey, false, false, 'NONE', 1.0),
+      { effectiveCoinMult: 1.0, effectiveGeneMult: 1.0, finalScoreGain: 10 },
+      undefined,
+      pityHigh
+    );
+  }
+  assert.equal(pityHigh.pityMissStreak, 2);
+  const guaranteedHigh = buildPredationRewardPlan(
+    { uid: 6003, config: highPrey, mutationVariant: 'NONE', scaleMultiplier: 1.0 },
+    resolvePreyEncounter(maxStats, highPrey, false, false, 'NONE', 1.0),
+    { effectiveCoinMult: 1.0, effectiveGeneMult: 1.0, finalScoreGain: 10 },
+    undefined,
+    pityHigh
+  );
+  assert.ok(guaranteedHigh.totalGenes >= 1, 'T18+ 3rd kill after 2 misses must guarantee DNA drop');
+  assert.equal(pityHigh.pityMissStreak, 0);
+
+  // 6. D8 Ads & Scaled Supply Drops + Next Unowned Trial Target
+  assert.equal(AD_PLACEMENT_RULES.DOUBLE_SETTLEMENT.dailyCap, 2);
+  assert.equal(AD_PLACEMENT_RULES.SUPPLY_DROP.dailyCap, 6);
+  assert.equal(getScaledSupplyDropReward(0).coins, 160);
+  assert.equal(getScaledSupplyDropReward(5).coins, 16000);
+  const trialSpec = getTrialTargetSharkSpec(['shark_00_clown_fry']);
+  assert.equal(trialSpec.sharkId, 'shark_01_lemon_pup');
+  assert.equal(trialSpec.upgradeLevel, 6);
+  assert.equal(trialSpec.inRunLevel, 5);
+  assert.equal(trialSpec.initialFrenzyDurationSec, 4.5);
+  assert.equal(WORLD_CONFIG.timeDifficulty.maxDifficultyMultiplier, 2.2);
+  assert.equal(ECONOMY_PREDATION_CONFIG.activeSkills.goldOverdrive.healMaxHpPct, 0.5);
+  assert.equal(ADS_AND_MONETIZATION_CONFIG.placements.REVIVE.frenzyDurationSec, 6);
+});
+
 
 
 

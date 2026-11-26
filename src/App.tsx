@@ -10,6 +10,7 @@ import { GAME_CONFIG, PreyTierConfig } from './game/config';
 import {
   ComputedSharkStats,
   computeEvolvedSharkStats,
+  ECONOMY_PREDATION_CONFIG,
   getDebugPreySizeMultiplier,
   getGeneSurgeCost,
   getGoldOverdriveCost,
@@ -17,18 +18,28 @@ import {
   setDebugPreySizeMultiplier,
 } from './game/rules';
 import {
-  evaluateSharkUnlock,
+  evaluateSharkUnlockForRun,
+  getGlobalAtlasBonuses,
   getNextEvolutionTarget,
+  getPermanentProgressEligibility,
   getSharkFormById,
   getSharkUpgradeCost,
   getSharkUpgradeGeneCost,
   LINEAGE_META,
   loadSharkMetaSave,
+  recordFormalRunStarted,
   saveSharkMetaSave,
   SharkMetaSaveData,
 } from './game/sharkEvolutionConfig';
 import { soundFX } from './game/audio';
-import { adManager } from './game/adManager';
+import {
+  adManager,
+  AdErrorInfo,
+  ADS_AND_MONETIZATION_CONFIG,
+  getMaxUnlockedRowFromSave,
+  getScaledSupplyDropReward,
+  getTrialTargetSharkSpec,
+} from './game/adManager';
 import { PreyEntity } from './game/canvasRenderer';
 import { SharkEvolutionAtlasModal } from './components/SharkEvolutionAtlasModal';
 import { GoogleRewardedVideoAdOverlay } from './components/GoogleRewardedVideoAdOverlay';
@@ -102,6 +113,7 @@ export default function App() {
   showAtlasModalRef.current = showAtlasModal;
 
   const [reviveOffered, setReviveOffered] = useState<boolean>(true);
+  const [settlementDoubled, setSettlementDoubled] = useState<boolean>(false);
   const [runSnapshot, setRunSnapshot] = useState<RunSummarySnapshot>({
     score: 0,
     maxDepth: 120,
@@ -113,6 +125,7 @@ export default function App() {
     activeSharkId: 'shark_00_clown_fry',
     personalBestScore: 0,
     isNewRecord: false,
+    masteryCoinsBonus: 0,
     masteryGenesBonus: 0,
     masteryCrownTier: 0,
   });
@@ -121,6 +134,8 @@ export default function App() {
   const [simAd, setSimAd] = useState<SimulatedAdState | null>(null);
   const simAdRef = useRef<SimulatedAdState | null>(null);
   simAdRef.current = simAd;
+  const [adNotice, setAdNotice] = useState<string | null>(null);
+  const adNoticeTimerRef = useRef<number | null>(null);
 
   // Audio mute state
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -208,7 +223,12 @@ export default function App() {
     runStartCoins: 0,
     runStartGenes: 0,
     runStartBestScore: 0,
+    runMasteryCoinsAwarded: 0,
     runMasteryGenesAwarded: 0,
+    runCoinsEarned: 0,
+    runGenesEarned: 0,
+    settlementDoubled: false,
+    announcedCrownTier: 0,
   });
 
   // DOM refs for smooth 60fps bar & joystick transforms without React re-renders
@@ -230,9 +250,30 @@ export default function App() {
   // Mutable 60Hz simulation engine state stored in ref
   const simRef = useRef<SharkSimState>(createInitialSimState(metaSave));
 
-  // Sync document.body.dataset.state whenever gameState changes
+  // Sync document.body.dataset.state & flush/clear active run flags cleanly on state transitions
   useEffect(() => {
+    const prevState = gameStateRef.current;
     gameStateRef.current = gameState;
+    if (gameState === 'title') {
+      const sim = simRef.current;
+      if (prevState === 'playing' || prevState === 'paused') {
+        const curSave = metaSaveRef.current;
+        if (
+          curSave.bankedCoins !== sim.shark.coins ||
+          curSave.bankedGenes !== sim.shark.genes
+        ) {
+          const flushed: SharkMetaSaveData = {
+            ...curSave,
+            bankedCoins: sim.shark.coins,
+            bankedGenes: sim.shark.genes,
+          };
+          metaSaveRef.current = flushed;
+          saveSharkMetaSave(flushed);
+          setMetaSave(flushed);
+        }
+      }
+      sim.shark.trialActive = false;
+    }
     if (typeof document !== 'undefined') {
       document.body.dataset.state = gameState;
     }
@@ -253,9 +294,11 @@ export default function App() {
           activeSharkId: metaSaveRef.current.selectedSharkId,
           personalBestScore: 12850,
           isNewRecord: true,
+          masteryCoinsBonus: 25,
           masteryGenesBonus: 15,
           masteryCrownTier: 2,
         });
+        setSettlementDoubled(false);
         setReviveOffered(revive);
         setGameState('gameover');
       };
@@ -278,6 +321,23 @@ export default function App() {
         onCancel,
       });
     });
+    adManager.registerErrorHandler((err: AdErrorInfo) => {
+      const msg = langRef.current === 'zh' ? err.messageZh : err.messageEn;
+      setAdNotice(msg);
+      if (adNoticeTimerRef.current !== null) {
+        window.clearTimeout(adNoticeTimerRef.current);
+      }
+      adNoticeTimerRef.current = window.setTimeout(() => {
+        setAdNotice(null);
+        adNoticeTimerRef.current = null;
+      }, 2600);
+    });
+    return () => {
+      adManager.registerErrorHandler(null);
+      if (adNoticeTimerRef.current !== null) {
+        window.clearTimeout(adNoticeTimerRef.current);
+      }
+    };
   }, []);
 
   // Countdown timer for Simulated Rewarded Video Ad
@@ -374,16 +434,17 @@ export default function App() {
         simRef.current.shark.sharkFormId ??
         save.selectedSharkId;
       const upgLevel = simRef.current.shark.trialActive
-        ? 10
+        ? getTrialTargetSharkSpec(save.unlockedSharkIds).upgradeLevel
         : save.sharkUpgradeLevels[formId] ?? 1;
-      const unlockedCount = save.unlockedSharkIds.length;
+      const atlasBonuses = getGlobalAtlasBonuses(save);
       return computeEvolvedSharkStats(
         inRunLevel,
         formId,
         upgLevel,
         frenzyActive,
         infiniteProgressionManager.globalDifficultyMultiplier,
-        unlockedCount
+        atlasBonuses.unlockedCount,
+        atlasBonuses.totalMasteryCrowns
       );
     },
     []
@@ -416,16 +477,27 @@ export default function App() {
 
   // Initialize or reset a run
   const startNewRun = useCallback(
-    (withMaxMechaTrial: boolean = false) => {
+    (withTrialShark: boolean = false) => {
       const sim = simRef.current;
-      const save = metaSaveRef.current;
-      const chosenSharkId = withMaxMechaTrial
-        ? 'shark_41_star_destroyer'
+      const baseSave = metaSaveRef.current;
+      const runContext = { trialActive: withTrialShark, activeInRun: true };
+      const permEligibility = getPermanentProgressEligibility(runContext);
+      const save = recordFormalRunStarted(runContext, baseSave);
+      if (save !== baseSave) {
+        metaSaveRef.current = save;
+        saveSharkMetaSave(save);
+        setMetaSave(save);
+      }
+
+      const trialSpec = getTrialTargetSharkSpec(save.unlockedSharkIds);
+      const chosenSharkId = withTrialShark
+        ? trialSpec.sharkId
         : save.selectedSharkId;
-      const chosenUpgLevel = withMaxMechaTrial
-        ? 10
+      const chosenUpgLevel = withTrialShark
+        ? trialSpec.upgradeLevel
         : save.sharkUpgradeLevels[chosenSharkId] ?? 1;
-      const unlockedCount = save.unlockedSharkIds.length;
+      const atlasBonusInit = getGlobalAtlasBonuses(save);
+      const unlockedCount = atlasBonusInit.unlockedCount;
 
       economyUsesRef.current = {
         goldOverdriveCount: 0,
@@ -433,22 +505,33 @@ export default function App() {
         runStartCoins: save.bankedCoins,
         runStartGenes: save.bankedGenes,
         runStartBestScore: save.sharkBestScores?.[chosenSharkId] ?? 0,
+        runMasteryCoinsAwarded: 0,
         runMasteryGenesAwarded: 0,
+        runCoinsEarned: 0,
+        runGenesEarned: 0,
+        settlementDoubled: false,
+        announcedCrownTier: 0,
       };
+      sim.settledPreyUids.clear();
+      sim.genePityState = { pityMissStreak: 0 };
 
-      const initialLevel = withMaxMechaTrial ? 5 : 1;
+      const initialLevel = withTrialShark ? trialSpec.inRunLevel : 1;
       const stats = computeEvolvedSharkStats(
         initialLevel,
         chosenSharkId,
         chosenUpgLevel,
-        withMaxMechaTrial,
+        withTrialShark,
         1.0,
-        unlockedCount
+        unlockedCount,
+        atlasBonusInit.totalMasteryCrowns
       );
 
       const initWorldScale = stats.worldScale ?? stats.scale;
       const spawnY = Math.max(220, Math.round(22 * initWorldScale + 95));
       const spawnDepthMeters = Math.max(22, Math.round(spawnY * 0.1));
+      const initialFrenzyTimer = withTrialShark
+        ? trialSpec.initialFrenzyDurationSec
+        : 0;
 
       sim.shark = {
         x: 0,
@@ -469,18 +552,18 @@ export default function App() {
         coins: save.bankedCoins,
         maxDepthReached: spawnDepthMeters,
         preyEatenCount: 0,
-        frenzyTimer: withMaxMechaTrial ? 4.5 : 0,
+        frenzyTimer: initialFrenzyTimer,
         hitFlashTimer: 0,
         hitstopTimer: 0,
         invulnerableTimer: 1.8,
         cameraShakeTrauma: 0,
-        trialActive: withMaxMechaTrial,
+        trialActive: withTrialShark,
         comboCount: 0,
         comboTimer: 0,
         reachedTwilight: false,
         reachedAbyss: false,
         sharkFormId: chosenSharkId,
-        morphFlashTimer: withMaxMechaTrial ? 1.0 : 0.45,
+        morphFlashTimer: withTrialShark ? 1.0 : 0.45,
         turnRate: 0,
         facingDir: 1,
         facingScaleX: 1,
@@ -510,7 +593,7 @@ export default function App() {
       sim.targetBounty = {
         preyConfig: firstTargetConfig,
         progress: 0,
-        required: 2,
+        required: ECONOMY_PREDATION_CONFIG.bounty.requiredKills,
       };
       ecosystemSpawner.activeTargetPreyId = firstTargetConfig.id;
       ecosystemSpawner.activeSharkBiteTier =
@@ -519,10 +602,10 @@ export default function App() {
       let shouldRunTutorial = false;
       try {
         shouldRunTutorial =
-          !withMaxMechaTrial &&
+          !withTrialShark &&
           localStorage.getItem(TUTORIAL_STORAGE_KEY) !== '1';
       } catch {
-        shouldRunTutorial = !withMaxMechaTrial;
+        shouldRunTutorial = !withTrialShark;
       }
       ecosystemSpawner.tutorialProtectionActive = shouldRunTutorial;
       if (shouldRunTutorial) {
@@ -574,13 +657,14 @@ export default function App() {
       const activeForm = getSharkFormById(chosenSharkId);
       const nextEvo = getNextEvolutionTarget(chosenSharkId, save);
       const nextEval = nextEvo
-        ? evaluateSharkUnlock(
+        ? evaluateSharkUnlockForRun(
             nextEvo,
             save,
+            runContext,
             0,
             0,
-            Math.max(save.bestInRunLevel, initialLevel),
-            Math.max(save.bestDepthReached, 220)
+            initialLevel,
+            spawnDepthMeters
           )
         : null;
       const upgCost = getSharkUpgradeCost(activeForm, chosenUpgLevel);
@@ -588,6 +672,7 @@ export default function App() {
 
       setShowAtlasModal(false);
       setReviveOffered(true);
+      setSettlementDoubled(false);
       setHudState({
         hp: stats.maxHp,
         maxHp: stats.maxHp,
@@ -602,11 +687,11 @@ export default function App() {
         depth: spawnDepthMeters,
         zoneKey: 'zone_shallow',
         biteTier: stats.biteTier,
-        frenzyTimer: withMaxMechaTrial ? 4.5 : 0,
-        trialActive: withMaxMechaTrial,
+        frenzyTimer: initialFrenzyTimer,
+        trialActive: withTrialShark,
         targetFishNameKey: firstTargetConfig.nameKey,
         targetFishProgress: 0,
-        targetFishRequired: 2,
+        targetFishRequired: ECONOMY_PREDATION_CONFIG.bounty.requiredKills,
         targetFishLengthCm: firstTargetConfig.bodyLengthCm,
         targetFishSpeed: firstTargetConfig.baseSpeed,
         activeSynergy: stats.activeSynergy,
@@ -616,13 +701,16 @@ export default function App() {
         comboMultiplier: 1.0,
         goldenMutantCharge: 0,
         goldenMutantRequired: infiniteProgressionManager.goldenMutantRequired,
-        frenzyCooldown: 12,
+        frenzyCooldown: ECONOMY_PREDATION_CONFIG.frenzy.initProtectionSec,
         activeSharkId: chosenSharkId,
         activeUpgradeLevel: chosenUpgLevel,
         unlockedFormsCount: unlockedCount,
         nextEvoTargetId: nextEvo?.id ?? null,
-        canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
+        canBreakthroughNow: Boolean(
+          permEligibility.allowSharkUnlockAndUpgrade && nextEval?.canUnlockNow
+        ),
         canUpgradeBodyNow:
+          permEligibility.allowSharkUnlockAndUpgrade &&
           chosenUpgLevel < 10 &&
           save.bankedCoins >= upgCost &&
           save.bankedGenes >= upgGeneCost,
@@ -633,13 +721,15 @@ export default function App() {
         deepDivePromptMeters: null,
       });
 
-      if (withMaxMechaTrial) {
+      if (withTrialShark) {
         soundFX.playEvolution();
         spawnFloatText(
           0,
           180,
           'float_trial_start',
-          'MECHA LEVIATHAN',
+          langRef.current === 'zh'
+            ? `限时试玩: ${activeForm.nameZh}`
+            : `TRIAL: ${activeForm.nameEn}`,
           '#38bdf8',
           1.25
         );
@@ -661,11 +751,32 @@ export default function App() {
     }
   }, [gameState, startNewRun]);
 
+  const getCurrentProgressContext = useCallback(() => {
+    const inRun =
+      gameStateRef.current === 'playing' || gameStateRef.current === 'paused';
+    return {
+      trialActive: simRef.current.shark.trialActive,
+      activeInRun: inRun,
+    };
+  }, []);
+
   // Upgrade unlocked shark form body level (Lv.1 -> Lv.10)
   const handleUpgradeSharkForm = useCallback(
     (sharkId: string) => {
       const sim = simRef.current;
-      const save = metaSaveRef.current;
+      const runContext = getCurrentProgressContext();
+      const permEligibility = getPermanentProgressEligibility(runContext);
+      if (!permEligibility.allowSharkUnlockAndUpgrade) return;
+
+      const baseSave = metaSaveRef.current;
+      const inRun = runContext.activeInRun;
+      const syncedCoins = inRun ? sim.shark.coins : baseSave.bankedCoins;
+      const syncedGenes = inRun ? sim.shark.genes : baseSave.bankedGenes;
+      const save: SharkMetaSaveData = {
+        ...baseSave,
+        bankedCoins: syncedCoins,
+        bankedGenes: syncedGenes,
+      };
       if (!save.unlockedSharkIds.includes(sharkId)) return;
       const curLv = save.sharkUpgradeLevels[sharkId] ?? 1;
       if (curLv >= 10) return;
@@ -690,7 +801,7 @@ export default function App() {
 
       sim.shark.coins = nextSave.bankedCoins;
       sim.shark.genes = nextSave.bankedGenes;
-      if (sim.shark.sharkFormId === sharkId && !sim.shark.trialActive) {
+      if (inRun && sim.shark.sharkFormId === sharkId && !sim.shark.trialActive) {
         sim.shark.stats = recomputeSharkStats(
           sim.shark.level,
           sim.shark.frenzyTimer > 0,
@@ -719,13 +830,14 @@ export default function App() {
       const nextUpgGeneCost = getSharkUpgradeGeneCost(activeForm, activeUpg);
       const nextEvo = getNextEvolutionTarget(sim.shark.sharkFormId, nextSave);
       const nextEval = nextEvo
-        ? evaluateSharkUnlock(
+        ? evaluateSharkUnlockForRun(
             nextEvo,
             nextSave,
+            runContext,
             0,
             0,
-            Math.max(nextSave.bestInRunLevel, sim.shark.level),
-            Math.max(nextSave.bestDepthReached, Math.round(sim.shark.maxDepthReached))
+            sim.shark.level,
+            Math.round(sim.shark.maxDepthReached)
           )
         : null;
       setHudState((prev) => ({
@@ -739,12 +851,14 @@ export default function App() {
         bodyUpgradeCost: nextUpgCost,
         bodyUpgradeGeneCost: nextUpgGeneCost,
         canUpgradeBodyNow:
-          !sim.shark.trialActive &&
+          permEligibility.allowSharkUnlockAndUpgrade &&
           activeUpg < 10 &&
           nextSave.bankedCoins >= nextUpgCost &&
           nextSave.bankedGenes >= nextUpgGeneCost,
         nextEvoTargetId: nextEvo?.id ?? null,
-        canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
+        canBreakthroughNow: Boolean(
+          permEligibility.allowSharkUnlockAndUpgrade && nextEval?.canUnlockNow
+        ),
       }));
 
       if (tutorialStepRef.current === 'HANDS_ON_UPGRADE') {
@@ -752,13 +866,23 @@ export default function App() {
       }
       soundFX.playEvolution();
     },
-    [completeTutorialOnboarding, recomputeSharkStats, spawnFloatText]
+    [
+      completeTutorialOnboarding,
+      getCurrentProgressContext,
+      recomputeSharkStats,
+      spawnFloatText,
+    ]
   );
 
   // Switch active deployed shark form
   const handleSelectActiveSharkForm = useCallback(
     (sharkId: string) => {
       const sim = simRef.current;
+      const runContext = getCurrentProgressContext();
+      const permEligibility = getPermanentProgressEligibility(runContext);
+      // P0-07: Never allow switching out of a Trial shark mid-run (prevents carrying Lv.5 / depth into formal play)
+      if (!permEligibility.allowSharkUnlockAndUpgrade) return;
+
       const save = metaSaveRef.current;
       if (!save.unlockedSharkIds.includes(sharkId)) return;
 
@@ -772,41 +896,54 @@ export default function App() {
 
       sim.shark.trialActive = false;
       sim.shark.sharkFormId = sharkId;
-      sim.shark.morphFlashTimer = 0.85;
-      sim.shark.stats = recomputeSharkStats(
-        sim.shark.level,
-        sim.shark.frenzyTimer > 0,
-        sharkId,
-        nextSave
-      );
-      sim.shark.hp = Math.min(sim.shark.stats.maxHp, sim.shark.hp);
-      const form = getSharkFormById(sharkId);
-      soundFX.playEvolution();
-      spawnFloatText(
-        sim.shark.x,
-        sim.shark.y - 42,
-        'float_evo_ready',
-        `${langRef.current === 'zh' ? form.nameZh : form.nameEn}`,
-        LINEAGE_META[form.lineage].badgeColor,
-        1.25
-      );
+      if (runContext.activeInRun) {
+        sim.shark.morphFlashTimer = 0.85;
+        sim.shark.stats = recomputeSharkStats(
+          sim.shark.level,
+          sim.shark.frenzyTimer > 0,
+          sharkId,
+          nextSave
+        );
+        sim.shark.hp = Math.min(sim.shark.stats.maxHp, sim.shark.hp);
+        const form = getSharkFormById(sharkId);
+        soundFX.playEvolution();
+        spawnFloatText(
+          sim.shark.x,
+          sim.shark.y - 42,
+          'float_evo_ready',
+          `${langRef.current === 'zh' ? form.nameZh : form.nameEn}`,
+          LINEAGE_META[form.lineage].badgeColor,
+          1.25
+        );
+      }
     },
-    [recomputeSharkStats, spawnFloatText]
+    [getCurrentProgressContext, recomputeSharkStats, spawnFloatText]
   );
 
-  // Unlock a new shark form via Triple-Gate & morph immediately
+  // Unlock a new shark form via Triple-Gate & morph immediately (blocked during active Trial runs)
   const handleUnlockAndSelectSharkForm = useCallback(
     (sharkId: string) => {
       const sim = simRef.current;
-      const save = metaSaveRef.current;
+      const runContext = getCurrentProgressContext();
+      const permEligibility = getPermanentProgressEligibility(runContext);
+      if (!permEligibility.allowSharkUnlockAndUpgrade) return;
+
+      const baseSave = metaSaveRef.current;
+      const inRun = runContext.activeInRun;
+      const save: SharkMetaSaveData = {
+        ...baseSave,
+        bankedCoins: inRun ? sim.shark.coins : baseSave.bankedCoins,
+        bankedGenes: inRun ? sim.shark.genes : baseSave.bankedGenes,
+      };
       const form = getSharkFormById(sharkId);
-      const evalStatus = evaluateSharkUnlock(
+      const evalStatus = evaluateSharkUnlockForRun(
         form,
         save,
+        runContext,
         0,
         0,
-        Math.max(save.bestInRunLevel, sim.shark.level),
-        Math.max(save.bestDepthReached, Math.round(sim.shark.maxDepthReached))
+        sim.shark.level,
+        Math.round(sim.shark.maxDepthReached)
       );
       if (!evalStatus.canUnlockNow) return;
 
@@ -832,58 +969,63 @@ export default function App() {
       sim.shark.coins = nextSave.bankedCoins;
       sim.shark.genes = nextSave.bankedGenes;
       sim.shark.sharkFormId = sharkId;
-      sim.shark.morphFlashTimer = 1.0;
-      sim.shark.frenzyTimer = Math.max(sim.shark.frenzyTimer, 3.2);
-      sim.shark.invulnerableTimer = Math.max(sim.shark.invulnerableTimer, 1.5);
-      sim.shark.cameraShakeTrauma = Math.max(sim.shark.cameraShakeTrauma, 0.55);
-      sim.shark.stats = recomputeSharkStats(
-        sim.shark.level,
-        true,
-        sharkId,
-        nextSave
-      );
-      sim.shark.hp = sim.shark.stats.maxHp;
-      sim.shark.ghostHp = sim.shark.stats.maxHp;
-      sim.shark.energy = sim.shark.stats.maxEnergy;
-
-      const lineageAccent = LINEAGE_META[form.lineage].badgeColor;
-      for (let i = 0; i < 24; i++) {
-        const ang = (i * Math.PI * 2) / 24;
-        const spd = 110 + Math.random() * 140;
-        spawnParticle(
-          sim.shark.x,
-          sim.shark.y,
-          Math.cos(ang) * spd,
-          Math.sin(ang) * spd,
-          5 + Math.random() * 5,
-          0.75,
-          i % 2 === 0 ? lineageAccent : '#fde047',
-          i % 3 === 0 ? 'DNA' : 'SPARK'
+      if (inRun) {
+        sim.shark.morphFlashTimer = 1.0;
+        sim.shark.frenzyTimer = Math.max(sim.shark.frenzyTimer, 3.2);
+        sim.shark.invulnerableTimer = Math.max(sim.shark.invulnerableTimer, 1.5);
+        sim.shark.cameraShakeTrauma = Math.max(sim.shark.cameraShakeTrauma, 0.55);
+        sim.shark.stats = recomputeSharkStats(
+          sim.shark.level,
+          true,
+          sharkId,
+          nextSave
         );
-      }
+        sim.shark.hp = sim.shark.stats.maxHp;
+        sim.shark.ghostHp = sim.shark.stats.maxHp;
+        sim.shark.energy = sim.shark.stats.maxEnergy;
 
-      soundFX.playEvolution();
-      spawnFloatText(
-        sim.shark.x,
-        sim.shark.y - 48,
-        'float_evo_ready',
-        `⚡ ${langRef.current === 'zh' ? form.nameZh : form.nameEn}!`,
-        '#fde047',
-        1.38
-      );
+        const lineageAccent = LINEAGE_META[form.lineage].badgeColor;
+        for (let i = 0; i < 24; i++) {
+          const ang = (i * Math.PI * 2) / 24;
+          const spd = 110 + Math.random() * 140;
+          spawnParticle(
+            sim.shark.x,
+            sim.shark.y,
+            Math.cos(ang) * spd,
+            Math.sin(ang) * spd,
+            5 + Math.random() * 5,
+            0.75,
+            i % 2 === 0 ? lineageAccent : '#fde047',
+            i % 3 === 0 ? 'DNA' : 'SPARK'
+          );
+        }
+
+        soundFX.playEvolution();
+        spawnFloatText(
+          sim.shark.x,
+          sim.shark.y - 48,
+          'float_evo_ready',
+          `⚡ ${langRef.current === 'zh' ? form.nameZh : form.nameEn}!`,
+          '#fde047',
+          1.38
+        );
+      } else {
+        soundFX.playEvolution();
+      }
 
       const newUpg = nextSave.sharkUpgradeLevels[sharkId] ?? 1;
       const newUpgCost = getSharkUpgradeCost(form, newUpg);
       const newUpgGeneCost = getSharkUpgradeGeneCost(form, newUpg);
       const nextEvoAfter = getNextEvolutionTarget(sharkId, nextSave);
       const nextEvalAfter = nextEvoAfter
-        ? evaluateSharkUnlock(
+        ? evaluateSharkUnlockForRun(
             nextEvoAfter,
             nextSave,
+            runContext,
             0,
             0,
-            Math.max(nextSave.bestInRunLevel, sim.shark.level),
-            Math.max(nextSave.bestDepthReached, Math.round(sim.shark.maxDepthReached))
+            sim.shark.level,
+            Math.round(sim.shark.maxDepthReached)
           )
         : null;
       setHudState((prev) => ({
@@ -899,8 +1041,11 @@ export default function App() {
         activeUpgradeLevel: newUpg,
         unlockedFormsCount: nextSave.unlockedSharkIds.length,
         nextEvoTargetId: nextEvoAfter?.id ?? null,
-        canBreakthroughNow: Boolean(nextEvalAfter?.canUnlockNow),
+        canBreakthroughNow: Boolean(
+          permEligibility.allowSharkUnlockAndUpgrade && nextEvalAfter?.canUnlockNow
+        ),
         canUpgradeBodyNow:
+          permEligibility.allowSharkUnlockAndUpgrade &&
           newUpg < 10 &&
           nextSave.bankedCoins >= newUpgCost &&
           nextSave.bankedGenes >= newUpgGeneCost,
@@ -908,47 +1053,57 @@ export default function App() {
         bodyUpgradeGeneCost: newUpgGeneCost,
       }));
     },
-    [recomputeSharkStats, spawnFloatText, spawnParticle]
+    [getCurrentProgressContext, recomputeSharkStats, spawnFloatText, spawnParticle]
   );
 
   const handleInRunBreakthroughOrAtlas = useCallback(() => {
     const sim = simRef.current;
     const save = metaSaveRef.current;
-    const nextEvo = getNextEvolutionTarget(sim.shark.sharkFormId, save);
-    if (nextEvo) {
-      const evalStatus = evaluateSharkUnlock(
-        nextEvo,
-        save,
-        0,
-        0,
-        Math.max(save.bestInRunLevel, sim.shark.level),
-        Math.max(save.bestDepthReached, Math.round(sim.shark.maxDepthReached))
-      );
-      if (evalStatus.canUnlockNow) {
-        handleUnlockAndSelectSharkForm(nextEvo.id);
-        return;
+    const runContext = getCurrentProgressContext();
+    const permEligibility = getPermanentProgressEligibility(runContext);
+    if (permEligibility.allowSharkUnlockAndUpgrade) {
+      const nextEvo = getNextEvolutionTarget(sim.shark.sharkFormId, save);
+      if (nextEvo) {
+        const evalStatus = evaluateSharkUnlockForRun(
+          nextEvo,
+          save,
+          runContext,
+          0,
+          0,
+          sim.shark.level,
+          Math.round(sim.shark.maxDepthReached)
+        );
+        if (evalStatus.canUnlockNow) {
+          handleUnlockAndSelectSharkForm(nextEvo.id);
+          return;
+        }
       }
     }
     setShowAtlasModal(true);
-  }, [handleUnlockAndSelectSharkForm]);
+  }, [getCurrentProgressContext, handleUnlockAndSelectSharkForm]);
 
   const handleReviveWithFrenzyAd = useCallback(() => {
-    adManager.showRewardedVideoAd('REVIVE_FRENZY', () => {
+    adManager.showRewardedVideoAd('REVIVE', () => {
       const sim = simRef.current;
+      const reviveCfg = ADS_AND_MONETIZATION_CONFIG.placements.REVIVE;
       clearAllInputs();
-      infiniteProgressionManager.addFrenzyStack();
       sim.shark.stats = recomputeSharkStats(sim.shark.level, true);
       sim.shark.frenzyTimer =
-        GAME_CONFIG.world.frenzyDuration + sim.shark.stats.frenzyDurationBonus;
-      sim.shark.hp = sim.shark.stats.maxHp;
-      sim.shark.ghostHp = sim.shark.stats.maxHp;
-      sim.shark.energy = sim.shark.stats.maxEnergy;
+        reviveCfg.frenzyDurationSec + sim.shark.stats.frenzyDurationBonus;
+      sim.shark.hp = Math.round(sim.shark.stats.maxHp * reviveCfg.hpRestorePct);
+      sim.shark.ghostHp = sim.shark.hp;
+      sim.shark.energy = Math.round(
+        sim.shark.stats.maxEnergy * reviveCfg.energyRestorePct
+      );
       sim.shark.vx = 0;
       sim.shark.vy = 0;
       sim.shark.y = Math.max(46, Math.min(20000, sim.shark.y));
       sim.shark.hitFlashTimer = 0;
       sim.shark.hitstopTimer = 0;
-      sim.shark.invulnerableTimer = Math.max(sim.shark.invulnerableTimer, 2.5);
+      sim.shark.invulnerableTimer = Math.max(
+        sim.shark.invulnerableTimer,
+        reviveCfg.invulnDurationSec
+      );
 
       soundFX.playEvolution();
       spawnFloatText(
@@ -974,16 +1129,96 @@ export default function App() {
     });
   }, [clearAllInputs, recomputeSharkStats, spawnFloatText]);
 
-  const handleTrialMaxMechaAd = useCallback(() => {
-    adManager.showRewardedVideoAd('TRIAL_MAX_MECHA', () => {
+  const handleTrialSharkAd = useCallback(() => {
+    adManager.showRewardedVideoAd('TRIAL_SHARK', () => {
       startNewRun(true);
     });
   }, [startNewRun]);
 
+  const handleDoubleSettlementAd = useCallback(() => {
+    const sim = simRef.current;
+    const permElig = getPermanentProgressEligibility({
+      trialActive: sim.shark.trialActive,
+    });
+    if (!permElig.allowDoubleSettlementAd || economyUsesRef.current.settlementDoubled) {
+      return;
+    }
+    const extraCoins = economyUsesRef.current.runCoinsEarned;
+    const extraGenes = economyUsesRef.current.runGenesEarned;
+    if (extraCoins <= 0 && extraGenes <= 0) {
+      return;
+    }
+    adManager.showRewardedVideoAd('DOUBLE_SETTLEMENT', () => {
+      if (economyUsesRef.current.settlementDoubled) return;
+      economyUsesRef.current.settlementDoubled = true;
+      setSettlementDoubled(true);
+      const curSave = metaSaveRef.current;
+      const nextSave: SharkMetaSaveData = {
+        ...curSave,
+        bankedCoins: curSave.bankedCoins + extraCoins,
+        bankedGenes: curSave.bankedGenes + extraGenes,
+      };
+      metaSaveRef.current = nextSave;
+      saveSharkMetaSave(nextSave);
+      setMetaSave(nextSave);
+      sim.shark.coins = nextSave.bankedCoins;
+      sim.shark.genes = nextSave.bankedGenes;
+      soundFX.playEvolution();
+    });
+  }, []);
+
+  const handleSupplyDropAd = useCallback(() => {
+    adManager.showRewardedVideoAd('SUPPLY_DROP', () => {
+      const sim = simRef.current;
+      const curSave = metaSaveRef.current;
+      const drop = getScaledSupplyDropReward(
+        getMaxUnlockedRowFromSave(curSave.unlockedSharkIds)
+      );
+      const nextSave: SharkMetaSaveData = {
+        ...curSave,
+        bankedCoins: curSave.bankedCoins + drop.coins,
+        bankedGenes: curSave.bankedGenes + drop.genes,
+      };
+      metaSaveRef.current = nextSave;
+      saveSharkMetaSave(nextSave);
+      setMetaSave(nextSave);
+      if (gameStateRef.current === 'playing' || gameStateRef.current === 'paused') {
+        sim.shark.coins += drop.coins;
+        sim.shark.genes += drop.genes;
+        const flushed: SharkMetaSaveData = {
+          ...nextSave,
+          bankedCoins: sim.shark.coins,
+          bankedGenes: sim.shark.genes,
+        };
+        metaSaveRef.current = flushed;
+        saveSharkMetaSave(flushed);
+        setMetaSave(flushed);
+        spawnFloatText(
+          sim.shark.x,
+          sim.shark.y - 44,
+          'float_supply_drop',
+          `+${drop.coins}🪙 +${drop.genes}🧬`,
+          '#fde047',
+          1.3
+        );
+      }
+      soundFX.playEvolution();
+    });
+  }, [spawnFloatText]);
+
   const handleGoldOverdrive = useCallback(() => {
     const sim = simRef.current;
     const shark = sim.shark;
-    const save = metaSaveRef.current;
+    const overdriveCfg = ECONOMY_PREDATION_CONFIG.activeSkills.goldOverdrive;
+    if (overdriveCfg.blockWhileFrenzy && shark.frenzyTimer > 0) {
+      return;
+    }
+    const baseSave = metaSaveRef.current;
+    const save: SharkMetaSaveData = {
+      ...baseSave,
+      bankedCoins: shark.coins,
+      bankedGenes: shark.genes,
+    };
     const activeForm = getSharkFormById(shark.sharkFormId);
     const cost = getGoldOverdriveCost(
       economyUsesRef.current.goldOverdriveCount,
@@ -1004,17 +1239,18 @@ export default function App() {
     shark.stats = recomputeSharkStats(shark.level, true, shark.sharkFormId, nextSave);
     shark.frenzyTimer = Math.max(
       shark.frenzyTimer,
-      4.5 + shark.stats.frenzyDurationBonus
+      overdriveCfg.durationSec + shark.stats.frenzyDurationBonus
     );
-    shark.hp = Math.min(shark.stats.maxHp, shark.hp + 45);
-    shark.energy = shark.stats.maxEnergy;
-    shark.invulnerableTimer = Math.max(shark.invulnerableTimer, 1.0);
+    const healAmount = Math.max(1, Math.round(shark.stats.maxHp * overdriveCfg.healMaxHpPct));
+    shark.hp = Math.min(shark.stats.maxHp, shark.hp + healAmount);
+    shark.energy = Math.round(shark.stats.maxEnergy * overdriveCfg.energyRestorePct);
+    shark.invulnerableTimer = Math.max(shark.invulnerableTimer, overdriveCfg.invulnDurationSec);
     soundFX.playEvolution();
     spawnFloatText(
       shark.x,
       shark.y - 42,
       'float_gold_overdrive',
-      '+45 HP · FRENZY!',
+      `+${healAmount} HP · FRENZY!`,
       '#fde047',
       1.28
     );
@@ -1034,7 +1270,13 @@ export default function App() {
   const handleGeneSurge = useCallback(() => {
     const sim = simRef.current;
     const shark = sim.shark;
-    const save = metaSaveRef.current;
+    const surgeCfg = ECONOMY_PREDATION_CONFIG.activeSkills.geneSurge;
+    const baseSave = metaSaveRef.current;
+    const save: SharkMetaSaveData = {
+      ...baseSave,
+      bankedCoins: shark.coins,
+      bankedGenes: shark.genes,
+    };
     const activeForm = getSharkFormById(shark.sharkFormId);
     const cost = getGeneSurgeCost(
       shark.level,
@@ -1053,11 +1295,16 @@ export default function App() {
 
     shark.genes = nextSave.bankedGenes;
     economyUsesRef.current.geneSurgeCount += 1;
-    const xpReq = getXpRequiredForLevel(shark.level);
-    const bonusXp = Math.ceil(xpReq * 0.55);
+    const bonusXp = Math.round(
+      getXpRequiredForLevel(shark.level) * surgeCfg.xpGrantRatio
+    );
     shark.xp += bonusXp;
-    shark.hp = Math.min(shark.stats.maxHp, shark.hp + 30);
-    shark.energy = shark.stats.maxEnergy;
+    const baseHeal = Math.max(
+      surgeCfg.healMinFlat,
+      Math.round(shark.stats.maxHp * surgeCfg.healMaxHpPct)
+    );
+    shark.hp = Math.min(shark.stats.maxHp, shark.hp + baseHeal);
+    shark.energy = Math.round(shark.stats.maxEnergy * surgeCfg.energyRestorePct);
     shark.morphFlashTimer = Math.max(shark.morphFlashTimer, 0.55);
     soundFX.playEvolution();
     spawnFloatText(
@@ -1068,7 +1315,8 @@ export default function App() {
       '#34d399',
       1.26
     );
-    if (shark.xp >= xpReq) {
+    let xpReq = getXpRequiredForLevel(shark.level);
+    while (shark.xp >= xpReq) {
       shark.xp -= xpReq;
       shark.level += 1;
       shark.stats = recomputeSharkStats(
@@ -1090,16 +1338,14 @@ export default function App() {
         '#38bdf8',
         1.25
       );
-    }
-    if (tutorialStepRef.current === 'HANDS_ON_UPGRADE') {
-      completeTutorialOnboarding();
+      xpReq = getXpRequiredForLevel(shark.level);
     }
     setHudState((prev) => ({
       ...prev,
       genes: shark.genes,
       level: shark.level,
       xp: Math.round(shark.xp),
-      xpToNext: getXpRequiredForLevel(shark.level),
+      xpToNext: xpReq,
       hp: Math.ceil(shark.hp),
       maxHp: shark.stats.maxHp,
       energy: Math.round(shark.energy),
@@ -1111,7 +1357,7 @@ export default function App() {
         activeForm.row
       ),
     }));
-  }, [completeTutorialOnboarding, recomputeSharkStats, spawnFloatText]);
+  }, [recomputeSharkStats, spawnFloatText]);
 
   // Keyboard Listeners (WASD / Arrows / Space / E / P / M / Enter)
   useEffect(() => {
@@ -1461,6 +1707,11 @@ export default function App() {
   const nextEvoTargetForm = hudState.nextEvoTargetId
     ? getSharkFormById(hudState.nextEvoTargetId)
     : null;
+  const trialTargetSpec = getTrialTargetSharkSpec(metaSave.unlockedSharkIds);
+  const trialTargetForm = getSharkFormById(trialTargetSpec.sharkId);
+  const supplyDropReward = getScaledSupplyDropReward(
+    getMaxUnlockedRowFromSave(metaSave.unlockedSharkIds)
+  );
 
   return (
     <main className="fixed inset-0 w-full h-full overflow-hidden select-none bg-slate-950">
@@ -1516,9 +1767,10 @@ export default function App() {
         t={t}
         gameState={gameState}
         unlockedTotalCount={unlockedTotalCount}
+        trialTargetForm={trialTargetForm}
         setShowAtlasModal={setShowAtlasModal}
         startNewRun={startNewRun}
-        handleTrialMaxMechaAd={handleTrialMaxMechaAd}
+        handleTrialSharkAd={handleTrialSharkAd}
       />
 
       {/* 2. Playing HUD (Frameless Iconic 90%+ Viewport Design) */}
@@ -1548,6 +1800,8 @@ export default function App() {
         handleInRunBreakthroughOrAtlas={handleInRunBreakthroughOrAtlas}
         handleGoldOverdrive={handleGoldOverdrive}
         handleGeneSurge={handleGeneSurge}
+        handleSupplyDropAd={handleSupplyDropAd}
+        supplyDropReward={supplyDropReward}
         handleJoystickPointerDown={handleJoystickPointerDown}
         handleJoystickPointerMove={handleJoystickPointerMove}
         handleJoystickPointerUp={handleJoystickPointerUp}
@@ -1557,20 +1811,33 @@ export default function App() {
       />
 
       {/* 3. 48-Shark Evolution Atlas & Upgrade Lab Modal */}
-      {showAtlasModal && (
-        <SharkEvolutionAtlasModal
-          lang={lang}
-          metaSave={metaSave}
-          liveRunCoins={0}
-          liveRunGenes={0}
-          liveRunLevel={hudState.level}
-          liveRunMaxDepth={Math.max(metaSave.bestDepthReached, hudState.depth)}
-          onClose={() => setShowAtlasModal(false)}
-          onSelectActiveShark={handleSelectActiveSharkForm}
-          onUpgradeShark={handleUpgradeSharkForm}
-          onUnlockShark={handleUnlockAndSelectSharkForm}
-        />
-      )}
+      {showAtlasModal && (() => {
+        const atlasRunContext = {
+          trialActive: simRef.current.shark.trialActive,
+          activeInRun: gameState === 'playing' || gameState === 'paused',
+        };
+        const atlasEligibility = getPermanentProgressEligibility(atlasRunContext);
+        const safeLiveLevel = atlasEligibility.allowRunRecords ? hudState.level : 1;
+        const safeLiveMaxDepth = atlasEligibility.allowRunRecords
+          ? Math.round(simRef.current.shark.maxDepthReached)
+          : 0;
+        return (
+          <SharkEvolutionAtlasModal
+            lang={lang}
+            metaSave={metaSave}
+            liveRunCoins={0}
+            liveRunGenes={0}
+            liveRunLevel={safeLiveLevel}
+            liveRunMaxDepth={safeLiveMaxDepth}
+            trialLockedInRun={!atlasEligibility.allowSharkUnlockAndUpgrade}
+            onClose={() => setShowAtlasModal(false)}
+            onSelectActiveShark={handleSelectActiveSharkForm}
+            onUpgradeShark={handleUpgradeSharkForm}
+            onUnlockShark={handleUnlockAndSelectSharkForm}
+            onSupplyDropAd={handleSupplyDropAd}
+          />
+        );
+      })()}
 
       {/* 4. Pause Modal */}
       <PauseModalOverlay
@@ -1598,11 +1865,14 @@ export default function App() {
         setShowAtlasModal={setShowAtlasModal}
         reviveOffered={reviveOffered}
         setReviveOffered={setReviveOffered}
+        settlementDoubled={settlementDoubled}
         runSnapshot={runSnapshot}
         hudState={hudState}
         startNewRun={startNewRun}
         handleReviveWithFrenzyAd={handleReviveWithFrenzyAd}
-        handleTrialMaxMechaAd={handleTrialMaxMechaAd}
+        handleDoubleSettlementAd={handleDoubleSettlementAd}
+        handleTrialSharkAd={handleTrialSharkAd}
+        trialTargetForm={trialTargetForm}
         activeHudSharkForm={activeHudSharkForm}
       />
 
@@ -1626,6 +1896,18 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* 7. Ad Cooldown / Error Toast Notice */}
+      {adNotice && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="ad-error-notice"
+          className="fixed top-6 left-1/2 -translate-x-1/2 z-[70] px-4 py-2 rounded-full bg-slate-900/95 border border-amber-400/70 text-amber-200 text-xs sm:text-sm font-bold shadow-xl pointer-events-none"
+        >
+          {adNotice}
+        </div>
+      )}
     </main>
   );
 }

@@ -41,9 +41,10 @@ public enum SimRewardedAdKind: String, Sendable {
 @MainActor
 public final class GoogleAdMobManager: NSObject, ObservableObject {
     public static let shared = GoogleAdMobManager()
-    public let appId: String = GameConfigGenerated.googleAdMobAppId
-    public let rewardedAdUnitId: String = GameConfigGenerated.googleAdMobRewardedAdUnitId
-    public let backupRewardedAdUnitId: String = GameConfigGenerated.googleAdMobBackupRewardedAdUnitId
+    public var appId: String { DomainConfigs.adsAndMonetization.providers.admobAppId }
+    public var rewardedAdUnitId: String { DomainConfigs.adsAndMonetization.providers.admobRewardedAdUnitId }
+    public var backupRewardedAdUnitId: String { DomainConfigs.adsAndMonetization.providers.admobIosBackupRewardedAdUnitId }
+    public var interstitialAdUnitId: String { DomainConfigs.adsAndMonetization.providers.admobInterstitialAdUnitId }
 
     #if DEBUG
     /// Google official rewarded video test unit — strictly `#if DEBUG` only, never compiled into Release.
@@ -51,7 +52,16 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
     #endif
 
     @Published public var isConnectingAd: Bool = false
+    @Published public private(set) var isInFlight: Bool = false
 
+    private struct PersistedAdFrequencyState: Codable {
+        var dayKey: String
+        var lastGrantedEpochByKind: [String: TimeInterval]
+        var dailyGrantCountByKind: [String: Int]
+    }
+
+    private let frequencyDefaults: UserDefaults
+    private let frequencyStorageKey: String
     private var lastGrantedAtByKind: [SimRewardedAdKind: Date] = [:]
     private var dailyGrantCountByKind: [SimRewardedAdKind: Int] = [:]
     private var dailyCapDayKey: String = ""
@@ -70,9 +80,16 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
     private var timeoutTask: Task<Void, Never>? = nil
     #endif
 
-    public override init() {
+    public convenience override init() {
+        self.init(userDefaults: .standard, storageKey: "hs_ios_ad_freq_v1")
+    }
+
+    public init(userDefaults: UserDefaults, storageKey: String = "hs_ios_ad_freq_v1") {
+        self.frequencyDefaults = userDefaults
+        self.frequencyStorageKey = storageKey
         GADInfoPlistRuntimePatch.installIfNeeded()
         super.init()
+        loadFrequencyState()
     }
 
     public var hasValidPlistAdMobConfig: Bool {
@@ -87,39 +104,117 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
         return false
     }
 
-    // MARK: - Placement Cooldown & Daily Cap Guard
+    // MARK: - Placement Cooldown & Daily Cap Guard (Persisted across App Kills)
 
-    private func refreshDailyCounterIfNeeded() {
-        let comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-        let key = "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
+    private static func dayKey(for date: Date) -> String {
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return "\(comps.year ?? 0)-\(comps.month ?? 0)-\(comps.day ?? 0)"
+    }
+
+    private func loadFrequencyState(now: Date = Date()) {
+        let todayKey = Self.dayKey(for: now)
+        dailyCapDayKey = todayKey
+        lastGrantedAtByKind.removeAll()
+        dailyGrantCountByKind.removeAll()
+
+        guard let data = frequencyDefaults.data(forKey: frequencyStorageKey),
+              let decoded = try? JSONDecoder().decode(PersistedAdFrequencyState.self, from: data) else {
+            return
+        }
+
+        if decoded.dayKey == todayKey {
+            for (rawKind, count) in decoded.dailyGrantCountByKind {
+                if let kind = SimRewardedAdKind(rawValue: rawKind), count > 0 {
+                    dailyGrantCountByKind[kind] = count
+                }
+            }
+        }
+        for (rawKind, epoch) in decoded.lastGrantedEpochByKind {
+            if let kind = SimRewardedAdKind(rawValue: rawKind), epoch > 0 {
+                lastGrantedAtByKind[kind] = Date(timeIntervalSince1970: epoch)
+            }
+        }
+    }
+
+    private func saveFrequencyState() {
+        var lastEpochs: [String: TimeInterval] = [:]
+        for (kind, date) in lastGrantedAtByKind {
+            lastEpochs[kind.rawValue] = date.timeIntervalSince1970
+        }
+        var dailyCounts: [String: Int] = [:]
+        for (kind, count) in dailyGrantCountByKind {
+            dailyCounts[kind.rawValue] = count
+        }
+        let state = PersistedAdFrequencyState(
+            dayKey: dailyCapDayKey,
+            lastGrantedEpochByKind: lastEpochs,
+            dailyGrantCountByKind: dailyCounts
+        )
+        if let data = try? JSONEncoder().encode(state) {
+            frequencyDefaults.set(data, forKey: frequencyStorageKey)
+        }
+    }
+
+    private func refreshDailyCounterIfNeeded(now: Date = Date()) {
+        let key = Self.dayKey(for: now)
         if key != dailyCapDayKey {
             dailyCapDayKey = key
             dailyGrantCountByKind.removeAll()
+            saveFrequencyState()
         }
     }
 
     private func cooldownSeconds(for kind: SimRewardedAdKind) -> TimeInterval {
+        let p = DomainConfigs.adsAndMonetization.placements
         switch kind {
-        case .SUPPLY_DROP: return 90.0
-        case .TRIAL_SHARK: return 60.0
-        case .REVIVE: return 5.0
-        case .DOUBLE_SETTLEMENT: return 5.0
+        case .SUPPLY_DROP: return p.SUPPLY_DROP.cooldownSec
+        case .TRIAL_SHARK: return p.TRIAL_SHARK.cooldownSec
+        case .REVIVE: return p.REVIVE.cooldownSec
+        case .DOUBLE_SETTLEMENT: return p.DOUBLE_SETTLEMENT.cooldownSec
         }
     }
 
     private func dailyCap(for kind: SimRewardedAdKind) -> Int {
+        let p = DomainConfigs.adsAndMonetization.placements
         switch kind {
-        case .SUPPLY_DROP: return 10
-        case .TRIAL_SHARK: return 6
-        case .REVIVE: return 20
-        case .DOUBLE_SETTLEMENT: return 20
+        case .SUPPLY_DROP: return p.SUPPLY_DROP.dailyCap
+        case .TRIAL_SHARK: return p.TRIAL_SHARK.dailyCap
+        case .REVIVE: return p.REVIVE.dailyCap
+        case .DOUBLE_SETTLEMENT: return p.DOUBLE_SETTLEMENT.dailyCap
         }
     }
 
-    public func remainingCooldownSeconds(for kind: SimRewardedAdKind) -> Int {
-        refreshDailyCounterIfNeeded()
+    public func canShowInterstitial(totalRunsCompleted: Int, now: Date = Date()) -> Bool {
+        let cfg = DomainConfigs.adsAndMonetization.placements.INTERSTITIAL
+        guard cfg.enabled, totalRunsCompleted >= cfg.starterProtectedRuns else {
+            return false
+        }
+        refreshDailyCounterIfNeeded(now: now)
+        let count = frequencyDefaults.integer(forKey: interstitialDailyCountKey())
+        if count >= cfg.dailyCap { return false }
+        let lastEpoch = frequencyDefaults.double(forKey: "\(frequencyStorageKey)_interstitial_last")
+        if lastEpoch > 0 && now.timeIntervalSince1970 - lastEpoch < cfg.cooldownSec {
+            return false
+        }
+        return true
+    }
+
+    public func recordInterstitialShown(now: Date = Date()) {
+        refreshDailyCounterIfNeeded(now: now)
+        let key = interstitialDailyCountKey()
+        let prev = frequencyDefaults.integer(forKey: key)
+        frequencyDefaults.set(prev + 1, forKey: key)
+        frequencyDefaults.set(now.timeIntervalSince1970, forKey: "\(frequencyStorageKey)_interstitial_last")
+    }
+
+    private func interstitialDailyCountKey() -> String {
+        "\(frequencyStorageKey)_interstitial_count_\(dailyCapDayKey)"
+    }
+
+    public func remainingCooldownSeconds(for kind: SimRewardedAdKind, now: Date = Date()) -> Int {
+        refreshDailyCounterIfNeeded(now: now)
         if let last = lastGrantedAtByKind[kind] {
-            let rem = cooldownSeconds(for: kind) - Date().timeIntervalSince(last)
+            let rem = cooldownSeconds(for: kind) - now.timeIntervalSince(last)
             if rem > 0.5 {
                 return Int(ceil(rem))
             }
@@ -127,16 +222,22 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
         return 0
     }
 
-    public func isDailyCapReached(for kind: SimRewardedAdKind) -> Bool {
-        refreshDailyCounterIfNeeded()
+    public func dailyGrantCount(for kind: SimRewardedAdKind, now: Date = Date()) -> Int {
+        refreshDailyCounterIfNeeded(now: now)
+        return dailyGrantCountByKind[kind] ?? 0
+    }
+
+    public func isDailyCapReached(for kind: SimRewardedAdKind, now: Date = Date()) -> Bool {
+        refreshDailyCounterIfNeeded(now: now)
         return (dailyGrantCountByKind[kind] ?? 0) >= dailyCap(for: kind)
     }
 
-    private func recordRewardGranted(for kind: SimRewardedAdKind?) {
+    func recordRewardGranted(for kind: SimRewardedAdKind?, now: Date = Date()) {
         guard let kind = kind else { return }
-        refreshDailyCounterIfNeeded()
-        lastGrantedAtByKind[kind] = Date()
+        refreshDailyCounterIfNeeded(now: now)
+        lastGrantedAtByKind[kind] = now
         dailyGrantCountByKind[kind] = (dailyGrantCountByKind[kind] ?? 0) + 1
+        saveFrequencyState()
     }
 
     // MARK: - ATT-First SDK Initialization (Apple Guideline 5.1.2 Compliant)
@@ -271,20 +372,23 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
             let kind = activeAdKind
             activeAdRewardCallback = nil
             activeAdKind = nil
+            isInFlight = false
             recordRewardGranted(for: kind)
             cb()
         }
     }
 
     private func failPendingAdIfAny() {
-        guard let unavailable = pendingUnavailableAction else { return }
+        let unavailable = pendingUnavailableAction
         pendingRewardAction = nil
         pendingUnavailableAction = nil
+        activeAdRewardCallback = nil
         activeAdKind = nil
         timeoutTask?.cancel()
         timeoutTask = nil
         isConnectingAd = false
-        unavailable()
+        isInFlight = false
+        unavailable?()
     }
     #endif
 
@@ -294,6 +398,12 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
         onUnavailable: @escaping () -> Void,
         onCooldown: ((Int) -> Void)? = nil
     ) {
+        // Concurrency mutex lock: never allow overlapping requests to overwrite pending callbacks or double-grant
+        guard !isInFlight else {
+            onUnavailable()
+            return
+        }
+
         if let k = kind {
             let rem = remainingCooldownSeconds(for: k)
             if rem > 0 {
@@ -307,6 +417,7 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
         }
 
         #if canImport(GoogleMobileAds)
+        isInFlight = true
         if !sdkStarted {
             startSDKAndPreload()
         }
@@ -342,6 +453,7 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
             }
         }
         #else
+        isInFlight = false
         onUnavailable()
         #endif
     }
@@ -363,6 +475,7 @@ public final class GoogleAdMobManager: NSObject, ObservableObject {
 extension GoogleAdMobManager: GADFullScreenContentDelegate {
     public func adDidDismissFullScreenContent(_ ad: GADFullScreenPresentingAd) {
         activeAdDidDismiss = true
+        isInFlight = false
         if activeAdDidEarnReward, let cb = activeAdRewardCallback {
             let kind = activeAdKind
             activeAdRewardCallback = nil
@@ -381,6 +494,7 @@ extension GoogleAdMobManager: GADFullScreenContentDelegate {
         activeAdKind = nil
         activeAdDidEarnReward = false
         activeAdDidDismiss = false
+        isInFlight = false
         failPendingAdIfAny()
     }
 }

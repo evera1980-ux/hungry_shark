@@ -793,6 +793,22 @@ public struct EvolutionAtlasSheetView: View {
             Spacer(minLength: 2)
 
             // 5. Bottom Action Buttons
+            if !vm.permanentProgressEligibility.allowSharkUnlockAndUpgrade {
+                HStack(spacing: 8) {
+                    Text(vm.lang == "zh"
+                         ? "试玩模式仅预览图谱（本局结束后可消费金币/基因）"
+                         : "Trial Preview Only (Spend currency after run)")
+                        .font(.system(size: 11, weight: .black))
+                        .foregroundColor(.yellow)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color.yellow.opacity(0.14))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.yellow.opacity(0.45), lineWidth: 1.2))
+                        )
+                }
+            } else {
             HStack(spacing: 10) {
                 if check.isUnlocked {
                     // Upgrade Body Button
@@ -863,10 +879,11 @@ public struct EvolutionAtlasSheetView: View {
 
                     // Free Supply Drop Ad Button when short on Coins / Genes
                     if !check.coinsMet || !check.genesMet {
+                        let drop = vm.currentSupplyDropReward
                         Button {
                             vm.showRewardedAd(kind: .SUPPLY_DROP)
                         } label: {
-                            Text(vm.lang == "zh" ? "📺 免费补给 (+300🪙+25🧬)" : "📺 FREE DROP (+300🪙+25🧬)")
+                            Text(vm.lang == "zh" ? "📺 免费补给 (+\(drop.coins)🪙+\(drop.genes)🧬)" : "📺 FREE DROP (+\(drop.coins)🪙+\(drop.genes)🧬)")
                                 .font(.system(size: 10.5, weight: .black))
                                 .foregroundColor(.black)
                                 .padding(.horizontal, 12)
@@ -876,6 +893,7 @@ public struct EvolutionAtlasSheetView: View {
                         .buttonStyle(.plain)
                     }
                 }
+            }
             }
         }
         .padding(.horizontal, 16)

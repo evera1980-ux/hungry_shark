@@ -164,7 +164,7 @@ public struct HudRow2StatusOverlayView: View {
                             .font(.system(size: 10, weight: .black))
                             .foregroundColor(.white)
                         if heatBuff.heatLevel > 0 {
-                            Text("· \(vm.t(heatBuff.labelKey)) ⚡+\(Int((heatBuff.speedMultiplier - 1.0) * 100))%")
+                            Text("· \(vm.t(heatBuff.labelKey)) 🧲+\(Int(heatBuff.magnetRadiusBonus)) ⚡+\(Int(heatBuff.energyRegenBonus))/s")
                                 .font(.system(size: 9, weight: .heavy))
                                 .foregroundColor(.yellow)
                         }
@@ -190,6 +190,20 @@ public struct HudRow2StatusOverlayView: View {
                                 .overlay(Capsule().stroke(Color.yellow, lineWidth: 1))
                         )
                 }
+            }
+
+            if let crownToast = vm.crownHudToastText {
+                Text(crownToast)
+                    .font(.system(size: 10, weight: .black))
+                    .foregroundColor(.yellow)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(Color.black.opacity(0.78))
+                            .overlay(Capsule().stroke(Color.yellow.opacity(0.75), lineWidth: 1))
+                    )
+                    .allowsHitTesting(false)
             }
 
             if let targetDepth = telemetry.deepDivePromptMeters {

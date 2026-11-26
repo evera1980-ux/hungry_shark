@@ -1,8 +1,8 @@
 # 03. 核心数值策划与系统公式圣经 (Game Balance & Numerical Design)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-23
-> **关联约束**：修改 `src/game/rules.ts`、`src/game/sharkEvolutionConfig.ts`、`src/game/config.ts`、`src/game/preyDatabase140.ts` 或 `src/game/infiniteProgressionManager.ts` 中的任何数值参数或公式时，**必须在同一次提交中更新本文档对应的章节与表格**（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
+> **最后更新**：2026-11-26
+> **关联约束**：全部核心平衡与成长配置参数已迁移至 **`shared/configs/*.json`** 六大域配置真源（严禁代码硬编码），经 `npm run sync:ios` 同步至 iOS `DomainConfigs.swift`。修改 `shared/configs/*.json`、`src/game/rules.ts`、`src/game/sharkEvolutionConfig.ts`、`src/game/config.ts`、`src/game/preyDatabase140.ts`、`src/game/infiniteProgressionManager.ts` 或 `ios-native/.../Core/GameRules.swift` 中的任何数值参数或公式时，**必须在同一次提交中更新本文档对应的章节与表格**（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
 
@@ -11,13 +11,13 @@
 本游戏采用 **“局内吞噬成长等级（In-Run `Lv`）” + “跨局鲨鱼躯体强化等级（Body Upgrade `Lv.1 ~ Lv.10`）”** 的双轨制设计，兼顾单局爽快感与长期跨局养成积累：
 
 ### 1.1 局内吞噬等级 `Lv.X`（顶部状态栏深蓝色徽章 `Lv.1, Lv.2, ...`）
-- **重置规则**：每局新下潜从 `Lv.1` 开始（若观看广告试驾 `#46 机甲利维坦` 则从 `Lv.5` 开局）。历史最高单局等级会永久记录在存档字段 `bestInRunLevel` 中，作为解锁高阶鲨鱼形态的门禁条件之一。
-- **升级所需经验（XP）公式**（位于 `src/game/rules.ts` ➔ `getXpRequiredForLevel(level)`）：
+- **重置规则 & 开局默认值**：每局新下潜从 `Lv.1` 开始（若观看 `TRIAL_SHARK` 试玩广告则按 `trialInRunLevel = 5`、`trialUpgradeLevel = 6`、`initialFrenzyDurationSec = 4.5s` 起步）；正式档案初始默认 `120 Coins / 20 Genes / bestDepthReached = 200m`（配置于 `world_and_progression_config.json`）。仅正式非试玩局（`isEligibleForPermanentProgress === true`）达到的历史最高单局等级才会永久记录在 `bestInRunLevel` 中，作为解锁高阶鲨鱼形态的门禁条件之一。
+- **升级所需经验（XP）公式**（配置于 `world_and_progression_config.json`，计算位于 `getXpRequiredForLevel(level)`）：
   $$\text{XP}_{\text{req}}(L) = \begin{cases} 140, & L \le 1 \\ \text{round}\left(140 + (L - 1) \times 145 + (L - 1)^{1.75} \times 65\right), & L \ge 2 \end{cases}$$
 - **前 10 级所需 XP 速查表**：
   | 当前局内等级 $L$ | 升至下一级所需 XP | 局内升级奖励 |
   | :---: | :---: | :--- |
-  | `Lv.1 -> Lv.2` | `140` | 回满 38% 最大生命值 + 50% 冲刺能量 + 提升移速/生命上限/咬合阶位 |
+  | `Lv.1 -> Lv.2` | `140` | 回复 `35%` 最大生命值 + `50%` 冲刺能量 + 提升移速/生命上限/咬合阶位 |
   | `Lv.2 -> Lv.3` | `350` | 同上 |
   | `Lv.3 -> Lv.4` | `649` | 同上 |
   | `Lv.4 -> Lv.5` | `1,020` | 同上 |
@@ -25,29 +25,29 @@
   | `Lv.8 -> Lv.9` | `3,111` | 同上 |
   | `Lv.10 -> Lv.11` | `4,487` | 同上 |
 - **局内等级 `Lv` 对属性的加成**（位于 `computeEvolvedSharkStats`）：
-  - **基础生命值加成**：每升 1 级额外增加 `+(Lv - 1) * 18` 基础最大生命值（再乘以躯体强化倍率与图鉴收集倍率）。
-  - **基础能量值加成**：每升 1 级额外增加 `+(Lv - 1) * 4` 冲刺能量上限。
-  - **游动速度加成**：每升 1 级增加 `+(Lv - 1) * 1.4%` 基础移速。
-  - **磁吸半径加成**：每升 1 级增加 `+(Lv - 1) * 10 px` 金币/基因吸附半径。
-  - **咬合阶位 `T` 成长**：随着局内等级提升，自动增加局内咬合加成 `inRunBiteBonus`（详见第 2 节）。
+  - **基础生命值加成**：每升 1 级额外增加 `+(Lv - 1) * 16` 基础最大生命值（`hpPerLevelFlat: 16`，再乘以躯体强化倍率与图鉴收集倍率）。
+  - **基础能量值加成**：每升 1 级额外增加 `+(Lv - 1) * 4` 冲刺能量上限（`energyPerLevelFlat: 4`）。
+  - **游动速度加成**：每升 1 级增加 `+(Lv - 1) * 2.8%` 基础移速（`speedPerLevel: 0.028`）。
+  - **磁吸半径加成**：每升 1 级增加 `+(Lv - 1) * 10 px` 金币/基因吸附半径（`magnetPerLevel: 10`）。
+  - **饥饿与续航成长**：每升 1 级饥饿掉血增加 `+(Lv - 1) * 0.65 / 秒`（`hpDrainGrowthPerLevel: 0.65`），吞噬回血倍率提升 `+2%`（`devourHealPerLevel: 0.02`），体长/体形缩放提升 `+2.8%`（`scalePerLevel: 0.028`）。
+  - **咬合阶位 `T` 成长**：随着局内等级提升，于 `Lv.2 / 5 / 8 / 12` 自动增加 `inRunBiteBonus`（最高 `+4T`，详见第 2 节）。
 
 ### 1.2 跨局鲨鱼躯体强化等级 `Lv.1 ~ Lv.10`（左上角形态旁 `Lv.X` 与右下角 `⬆️ 强化躯体`）
 - **持久化规则**：每只已解锁的鲨鱼形态都拥有独立的 `Lv.1 ~ Lv.10` 躯体强化等级，**永久保存在存档中，跨局绝不清零**。
-- **消耗货币（金币高频强化 + 关键阶级基因突破）**：
-  - **常规强化级（`Lv.1→2, 2→3, 3→4, 5→6, 6→7, 7→8, 8→9`）**：仅消耗**金币 `🪙`**（基因消耗为 `0`），并且基础金币消耗下调约 `15%`，指数调整为 `1.36`。
-  - **咬合阶级突破级（`Lv.4 → Lv.5` 与 `Lv.9 → Lv.10`）**：这两级分别赋予该鲨鱼永久 **`+1 T` 咬合阶位突破**，除金币外还需消耗**基因碎片 `🧬`**（由 `getSharkUpgradeGeneCost(form, currentUpgradeLevel)` 计算：`Lv.4→5` 消耗 $\text{round}(\text{refGenes} \times 0.35 + 6)$，`Lv.9→10` 消耗 $\text{round}(\text{refGenes} \times 0.65 + 14)$）。
-- **每级强化金币消耗公式**（位于 `src/game/sharkEvolutionConfig.ts` ➔ `getSharkUpgradeCost(form, currentLevel)`）：
-  $$\text{Cost}_{\text{coin}}(L_{\text{upg}}) = \text{round}\left(\text{upgradeBaseCoinCost} \times 1.36^{(L_{\text{upg}} - 1)}\right)$$
+- **消耗货币（金币高频强化 + 咬合突破节点 100% 对齐 `D7-1 U-B`）**：
+  - **常规强化级（`Lv.1→2, 2→3, 3→4, 5→6, 6→7, 7→8, 8→9`）**：仅消耗**金币 `🪙`**（基因消耗为 `0`），金币升级指数收敛为 **`1.28`**（`coinCostExponent: 1.28`）。
+  - **咬合阶级突破级（`Lv.4 → Lv.5` 与 `Lv.9 → Lv.10`）**：在 `D7-1 U-B` 统一方案下，基因收费节点与永久 **`+1T / +2T` 咬合阶位突破 + `+6% / +12% HP` 爆发加成**实现 100% 严格对齐：除金币外还需消耗**基因碎片 `🧬`**（由 `getSharkUpgradeGeneCost` 计算：`refGenes = max(12, form.unlockGenes)`，`Lv.4→5` 消耗 $\text{round}(\text{refGenes} \times 0.35 + 6)$，`Lv.9→10` 消耗 $\text{round}(\text{refGenes} \times 0.65 + 14)$，全图鉴 48 只满强合计 **`87,428 🧬`**）。
+- **每级强化金币消耗公式**（配置于 `world_and_progression_config.json`，位于 `getSharkUpgradeCost`）：
+  $$\text{Cost}_{\text{coin}}(L_{\text{upg}}) = \text{round}\left(\text{baseUpgradeCoinCost} \times 1.28^{(L_{\text{upg}} - 1)}\right)$$
 - **每升 1 级躯体强化带来的永久属性提升**：
-  - **最大生命值倍率**：`+8% / 级`（满级 `Lv.10` 为 `1.72x` 生命上限，且每次点击升级立即恢复 `25%` 最大生命值）。
+  - **最大生命值倍率**：`+8% / 级`（满级 `Lv.10` 为 `1.72x`，叠加 **`Lv.5` 额外 `+6%` HP 与 `Lv.10` 额外 `+12%` HP** 突破加成；且每次点击升级立即恢复 `25%` 最大生命值）。
   - **游动与冲刺移速**：`+2.2% / 级`（满级 `Lv.10` 为 `+19.8%` 移速）。
   - **饥饿掉血减免**：`+1.5% / 级`（满级 `Lv.10` 为 `-13.5%` 饥饿衰减）。
   - **冲刺耗能减免**：`+1.8% / 级`（满级 `Lv.10` 为 `-16.2%` 冲刺耗能）。
-  - **咬合阶位 `T` 突破奖励（最多 `+3T`）**：
-    - 强化达到 **`Lv.3`** 时：该鲨鱼永久获得 **`+1 咬合阶位 (T+1)`**！
-    - 强化达到 **`Lv.6`** 时：该鲨鱼永久获得 **`+2 咬合阶位 (T+2)`**！
-    - 强化达到 **`Lv.10`（满级）** 时：该鲨鱼永久获得 **`+3 咬合阶位 (T+3)`**！
-  - **解锁下一阶鲨鱼的前置条件**：强化当前鲨鱼至指定等级（`Lv.2 ~ Lv.9`），是破茧进化解锁下一只鲨鱼形态的第一道门禁。
+  - **咬合阶位 `T` 突破奖励（最多 `+2T`，节点与基因收费严格合一）**：
+    - 强化达到 **`Lv.5`** 时：该鲨鱼永久获得 **`+1 咬合阶位 (T+1)` 与 `+6%` HP 突破加成**！
+    - 强化达到 **`Lv.10`（满级）** 时：该鲨鱼永久获得 **`+2 咬合阶位 (T+2)` 与 `+12%` HP 突破加成**！
+  - **解锁下一阶鲨鱼的前置条件**：G1~G6 门禁前置等级上限收敛为 `[3, 4, 5, 5, 5, 6]`（同代纵列父级 `(row-1)*8+col` 与线性前序 `index-1` 双路径任一达标即可）。
 
 ---
 
@@ -75,24 +75,24 @@ $$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Fren
      - **第四代·霸主期 (`#25 ~ #32`)**：`T25 ~ T32`。
      - **第五代·泰坦期 (`#33 ~ #40`)**：`T33 ~ T40`。
      - **第六代·神明期 (`#41 ~ #48`)**：`T41 ~ T48`（且第六代深渊系与机甲系自带直接吞噬深水雷特权 `canEatMines = true`）。
-2. **躯体强化咬合加成 $\Delta T_{\text{upgrade}}$（`upgradeBiteBonus`，最高 `+3T`）**：
-   $$\Delta T_{\text{upgrade}} = \begin{cases} 3, & \text{当躯体强化等级 } L_{\text{upg}} = 10 \\ 2, & \text{当躯体强化等级 } 6 \le L_{\text{upg}} \le 9 \\ 1, & \text{当躯体强化等级 } 3 \le L_{\text{upg}} \le 5 \\ 0, & \text{当躯体强化等级 } 1 \le L_{\text{upg}} \le 2 \end{cases}$$
-3. **局内等级咬合加成 $\Delta T_{\text{inRun}}$（`inRunBiteBonus`，最高 `+3T`）**：
-   $$\Delta T_{\text{inRun}} = \begin{cases} 3, & L_{\text{inRun}} \ge 9 \\ 2, & 5 \le L_{\text{inRun}} \le 8 \\ 1, & 2 \le L_{\text{inRun}} \le 4 \\ 0, & L_{\text{inRun}} \le 1 \end{cases}$$
+2. **躯体强化咬合加成 $\Delta T_{\text{upgrade}}$（`upgradeBiteBonus`，最高 `+2T`，与 `Lv.5/Lv.10` 基因突破点对齐）**：
+   $$\Delta T_{\text{upgrade}} = \begin{cases} 2, & \text{当躯体强化等级 } L_{\text{upg}} = 10 \\ 1, & \text{当躯体强化等级 } 5 \le L_{\text{upg}} \le 9 \\ 0, & \text{当躯体强化等级 } 1 \le L_{\text{upg}} \le 4 \end{cases}$$
+3. **局内等级咬合加成 $\Delta T_{\text{inRun}}$（`inRunBiteBonus`，最高 `+4T`）**：
+   $$\Delta T_{\text{inRun}} = \begin{cases} 4, & L_{\text{inRun}} \ge 12 \\ 3, & 8 \le L_{\text{inRun}} \le 11 \\ 2, & 5 \le L_{\text{inRun}} \le 7 \\ 1, & 2 \le L_{\text{inRun}} \le 4 \\ 0, & L_{\text{inRun}} \le 1 \end{cases}$$
 4. **单鲨鱼跨阶成长上限 $T_{\text{genMax}}$（`genMaxBiteTier`）**：
    $$T_{\text{genMax}} = \min(48,\; T_{\text{base}} + 6)$$
-   - 每只鲨鱼通过局外躯体强化（`+3T`）与局内吞噬升级（`+3T`），最多可在其天生基础阶位 $T_{\text{base}}$ 上提升 **`+6 阶`**，支持满配鲨鱼跨代狩猎。
+   - 每只鲨鱼通过局外躯体强化（`+2T`）与局内吞噬升级（`+4T`），最多可在其天生基础阶位 $T_{\text{base}}$ 上提升 **`+6 阶`**，支持满配鲨鱼跨代狩猎，且保证 48 只鲨鱼相邻晋升 **零负跃迁（0 Negative Bite Tier Transitions）**。
 
 ### 2.2 咬合阶位 `T` 的三级实战克制与碰撞判定规则
-位于 `src/game/rules.ts` ➔ `resolvePreyEncounter()`：
+位于 `src/game/rules.ts` ➔ `resolvePreyEncounter()` 与 Swift `GameRules.swift`（配置于 `economy_predation_config.json`）：
 
 设猎物的有效阶位为 $T_{\text{prey}}$（普通猎物为 `prey.tier`，若带有 `ABYSS_BEHEMOTH` 深渊巨兽变异词缀则为 $\min(50, \text{prey.tier} + 1)$）：
 
 | 阶位对比条件 | 屏幕视觉体型表现 | 触碰结果 (`resolvePreyEncounter`) |
 | :--- | :--- | :--- |
-| **$T_{\text{shark}} \ge T_{\text{prey}}$**<br>（或处于黄金狂暴 `Frenzy`） | **猎物体型严格小于玩家鲨鱼**（`16% ~ 64%` 鲨鱼大小） | **直接一口吞噬 (`DEVOUR`)**：恢复生命值，获得 XP、分数、金币与基因碎片，叠加连击 `Combo` |
-| **$T_{\text{shark}} + 1 \le T_{\text{prey}} \le T_{\text{shark}} + 3$**<br>且玩家**正在按住冲刺 (`isBoosting === true`)** | **猎物体型略大于玩家鲨鱼**（`118% ~ 130%` 鲨鱼大小，无外圈圆环） | **冲刺破甲撕咬 (`ARMOR_CRUSH`)**：按住冲刺直接咬穿护甲吞噬，爆出 **1.35 倍分数/经验/金币暴击奖励**（飘字 `破甲撕咬! / ARMOR CRUSH!`） |
-| **$T_{\text{shark}} + 1 \le T_{\text{prey}} \le T_{\text{shark}} + 3$**<br>但玩家**未按冲刺 (`isBoosting === false`)** | **猎物体型略大于玩家鲨鱼**（`118% ~ 130%` 鲨鱼大小，无外圈圆环） | **未冲刺弹开 (`NEED_BOOST`)**：玩家受到 `0.85x` 阻尼反噬伤害并弹开（飘字提示 `冲刺可破甲! / BOOST TO CRUSH!`） |
+| **$T_{\text{shark}} \ge T_{\text{prey}}$**<br>（或处于黄金狂暴 `Frenzy`） | **猎物体型严格小于玩家鲨鱼**（`16% ~ 64%` 鲨鱼大小） | **直接一口吞噬 (`DEVOUR`)**：恢复生命值，获得 XP、分数、金币与概率基因，叠加连击 `Combo` |
+| **$T_{\text{shark}} + 1 \le T_{\text{prey}} \le T_{\text{shark}} + 3$**<br>且玩家**正在按住冲刺 (`isBoosting === true`)** | **猎物体型略大于玩家鲨鱼**（`118% ~ 130%` 鲨鱼大小，无外圈圆环） | **冲刺破甲撕咬 (`ARMOR_CRUSH`)**：普通猎物需 **`1` 次**、Boss/深渊巨兽需 **`2` 次**冲刺撕咬破甲，爆出 **`1.35x` 金币/基因/XP 与 `1.50x` 分数暴击奖励**（100% 必掉基因，且叠加鲨鱼产出乘数、计入悬赏击杀与黄金充能） |
+| **$T_{\text{shark}} + 1 \le T_{\text{prey}} \le T_{\text{shark}} + 3$**<br>但玩家**未按冲刺 (`isBoosting === false`)** | **猎物体型略大于玩家鲨鱼**（`118% ~ 130%` 鲨鱼大小，无外圈圆环） | **未冲刺弹开 (`NEED_BOOST`)**：玩家受到 `0.85x` 阻尼反噬伤害并弹开（深渊巨兽反噬伤害再乘 `1.35x`，飘字提示 `冲刺可破甲! / BOOST TO CRUSH!`） |
 | **$T_{\text{prey}} \ge T_{\text{shark}} + 4$**<br>（或触碰深水雷且无吞雷特权） | **猎物体型显著大于玩家鲨鱼**（`138% ~ 195%` 鲨鱼大小，无外圈圆环） | **致命天敌重创 (`DEADLY_PREDATOR`)**：即使按住冲刺也无法破甲，必须走位躲避（仅黄金狂暴可吞） |
 
 ---
@@ -175,71 +175,86 @@ $$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Fren
 
 ## 4. 48 阶鲨鱼本体进化矩阵与三重门禁系统
 
-### 4.1 6 代 × 8 列进化矩阵总览 (`src/game/sharkEvolutionConfig.ts`)
+### 4.1 6 代 × 8 列进化矩阵总览（配置真源：`shared/configs/shark_evolution_config.json`）
+
+全图鉴 48 只鲨鱼总计解锁需 **`753,560 🪙 + 86,452 🧬`**（`D7-1 U-B` 对 G4~G6 实施 `1.25x / 1.55x / 1.85x` 金币梯级后移；线性紧邻前序 `index-1` 与同列上级 `(row-1)*8+col` 任一父级达标即可解锁），主线必经成长总需求 **`1,059,849 🪙 + 113,453 🧬`**：
 
 | 代际 (Generation) | 图谱行号 | 编号范围 | 基础咬合 $T_{\text{base}}$ | 进化阶段定位 | 解锁所需前置躯体等级 | 解锁所需历史最高局内 `Lv` | 解锁所需历史最深下潜 `m` |
 | :--- | :---: | :---: | :---: | :--- | :---: | :---: | :---: |
-| **第一代·礁石幼体期** | Row 0 | `#01 ~ #08` | `T1 ~ T8` | 新手破局期（1~3 局解锁新形态） | `Lv.2 ~ Lv.4` | `Lv.1 ~ Lv.4` | `0m ~ 435m` |
-| **第二代·远洋猎手期** | Row 1 | `#09 ~ #16` | `T9 ~ T16` | 进军暮光温跃层 | `Lv.4` | `Lv.4 ~ Lv.6` | `320m ~ 670m` |
-| **第三代·重装异变期** | Row 2 | `#17 ~ #24` | `T17 ~ T24` | 装甲猎杀与中深海统治 | `Lv.5` | `Lv.7 ~ Lv.9` | `560m ~ 945m` |
-| **第四代·深海霸主期** | Row 3 | `#25 ~ #32` | `T25 ~ T32` | 突破 850m~1270m 深渊交界（首阶为 `#25 远古霸主巨齿鲨`） | `Lv.6` | `Lv.10 ~ Lv.12` | `850m ~ 1270m` |
-| **第五代·深渊泰坦期** | Row 4 | `#33 ~ #40` | `T33 ~ T40` | 猎杀大型远洋鲨与巨型海怪 | `Lv.8` | `Lv.13 ~ Lv.15` | `1180m ~ 1635m` |
-| **第六代·创世神明期** | Row 5 | `#41 ~ #48` | `T41 ~ T48` | 终极神明形态（猎杀巨鲸霸主、可吞水雷） | `Lv.9` | `Lv.16 ~ Lv.18` | `1500m ~ 1990m` |
+| **第一代·礁石幼体期** | Row 0 | `#01 ~ #08` | `T1 ~ T8` | 新手破局期（前 3 局平滑解锁） | `Lv.2 ~ Lv.3` | `Lv.1 ~ Lv.4` | `0m` |
+| **第二代·远洋猎手期** | Row 1 | `#09 ~ #16` | `T9 ~ T16` | 进军暮光温跃层 | `Lv.4` | `Lv.4 ~ Lv.6` | `300m` |
+| **第三代·重装异变期** | Row 2 | `#17 ~ #24` | `T17 ~ T24` | 装甲猎杀与中深海统治 | `Lv.5` | `Lv.6 ~ Lv.9` | `540m` |
+| **第四代·深海霸主期** | Row 3 | `#25 ~ #32` | `T25 ~ T32` | 突破 850m 深渊交界（首阶 `#25 远古霸主巨齿鲨`，解锁金币 `1.25x`） | `Lv.5` | `Lv.9 ~ Lv.11` | `850m` |
+| **第五代·深渊泰坦期** | Row 4 | `#33 ~ #40` | `T33 ~ T40` | 猎杀大型远洋鲨与巨型海怪（解锁金币 `1.55x`） | `Lv.5` | `Lv.11 ~ Lv.13` | `1180m` |
+| **第六代·创世神明期** | Row 5 | `#41 ~ #48` | `T41 ~ T48` | 终极神明形态（可吞水雷，解锁金币 `1.85x`） | `Lv.6` | `Lv.13 ~ Lv.15` | `1450m` |
 
 ### 4.2 四大进化血统分支（Lineages）与专属特性乘数
-每只鲨鱼归属于四大血统之一，在 `src/game/sharkEvolutionConfig.ts` 与 `src/game/rules.ts` (`computeEvolvedSharkStats`) 中拥有完整落地的被动与专属特性乘数：
-1. **🩸 狂暴血统 (`APEX_BIO`)**：额外提升 `+(25 + row * 15)` 基础生命上限、`+20%` 吞噬回血倍率、`-5%` 饥饿掉血，以及 **`1.18x` 巨口吸附判定半径 (`jawSuctionMultiplier`)**。
-2. **⚙️ 机甲血统 (`CYBER_MECHA`)**：额外提升 `+10%` 游动移速、`-12%` 冲刺耗能与 `+55 px` 磁吸半径，第 6 代机甲鲨可直接吞噬水雷 (`canEatMines = true`)。
-3. **🔥 元素血统 (`ELEMENTAL_CORE`)**：额外提升 `+18%` 得分倍率与 `+5%` 移速，黄金狂暴持续时间延长 `+(1.0 + row * 0.3)s`（特定神明鲨如 `#34 地心业火熔岩巨兽` `+2.5s`、`#44 恒星日冕太阳神鲨` `+4.0s`）。
-4. **👁️ 深渊血统 (`ELDER_ABYSS`)**：额外提升 `-10%` 饥饿掉血、`+35 px` 磁吸半径，以及 **`+15%` 基因结晶产出倍率 (`geneYieldMultiplier`)**。
-5. **专属个体特性全量实装**：
-   - **进化面板与局内公式 100% 同源**：`SharkEvolutionAtlasModal.tsx` 直接调用 `computeEvolvedSharkStats(1, form.id, upgradeLv, false, 1.0, unlockedCount)` 渲染面板属性，确保躯体强化 `Lv.5`（`+1T`）与 `Lv.10`（`+2T`）突破后的咬合阶位、强化与图鉴加成后的生命上限与移速在面板与局内 HUD 完全一致。
-   - **代际与个体资源产出乘数 (`coinYieldMultiplier` / `geneYieldMultiplier`)**：代际加成 `1 + row * 0.12` 叠加图鉴加成与 `#15`/`#23`/`#31`/`#35`/`#40`/`#44`/`#45`/`#47` 专属金币/基因收益倍率。
-   - **重甲减伤与抗震退 (`damageTakenMultiplier` / `mineDamageTakenMultiplier` / `knockbackMultiplier`)**：`#10 暴君公牛壮鲨`（碰撞减伤 `-25%`）、`#21 重装钛合金战鲨`（水雷减伤 `-40%`）、`#30 大地岩甲泰坦鲨`（震退减半 `-50%`）、`#44 圣光奥术神装炽天使鲨`（全伤害减免 `-50%`）。
-   - **机动、连击与猎首特权**：`#09 灰鲭深蓝极速鲨`（`1.25x` 冲刺回能）、`#18 百战刀疤狂鲨`（连击上限 `2.4x` + 吞噬回能 `+4`）、`#28 虚空雷霆脉冲鲨`（黄金狂暴需求 `-1`）、`#37 矩阵代码黑客幽灵鲨`（`2.0x` 冲刺回能）、`#39 深渊九头海怪克拉肯鲨`（吞噬深渊 Boss `2.0x` 奖励）。
+每只鲨鱼归属于四大血统之一，被动配置于 `shared/configs/world_and_progression_config.json`（`lineagePassives`），由双端 `computeEvolvedSharkStats` 统一加载：
+1. **🩸 狂暴血统 (`APEX_BIO`)**：拥有 **`1.18x` 巨口吸附判定半径 (`jawSuctionMult`)**，强化突进咬合容错。
+2. **⚙️ 机甲血统 (`CYBER_MECHA`)**：协同词条 `MECHA`，第 6 代机甲鲨自带直接吞噬水雷 (`canEatMines = true`)。
+3. **🔥 元素血统 (`ELEMENTAL_CORE`)**：黄金狂暴持续时间延长 **`+1.0s`**，冲刺破甲效率提升 **`1.4x` (`armorBreakMult`)**，协同词条 `MAGMA`。
+4. **👁️ 深渊血统 (`ELDER_ABYSS`)**：`D6-X` 收敛为 **`+10%` 基因产出倍率 (`geneYieldMult: 1.10`)**，协同词条 `ABYSS`。
+5. **专属个体特性全量实装（`D6-X` 产出封顶 `<= 1.50x` 收敛）**：
+   - **进化面板与局内公式 100% 同源**：Web `SharkEvolutionAtlasModal.tsx` 与 iOS `EvolutionAtlasSheetView.swift` 均直接调用 `computeEvolvedSharkStats`，确保 `Lv.5 (+1T, +6% HP)` / `Lv.10 (+2T, +12% HP)` 突破与全图鉴/王冠被动在面板与局内 HUD 完全一致。
+   - **代际与个体资源产出乘数 (`coinYieldMult` / `geneYieldMult`)**：代际加成 `1 + row * 0.12` 叠加图鉴加成与 8 项收敛产出特性：`#16` (`1.15x` 基因)、`#24` (`1.20x` 金/基)、`#32` (`1.25x` 金/基)、`#36` (`1.30x` 金/基)、`#40 克拉肯`（吞噬深渊 Boss **`1.50x`** 奖励）、`#41` (`1.35x` 基因)、`#45` (`1.40x` 金币)、`#46` (`1.40x` 基因)、`#48 奥米茄` (`1.50x` 金/基)。
+   - **重甲减伤、抗震退与机动狂暴特性**：`#10 暴君公牛壮鲨`（碰撞减伤）、`#21 重装钛合金战鲨`（水雷减伤）、`#30 大地岩甲泰坦鲨`（震退减半）、`#45 圣光奥术神装炽天使鲨`（全伤减免）、`#29 虚空雷霆脉冲鲨` (`shark_28_void_lightning`，黄金狂暴充能需求 `-1` 至 `5`)、`#38 矩阵代码黑客幽灵鲨`（冲刺回能倍增）。
 
-### 4.3 全图鉴收集被动光环 (`getGlobalAtlasBonuses`)
-为了鼓励玩家横向收集全部 48 只鲨鱼，而不仅仅只走单一路线，**每多解锁 1 只新鲨鱼形态，全账号永久叠加**：
-- **全局生命上限**：`+2.0% / 只`（解锁满 48 只时高达 `+94%` 生命上限）
-- **全局游动速度**：`+0.8% / 只`（解锁满 48 只时高达 `+37.6%` 移速）
-- **全局金币与基因收益**：`+2.5% / 只`（解锁满 48 只时高达 `+117.5%` 资源产出）
+### 4.3 全图鉴与王冠收集被动光环 (`atlasPassives` in `world_and_progression_config.json`)
+- **每多解锁 1 只额外鲨鱼（全 48 只收集）**：
+  - **全局生命上限**：`+2.0% / 只`（满 48 只 `+94%`）
+  - **全局游动速度**：`+0.8% / 只`（满 48 只 `+37.6%`）
+  - **全局分数倍率**：`+2.5% / 只`（满 48 只 `+117.5%`）
+  - **全局金币与基因收益**：`+2.5% / 只`（满 48 只 `+117.5%`）
+- **每多解锁 1 顶统治王冠（`D3-A`，满分 144 冠）**：
+  - **全局分数倍率**：**`+0.35% / 冠`**（满 144 冠 `+50.4%` 分数）
+  - **全局生命上限**：**`+0.20% / 冠`**（满 144 冠 `+28.8%` HP）
+  - **全局资源收益加成**：**`0%`**（严格剥离金币/基因直接滚雪球增益）
 
 ---
 
 ## 5. 双货币经济循环与防套利动态消耗（4:1 黄金产销比）
 
-### 5.1 金币 `🪙` 与基因 `🧬` 的获取/消耗平衡（~4:1 产出比）
+### 5.1 金币 `🪙` 与基因 `🧬` 的获取/消耗平衡（`D5-A / D6-X / D8` 双端统一经济模型）
 - **金币 `🪙`（高频养成与战术货币）**：
-  - **获取**：全部 135 项现役猎物与障碍配置（134 种海洋生物 + `cyber_mine`）的 `coinValue` 与 `geneValue` 按约 **4:1 ~ 4.5:1** 黄金比例配置；普通猎物死亡爆出的拾取球中 **75% 为金币球 `COIN`**、25% 为基因结晶；此外包含黄金变异鱼 `3.0x` 金币倍率与悬赏目标鱼丰厚金币奖励。
-  - **消耗**：① 强化当前鲨鱼躯体等级（`Lv.1 -> Lv.10`）；② 破茧进化解锁新鲨鱼形态；③ 局内释放 `🪙 黄金狂暴` 战术爆发技能。
-- **基因碎片 `🧬`（高价值突破与质变货币）**：
-  - **获取**：浅海普通小鱼仅少量产出基因（`geneValue = 1~2`），高浓度基因产出来自：**🎯 悬赏目标鱼**（完成悬赏奖励 `18 + 4 * tier` 基因及必掉额外基因结晶）、**深渊巨兽变异体 (`ABYSS_BEHEMOTH`, `2.5x` 基因)** 与 **`T4+` 深海大型猎物**。
-  - **消耗**：① 破茧进化解锁新鲨鱼形态；② 躯体强化在 **`Lv.4 → Lv.5` 与 `Lv.9 → Lv.10` 咬合阶级突破点** 的基因消耗；③ 局内释放 `🧬 基因突破`（立即获得 `+55%` 当前等级所需 XP、回复 `+30 HP` 并 **100% 瞬间回满冲刺能量槽 ⚡**）。
+  - **获取（单源拾取结算）**：全部 235 项现役猎物与障碍配置（`shared/configs/prey_ecology_config.json`）在吞噬时由 `resolvePreyEncounter` 与 `buildPredationRewardPlan`（iOS `computePredationSettlement`）计算唯一一次奖励，拆分为 `1..4` 个 `COIN` 拾取球与对应 `DNA_CRYSTAL` 拾取结晶（存活 **`14s`**、末 **`2.5s`** 闪烁、狂暴磁吸 **`1.45x`**、拾取半径 `38 * worldScale`、同场池化上限 `120` 枚，拾取单枚额外附带 `+10`/`+15` 分数），收集后单次入账并计入独立 `RunSummary`；**🎯 悬赏目标鱼**固定每 **`2`** 击杀结算 $\text{round}((36 + 2.2T)\times \text{coinM})$ 金币 + $\text{round}((6 + 0.35T)\times \text{geneM})$ 基因，刷新偏置 **`26%`** 且支持超长距离淘汰重生（`recycleAndRespawn`）。
+  - **消耗**：① 强化当前鲨鱼躯体等级（`Lv.1 -> Lv.10`，指数 `1.28`）；② 破茧进化解锁新鲨鱼形态（48 阶合计 `753,560 🪙`）；③ 局内释放 `🪙 黄金狂暴` 战术爆发技能。
+- **基因碎片 `🧬`（高价值突破与稀缺货币，`D6-X` 分层掉率 + 保底）**：
+  - **获取**：移除旧版普通捕食 `Math.max(1)` 保底地板；改为 **`T1..T17` 基础 `30%` 掉率（连空 `3` 次第 `4` 杀必掉）**、**`T18+` 基础 `45%` 掉率（连空 `2` 次第 `3` 杀必掉）**，特殊击杀（黄金变异、深渊巨兽、冲刺破甲 `ARMOR_CRUSH`）**`100%`** 必掉；同时在 `prey_ecology_config.json` 中对 `T18..T48` `geneValue` 实施阶梯稀释。
+  - **消耗**：① 破茧进化解锁新鲨鱼形态（48 阶合计 `86,452 🧬`）；② 躯体强化在 **`Lv.4 → Lv.5` 与 `Lv.9 → Lv.10` 咬合阶级突破点** 的基因消耗（满强合计 `87,428 🧬`）；③ 局内释放 `🧬 基因突破`（立即获得 `+55%` 当前等级所需 XP、支持连续多级跃迁、回复 `max(35, round(maxHp * 0.15))` HP、**100% 瞬间回满冲刺能量槽 ⚡**，且不跳过新手引导）。
 
-### 5.2 局内技能“代际锚定 + 二次方加速递增”消耗公式（防止高代际永动套利）
-- **`🪙 黄金狂暴` 局内消耗公式**（`getGoldOverdriveCost(useCount, generationRow)`）：
+### 5.2 局内技能与变现配置锚定（`economy_predation_config.json` & `ads_and_monetization_config.json`）
+- **`🪙 黄金狂暴` 局内释放**：黄金狂暴激活期间**禁止再次付费释放**（`blockWhileFrenzy: true`）；释放后立即持续 **`6.0s`** 狂暴、恢复 **`50% maxHP`**、回满 `100%` 冲刺能量并授予 **`1.0s`** 无敌保护；消耗公式（`getGoldOverdriveCost`）：
   $$\text{Cost}_{\text{gold}}(n, \text{row}) = \text{round}\Big(\big(35 + 25n + 12n^2\big) \times \big(1 + 0.35 \times \max(0, \text{row})\big)\Big)$$
-  - 初代幼鲨前 3 次依然亲民（`35 -> 72 -> 133`），第 4 次起二次方项快速拉升，且随鲨鱼代际（`row = 0..5`）自动锚定单局购买力，彻底杜绝高阶鲨鱼无限连开黄金狂暴套利。
-- **`🧬 基因突破` 局内消耗公式**（`getGeneSurgeCost(level, useCount, generationRow)`）：
+- **`🧬 基因突破` 局内消耗公式**（`getGeneSurgeCost`）：
   $$\text{Cost}_{\text{gene}}(L, n, \text{row}) = \text{round}\Big(\big(12 + 5(L - 1) + 10n + 6n^2\big) \times \big(1 + 0.25 \times \max(0, \text{row})\big)\Big)$$
+- **五大广告位双端统一规则 (`D8`，配置真源 `ads_and_monetization_config.json`)**：
+  - `DOUBLE_SETTLEMENT`：`30s CD / 日限 2 次`，`2.0x` 倍率（排除王冠奖励与 Trial 试玩局）。
+  - `SUPPLY_DROP`：`90s CD / 日限 6 次`，按账号已解锁最高代际动态阶梯发放：**G1 `160C/14G` → G2 `480C/42G` → G3 `1,200C/100G` → G4 `3,000C/240G` → G5 `7,500C/560G` → G6 `16,000C/1,150G`**。
+  - `REVIVE`：`15s CD / 日限 6 次 / 每局 1 次`，回满 HP/能量 + **`6.0s` 黄金狂暴 + `2.5s` 无敌**。
+  - `TRIAL_SHARK`：`60s CD / 日限 4 次`，自动选择 `next_unowned_shark`，预设强化 `Lv.6` + 局内 `Lv.5` + 开局 **`4.5s` 黄金狂暴**。
+  - `INTERSTITIAL`：`90s CD / 日限 12 次`，前 **`3`** 局新手局免插屏保护。
 
 ### 5.3 分数（Score）的双重核心定位：单物种统治王冠 `👑` + 局内狩猎热度 `Heat`
-为了避免“分数日常折算货币造成通胀”以及“平方根折算引发自杀刷钱流”，分数系统严格遵循**“局内化作狩猎热度增益、跨局化作单鲨鱼独立三段位首通奖”**的原则：
-1. **单物种独立三段位王冠 (`getSharkMasteryConfig` & `settleSharkScoreMastery`)**：
-   - 48 只鲨鱼各自独立记录最高分 `sharkBestScores[sharkId]` 与已达成王冠段位 `sharkMasteryTiers[sharkId]`（`0 = 无, 1 = 🥉铜冠, 2 = 🥈银冠, 3 = 👑金冠`）。
-   - **试驾严格隔离**：观看广告试驾 `#42 歼星舰超光速机甲神鲨`（`trialActive === true`）绝不污染正式最高分纪录，也不触发王冠首通。
-   - **一次性首通基因大奖**：每只鲨鱼首次达到其代际对应的 `🥉 铜冠 (1.0x)`、`🥈 银冠 (2.4x)`、`👑 金冠 (5.0x)` 分数线时，立即发放一次性固定基因奖励（领过即标记 `✓ 已领`，不可重复刷取）。
-2. **局内狩猎热度被动增益 (`computeHuntingHeatBuff(currentScore, generationRow)`)**：
-   - 单局当前分数按代际基准映射为 **`Heat Lv.0 ~ Lv.5`**：
-     - **磁吸半径加成**：`+16 px / Heat Lv`（最高 `+80 px` 拾取磁吸范围，无需回头捡球）。
-     - **冲刺能量恢复加成**：`+2.2 / 秒 / Heat Lv`（最高 `+11 / 秒` 能量恢复加速，越杀越顺手）。
+1. **单物种独立三段位王冠 (`crown_mastery_config.json`, `D3-A`)**：
+   - 48 只鲨鱼各自独立记录最高分与已达成段位（`0 = 无, 1 = 🥉铜冠 (1.0x), 2 = 🥈银冠 (2.4x), 3 = 👑金冠 (4.8x)`；奖励倍率 `1.0x / 2.0x / 3.5x`）。
+   - **全表定额发放**：48 阶全部 144 冠合计 **`44,940 🪙 + 9,619 🧬`**（其中 G1~G3 前三代仅 **`11,238 🪙 + 2,659 🧬`**，不再淹没前期金币需求）。
+   - **统一 `end_of_run` 结算与 Trial 隔离**：局内仅触发轻量 HUD 达成提示（`hudUnlockNotificationOnly: true`），全部王冠奖励统一在正式局结算写入并排除 Trial 与双倍广告（`allowInTrial: false`, `allowDoubleSettlement: false`）；同时赋予全局 `+0.35% 分数 / +0.20% HP`（每冠）。
+2. **局内狩猎热度被动增益 (`computeHuntingHeatBuff` in `economy_predation_config.json`, `D5-A`)**：
+   - 按连续吞噬连击 `Combo` 分 **`Heat Lv.0 ~ Lv.4`**（断连窗口 `3.2s`）：
+     | Heat 等级 | 连击门槛 (`minCombo`) | 得分倍率 | 磁吸半径加成 | 冲刺回能加成 |
+     | :---: | :---: | :---: | :---: | :---: |
+     | `Lv.0` | `0` | `1.00x` | `+0 px` | `+0 /s` |
+     | `Lv.1` | `4` | `1.10x` | `+20 px` | `+2 /s` |
+     | `Lv.2` | `10` | `1.20x` | `+40 px` | `+5 /s` |
+     | `Lv.3` | `18` | `1.35x` | `+60 px` | `+8 /s` |
+     | `Lv.4` | `28` | `1.45x` | `+80 px` | `+10 /s` |
 
 ---
 
-## 6. 海洋深度生态分布规则（134 种现役真实水深生物 + `cyber_mine`，`0m ~ 20000m` 体大优先深海分层）
+## 6. 海洋深度生态分布规则（234 种现役真实水深生物 + `cyber_mine`，`0m ~ 20000m` 体大优先深海分层）
 
 ### 6.1 双因子映射算法 (`computeMappedPrey140Config` in `src/game/preyDatabase140.ts`) 与五大深海生态带
-游戏生态库 `GAME_CONFIG.preyTiers` 由 `buildPrey140TiersWithMines()` 生成，包含 `docs/06-PREY_DATABASE_140.md` 中的 **134 种现役海洋生物（`PREY-001 ~ PREY-100` 普通鱼、`PREY-101 ~ PREY-130` 与 `PREY-201 ~ PREY-210` 大/巨型鱼类与鲸豚，已剔除 `PREY-122..126, 209` 海狮/海象/海牛/儒艮）** 与 **1 种保留的爆破障碍（`cyber_mine`：`T6`，`560m ~ 20000m`）**，总计 **135 项**（旧版 32 种混合生物、潜艇、辐射粘液及海底遗物全部移除）。
+游戏生态库 `GAME_CONFIG.preyTiers` 由 `buildPrey140TiersWithMines()` 生成，包含 `docs/06-PREY_DATABASE_140.md` 中的 **234 种现役海洋生物（`PREY-001 ~ PREY-100` 普通鱼、`PREY-101 ~ PREY-130` 与 `PREY-201 ~ PREY-210` 大/巨型鱼类与鲸豚、以及 `P1-1` 新增的 `PREY-301 ~ PREY-400` 共 100 种 `T37~T48` 粉红深渊巨兽占位变体，已剔除 `PREY-122..126, 209` 海狮/海象/海牛/儒艮）** 与 **1 种保留的爆破障碍（`cyber_mine`：`T36`，`560m ~ 20000m`）**，总计 **235 项**（旧版 32 种混合生物、潜艇、辐射粘液及海底遗物全部移除）。
 
 由于现实鱼类真实水深多集中在 `0~300m`、最深 `2000m`，而游戏世界深度为 `0m ~ 20000m`，系统采用 **「真实生存水深对数分位数 `depthFactor` + 尺寸级别 `sizeClass` 深海偏移」** 双因子纯函数映射到 5 大深度区间：
 - **对数水深基准**：$\text{depthFactor} = \min\big(1,\; \ln(1 + \text{realMaxDepth}) / \ln(1 + 1200)\big)$。
@@ -337,16 +352,18 @@ $$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Fren
 
 ---
 
-## 7. 无限成长与深渊难度膨胀系统 (`InfiniteProgressionManager`)
+## 7. 无限成长、狂暴充能与深渊变异系统（`InfiniteProgressionManager` & `GameRules.swift`）
 
-位于 `src/game/infiniteProgressionManager.ts`：
-- **全局时间难度乘数**：随单局存活时间 $t$（秒）按对数平滑增长：
-  $$M_{\text{time}} = 1.0 + 0.35 \times \ln\left(1 + \frac{t}{60}\right)$$
-- **狂暴进化叠层**：每次触发黄金狂暴叠层，全局难度额外 `+0.18`，但同时猎物的金币、基因与经验产出倍率也按 $1.0 + (M_{\text{diff}} - 1.0) \times 0.85$ 同步膨胀，确保后期高风险伴随高额跨局收益。
-- **三大深海变异词缀（Mutations）**：
-  - `GOLDEN_SWARM`（黄金丰饶）：体型 `0.92x`，移速 `1.2x`，经验/金币/基因收益 **`3.0x`**。
-  - `FRENZY_PREY`（狂暴迅捷）：体型 `1.08x`，移速 `1.42x`，收益 **`1.75x`**。
-  - `ABYSS_BEHEMOTH`（深渊巨兽）：体型放大，有效阶位 **`T + 1`**，咬碎后收益 **`2.6x`**。
+全部参数配置于 `world_and_progression_config.json`（`timeDifficulty`）与 `economy_predation_config.json`（`frenzy` / `mutations` / `xpMultipliers`），双端（Web + iOS 原生）100% 同源对齐：
+- **全局时间难度乘数 (`timeDifficulty`)**：随单局存活时间 $t$（秒）每 **`60s`** 阶跃 **`+0.05`**，上限封顶 **`2.20x`**（Web 与 iOS 同步）：
+  - 饥饿掉血同步按 `hpDrainScalingFactor = 0.52` 增长；猎物价值/分值按 `(globalDifficultyMultiplier)^0.65`（底线 `1.0`）放缩，避免长局无限暴涨。
+- **黄金狂暴 (`frenzy`，`D4-A`)**：
+  - **充能与节流**：默认需要 **`6` 次**金色充能激活（`#29 shark_28_void_lightning` `-1` 至 `5`，最低门槛 `3`）；开局 **`8.0s`** 初期保护，结束进入 **`15.0s`** 充能冷却，持续 **`6.0s`**（叠加血统/特性奖励）。
+  - **收益倍率与反膨胀**：狂暴期间固定 **`1.5x` 金币 / `1.0x` 基因 / `2.0x` 分数 / `0.50x` XP**，**彻底废除 `frenzyStack` 无限叠层膨胀（`allowFrenzyStackInflation: false`）**。
+- **全局 XP 倍率表 (`xpMultipliers`, `D7-2 Lv.15`)**：常规 `0.80x`、狂暴 `0.50x`、冲刺破甲 `1.35x`、黄金变异 `2.00x`、深渊巨兽 `1.50x`。
+- **两大活跃深海变异词缀（已彻底移除未实装死分支 `FRENZY_PREY`）**：
+  - `GOLDEN_MUTANT`（黄金丰饶）：生成概率 **`4.5% ~ 8.0%`**（按分值 `scoreScaleDivisor = 60,000` 渐增），提供 **`3.0x` 金币 / `1.0x` 基因 / `3.0x` 分数 / `2.0x` 经验**，**100% 必掉基因**。
+  - `ABYSS_BEHEMOTH`（深渊巨兽）：仅在 **`preyTier >= 8 || depthMeters >= 220m`** 时激活，生成概率 **`6.0% ~ 16.0%`**（`scoreScaleDivisor = 80,000`）；体型 `1.25x`、移速 `1.25x`、有效阶位 **`T + 1`**、破甲需 **`2` 次**冲刺、碰撞反噬伤害 **`1.35x`**；击败提供 **`1.2x` 金币 / `2.0x` 基因 / `1.5x` 经验 / `2.2x` 分数**，**100% 必掉基因**。
 
 ---
 
@@ -354,6 +371,9 @@ $$T_{\text{shark}} = \begin{cases} 48, & \text{若处于黄金狂暴状态 (Fren
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-26 | **Task 05 成长体系、经济平衡及全配置表驱动（`D3~D8` Zero-Hardcode）全量落地**：① **六大域配置表唯一真源**：建立 `shared/configs/*.json`（`world_and_progression_config.json`、`economy_predation_config.json`、`shark_evolution_config.json`、`crown_mastery_config.json`、`ads_and_monetization_config.json`、`prey_ecology_config.json`），Web TS 与 iOS `DomainConfigs.swift`（经 `npm run sync:ios`）实时同源读取，彻底消除跨端硬编码；② **D3-A 王冠与图鉴平衡**：48 阶王冠收敛为 **`44,940C / 9,619G`**（G1~G3 `11,238C / 2,659G`），Atlas 王冠被动 `+0.35% Score / +0.20% HP`（`0%` 产出加成），统一 `end_of_run` 结算、局内仅轻量 HUD 提示且严格排除 Trial 与双倍广告；③ **D4-A 狂暴/变异/破甲对齐**：狂暴 `6` 充能（`#28` 减 1）/ `8s` 保护 / `15s` CD / `6s` 时长 / `1.5x C / 1.0x G / 2.0x Score`（废除 `frenzyStack` 膨胀），移除死分支 `FRENZY_PREY`，`ABYSS_BEHEMOTH` 门槛 `T>=8 || 220m`（1.2xC / 2.0xG / 1.5xXP / 2.2xScore，失败反噬 `1.35x`），`ARMOR_CRUSH` 普通 `1` 击 / Boss 与巨兽 `2` 击（`1.35x C/G/XP`、`1.5x Score`）并同步计入悬赏与充能；④ **D5-A/D6-X 经济收敛**：Starter `120C/20G/200m`、`#0` 基因 ref `12`（`32G`）、悬赏 `2` 杀加权公式 + `26%` 偏置 + 淘汰重生、拾取物 `14s / 2.5s闪烁 / 38*worldScale / 1.45x狂暴磁吸`、4 段 Combo `HuntingHeat`、双端统一时间难度 `+0.05/60s` 封顶 `2.20x`（指数 `0.65`），移除普通捕食保底 `1` 基因并实施 `T1..17 (30%/3保底)` 与 `T18+ (45%/2保底)` + `T18..T48` 稀释与 8 产出特性收敛（`<= 1.50x`）；⑤ **D7-1 U-B & D7-2 Lv.15 成长体系**：躯体强化咬合节点调整为 `Lv.5 (+1T, +6% HP)` / `Lv.10 (+2T, +12% HP)` 与基因突破完全重合，局内 `Lv.2/5/8/12`（0 负跃迁），金币强化指数 `1.28` + G4..G6 解锁金币 `1.25/1.55/1.85x`、全 XP 档 `0.8/0.5/1.35/2.0/1.5x`；⑥ **D8 广告与技能规范**：5 广告位参数统一 + 动态阶梯 `SUPPLY_DROP` + 纵/横双路径父级解锁 + `GoldOverdrive` 狂暴互斥与 `50% maxHp` 回复 + `GeneSurge` `0.55*xpReq` 多级跃迁与 `max(35, 15% HP)` 回复 | `shared/configs/*.json`, `scripts/build-ios-native.ts`, `src/game/rules.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/preyDatabase140.ts`, `src/game/config.ts`, `src/game/infiniteProgressionManager.ts`, `src/game/ecosystemSpawner.ts`, `src/game/adManager.ts`, `src/game/sim/*.ts`, `src/App.tsx`, `src/components/*.tsx`, `ios-native/HungrySharkEvolution/Core/DomainConfigs.swift`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `ios-native/HungrySharkEvolution/Monetization/GoogleAdMobManager.swift`, `ios-native/HungrySharkEvolution/State/GameViewModel.swift`, `ios-native/HungrySharkEvolution/Rendering/*.swift`, `ios-native/HungrySharkEvolution/UI/**/*.swift`, `scripts/economy-simulator/*.ts`, `src/game/rules.test.ts`, `ios-native/HungrySharkEvolutionTests/GameRulesTests.swift`, `docs/ECONOMY_BALANCE_IMPLEMENTATION_REPORT.md` |
+| 2026-11-25 | **Task 02 P0 经济与 Trial 进度完整性修复**：① Web 捕食结算收敛为 `buildPredationRewardPlan` + `collectPickupEntity` 单源拾取入账（对齐 iOS，彻底根除双重入账与 `T1~T17` 0% DNA 拾取死区，同步独立记录 `RunSummary`）；② 双端建立 `isEligibleForPermanentProgress` 统一 Trial 隔离门控（保留 `D1` 拾取/悬赏金币基因，严格阻断 Trial 污染 `bestInRunLevel` / `bestDepthReached` / 王冠 / `DOUBLE_SETTLEMENT` / 局内解锁升级切鲨 / `totalRuns`）；③ 修复双端重播新手引导无限刷礼并完成 iOS AdMob 频控 `UserDefaults` 持久化与并发互斥锁 | `src/game/rules.ts`, `src/game/sharkEvolutionConfig.ts`, `src/game/sim/types.ts`, `src/game/sim/stepSimulation.ts`, `src/App.tsx`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `ios-native/HungrySharkEvolution/State/GameViewModel.swift`, `ios-native/HungrySharkEvolution/Monetization/GoogleAdMobManager.swift`, `src/game/rules.test.ts`, `ios-native/HungrySharkEvolutionTests/GameRulesTests.swift`, `docs/P0_ECONOMY_FIX_REPORT.md` |
+| 2026-11-25 | **P1-1 扩充 100 种 `T37 ~ T48` 粉红深渊/星穹猎物（`PREY-301 ~ PREY-400`，总生态 235 项）**：① 严格按原声明式元组规范在 `RAW_PREY_140_TUPLES` 录入 100 种深渊巨兽（`4000m ~ 11000m` 真实深海，通过 `meterDepthToWorldY` 映射为 `10,000px ~ 20,000px`，并同步校准双端刷新器 `targetTier` 与 `depthScale` 分段对齐，彻底杜绝 1,000m 提前刷出）；② 依据真实体长门槛（`26.2m ~ 45.0m`）填满 `T37 ~ T48`（每阶 8~9 种），`T1` 占比降至 `37.9%`；③ 在 `docs/06-PREY_DATABASE_140.md` 记录该 100 种为缺少正式素材清单，磁盘暂用 `PREY-001~100` 粉红占位 WebP 代替 | `src/game/preyDatabase140.ts`, `src/game/ecosystemSpawner.ts`, `ios-native/HungrySharkEvolution/Rendering/PreySimulation.swift`, `ios-native/HungrySharkEvolutionTests/GameRulesTests.swift`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/06-PREY_DATABASE_140.md`, `docs/07-REVIEW_AND_ACTION_PLAN.md` |
 | 2026-11-23 | **P1-2 废除 `seabedScale` 双空间微缩投影，切换为原生 2D 真相机变焦（`CAMERA_ZOOM_MIN = 0.22`）+ 严守线性猎物体长比 + 巨鲨撞碎上层阶梯海床（`Tier 0~4: 8/12/18/26/36m`）+ 浅海空海深潜引导闭环**：① `computeTrueCameraZoom(L)` 按幂律 $(0.8/L)^{0.376}$ 平滑拉远至 `0.22` 下限，`stats.worldScale = scale / cameraZoom` 使鲨鱼与猎物在单一 1:1 世界空间同时满足视觉 === 碰撞与严格线性 $L_{\text{prey}}/L_{\text{shark}}$ 屏幕比例；② `SEABED_TERRACE_TIERS[0..4]` 接入体长破壁门槛与 `breachedTerraceCells` 破口追踪，消除巨鲨卡洞问题，同时 `Tier 5..8` 与主海床维持深渊基岩碰撞；③ 保持 45m 巨鲨浅海无适口猎物的生态跃迁设定，升级 `EcosystemSpawner` 广角视口回收/刷怪半径与 `rollTargetBountySpecies` 体长过滤，新增滞留 `>1.5s` 深潜 HUD 提示 | `src/game/rules.ts`, `src/game/world/terrainSystem.ts`, `src/game/ecosystemSpawner.ts`, `src/game/sim/types.ts`, `src/game/sim/stepSimulation.ts`, `src/game/sim/renderOceanWorld.ts`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |
 | 2026-11-20 | **生物力学体长与游动速度流体动力学协调重构（Biomechanical Swim Speed & Body Length Scaling Formula + Tail Cadence Coupling）**：① **定位并根除巨型鲨鱼屏幕游速塌缩缺陷**：在全环境等比微缩（`seabedScale = 0.8 / realBodyLengthM`，0.8m 幼鲨为 1.00，45m 巨兽降至 0.0178 即 56 倍缩小）体系下，原引擎世界速度（`moveSpeed = 140`）直接投影至屏幕后坍塌为 $V_{\text{visual}} = 140 \times \text{seabedScale} \approx 2.49 \sim 3.36\text{ px/s}$，导致终极巨兽在屏幕上移动自身体长需耗时 40 余秒（0.024 BL/s 龟速蠕动）而尾鳍却以 2.5Hz 疯狂摆动；② **视口屏幕目标速度与世界速度解耦换算**：在 `computeEvolvedSharkStats` 与 `computeSharkStats` 中引入生物体长成长因子 `lengthGrowthFactor = (realBodyLengthM / 0.8)^0.08`，屏幕视口目标速度定义为 $V_{\text{screen}} = V_{\text{base}} \times \text{lengthGrowthFactor} \times (1 + \text{speedBonus})$（0.8m 幼鲨常态 143px/s、冲刺 315px/s；45m 巨兽常态 260px/s、冲刺 574px/s，体现庞然巨物的磅礴动量与巡航推力）。引擎世界速度统一定义为 $V_{\text{world}} = V_{\text{screen}} / \text{curSeabedScale}$，使屏幕视觉位移严格恒等于 $V_{\text{screen}}$；③ **生物力学脊柱与尾摆节律缩放（Tail Cadence Factor）**：水生生物摆尾频率随体长按 $L^{-0.22}$ 幂律衰减，引入 `cadenceFactor = clamp((0.8 / L)^0.22, 0.42, 1.0)`。幼鲨摆尾频率 ~1.85Hz（轻快敏捷），终极巨神鲨摆尾频率平滑降至 ~0.77Hz（厚重威严、单次挥动推进巨大距离），彻底消除“小碎步狂摆但原地踏步”的视觉违和感；④ **海床物理碰撞半径与猎物 AI 速度同步缩放**：海床碰撞物理半径按 $(22 \times \text{scale}) / \text{curSeabedScale}$ 换算为真实物理尺度，猎物巡航/逃窜/冲撞速度及大嘴吸入速度统一按 `baseSpeed / curSeabedScale` 换算至微缩世界空间，确保全物种相对视口巡游速度与吞噬手感始终如一；⑤ **Web 与 iOS 原生 Swift 100% 契约对齐**：`src/App.tsx`、`src/game/rules.ts` 与 `scripts/build-ios-native.ts`、`GameRules.swift`、`OceanGameScene.swift` 同步全量适配，全量 45 项测试、TypeScript 零报错、Vite 构建及 Xcode 纯原生编译 100% PASS | `src/game/rules.ts`, `src/App.tsx`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `ios-native/HungrySharkEvolution/Rendering/OceanGameScene.swift`, `src/game/rules.test.ts`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md`, `docs/02-DESIGN_SPEC.md` |
 | 2026-11-20 | **彻底消除冲刺逆流感与猎物相对海床漂移的同源坐标空间投影重构（Unified Shrunk Coordinate Projection & Zero Relative Velocity Drift）+ 随机游动方向与平滑随机刷新计时器（Organic Staggered Edge Spawning & Direction Decoupling）**：① **消除冲刺相对海床漂移**：定位并解决原海床地貌以相机为中心按 `seabedScale` 几何微缩（$\text{screenX}_{\text{seabed}} = \text{viewW}/2 + (wx - C_x) \cdot \text{seabedScale} \cdot \text{zoom}$）而猎物/掉落物/飘字直接使用未缩放世界坐标（$\text{screenX}_{\text{prey}} = \text{viewW}/2 + (px - C_x) \cdot 1.0 \cdot \text{zoom}$）引发的逆流后移缺陷。当鲨鱼以速度 $V_x$ 冲刺时，相对屏幕速度差为 $-V_x \cdot (1 - \text{seabedScale}) \cdot \text{zoom}$，导致巨兽形态下猎物以冲刺速度的 90% 相对海床向鲨鱼逆向漂移。在 Web（`App.tsx`）与 iOS 原生 SpriteKit（`OceanGameScene.swift`）中全面统一猎物、掉落物、浮动跳字至同源微缩空间：$\text{screenX} = \text{viewW}/2 + (X - C_x) \cdot \text{seabedScale} \cdot \text{zoom}$，物理判定与吸入口距离同步使用 $\text{effPrey} = \text{shark} + (P - \text{shark}) \cdot \text{seabedScale}$。数学保证 $\frac{d}{dt}(\text{screenX}_{\text{prey}} - \text{screenX}_{\text{seabed}}) = v_{\text{prey}} \cdot \text{seabedScale} \cdot \text{zoom}$，鲨鱼冲刺速度在微分中完全抵消，猎物与海床 100% 相对静止，冲刺漂移彻底降为零；② **猎物游动方向随机化**：解绑边缘刷新方向耦合，猎物生成后 50% 朝左、50% 朝右游动（`dir = rng() < 0.5 ? 1 : -1`），消除所有鱼类扑向玩家的刻板感；③ **平滑随机刷新计时器**：移除每帧紧凑出怪与单帧倾泻，引入累加计时器 `spawnTimer`（$0.35\text{s} \sim 0.88\text{s}$ 随机单条涌入），杜绝一波一波出怪的波次顿挫感 | `src/App.tsx`, `src/game/ecosystemSpawner.ts`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Rendering/OceanGameScene.swift`, `docs/02-DESIGN_SPEC.md`, `docs/03-GAME_BALANCE_AND_NUMERICAL_DESIGN.md` |

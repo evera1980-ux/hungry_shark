@@ -1,3 +1,7 @@
+import worldAndProgressionJson from '../../shared/configs/world_and_progression_config.json';
+import sharkEvolutionJson from '../../shared/configs/shark_evolution_config.json';
+import crownMasteryJson from '../../shared/configs/crown_mastery_config.json';
+
 export type SharkLineageId =
   | 'APEX_BIO'
   | 'CYBER_MECHA'
@@ -54,6 +58,23 @@ export type SharkSpriteKey =
   | 'SHARK_FORM_46'
   | 'SHARK_FORM_47';
 
+export interface SharkTraitsConfig {
+  coinYieldTraitMult: number;
+  geneYieldTraitMult: number;
+  bossRewardMult: number;
+  specialPreyScoreMult: number;
+  frenzyDurationBonus: number;
+  jawSuctionMult: number;
+  damageTakenMult: number;
+  mineDamageTakenMult: number;
+  knockbackMult: number;
+  boostRegenMult: number;
+  killEnergyBonus: number;
+  maxComboBonus: number;
+  goldenMutantReduction: number;
+  canEatMines: boolean;
+}
+
 export interface SharkFormConfig {
   index: number; // 0..47
   row: number; // 0..5 (Generation I..VI)
@@ -90,12 +111,13 @@ export interface SharkFormConfig {
   devourHealMult: number;
   scoreMult: number;
   /** Evolution Unlock Gates */
-  reqParentUpgradeLevel: number; // Required upgrade level (1..10) on either [row, col-1] or [row-1, col]
-  reqMaxInRunLevel: number; // Historical or current in-run level requirement
-  reqMaxDepth: number; // Historical or current max depth requirement (m)
+  reqParentUpgradeLevel: number;
+  reqMaxInRunLevel: number;
+  reqMaxDepth: number;
   unlockCoins: number;
   unlockGenes: number;
   baseUpgradeCoinCost: number;
+  traits: SharkTraitsConfig;
 }
 
 export interface SharkMetaSaveData {
@@ -108,10 +130,55 @@ export interface SharkMetaSaveData {
   bestInRunLevel: number;
   bestDepthReached: number;
   totalRunsPlayed: number;
+  /** Whether the one-time onboarding starter gift has already been claimed */
+  onboardingGiftClaimed?: boolean;
   /** Per-shark personal best score (non-trial runs only) */
   sharkBestScores?: Record<string, number>;
   /** Per-shark highest claimed mastery crown tier (0 = none, 1 = Bronze, 2 = Silver, 3 = Gold) */
   sharkMasteryTiers?: Record<string, number>;
+}
+
+export interface PermanentProgressRunContext {
+  trialActive: boolean;
+  activeInRun?: boolean;
+  sandboxOrCheatMode?: boolean;
+}
+
+export interface PermanentProgressEligibility {
+  eligible: boolean;
+  allowRunRecords: boolean;
+  allowSharkMasteryAndCrown: boolean;
+  allowSharkUnlockAndUpgrade: boolean;
+  allowAchievements: boolean;
+  allowMissions: boolean;
+  allowEncyclopediaDiscovery: boolean;
+  allowRunCountIncrement: boolean;
+  allowTrialCurrencyCarryOver: boolean;
+  allowDoubleSettlementAd: boolean;
+}
+
+export function isEligibleForPermanentProgress(
+  runContext: PermanentProgressRunContext
+): boolean {
+  return !runContext.trialActive && !runContext.sandboxOrCheatMode;
+}
+
+export function getPermanentProgressEligibility(
+  runContext: PermanentProgressRunContext
+): PermanentProgressEligibility {
+  const eligible = isEligibleForPermanentProgress(runContext);
+  return {
+    eligible,
+    allowRunRecords: eligible,
+    allowSharkMasteryAndCrown: eligible,
+    allowSharkUnlockAndUpgrade: eligible,
+    allowAchievements: eligible,
+    allowMissions: eligible,
+    allowEncyclopediaDiscovery: eligible,
+    allowRunCountIncrement: eligible,
+    allowTrialCurrencyCarryOver: !runContext.sandboxOrCheatMode,
+    allowDoubleSettlementAd: eligible,
+  };
 }
 
 export const LINEAGE_META: Record<
@@ -123,888 +190,113 @@ export const LINEAGE_META: Record<
     descZh: string;
     descEn: string;
   }
-> = {
-  APEX_BIO: {
-    nameZh: '远古狂暴血统',
-    nameEn: 'Apex Leviathan',
-    badgeColor: '#f43f5e',
-    descZh: '高额生命上限与吞噬回血，巨口咬合判定范围扩大',
-    descEn: 'High max HP & devour heal, wider jaw bite radius',
-  },
-  CYBER_MECHA: {
-    nameZh: '赛博机甲血统',
-    nameEn: 'Cyber Mecha',
-    badgeColor: '#22d3ee',
-    descZh: '推进极速大幅提升，冲刺能耗降低，自带大范围磁吸雷达',
-    descEn: 'High swim velocity, lower boost drain & wide magnet radar',
-  },
-  ELEMENTAL_CORE: {
-    nameZh: '地心元素血统',
-    nameEn: 'Elemental Core',
-    badgeColor: '#fb923c',
-    descZh: '高额捕食得分加成，狂暴持续时间延长，冲刺破甲伤害倍增',
-    descEn: 'High score multiplier, extended Gold Frenzy & armor break',
-  },
-  ELDER_ABYSS: {
-    nameZh: '克苏鲁深渊血统',
-    nameEn: 'Elder Abyss',
-    badgeColor: '#c084fc',
-    descZh: '深海饥饿代谢大幅减缓，深渊抗压无惧黑暗，额外基因结晶产出',
-    descEn: 'Slow hunger drain in deep sea, abyssal resilience & bonus genes',
-  },
-};
+> = sharkEvolutionJson.lineageMeta as Record<
+  SharkLineageId,
+  {
+    nameZh: string;
+    nameEn: string;
+    badgeColor: string;
+    descZh: string;
+    descEn: string;
+  }
+>;
 
 export const GENERATION_NAMES: Array<{
   gen: number;
   nameZh: string;
   nameEn: string;
   color: string;
-}> = [
-  { gen: 1, nameZh: 'Tier I · 幼生启源阶', nameEn: 'Tier I · Juvenile Origin', color: '#38bdf8' },
-  { gen: 2, nameZh: 'Tier II · 大洋猎手阶', nameEn: 'Tier II · Ocean Hunter', color: '#4ade80' },
-  { gen: 3, nameZh: 'Tier III · 深海霸主阶', nameEn: 'Tier III · Deep Overlord', color: '#a855f7' },
-  { gen: 4, nameZh: 'Tier IV · 狂暴元素阶', nameEn: 'Tier IV · Elemental Fury', color: '#f97316' },
-  { gen: 5, nameZh: 'Tier V · 传说君王阶', nameEn: 'Tier V · Mythic Monarch', color: '#eab308' },
-  { gen: 6, nameZh: 'Tier VI · 神话古神阶', nameEn: 'Tier VI · Cosmic Elder God', color: '#f43f5e' },
-];
+}> = sharkEvolutionJson.generations;
 
-interface RawSharkSeed {
-  id: string;
-  lineage: SharkLineageId;
-  nameZh: string;
-  nameEn: string;
-  titleZh: string;
-  titleEn: string;
-  traitZh: string;
-  traitEn: string;
-  colors: [string, string, string];
-  realBodyLengthM?: number;
-  cruiseSpeedMps?: number;
-  boostSpeedMps?: number;
-  statOverrides?: Partial<
-    Pick<
-      SharkFormConfig,
-      | 'baseHp'
-      | 'speedBonus'
-      | 'hpDrainReduction'
-      | 'boostCostReduction'
-      | 'magnetBonus'
-      | 'devourHealMult'
-      | 'scoreMult'
-    >
-  >;
-}
+export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] =
+  sharkEvolutionJson.sharks as SharkFormConfig[];
 
-const RAW_SHARK_SEEDS: RawSharkSeed[] = [
-  // ==================== ROW 0: TIER I · 幼生启源阶 (Indices 0..7) ====================
-  {
-    id: 'shark_00_clown_fry',
-    lineage: 'APEX_BIO',
-    nameZh: '拟态小丑幼鲨',
-    nameEn: 'Mimic Clown Fry',
-    titleZh: '破壳初生·浅礁伪装者',
-    titleEn: 'Reef Camouflage Hatchling',
-    traitZh: '浅海珊瑚礁完美拟态，吞噬小型鱼群额外恢复 +20% 生命',
-    traitEn: '+20% HP restored from shallow reef fish schools',
-    colors: ['#fb923c', '#f8fafc', '#fdba74'],
-  },
-  {
-    id: 'shark_01_lemon_pup',
-    lineage: 'APEX_BIO',
-    nameZh: '柠檬黄沙幼鲨',
-    nameEn: 'Lemon Sand Pup',
-    titleZh: '阳光沙洲·敏捷巡游者',
-    titleEn: 'Sunlit Sandbar Cruiser',
-    traitZh: '初具真鲨流线体型，基础咬合阶位提升至 T2，游速 +8%',
-    traitEn: 'Base Bite Tier T2 unlocked, +8% swim speed',
-    colors: ['#eab308', '#fef08a', '#facc15'],
-    statOverrides: { speedBonus: 0.08 },
-  },
-  {
-    id: 'shark_02_neon_reef',
-    lineage: 'CYBER_MECHA',
-    nameZh: '霓虹流光礁鲨',
-    nameEn: 'Neon Stream Reef Shark',
-    titleZh: '生物电感·极速掠影',
-    titleEn: 'Bio-Electric Reef Sprinter',
-    traitZh: '体表霓虹侧线感应猎物，冲刺能量消耗降低 14%，磁吸范围 +64',
-    traitEn: '-14% boost energy cost, +64 magnet radius',
-    colors: ['#06b6d4', '#a855f7', '#22d3ee'],
-  },
-  {
-    id: 'shark_03_leopard_shark',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '豹纹珊瑚猎鲨',
-    nameEn: 'Leopard Coral Hunter',
-    titleZh: '礁盘伏击·连击新星',
-    titleEn: 'Reef Ambush Predator',
-    traitZh: '连击捕食得分倍率提升至 1.27x（+27%），咬碎硬壳蟹类速度加快',
-    traitEn: '1.27x (+27%) feeding score multiplier, agile reef turning',
-    colors: ['#d97706', '#fde68a', '#f59e0b'],
-  },
-  {
-    id: 'shark_04_glow_spotted',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '幽绿星斑幼鲨',
-    nameEn: 'Bioluminescent Star Shark',
-    titleZh: '微光适应·耐饥潜行者',
-    titleEn: 'Twilight-Adapted Stalker',
-    traitZh: '荧光斑点减缓新陈代谢，饥饿掉血速率降低 13%',
-    traitEn: '-13% hunger HP drain rate',
-    colors: ['#10b981', '#047857', '#34d399'],
-    statOverrides: { hpDrainReduction: 0.13 },
-  },
-  {
-    id: 'shark_05_rivet_proto',
-    lineage: 'CYBER_MECHA',
-    nameZh: '铆钉铁皮实验鲨',
-    nameEn: 'Riveted Tin Proto-Shark',
-    titleZh: '初代半机械·发条推进',
-    titleEn: 'Clockwork Alloy Prototype',
-    traitZh: '加固初代合金骨骼，基础生命达 150，金币与基因吸附范围 +78',
-    traitEn: '150 Base HP, +78 coin & gene magnet radius',
-    colors: ['#64748b', '#cbd5e1', '#38bdf8'],
-  },
-  {
-    id: 'shark_06_hammerhead_pup',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '双髻锤头猎鲨',
-    nameEn: 'Hammerhead Radar Shark',
-    titleZh: '全景声呐·360度锁定',
-    titleEn: 'Panoramic Sonar Hunter',
-    traitZh: '宽阔锤头具备超强电感应，悬赏目标鱼与黄金变异鱼得分额外 +20%',
-    traitEn: '+20% bonus score from Bounty & Golden Mutant fish',
-    colors: ['#60a5fa', '#cbd5e1', '#93c5fd'],
-  },
-  {
-    id: 'shark_07_steel_patrol',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '重铆钢甲巡逻鲨',
-    nameEn: 'Steel-Plated Patrol Shark',
-    titleZh: '浅海铁卫·突破暮光',
-    titleEn: 'Armored Twilight Pioneer',
-    traitZh: '咬合阶位稳固提升至 T3，可轻松咬碎刺豚与狮子鱼',
-    traitEn: 'Base Bite Tier T3, crushes pufferfish & lionfish',
-    colors: ['#475569', '#94a3b8', '#cbd5e1'],
-  },
+const SHARK_BY_ID: Record<string, SharkFormConfig> = Object.fromEntries(
+  SHARK_EVOLUTION_FORMS.map((s) => [s.id, s])
+);
 
-  // ==================== ROW 1: TIER II · 大洋猎手阶 (Indices 8..15) ====================
-  {
-    id: 'shark_08_blacktip_reef',
-    lineage: 'APEX_BIO',
-    nameZh: '黑鳍远洋猎鲨',
-    nameEn: 'Blacktip Pelagic Shark',
-    titleZh: '浪尖飞跃·群鱼收割者',
-    titleEn: 'Wave-Leaping Pack Hunter',
-    traitZh: '强健背鳍带来 +15% 基础游速，吞噬回血提升 34%',
-    traitEn: '+15% swim speed, +34% devour HP heal',
-    colors: ['#a16207', '#f8fafc', '#fbbf24'],
-    statOverrides: { speedBonus: 0.15 },
-  },
-  {
-    id: 'shark_09_blue_mako',
-    lineage: 'APEX_BIO',
-    nameZh: '灰鲭深蓝极速鲨',
-    nameEn: 'Blue Mako Torpedo Shark',
-    titleZh: '大洋闪电·顺流鱼雷',
-    titleEn: 'Oceanic Lightning Torpedo',
-    traitZh: '海洋中游速最快的真鲨之一，基础游速 +22%，冲刺能量恢复 +25%',
-    traitEn: '+22% swim speed & +25% boost energy recovery',
-    colors: ['#0284c7', '#e0f2fe', '#38bdf8'],
-    statOverrides: { speedBonus: 0.22 },
-  },
-  {
-    id: 'shark_10_bull_shark',
-    lineage: 'CYBER_MECHA',
-    nameZh: '暴君公牛壮鲨',
-    nameEn: 'Tyrant Bull Shark',
-    titleZh: '横冲直撞·重装碎骨者',
-    titleEn: 'Heavy Bone-Crusher',
-    traitZh: '粗壮身躯无惧碰撞，受到不可吞噬巨兽反伤降低 25%',
-    traitEn: '-25% collision damage taken from larger predators',
-    colors: ['#475569', '#e2e8f0', '#94a3b8'],
-  },
-  {
-    id: 'shark_11_tiger_shark',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '深海斑纹虎鲨',
-    nameEn: 'Striped Tiger Shark',
-    titleZh: '锯齿利颚·来者不拒',
-    titleEn: 'Serrated-Jaw Scavenger',
-    traitZh: '锯齿状颚骨可撕裂潜艇外壳，基础咬合阶位达 T4',
-    traitEn: 'Base Bite Tier T4, can crunch submersibles & moray eels',
-    colors: ['#78716c', '#fef3c7', '#f59e0b'],
-  },
-  {
-    id: 'shark_12_starry_whale',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '星夜荧光鲸鲨',
-    nameEn: 'Starry Night Whale Shark',
-    titleZh: '暮光滤食·群星庇护',
-    titleEn: 'Mesopelagic Star Filter',
-    traitZh: '宽阔巨口吸附半径扩大 35%，饥饿代谢减缓 20%',
-    traitEn: '+35% jaw suction radius, -20% hunger drain',
-    colors: ['#0f172a', '#38bdf8', '#7dd3fc'],
-    statOverrides: { hpDrainReduction: 0.2 },
-  },
-  {
-    id: 'shark_13_steam_conduit',
-    lineage: 'CYBER_MECHA',
-    nameZh: '蒸汽铜管改造鲨',
-    nameEn: 'Steampunk Conduit Shark',
-    titleZh: '高压锅炉·涡轮过载',
-    titleEn: 'High-Pressure Boiler Shark',
-    traitZh: '蒸汽动力核心持续增压，冲刺能耗降低 25%，磁吸范围 +114',
-    traitEn: '-25% boost energy drain, +114 magnet radius',
-    colors: ['#0f766e', '#d97706', '#2dd4bf'],
-  },
-  {
-    id: 'shark_14_magma_ember',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '赤焰熔火幼鲨',
-    nameEn: 'Magma Ember Shark',
-    titleZh: '海底火山·炙热流体',
-    titleEn: 'Volcanic Vent Predator',
-    traitZh: '体内流淌滚烫岩浆，捕食得分倍率 1.54x，黄金狂暴时长 +1.3秒',
-    traitEn: '1.54x score multiplier, +1.3s Gold Frenzy duration',
-    colors: ['#ea580c', '#fde047', '#f97316'],
-  },
-  {
-    id: 'shark_15_abyss_tentacle',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '深渊触须变异鲨',
-    nameEn: 'Abyss Tentacle Mutant',
-    titleZh: '古神低语·触腕初生',
-    titleEn: 'Eldritch Tendril Mutant',
-    traitZh: '深渊基因共鸣，自动牵引近距离猎物，基因获取量额外 +20%',
-    traitEn: 'Abyssal resonance pulls nearby prey, +20% Gene crystal yield',
-    colors: ['#7e22ce', '#f472b6', '#c084fc'],
-  },
-
-  // ==================== ROW 2: TIER III · 深海霸主阶 (Indices 16..23) ====================
-  {
-    id: 'shark_16_great_white',
-    lineage: 'APEX_BIO',
-    nameZh: '远洋霸主大白鲨',
-    nameEn: 'Apex Great White Shark',
-    titleZh: '海洋死神·顶级掠食者',
-    titleEn: 'Supreme Ocean Predator',
-    traitZh: '经典深海霸主！基础生命达 305，咬合阶位 T4，吞噬回血 +48%',
-    traitEn: '305 Base HP, Bite Tier T4, +48% devour healing',
-    colors: ['#0369a1', '#f8fafc', '#38bdf8'],
-  },
-  {
-    id: 'shark_17_sabre_tiger',
-    lineage: 'APEX_BIO',
-    nameZh: '远古剑齿虎鲨',
-    nameEn: 'Prehistoric Sabretooth Shark',
-    titleZh: '史前血脉·撕裂重甲',
-    titleEn: 'Ancient Armor-Piercing Jaws',
-    traitZh: '史前巨型剑齿觉醒，基础咬合阶位直达 T5，可生吞电鳗与大赤鱿',
-    traitEn: 'Base Bite Tier T5, devours electric eels & giant squids',
-    colors: ['#57534e', '#e7e5e4', '#a8a29e'],
-  },
-  {
-    id: 'shark_18_battle_scar',
-    lineage: 'CYBER_MECHA',
-    nameZh: '百战刀疤狂鲨',
-    nameEn: 'Battle-Scarred Berserker',
-    titleZh: '血海修罗·越战越勇',
-    titleEn: 'Relentless Frenzy Veteran',
-    traitZh: '连击倍率上限提升至 2.4x，每次吞噬额外回复 4 点冲刺能量',
-    traitEn: 'Combo cap raised to 2.4x, +4 extra boost energy on kill',
-    colors: ['#334155', '#f43f5e', '#64748b'],
-  },
-  {
-    id: 'shark_19_thresher_shark',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '镰尾闪电狐鲨',
-    nameEn: 'Scythe-Tail Thresher Shark',
-    titleZh: '长尾音爆·回旋猎杀',
-    titleEn: 'Sonic Whip-Tail Hunter',
-    traitZh: '修长尾鳍产生音爆推进，游速 +24%，巨口吸附范围扩大 25%',
-    traitEn: '+24% swim speed, +25% wider jaw suction reach',
-    colors: ['#0e7490', '#cffafe', '#06b6d4'],
-  },
-  {
-    id: 'shark_20_goblin_jaw',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '深渊弹射巨口鲨',
-    nameEn: 'Abyssal Sling-Jaw Shark',
-    titleZh: '千尺暗海·瞬发吞噬',
-    titleEn: 'Bathyal Sling-Jaw Devourer',
-    traitZh: '颚部可向前弹射吸附，大嘴吸附距离 +40%，饥饿消耗降低 26%',
-    traitEn: '+40% jaw suction range, -26% hunger drain',
-    colors: ['#312e81', '#f43f5e', '#818cf8'],
-  },
-  {
-    id: 'shark_21_cyber_alloy',
-    lineage: 'CYBER_MECHA',
-    nameZh: '重装钛合金战鲨',
-    nameEn: 'Titanium Cyber War-Shark',
-    titleZh: '军工级改造·深海装甲舰',
-    titleEn: 'Military-Grade Cybernetic Hull',
-    traitZh: '全身覆盖钛合金装甲，冲刺能耗降低 33%，水雷爆炸伤害减免 40%',
-    traitEn: '-33% boost cost, -40% damage taken from naval mines',
-    colors: ['#475569', '#38bdf8', '#94a3b8'],
-  },
-  {
-    id: 'shark_22_obsidian_lava',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '黑曜熔岩恶魔鲨',
-    nameEn: 'Obsidian Lava Demon Shark',
-    titleZh: '深海地火·熔核暴走',
-    titleEn: 'Molten Core Hell-Shark',
-    traitZh: '基础咬合阶位达 T5，捕食得分倍率 1.72x，黄金狂暴时长 +1.6秒',
-    traitEn: 'Base Bite Tier T5, 1.72x score, +1.6s Gold Frenzy',
-    colors: ['#7c2d12', '#f97316', '#facc15'],
-  },
-  {
-    id: 'shark_23_mindflayer_shark',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '克苏鲁夺心章鱼鲨',
-    nameEn: 'Cthulhu Mindflayer Shark',
-    titleZh: '旧日眷族·深渊精神震慑',
-    titleEn: 'Old One Tentacle Scion',
-    traitZh: '头部演化为巨型章鱼触手群，咬合阶位 T5，基因与金币收益额外 +30%',
-    traitEn: 'Base Bite Tier T5, +30% bonus Coin & Gene rewards',
-    colors: ['#065f46', '#9333ea', '#c084fc'],
-  },
-
-  // ==================== ROW 3: TIER IV · 狂暴元素阶 (Indices 24..31) ====================
-  {
-    id: 'shark_24_megalodon',
-    lineage: 'APEX_BIO',
-    nameZh: '远古霸主巨齿鲨',
-    nameEn: 'Prehistoric Megalodon',
-    titleZh: '新生代之王·五十吨咬合力',
-    titleEn: '50-Ton Bite Force Sovereign',
-    traitZh: '史前海洋绝对霸主！基础咬合阶位达 T6，基础生命高达 395，可咬碎帝王蟹与蝰鱼',
-    traitEn: 'Base Bite Tier T6, 395 Base HP, crushes King Crabs & Viperfish',
-    colors: ['#334155', '#e2e8f0', '#94a3b8'],
-  },
-  {
-    id: 'shark_25_bio_venom',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '核能生化毒液鲨',
-    nameEn: 'Bio-Radioactive Venom Shark',
-    titleZh: '翡翠辐射·融甲强酸',
-    titleEn: 'Emerald Fallout Meltdown',
-    traitZh: '浑身流淌强酸辐射液，直接免疫并可吞噬 T6 核废料与水雷回血！',
-    traitEn: 'Base Bite Tier T6, can safely devour Naval Mines & Toxic Slime!',
-    colors: ['#22c55e', '#bef264', '#4ade80'],
-  },
-  {
-    id: 'shark_26_twin_rocket',
-    lineage: 'CYBER_MECHA',
-    nameZh: '双联火箭推进机甲鲨',
-    nameEn: 'Twin-Rocket Mecha Shark',
-    titleZh: '超音速潜航·重型制导',
-    titleEn: 'Supersonic Thruster Mecha',
-    traitZh: '流线超导推进躯体，游速 +36%，冲刺能耗降低 38%',
-    traitEn: '+36% swim speed, -38% boost energy consumption',
-    colors: ['#475569', '#ef4444', '#f87171'],
-  },
-  {
-    id: 'shark_27_glacial_crystal',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '极地万年玄冰鲨',
-    nameEn: 'Glacial Permafrost Shark',
-    titleZh: '绝对零度·寒霜棱镜',
-    titleEn: 'Absolute Zero Frost Prism',
-    traitZh: '极寒晶甲减缓代谢，饥饿掉血降低 30%，捕食得分倍率 1.81x',
-    traitEn: '-30% hunger drain, 1.81x score multiplier',
-    colors: ['#0284c7', '#e0f2fe', '#38bdf8'],
-    statOverrides: { hpDrainReduction: 0.3 },
-  },
-  {
-    id: 'shark_28_void_lightning',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '虚空雷霆脉冲鲨',
-    nameEn: 'Void Lightning Pulse Shark',
-    titleZh: '暗雷环绕·电磁超导',
-    titleEn: 'Dark Plasma Ring Leviathan',
-    traitZh: '周身环绕紫电引力场，磁吸半径 +160，黄金狂暴充能需求减少 1 条',
-    traitEn: '+160 magnet radius, -1 Golden Mutant needed for Frenzy',
-    colors: ['#581c87', '#e879f9', '#c084fc'],
-    statOverrides: { magnetBonus: 160 },
-  },
-  {
-    id: 'shark_29_crimson_cyborg',
-    lineage: 'CYBER_MECHA',
-    nameZh: '猩红死神赛博鲨',
-    nameEn: 'Crimson Reaper Cyborg',
-    titleZh: '红眼歼灭者·高频激光刃',
-    titleEn: 'High-Frequency Laser Fin',
-    traitZh: '基础咬合阶位达 T7！可正面对决腔棘鱼与吞噬鳗，游速 +39%',
-    traitEn: 'Base Bite Tier T7! Devours Coelacanths & Gulper Eels, +39% speed',
-    colors: ['#334155', '#f43f5e', '#fb7185'],
-  },
-  {
-    id: 'shark_30_earth_golem',
-    lineage: 'APEX_BIO',
-    nameZh: '大地岩甲泰坦鲨',
-    nameEn: 'Earth-Core Golem Titan',
-    titleZh: '海沟盘石·不灭重甲',
-    titleEn: 'Trench Bedrock Behemoth',
-    traitZh: '大陆架岩石重甲护体，基础生命高达 455，咬合阶位 T7，受击震退减半',
-    traitEn: '455 Base HP, Base Bite Tier T7, -50% knockback taken',
-    colors: ['#78350f', '#fb923c', '#d97706'],
-  },
-  {
-    id: 'shark_31_multi_eyed_fiend',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '千眼深渊魔神鲨',
-    nameEn: 'Multi-Eyed Abyssal Fiend',
-    titleZh: '深渊凝视·全知魔物',
-    titleEn: 'All-Seeing Trench Horror',
-    traitZh: '全身复眼洞察深渊，咬合阶位 T7，金币与基因获取额外提升 45%',
-    traitEn: 'Base Bite Tier T7, +45% bonus Coin & Gene rewards',
-    colors: ['#1e1b4b', '#f43f5e', '#818cf8'],
-  },
-
-  // ==================== ROW 4: TIER V · 传说君王阶 (Indices 32..39) ====================
-  {
-    id: 'shark_32_chrono_mecha',
-    lineage: 'CYBER_MECHA',
-    nameZh: '超时空引力环机甲鲨',
-    nameEn: 'Chrono Holo-Ring Mecha',
-    titleZh: '曲率跃迁·霓虹奇点',
-    titleEn: 'Warp-Drive Singularity Mecha',
-    traitZh: '超时空曲率引擎加持，游速 +42%，冲刺能耗降低 45%，磁吸 +220',
-    traitEn: '+42% swim speed, -45% boost cost, +220 magnet radius',
-    colors: ['#6366f1', '#f472b6', '#e879f9'],
-    statOverrides: { boostCostReduction: 0.45, magnetBonus: 220 },
-  },
-  {
-    id: 'shark_33_hellfire_behemoth',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '地心业火熔岩巨兽',
-    nameEn: 'Hellfire Magma Behemoth',
-    titleZh: '海床崩裂·焚海君王',
-    titleEn: 'Tectonic Eruption Monarch',
-    traitZh: '咬合阶位 T7，基础生命达 495，黄金狂暴时长延长 +2.5秒且得分 1.93x',
-    traitEn: 'Bite Tier T7, 495 Base HP, +2.5s Frenzy & 1.93x score',
-    colors: ['#9a3412', '#facc15', '#f97316'],
-  },
-  {
-    id: 'shark_34_dark_matter',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '黑洞暗物质吞噬鲨',
-    nameEn: 'Dark Matter Singularity Shark',
-    titleZh: '事件视界·万物坍缩',
-    titleEn: 'Event Horizon Devourer',
-    traitZh: '周身环绕黑洞漩涡，大嘴吸附半径翻倍（2.0x），饥饿代谢降低 40%',
-    traitEn: '2.0x jaw suction radius, -40% hunger HP drain',
-    colors: ['#3b0764', '#a855f7', '#d8b4fe'],
-    statOverrides: { hpDrainReduction: 0.4 },
-  },
-  {
-    id: 'shark_35_golden_dragon',
-    lineage: 'APEX_BIO',
-    nameZh: '黄金圣龙瑞兽鲨',
-    nameEn: 'Golden Imperial Dragon Shark',
-    titleZh: '真龙化形·四海朝拜',
-    titleEn: 'Celestial Golden Dragon Sovereign',
-    traitZh: '化龙觉醒！基础咬合阶位直达 T8，金币与基因收益额外提升 +65%',
-    traitEn: 'Base Bite Tier T8! +65% bonus Coin & Gene drop yield',
-    colors: ['#ca8a04', '#fef08a', '#facc15'],
-  },
-  {
-    id: 'shark_36_dreadnought_cannon',
-    lineage: 'CYBER_MECHA',
-    nameZh: '重炮无畏战列舰鲨',
-    nameEn: 'Dreadnought Cannon Battleship',
-    titleZh: '深海重巡·主炮轰鸣',
-    titleEn: 'Heavy Artillery War-Shark',
-    traitZh: '重装无畏舰躯体，咬合阶位 T8，游速 +46%，可直接生吞深渊巨兽！',
-    traitEn: 'Base Bite Tier T8, +46% speed, devours Bosses & Behemoths cleanly',
-    colors: ['#3f6212', '#cbd5e1', '#84cc16'],
-  },
-  {
-    id: 'shark_37_matrix_phantom',
-    lineage: 'CYBER_MECHA',
-    nameZh: '矩阵代码黑客幽灵鲨',
-    nameEn: 'Matrix Code Cyber-Phantom',
-    titleZh: '虚拟重构·底层代码篡改',
-    titleEn: 'Digital Glitch Overlord',
-    traitZh: '数字化幽灵躯体，咬合阶位 T8，游速 +47%，冲刺能量恢复速度翻倍（2.0x）',
-    traitEn: 'Base Bite Tier T8, +47% speed, 2.0x boost energy regen',
-    colors: ['#16a34a', '#86efac', '#4ade80'],
-  },
-  {
-    id: 'shark_38_poseidon_king',
-    lineage: 'APEX_BIO',
-    nameZh: '海皇波塞冬皇冠霸主',
-    nameEn: 'Poseidon Crowned Sovereign',
-    titleZh: '七海帝王·黄金王权',
-    titleEn: 'Crowned King of the Seven Seas',
-    traitZh: '黄金海皇真身，咬合阶位 T8，基础生命达 630，吞噬回血提升 +76%',
-    traitEn: 'Base Bite Tier T8, 630 Base HP, +76% devour healing',
-    colors: ['#0284c7', '#facc15', '#fde047'],
-  },
-  {
-    id: 'shark_39_kraken_hydra',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '深渊九头海怪克拉肯鲨',
-    nameEn: 'Kraken Hydra Leviathan Shark',
-    titleZh: '触手君王·深渊支配者',
-    titleEn: 'Abyssal Tentacle Monarch',
-    traitZh: '融合克拉肯巨妖基因，咬合阶位 T8，吞噬深渊 Boss 额外获得 2 倍奖励',
-    traitEn: 'Base Bite Tier T8, 2x rewards from devouring Abyss Bosses',
-    colors: ['#0f766e', '#a855f7', '#2dd4bf'],
-  },
-
-  // ==================== ROW 5: TIER VI · 神话古神阶 (Indices 40..47) ====================
-  {
-    id: 'shark_40_nebula_galaxy',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '星云银河造物主鲨',
-    nameEn: 'Nebula Galaxy Cosmic Shark',
-    titleZh: '星海永恒·宇宙星尘化躯',
-    titleEn: 'Astral Nebula Creator',
-    traitZh: '体内孕育璀璨星河，咬合阶位 T8，基础生命达 645，得分 1.9x 且基因收益 +80%',
-    traitEn: 'Bite Tier T8, 645 Base HP, 1.9x Score & +80% Gene rewards',
-    colors: ['#4f46e5', '#ec4899', '#818cf8'],
-  },
-  {
-    id: 'shark_41_star_destroyer',
-    lineage: 'CYBER_MECHA',
-    nameZh: '歼星舰超光速机甲神鲨',
-    nameEn: 'Star-Destroyer Hyperdrive Shark',
-    titleZh: '歼星武装·等离子推进神明',
-    titleEn: 'Hyperdrive Mecha Deity',
-    traitZh: '终极机械降神！咬合阶位 T8，游速 +51%，冲刺能耗降低 55%，全屏磁吸 +300',
-    traitEn: 'Bite Tier T8, +51% speed, -55% boost cost, +300 magnet',
-    colors: ['#0284c7', '#38bdf8', '#7dd3fc'],
-    statOverrides: { boostCostReduction: 0.55, magnetBonus: 300 },
-  },
-  {
-    id: 'shark_42_sea_dragon_leviathan',
-    lineage: 'APEX_BIO',
-    nameZh: '沧溟海龙利维坦',
-    nameEn: 'Azure Sea-Dragon Leviathan',
-    titleZh: '远古海神·万丈狂澜',
-    titleEn: 'Primordial Sea-Serpent God',
-    traitZh: '完全体沧溟海龙形态！基础生命达 765，吞噬回血翻倍（2.0x），饥饿消耗降低 45%',
-    traitEn: 'Bite Tier T8, 765 Base HP, 2.0x devour heal, -45% hunger drain',
-    colors: ['#0d9488', '#38bdf8', '#2dd4bf'],
-    statOverrides: { devourHealMult: 2.0, hpDrainReduction: 0.45 },
-  },
-  {
-    id: 'shark_43_solar_supernova',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '恒星日冕太阳神鲨',
-    nameEn: 'Solar Corona Supernova Shark',
-    titleZh: '耀斑聚变·深海永恒烈阳',
-    titleEn: 'Stellar Fusion Sun-God Shark',
-    traitZh: '化身恒星烈阳照亮万米深渊，黄金狂暴时长 +4.0秒，捕食得分倍率 2.17x！',
-    traitEn: 'Bite Tier T8, +4.0s Gold Frenzy duration, 2.17x Score multiplier!',
-    colors: ['#ea580c', '#fef08a', '#facc15'],
-  },
-  {
-    id: 'shark_44_celestial_paladin',
-    lineage: 'APEX_BIO',
-    nameZh: '圣光奥术神装炽天使鲨',
-    nameEn: 'Celestial Arcane Paladin Shark',
-    titleZh: '神圣裁决·不朽金甲',
-    titleEn: 'Divine Aegis Seraph Shark',
-    traitZh: '奥术圣光护体，基础生命高达 785，受到任何伤害减免 50%，金币收益翻倍',
-    traitEn: 'Bite Tier T8, 785 Base HP, -50% damage taken, 2.0x Coin yield',
-    colors: ['#d97706', '#38bdf8', '#fef08a'],
-  },
-  {
-    id: 'shark_45_chaos_void_elder',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '混沌虚空暗影古神鲨',
-    nameEn: 'Chaos Void Shadow Elder God',
-    titleZh: '深渊尽头·旧日支配者真身',
-    titleEn: 'Primordial Abyssal Outer God',
-    traitZh: '无视深海高压代谢，饥饿掉血降低 50%，基因结晶产出翻倍（+100%）',
-    traitEn: 'Bite Tier T8, -50% hunger drain, +100% Gene crystal yield',
-    colors: ['#3b0764', '#9333ea', '#e879f9'],
-    statOverrides: { hpDrainReduction: 0.5 },
-  },
-  {
-    id: 'shark_46_aurora_valkyrie',
-    lineage: 'ELEMENTAL_CORE',
-    nameZh: '极光羽翼天界女武神鲨',
-    nameEn: 'Aurora Winged Valkyrie Shark',
-    titleZh: '虹光神翼·超维巡航',
-    titleEn: 'Prismatic Valkyrie Sovereign',
-    traitZh: '展开天界极光神翼，游速 +55%，冲刺能耗降低 55%，得分倍率 2.26x',
-    traitEn: 'Bite Tier T8, +55% swim speed, -55% boost cost, 2.26x Score',
-    colors: ['#6366f1', '#fde047', '#c084fc'],
-    statOverrides: { speedBonus: 0.55, boostCostReduction: 0.55 },
-  },
-  {
-    id: 'shark_47_omega_devourer',
-    lineage: 'ELDER_ABYSS',
-    nameZh: '终焉雷霆维度吞噬者·奥米茄',
-    nameEn: 'Omega Dimension-Devourer Apex',
-    titleZh: '第48号终极进化·万海之主',
-    titleEn: 'Ultimate #48 Evolution · Lord of All Seas',
-    traitZh: '48形态终极毕业古神！全属性巅峰，基础生命 750，游速 +55%，全收益与得分 2.5x！',
-    traitEn: 'Ultimate #48 Apex God! 750 Base HP, +55% speed, 2.5x Score & Rewards!',
-    colors: ['#581c87', '#38bdf8', '#f472b6'],
-    statOverrides: { baseHp: 750, speedBonus: 0.55, scoreMult: 2.5 },
-  },
-];
-
-/**
- * Generates the complete 48-form progression matrix with Senior Game Designer numerical curves
- */
-export const SHARK_EVOLUTION_FORMS: SharkFormConfig[] = RAW_SHARK_SEEDS.map(
-  (seed, index) => {
-    const row = Math.floor(index / 8); // 0..5
-    const col = index % 8; // 0..7
-    const generation = row + 1; // 1..6
-    const spriteKey = `SHARK_FORM_${String(index).padStart(2, '0')}` as SharkSpriteKey;
-
-    // 48-Tier 1-to-1 Base Bite Tier progression across the 48 shark forms (T1 .. T48)
-    const baseBiteTier = index + 1;
-
-    const isBio = seed.lineage === 'APEX_BIO';
-    const isMecha = seed.lineage === 'CYBER_MECHA';
-    const isElem = seed.lineage === 'ELEMENTAL_CORE';
-    const isAbyss = seed.lineage === 'ELDER_ABYSS';
-
-    // Base stats scaling smoothly across 6 generations and 8 columns + APEX_BIO lineage HP bonus
-    const progFactor = row * 8 + col; // 0..47
-    const defaultBaseHp = Math.round(
-      100 +
-        row * 75 +
-        col * 10 +
-        (row >= 4 ? (row - 3) * 85 : 0) +
-        (isBio && index > 0 ? 25 + row * 15 : 0)
-    );
-    const baseHp = seed.statOverrides?.baseHp ?? defaultBaseHp;
-    const baseEnergy = Math.round(100 + row * 22 + col * 3);
-
-    const defaultSpeedBonus = Number(
-      (progFactor * 0.01 + (isMecha ? 0.1 : isElem ? 0.05 : 0.02)).toFixed(3)
-    );
-    const speedBonus = seed.statOverrides?.speedBonus ?? defaultSpeedBonus;
-
-    const defaultHpDrainReduction = Number(
-      Math.min(0.5, progFactor * 0.008 + (isAbyss ? 0.1 : isBio ? 0.05 : 0.02)).toFixed(3)
-    );
-    const hpDrainReduction =
-      seed.statOverrides?.hpDrainReduction ?? defaultHpDrainReduction;
-
-    const defaultBoostCostReduction = Number(
-      Math.min(0.6, progFactor * 0.01 + (isMecha ? 0.12 : 0.03)).toFixed(3)
-    );
-    const boostCostReduction =
-      seed.statOverrides?.boostCostReduction ?? defaultBoostCostReduction;
-
-    const defaultMagnetBonus = Math.round(
-      progFactor * 4.5 + (isMecha ? 55 : isAbyss ? 35 : 15)
-    );
-    const magnetBonus = seed.statOverrides?.magnetBonus ?? defaultMagnetBonus;
-
-    const defaultDevourHealMult = Number(
-      (1.0 + row * 0.14 + (isBio ? 0.2 : 0.04)).toFixed(2)
-    );
-    const devourHealMult =
-      seed.statOverrides?.devourHealMult ?? defaultDevourHealMult;
-
-    const defaultScoreMult = Number(
-      (1.0 + row * 0.18 + col * 0.03 + (isElem ? 0.18 : 0)).toFixed(2)
-    );
-    const scoreMult = seed.statOverrides?.scoreMult ?? defaultScoreMult;
-
-    // Triple-Gate Unlock Requirements (Level Gate + Depth Gate + Coin/Gene Cost)
-    const reqParentUpgradeLevel =
-      index === 0
-        ? 0
-        : row === 0
-        ? Math.min(4, 2 + Math.floor(col / 3))
-        : row === 1
-        ? 4
-        : row === 2
-        ? 5
-        : row === 3
-        ? 6
-        : row === 4
-        ? 8
-        : 9;
-
-    const reqMaxInRunLevel =
-      index === 0
-        ? 1
-        : row === 0
-        ? Math.min(4, 1 + Math.ceil(col / 2))
-        : row === 1
-        ? 4 + Math.floor(col / 3)
-        : row === 2
-        ? 7 + Math.floor(col / 3)
-        : row === 3
-        ? 10 + Math.floor(col / 3)
-        : row === 4
-        ? 13 + Math.floor(col / 3)
-        : 16 + Math.floor(col / 3);
-
-    const reqMaxDepth =
-      index === 0
-        ? 0
-        : row === 0
-        ? 0
-        : row === 1
-        ? 300
-        : row === 2
-        ? 540
-        : row === 3
-        ? 850
-        : row === 4
-        ? 1180
-        : 1450;
-
-    // Economy cost curve per generation
-    const genCoinBase = [60, 420, 1400, 3800, 9500, 22000][row];
-    const genCoinStep = [35, 95, 240, 580, 1400, 3200][row];
-    const unlockCoins = index === 0 ? 0 : genCoinBase + col * genCoinStep;
-
-    const genGeneBase = [12, 85, 260, 720, 1800, 4200][row];
-    const genGeneStep = [8, 20, 48, 110, 260, 620][row];
-    const unlockGenes = index === 0 ? 0 : genGeneBase + col * genGeneStep;
-
-    const baseUpgradeCoinCost = [22, 68, 185, 440, 1020, 2200][row] + col * [4, 10, 25, 55, 125, 270][row];
-
-    const sprite3xUrl = `/assets/sharks_3x/shark_form_${String(index).padStart(2, '0')}@3x.webp`;
-    const traitZh = seed.traitZh.replace(/T\d+/g, `T${baseBiteTier}`);
-    const traitEn = seed.traitEn.replace(/Bite Tier T\d+/g, `Bite Tier T${baseBiteTier}`);
-
-    // Biological Adult Body Length scaling smoothly across 6 generations (0.8m .. 45.0m)
-    const baseLengths = [
-      [0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5],
-      [1.6, 1.8, 2.0, 2.2, 2.4, 2.6, 2.8, 3.0],
-      [3.2, 3.5, 3.8, 4.2, 4.6, 5.2, 5.8, 6.5],
-      [7.5, 9.0, 11.0, 13.0, 15.0, 17.0, 18.5, 20.0],
-      [21.5, 23.0, 24.5, 26.0, 27.5, 29.0, 30.5, 32.0],
-      [33.5, 35.0, 36.5, 38.0, 40.0, 42.0, 44.0, 45.0],
-    ];
-    const defaultBodyLengthM = baseLengths[row]?.[col] ?? Number((0.8 + index * 0.94).toFixed(1));
-    const realBodyLengthM = seed.realBodyLengthM ?? defaultBodyLengthM;
-
-    // Real cruising swim speed (1.2m/s ~ 7.0m/s) and burst speed (2.8m/s ~ 18.0m/s)
-    const defaultCruiseSpeedMps = Number((1.2 + (progFactor / 47) * 5.8).toFixed(2));
-    const defaultBoostSpeedMps = Number((defaultCruiseSpeedMps * (2.2 + (isMecha ? 0.35 : 0.2))).toFixed(2));
-    const cruiseSpeedMps = seed.cruiseSpeedMps ?? defaultCruiseSpeedMps;
-    const boostSpeedMps = seed.boostSpeedMps ?? defaultBoostSpeedMps;
-
-    return {
-      index,
-      row,
-      col,
-      generation,
-      id: seed.id,
-      spriteKey,
-      sprite3xUrl,
-      lineage: seed.lineage,
-      nameZh: seed.nameZh,
-      nameEn: seed.nameEn,
-      titleZh: seed.titleZh,
-      titleEn: seed.titleEn,
-      traitZh,
-      traitEn,
-      primaryColor: seed.colors[0],
-      secondaryColor: seed.colors[1],
-      glowColor: seed.colors[2],
-      realBodyLengthM,
-      cruiseSpeedMps,
-      boostSpeedMps,
-      baseBiteTier,
-      baseHp,
-      baseEnergy,
-      speedBonus,
-      hpDrainReduction,
-      boostCostReduction,
-      magnetBonus,
-      devourHealMult,
-      scoreMult,
-      reqParentUpgradeLevel,
-      reqMaxInRunLevel,
-      reqMaxDepth,
-      unlockCoins,
-      unlockGenes,
-      baseUpgradeCoinCost,
-    };
-  }
+const META_SAVE_STORAGE_KEY = 'hungry_shark_evo_meta_v1';
+const UPGRADE_CFG = worldAndProgressionJson.upgradeProgression;
+const ATLAS_CFG = worldAndProgressionJson.atlasPassives;
+const STARTER_CFG = worldAndProgressionJson.starterSaveDefaults;
+const CROWN_SHARKS_BY_ID = Object.fromEntries(
+  crownMasteryJson.sharks.map((s) => [s.sharkId, s.tiers])
 );
 
 export function getShark3xImageUrl(
-  keyOrIndex: SharkSpriteKey | number
+  formOrIndexOrKey: SharkFormConfig | SharkSpriteKey | number
 ): string {
-  if (typeof keyOrIndex === 'number') {
-    const clamped = Math.max(0, Math.min(47, Math.floor(keyOrIndex)));
-    return `/assets/sharks_3x/shark_form_${String(clamped).padStart(2, '0')}@3x.webp`;
+  let idx = 0;
+  if (typeof formOrIndexOrKey === 'number') {
+    idx = Math.max(0, Math.min(SHARK_EVOLUTION_FORMS.length - 1, formOrIndexOrKey));
+  } else if (typeof formOrIndexOrKey === 'string') {
+    const parsed = Number(formOrIndexOrKey.replace('SHARK_FORM_', ''));
+    idx = Number.isFinite(parsed)
+      ? Math.max(0, Math.min(SHARK_EVOLUTION_FORMS.length - 1, parsed))
+      : 0;
+  } else {
+    idx = formOrIndexOrKey.index;
   }
-  const match = keyOrIndex.match(/SHARK_FORM_(\d+)/);
-  const idx = match ? Math.max(0, Math.min(47, parseInt(match[1], 10))) : 0;
-  return `/assets/sharks_3x/shark_form_${String(idx).padStart(2, '0')}@3x.webp`;
+  const padded = String(idx).padStart(2, '0');
+  return `/assets/sharks_3x/shark_form_${padded}@3x.webp`;
 }
 
 export function getSharkFormById(id: string): SharkFormConfig {
-  return (
-    SHARK_EVOLUTION_FORMS.find((f) => f.id === id) ?? SHARK_EVOLUTION_FORMS[0]
-  );
+  return SHARK_BY_ID[id] ?? SHARK_EVOLUTION_FORMS[0];
 }
 
 export function getSharkUpgradeCost(
   form: SharkFormConfig,
-  currentUpgradeLevel: number
+  currentLevel: number
 ): number {
-  const lv = Math.max(1, Math.min(10, currentUpgradeLevel));
-  if (lv >= 10) return 0;
-  return Math.round(form.baseUpgradeCoinCost * Math.pow(1.36, lv - 1));
+  const maxLv = UPGRADE_CFG.maxUpgradeLevel;
+  const lv = Math.max(1, Math.min(maxLv - 1, currentLevel));
+  return Math.round(
+    form.baseUpgradeCoinCost * Math.pow(UPGRADE_CFG.coinCostExponent, lv - 1)
+  );
 }
 
 /**
- * Gene Shard breakthrough cost for body upgrades:
- * - Regular levels (Lv.1->2, 2->3, 3->4, 5->6, 6->7, 7->8, 8->9) cost 0 Genes (Coins only).
- * - Breakthrough levels (Lv.4->5 and Lv.9->10, which permanently grant +1 Bite Tier `T`)
- *   require Gene Shards as genetic mutation catalysts!
+ * Returns Gene Shard cost required at Bite Tier breakthrough gates (Lv.4->5 and Lv.9->10).
  */
 export function getSharkUpgradeGeneCost(
   form: SharkFormConfig,
-  currentUpgradeLevel: number
+  currentLevel: number
 ): number {
-  const lv = Math.max(1, Math.min(10, currentUpgradeLevel));
-  if (lv >= 10) return 0;
-  const refGenes = Math.max(20, form.unlockGenes);
-  if (lv === 4) {
-    // Lv.4 -> Lv.5 (+1 Bite Tier Breakthrough)
-    return Math.round(refGenes * 0.35 + 6);
+  const refGenes = Math.max(UPGRADE_CFG.geneUnlockMinRef, form.unlockGenes);
+  if (currentLevel === 4) {
+    return Math.round(
+      refGenes * UPGRADE_CFG.geneCostGateLv4.refMult +
+        UPGRADE_CFG.geneCostGateLv4.flatBonus
+    );
   }
-  if (lv === 9) {
-    // Lv.9 -> Lv.10 (Max-Level +1 Bite Tier Breakthrough)
-    return Math.round(refGenes * 0.65 + 14);
+  if (currentLevel === 9) {
+    return Math.round(
+      refGenes * UPGRADE_CFG.geneCostGateLv9.refMult +
+        UPGRADE_CFG.geneCostGateLv9.flatBonus
+    );
   }
   return 0;
 }
 
-/**
- * Checks whether a shark form's parent prerequisite is satisfied:
- * A form at (row, col) can be unlocked if EITHER:
- * - Its left neighbor (row, col - 1) is unlocked and at >= reqParentUpgradeLevel
- * - OR its upper-generation ancestor (row - 1, col) is unlocked and at >= reqParentUpgradeLevel
- * - OR (for col === 0, row > 0) the previous row's last shark (row - 1, 7) is unlocked and at >= reqParentUpgradeLevel
- */
-export function getParentCandidatesForForm(form: SharkFormConfig): SharkFormConfig[] {
-  if (form.index === 0) return [];
-  const parents: SharkFormConfig[] = [];
-  const prevInSequence = SHARK_EVOLUTION_FORMS[form.index - 1];
-  if (prevInSequence) {
-    parents.push(prevInSequence);
-  }
-  if (form.row > 0) {
-    const up = SHARK_EVOLUTION_FORMS[(form.row - 1) * 8 + form.col];
-    if (up && !parents.includes(up)) {
-      parents.push(up);
+export function getParentCandidatesForForm(
+  form: SharkFormConfig
+): SharkFormConfig[] {
+  if (form.index <= 0) return [];
+  const candidates: SharkFormConfig[] = [
+    SHARK_EVOLUTION_FORMS[form.index - 1],
+  ];
+  if (UPGRADE_CFG.allowVerticalParentUnlock && form.row > 0) {
+    const verticalParentIdx = (form.row - 1) * 8 + form.col;
+    if (
+      verticalParentIdx >= 0 &&
+      verticalParentIdx < SHARK_EVOLUTION_FORMS.length &&
+      verticalParentIdx !== form.index - 1
+    ) {
+      candidates.push(SHARK_EVOLUTION_FORMS[verticalParentIdx]);
     }
   }
-  return parents;
+  return candidates;
 }
 
 export interface UnlockCheckResult {
@@ -1031,131 +323,192 @@ export function evaluateSharkUnlock(
   liveRunMaxDepth: number = 0
 ): UnlockCheckResult {
   const alreadyUnlocked = save.unlockedSharkIds.includes(form.id);
-  const totalCoins = save.bankedCoins + liveRunCoins;
-  const totalGenes = save.bankedGenes + liveRunGenes;
-  const maxLv = Math.max(save.bestInRunLevel, liveRunLevel);
-  const maxDepth = Math.max(save.bestDepthReached, Math.round(liveRunMaxDepth));
-
   const parents = getParentCandidatesForForm(form);
-  const primaryParent =
-    form.index > 0 ? SHARK_EVOLUTION_FORMS[form.index - 1] : undefined;
   let parentMet = form.index === 0;
-  let bestParent = primaryParent ?? parents[0];
-  let bestParentCurrentLv =
-    bestParent && save.unlockedSharkIds.includes(bestParent.id)
-      ? (save.sharkUpgradeLevels[bestParent.id] ?? 1)
-      : 0;
+  let bestParent = parents[0] ?? SHARK_EVOLUTION_FORMS[0];
+  let bestParentCurrentLv = 10;
 
-  for (const p of parents) {
-    const isUnlocked = save.unlockedSharkIds.includes(p.id);
-    const pLv = isUnlocked ? (save.sharkUpgradeLevels[p.id] ?? 1) : 0;
-    if (isUnlocked && pLv >= form.reqParentUpgradeLevel) {
-      if (!parentMet) {
+  if (parents.length > 0) {
+    let highestUnlockedScore = -1;
+    bestParentCurrentLv = 0;
+    for (const p of parents) {
+      const unlocked = save.unlockedSharkIds.includes(p.id);
+      const lv = unlocked ? save.sharkUpgradeLevels[p.id] ?? 1 : 0;
+      const rank = unlocked ? 100 + lv : lv;
+      if (rank > highestUnlockedScore) {
+        highestUnlockedScore = rank;
         bestParent = p;
-        bestParentCurrentLv = pLv;
+        bestParentCurrentLv = lv;
       }
-      parentMet = true;
+      if (unlocked && lv >= form.reqParentUpgradeLevel) {
+        parentMet = true;
+      }
     }
   }
 
-  const levelMet = maxLv >= form.reqMaxInRunLevel;
-  const depthMet = maxDepth >= form.reqMaxDepth;
-  const coinsMet = totalCoins >= form.unlockCoins;
-  const genesMet = totalGenes >= form.unlockGenes;
+  const effectiveBestLevel = Math.max(save.bestInRunLevel, liveRunLevel);
+  const effectiveBestDepth = Math.max(save.bestDepthReached, liveRunMaxDepth);
+  const effectiveCoins = save.bankedCoins + liveRunCoins;
+  const effectiveGenes = save.bankedGenes + liveRunGenes;
+
+  const levelMet = effectiveBestLevel >= form.reqMaxInRunLevel;
+  const depthMet = effectiveBestDepth >= form.reqMaxDepth;
+  const coinsMet = effectiveCoins >= form.unlockCoins;
+  const genesMet = effectiveGenes >= form.unlockGenes;
+
+  const canUnlockNow =
+    !alreadyUnlocked &&
+    parentMet &&
+    levelMet &&
+    depthMet &&
+    coinsMet &&
+    genesMet;
 
   return {
     alreadyUnlocked,
-    canUnlockNow:
-      !alreadyUnlocked && parentMet && levelMet && depthMet && coinsMet && genesMet,
+    canUnlockNow,
     parentMet,
     levelMet,
     depthMet,
     coinsMet,
     genesMet,
-    bestParentId: bestParent?.id ?? '',
-    bestParentIndex: bestParent?.index ?? 0,
-    bestParentNameZh: bestParent?.nameZh ?? '',
-    bestParentNameEn: bestParent?.nameEn ?? '',
+    bestParentId: bestParent.id,
+    bestParentIndex: bestParent.index,
+    bestParentNameZh: bestParent.nameZh,
+    bestParentNameEn: bestParent.nameEn,
     bestParentCurrentLv,
   };
 }
 
-/**
- * Finds the next recommended breakthrough evolution target for the currently active shark
- */
-export function getNextEvolutionTarget(
-  currentFormId: string,
-  save: SharkMetaSaveData
-): SharkFormConfig | null {
-  const current = getSharkFormById(currentFormId);
-  // 1. Check immediate next form in the 48-shark sequence (covers right neighbor AND row-wrap e.g. #24 -> #25 Megalodon)
-  if (current.index + 1 < SHARK_EVOLUTION_FORMS.length) {
-    const nextSequential = SHARK_EVOLUTION_FORMS[current.index + 1];
-    if (nextSequential && !save.unlockedSharkIds.includes(nextSequential.id)) {
-      return nextSequential;
-    }
-  }
-  // 2. Check direct vertical descendant in next generation (row + 1, col)
-  if (current.row < 5) {
-    const down = SHARK_EVOLUTION_FORMS[(current.row + 1) * 8 + current.col];
-    if (down && !save.unlockedSharkIds.includes(down.id)) {
-      return down;
-    }
-  }
-  // 3. Otherwise, first locked shark in the 48-form list
-  return (
-    SHARK_EVOLUTION_FORMS.find((f) => !save.unlockedSharkIds.includes(f.id)) ?? null
+export function evaluateSharkUnlockForRun(
+  form: SharkFormConfig,
+  save: SharkMetaSaveData,
+  runContext: PermanentProgressRunContext,
+  liveRunCoins: number = 0,
+  liveRunGenes: number = 0,
+  liveRunLevel: number = 1,
+  liveRunMaxDepth: number = 0
+): UnlockCheckResult {
+  const eligibility = getPermanentProgressEligibility(runContext);
+  const safeLevel = eligibility.allowRunRecords ? liveRunLevel : 1;
+  const safeDepth = eligibility.allowRunRecords ? liveRunMaxDepth : 0;
+  const base = evaluateSharkUnlock(
+    form,
+    save,
+    liveRunCoins,
+    liveRunGenes,
+    safeLevel,
+    safeDepth
   );
+  if (!eligibility.allowSharkUnlockAndUpgrade) {
+    return {
+      ...base,
+      canUnlockNow: false,
+    };
+  }
+  return base;
 }
 
-const META_SAVE_STORAGE_KEY = 'hungry_shark_evo_meta_v1';
+export function getNextEvolutionTarget(
+  currentSharkId: string,
+  save: SharkMetaSaveData
+): SharkFormConfig | null {
+  const currentIdx = SHARK_EVOLUTION_FORMS.findIndex((s) => s.id === currentSharkId);
+  const startIdx = currentIdx >= 0 ? currentIdx + 1 : 0;
+  for (let offset = 0; offset < SHARK_EVOLUTION_FORMS.length; offset++) {
+    const candidate =
+      SHARK_EVOLUTION_FORMS[(startIdx + offset) % SHARK_EVOLUTION_FORMS.length];
+    if (!save.unlockedSharkIds.includes(candidate.id)) {
+      return candidate;
+    }
+  }
+  return null;
+}
 
 export function createDefaultMetaSave(): SharkMetaSaveData {
   return {
-    version: 1,
-    bankedCoins: 120, // Starter scholarship so new players can immediately test upgrading Lv.1 -> Lv.3!
-    bankedGenes: 25,
-    unlockedSharkIds: ['shark_00_clown_fry'],
-    selectedSharkId: 'shark_00_clown_fry',
-    sharkUpgradeLevels: {
-      shark_00_clown_fry: 1,
-    },
-    bestInRunLevel: 1,
-    bestDepthReached: 220,
-    totalRunsPlayed: 0,
+    version: STARTER_CFG.version,
+    bankedCoins: STARTER_CFG.bankedCoins,
+    bankedGenes: STARTER_CFG.bankedGenes,
+    unlockedSharkIds: [...STARTER_CFG.unlockedSharkIds],
+    selectedSharkId: STARTER_CFG.selectedSharkId,
+    sharkUpgradeLevels: { ...STARTER_CFG.sharkUpgradeLevels },
+    bestInRunLevel: STARTER_CFG.bestInRunLevel,
+    bestDepthReached: STARTER_CFG.bestDepthReached,
+    totalRunsPlayed: STARTER_CFG.totalRunsPlayed,
+    onboardingGiftClaimed: STARTER_CFG.onboardingGiftClaimed,
     sharkBestScores: {},
     sharkMasteryTiers: {},
   };
 }
 
 export function loadSharkMetaSave(): SharkMetaSaveData {
+  const defaults = createDefaultMetaSave();
   if (typeof window === 'undefined' || !window.localStorage) {
-    return createDefaultMetaSave();
+    return defaults;
   }
   try {
     const raw = window.localStorage.getItem(META_SAVE_STORAGE_KEY);
-    if (!raw) return createDefaultMetaSave();
+    if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Partial<SharkMetaSaveData>;
-    const defaults = createDefaultMetaSave();
-    const unlocked = Array.isArray(parsed.unlockedSharkIds) && parsed.unlockedSharkIds.length > 0
-      ? parsed.unlockedSharkIds
-      : defaults.unlockedSharkIds;
+    const unlocked =
+      Array.isArray(parsed.unlockedSharkIds) && parsed.unlockedSharkIds.length > 0
+        ? Array.from(
+            new Set([
+              STARTER_CFG.selectedSharkId,
+              ...parsed.unlockedSharkIds.filter((id) => Boolean(SHARK_BY_ID[id])),
+            ])
+          )
+        : defaults.unlockedSharkIds;
+    const upgradeLevels: Record<string, number> = {
+      ...defaults.sharkUpgradeLevels,
+      ...(parsed.sharkUpgradeLevels ?? {}),
+    };
+    const totalRuns =
+      typeof parsed.totalRunsPlayed === 'number'
+        ? Math.max(0, parsed.totalRunsPlayed)
+        : 0;
+    let tutorialLegacyDone = false;
+    try {
+      tutorialLegacyDone =
+        window.localStorage.getItem('hungry_shark_tutorial_done_v1') === '1';
+    } catch {
+      tutorialLegacyDone = false;
+    }
+    const inferredClaimed =
+      typeof parsed.onboardingGiftClaimed === 'boolean'
+        ? parsed.onboardingGiftClaimed
+        : tutorialLegacyDone ||
+          totalRuns > 0 ||
+          unlocked.length > 1 ||
+          (upgradeLevels[STARTER_CFG.selectedSharkId] ?? 1) > 1;
     return {
       version: 1,
-      bankedCoins: typeof parsed.bankedCoins === 'number' ? Math.max(0, Math.floor(parsed.bankedCoins)) : defaults.bankedCoins,
-      bankedGenes: typeof parsed.bankedGenes === 'number' ? Math.max(0, Math.floor(parsed.bankedGenes)) : defaults.bankedGenes,
+      bankedCoins:
+        typeof parsed.bankedCoins === 'number'
+          ? Math.max(0, Math.floor(parsed.bankedCoins))
+          : defaults.bankedCoins,
+      bankedGenes:
+        typeof parsed.bankedGenes === 'number'
+          ? Math.max(0, Math.floor(parsed.bankedGenes))
+          : defaults.bankedGenes,
       unlockedSharkIds: unlocked,
       selectedSharkId:
-        typeof parsed.selectedSharkId === 'string' && unlocked.includes(parsed.selectedSharkId)
+        typeof parsed.selectedSharkId === 'string' &&
+        unlocked.includes(parsed.selectedSharkId)
           ? parsed.selectedSharkId
           : unlocked[0],
-      sharkUpgradeLevels:
-        parsed.sharkUpgradeLevels && typeof parsed.sharkUpgradeLevels === 'object'
-          ? { ...defaults.sharkUpgradeLevels, ...parsed.sharkUpgradeLevels }
-          : defaults.sharkUpgradeLevels,
-      bestInRunLevel: typeof parsed.bestInRunLevel === 'number' ? Math.max(1, parsed.bestInRunLevel) : 1,
-      bestDepthReached: typeof parsed.bestDepthReached === 'number' ? Math.max(220, parsed.bestDepthReached) : 220,
-      totalRunsPlayed: typeof parsed.totalRunsPlayed === 'number' ? Math.max(0, parsed.totalRunsPlayed) : 0,
+      sharkUpgradeLevels: upgradeLevels,
+      bestInRunLevel:
+        typeof parsed.bestInRunLevel === 'number'
+          ? Math.max(1, parsed.bestInRunLevel)
+          : defaults.bestInRunLevel,
+      bestDepthReached:
+        typeof parsed.bestDepthReached === 'number'
+          ? Math.max(defaults.bestDepthReached, parsed.bestDepthReached)
+          : defaults.bestDepthReached,
+      totalRunsPlayed: totalRuns,
+      onboardingGiftClaimed: inferredClaimed,
       sharkBestScores:
         parsed.sharkBestScores && typeof parsed.sharkBestScores === 'object'
           ? { ...parsed.sharkBestScores }
@@ -1168,6 +521,64 @@ export function loadSharkMetaSave(): SharkMetaSaveData {
   } catch {
     return createDefaultMetaSave();
   }
+}
+
+export function recordFormalRunStarted(
+  runContext: PermanentProgressRunContext,
+  save: SharkMetaSaveData
+): SharkMetaSaveData {
+  const eligibility = getPermanentProgressEligibility(runContext);
+  if (!eligibility.allowRunCountIncrement) {
+    return save;
+  }
+  return {
+    ...save,
+    totalRunsPlayed: save.totalRunsPlayed + 1,
+  };
+}
+
+export function recordPermanentRunProgress(
+  save: SharkMetaSaveData,
+  runContext: PermanentProgressRunContext,
+  inRunLevel: number,
+  maxDepthMeters: number
+): SharkMetaSaveData {
+  const eligibility = getPermanentProgressEligibility(runContext);
+  if (!eligibility.allowRunRecords) {
+    return save;
+  }
+  const nextBestLv = Math.max(save.bestInRunLevel, Math.floor(inRunLevel));
+  const nextBestDepth = Math.max(save.bestDepthReached, Math.round(maxDepthMeters));
+  if (
+    nextBestLv === save.bestInRunLevel &&
+    nextBestDepth === save.bestDepthReached
+  ) {
+    return save;
+  }
+  return {
+    ...save,
+    bestInRunLevel: nextBestLv,
+    bestDepthReached: nextBestDepth,
+  };
+}
+
+export function claimOnboardingStarterGift(
+  save: SharkMetaSaveData,
+  giftCoins: number = 80,
+  giftGenes: number = 20
+): { updatedSave: SharkMetaSaveData; granted: boolean } {
+  if (save.onboardingGiftClaimed) {
+    return { updatedSave: save, granted: false };
+  }
+  return {
+    granted: true,
+    updatedSave: {
+      ...save,
+      bankedCoins: save.bankedCoins + Math.max(0, Math.floor(giftCoins)),
+      bankedGenes: save.bankedGenes + Math.max(0, Math.floor(giftGenes)),
+      onboardingGiftClaimed: true,
+    },
+  };
 }
 
 export function saveSharkMetaSave(data: SharkMetaSaveData): void {
@@ -1185,55 +596,23 @@ export interface SharkMasteryTierInfo {
   nameZh: string;
   nameEn: string;
   scoreThreshold: number;
+  coinReward: number;
   geneReward: number;
 }
 
-/**
- * Computes the 3 Mastery Crown thresholds and one-time first-clear Gene Shard rewards
- * for a specific shark form based on its generation row (0..5) and column (0..7).
- */
 export function getSharkMasteryConfig(
   form: SharkFormConfig
 ): [SharkMasteryTierInfo, SharkMasteryTierInfo, SharkMasteryTierInfo] {
-  const rowBaseScores = [3500, 8000, 18000, 38000, 75000, 140000];
-  const rowColSteps = [500, 1000, 2000, 4000, 7500, 12000];
-  const rowIdx = Math.max(0, Math.min(5, form.row));
-  const colIdx = Math.max(0, Math.min(7, form.col));
-
-  const bronzeScore = rowBaseScores[rowIdx] + colIdx * rowColSteps[rowIdx];
-  const silverScore = Math.round(bronzeScore * 2.4);
-  const goldScore = Math.round(bronzeScore * 5.0);
-
-  const bronzeGenes = 12 + rowIdx * 8 + Math.floor(colIdx / 2) * 2;
-  const silverGenes = 24 + rowIdx * 16 + colIdx * 2;
-  const goldGenes = 45 + rowIdx * 30 + colIdx * 4;
-
-  return [
-    {
-      tier: 1,
-      badgeIcon: '🥉',
-      nameZh: '铜冠·掠食者',
-      nameEn: 'Bronze Predator',
-      scoreThreshold: bronzeScore,
-      geneReward: bronzeGenes,
-    },
-    {
-      tier: 2,
-      badgeIcon: '🥈',
-      nameZh: '银冠·深海领主',
-      nameEn: 'Silver Overlord',
-      scoreThreshold: silverScore,
-      geneReward: silverGenes,
-    },
-    {
-      tier: 3,
-      badgeIcon: '👑',
-      nameZh: '金冠·深渊霸主',
-      nameEn: 'Gold Apex Monarch',
-      scoreThreshold: goldScore,
-      geneReward: goldGenes,
-    },
-  ];
+  const cfg = CROWN_SHARKS_BY_ID[form.id] ?? crownMasteryJson.sharks[0].tiers;
+  return cfg.map((t) => ({
+    tier: t.tier as 1 | 2 | 3,
+    badgeIcon: t.badgeIcon as '🥉' | '🥈' | '👑',
+    nameZh: t.nameZh,
+    nameEn: t.nameEn,
+    scoreThreshold: t.scoreThreshold,
+    coinReward: t.coinReward,
+    geneReward: t.geneReward,
+  })) as [SharkMasteryTierInfo, SharkMasteryTierInfo, SharkMasteryTierInfo];
 }
 
 export interface SharkMasterySettlementResult {
@@ -1244,20 +623,21 @@ export interface SharkMasterySettlementResult {
   prevCrownTier: number;
   newCrownTier: number;
   newlyUnlockedTiers: SharkMasteryTierInfo[];
+  coinsAwarded: number;
   genesAwarded: number;
   nextThresholdScore: number | null;
 }
 
 /**
- * Evaluates and settles a shark's single-run score against its 3 Mastery Crown tiers.
- * - Strictly isolates Trial runs (trialActive === true never records best scores or claims crowns).
- * - Awards one-time First-Clear Gene Shards ONLY for newly reached crown tiers (preventing suicide farming or inflation).
+ * Evaluates & (unless previewOnly) settles Mastery Crowns cleanly from shared/configs/crown_mastery_config.json.
+ * Strictly blocks Trial runs and grants each crown tier once per lifetime (no ad doubling).
  */
 export function settleSharkScoreMastery(
   sharkFormId: string,
   runScore: number,
   trialActive: boolean,
-  save: SharkMetaSaveData
+  save: SharkMetaSaveData,
+  options?: { previewOnly?: boolean }
 ): SharkMasterySettlementResult {
   const form = getSharkFormById(sharkFormId);
   const tiers = getSharkMasteryConfig(form);
@@ -1266,9 +646,10 @@ export function settleSharkScoreMastery(
 
   const prevBestScore = bestScoresMap[form.id] ?? 0;
   const prevCrownTier = masteryMap[form.id] ?? 0;
+  const eligibility = getPermanentProgressEligibility({ trialActive });
+  const allowCrown = eligibility.allowSharkMasteryAndCrown && (!trialActive || crownMasteryJson.allowInTrial);
 
-  if (trialActive) {
-    const nextTierInfo = tiers.find((t) => t.tier > prevCrownTier) ?? null;
+  if (!allowCrown) {
     return {
       updatedSave: save,
       prevBestScore,
@@ -1277,45 +658,70 @@ export function settleSharkScoreMastery(
       prevCrownTier,
       newCrownTier: prevCrownTier,
       newlyUnlockedTiers: [],
+      coinsAwarded: 0,
       genesAwarded: 0,
-      nextThresholdScore: nextTierInfo ? nextTierInfo.scoreThreshold : null,
+      nextThresholdScore: tiers[0].scoreThreshold,
     };
   }
 
-  const cleanScore = Math.max(0, Math.floor(runScore));
+  const cleanScore = Math.max(0, Math.round(runScore));
   const newBestScore = Math.max(prevBestScore, cleanScore);
   const isNewRecord = cleanScore > prevBestScore && cleanScore > 0;
 
-  let achievedTier = prevCrownTier;
-  const newlyUnlockedTiers: SharkMasteryTierInfo[] = [];
+  let newCrownTier = prevCrownTier;
+  let coinsAwarded = 0;
   let genesAwarded = 0;
+  const newlyUnlockedTiers: SharkMasteryTierInfo[] = [];
 
   for (const tierInfo of tiers) {
     if (cleanScore >= tierInfo.scoreThreshold && tierInfo.tier > prevCrownTier) {
-      achievedTier = Math.max(achievedTier, tierInfo.tier);
-      newlyUnlockedTiers.push(tierInfo);
+      newCrownTier = Math.max(newCrownTier, tierInfo.tier);
+      coinsAwarded += tierInfo.coinReward;
       genesAwarded += tierInfo.geneReward;
+      newlyUnlockedTiers.push(tierInfo);
     }
   }
 
-  const nextTierInfo = tiers.find((t) => t.tier > achievedTier) ?? null;
+  const nextTier = tiers.find((t) => t.tier > newCrownTier) ?? null;
 
-  if (!isNewRecord && newlyUnlockedTiers.length === 0) {
+  if (options?.previewOnly) {
+    return {
+      updatedSave: save,
+      prevBestScore,
+      newBestScore,
+      isNewRecord,
+      prevCrownTier,
+      newCrownTier,
+      newlyUnlockedTiers,
+      coinsAwarded,
+      genesAwarded,
+      nextThresholdScore: nextTier ? nextTier.scoreThreshold : null,
+    };
+  }
+
+  if (
+    newBestScore === prevBestScore &&
+    newCrownTier === prevCrownTier &&
+    coinsAwarded === 0 &&
+    genesAwarded === 0
+  ) {
     return {
       updatedSave: save,
       prevBestScore,
       newBestScore,
       isNewRecord: false,
       prevCrownTier,
-      newCrownTier: prevCrownTier,
-      newlyUnlockedTiers: [],
+      newCrownTier,
+      newlyUnlockedTiers,
+      coinsAwarded: 0,
       genesAwarded: 0,
-      nextThresholdScore: nextTierInfo ? nextTierInfo.scoreThreshold : null,
+      nextThresholdScore: nextTier ? nextTier.scoreThreshold : null,
     };
   }
 
   const updatedSave: SharkMetaSaveData = {
     ...save,
+    bankedCoins: save.bankedCoins + coinsAwarded,
     bankedGenes: save.bankedGenes + genesAwarded,
     sharkBestScores: {
       ...bestScoresMap,
@@ -1323,7 +729,7 @@ export function settleSharkScoreMastery(
     },
     sharkMasteryTiers: {
       ...masteryMap,
-      [form.id]: achievedTier,
+      [form.id]: newCrownTier,
     },
   };
 
@@ -1333,18 +739,23 @@ export function settleSharkScoreMastery(
     newBestScore,
     isNewRecord,
     prevCrownTier,
-    newCrownTier: achievedTier,
+    newCrownTier,
     newlyUnlockedTiers,
+    coinsAwarded,
     genesAwarded,
-    nextThresholdScore: nextTierInfo ? nextTierInfo.scoreThreshold : null,
+    nextThresholdScore: nextTier ? nextTier.scoreThreshold : null,
   };
 }
 
+/**
+ * Global Atlas passive bonuses loaded cleanly from shared/configs/world_and_progression_config.json (D3-A: Score +0.35%, HP +0.20%, 0% coin mult from crowns).
+ */
 export function getGlobalAtlasBonuses(save: SharkMetaSaveData): {
   unlockedCount: number;
   totalMasteryCrowns: number;
   hpMultiplier: number;
   speedBonus: number;
+  scoreBonus: number;
   rewardMultiplier: number;
 } {
   const unlockedCount = Math.max(1, save.unlockedSharkIds.length);
@@ -1357,8 +768,25 @@ export function getGlobalAtlasBonuses(save: SharkMetaSaveData): {
   return {
     unlockedCount,
     totalMasteryCrowns,
-    hpMultiplier: Number((1 + extraCount * 0.02).toFixed(3)),
-    speedBonus: Number((extraCount * 0.008).toFixed(3)),
-    rewardMultiplier: Number((1 + extraCount * 0.025).toFixed(3)),
+    hpMultiplier: Number(
+      (
+        1 +
+        extraCount * ATLAS_CFG.extraSharkHpBonusPerShark +
+        totalMasteryCrowns * ATLAS_CFG.crownHpBonusPerCrown
+      ).toFixed(4)
+    ),
+    speedBonus: Number(
+      (extraCount * ATLAS_CFG.extraSharkSpeedBonusPerShark).toFixed(4)
+    ),
+    scoreBonus: Number(
+      (totalMasteryCrowns * ATLAS_CFG.crownScoreBonusPerCrown).toFixed(4)
+    ),
+    rewardMultiplier: Number(
+      (
+        1 +
+        extraCount * ATLAS_CFG.extraSharkRewardBonusPerShark +
+        totalMasteryCrowns * ATLAS_CFG.crownRewardBonusPerCrown
+      ).toFixed(4)
+    ),
   };
 }

@@ -7,8 +7,9 @@ public struct FixedEvolutionHudButton: View {
 
     public var body: some View {
         let _ = atlasManager.atlasRevision
-        let nextTarget = GameRules.getNextEvolutionTarget(save: vm.save)
-        let evoReady = nextTarget?.check.canUnlockNow ?? false
+        let canModifyFormal = vm.permanentProgressEligibility.allowSharkUnlockAndUpgrade
+        let nextTarget = canModifyFormal ? GameRules.getNextEvolutionTarget(save: vm.save) : nil
+        let evoReady = canModifyFormal && (nextTarget?.check.canUnlockNow ?? false)
         let targetForm = nextTarget?.form
 
         Button {
@@ -167,11 +168,12 @@ extension ContentView {
         let geneCost = GameRules.getGeneSurgeCost(level: vm.inRunLevel, useCount: vm.geneSurgeUseCount, generationRow: form.row)
         let upCoinCost = GameRules.getSharkUpgradeCoinCost(form: form, currentLevel: vm.activeUpgradeLevel)
         let upGeneCost = GameRules.getSharkUpgradeGeneCost(form: form, currentLevel: vm.activeUpgradeLevel)
+        let canModifyFormal = vm.permanentProgressEligibility.allowSharkUnlockAndUpgrade
         let canGold = vm.save.bankedCoins >= goldCost && !vm.frenzyActive
         let canGene = vm.save.bankedGenes >= geneCost
-        let canUpgrade = vm.activeUpgradeLevel < 10 && vm.save.bankedCoins >= upCoinCost && vm.save.bankedGenes >= upGeneCost
-        let nextTarget = GameRules.getNextEvolutionTarget(save: vm.save)
-        let evoReady = nextTarget?.check.canUnlockNow ?? false
+        let canUpgrade = canModifyFormal && vm.activeUpgradeLevel < 10 && vm.save.bankedCoins >= upCoinCost && vm.save.bankedGenes >= upGeneCost
+        let nextTarget = canModifyFormal ? GameRules.getNextEvolutionTarget(save: vm.save) : nil
+        let evoReady = canModifyFormal && (nextTarget?.check.canUnlockNow ?? false)
 
         // When anchored 24pt from the right corner on Dynamic Island / Notch iPhones,
         // nudge only the upper buttons (`y ≈ 192..318pt`) along the fan arc so they stay
@@ -192,10 +194,11 @@ extension ContentView {
 
             // Optional Emergency Supply Drop when short on all resources
             if !canGold && !canGene && !canUpgrade && !evoReady {
+                let drop = vm.currentSupplyDropReward
                 skillFanSatelliteButton(
                     iconKey: "UI_ICON_GIFT",
                     label: vm.lang == "zh" ? "免费空投" : "AIRDROP",
-                    costText: "📺+300🪙+25🧬",
+                    costText: "📺+\(drop.coins)🪙+\(drop.genes)🧬",
                     ringColor: .yellow,
                     enabled: true,
                     pulse: true
@@ -540,9 +543,24 @@ extension ContentView {
                                     Text("\(vm.lang == "zh" ? form.nameZh : form.nameEn) · Lv.\(vm.inRunLevel)")
                                         .font(.system(size: 13, weight: .black))
                                         .foregroundColor(.white)
-                                    Text("🪙 +\(vm.runCoinsEarned)   🧬 +\(vm.runGenesEarned)   👑 \(vm.save.sharkMasteryTiers[form.id] ?? 0)/3")
-                                        .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                        .foregroundColor(.yellow)
+                                    if vm.trialSharkIdForRun != nil {
+                                        Text(vm.lang == "zh"
+                                             ? "🪙 +\(vm.runCoinsEarned)   🧬 +\(vm.runGenesEarned)   试玩不计王冠/纪录"
+                                             : "🪙 +\(vm.runCoinsEarned)   🧬 +\(vm.runGenesEarned)   Trial: No Crown/Record")
+                                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.yellow)
+                                    } else {
+                                        Text("🪙 +\(vm.runCoinsEarned)   🧬 +\(vm.runGenesEarned)   👑 \(vm.save.sharkMasteryTiers[form.id] ?? 0)/3")
+                                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.yellow)
+                                        if let ms = vm.lastMasterySettlement, (ms.totalBonusCoins > 0 || ms.totalBonusGenes > 0) {
+                                            Text(vm.lang == "zh"
+                                                 ? "👑 王冠结算: +\(ms.totalBonusCoins)🪙 +\(ms.totalBonusGenes)🧬 (不参与翻倍)"
+                                                 : "👑 Crown Bonus: +\(ms.totalBonusCoins)🪙 +\(ms.totalBonusGenes)🧬 (Not 2x)")
+                                                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                                                .foregroundColor(.mint)
+                                        }
+                                    }
                                 }
                                 Spacer()
                                 if let ms = vm.lastMasterySettlement, ms.isNewRecord {
@@ -565,17 +583,24 @@ extension ContentView {
                         .frame(width: innerW)
 
                         let thirdW = (innerW - 12) / 3.0
+                        let canDoubleReward = vm.permanentProgressEligibility.allowDoubleSettlementAd
+                            && !vm.settlementDoubled
+                            && (vm.runCoinsEarned > 0 || vm.runGenesEarned > 0)
                         HStack(spacing: 6) {
                             UiSettingButtonView(
                                 variantKey: "SETTING_BTN_SOUND",
-                                label: vm.settlementDoubled
+                                label: !vm.permanentProgressEligibility.allowDoubleSettlementAd
+                                    ? (vm.lang == "zh" ? "试玩不可翻倍" : "TRIAL: NO 2X")
+                                    : vm.settlementDoubled
                                     ? (vm.lang == "zh" ? "✓ 已翻倍领取" : "✓ 2X CLAIMED")
                                     : (vm.lang == "zh" ? "📺 奖励×2倍" : "📺 2X BOUNTY"),
-                                sublabel: "+🪙\(max(30, vm.runCoinsEarned)) +🧬\(max(5, vm.runGenesEarned))",
+                                sublabel: !vm.permanentProgressEligibility.allowDoubleSettlementAd
+                                    ? (vm.lang == "zh" ? "本局奖励已保留" : "Harvest Kept")
+                                    : "+🪙\(vm.runCoinsEarned) +🧬\(vm.runGenesEarned)",
                                 customIconText: "📺",
                                 width: thirdW,
                                 height: btnH,
-                                disabled: vm.settlementDoubled
+                                disabled: !canDoubleReward
                             ) {
                                 vm.showRewardedAd(kind: .DOUBLE_SETTLEMENT)
                             }

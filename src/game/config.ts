@@ -1,10 +1,13 @@
-import type { SpriteFrameKey } from './spriteSheetManager';
+import worldAndProgressionJson from '../../shared/configs/world_and_progression_config.json';
 import { buildPrey140TiersWithMines } from './preyDatabase140';
+import type { SpriteFrameKey } from './spriteSheetManager';
 
 export type FactionId = 'MECHA' | 'ABYSS' | 'MAGMA';
 
 export type PreyBehavior =
   | 'DRIFT_SWARM'
+  | 'SWARM_CRUISE'
+  | 'JELLY_PULSE'
   | 'SCHOOL_FLEE'
   | 'PUFFER_INFLATE'
   | 'SUB_PATROL'
@@ -18,10 +21,13 @@ export interface PreyTierConfig {
   id: string;
   nameKey: string;
   spriteKey?: SpriteFrameKey;
-  minDepth: number; // 0 to 1800+
+  /** Real @3x pre-trimmed biological sprite PNG URL */
+  externalPngUrl?: string;
+  minDepth: number;
   maxDepth: number;
   radius: number;
   baseSpeed: number;
+  /** Authentic biological adult length (cm) for linear size & spawn scaling */
   bodyLengthCm: number;
   minLengthCm?: number;
   maxLengthCm?: number;
@@ -37,77 +43,46 @@ export interface PreyTierConfig {
   glowColor: string;
   isHazard?: boolean;
   isBoss?: boolean;
-  externalPngUrl?: string | null;
 }
 
 export interface OceanZoneConfig {
-  id: 'shallow' | 'twilight' | 'abyss';
+  id: string;
   nameKey: string;
   minDepth: number;
-  maxDepth: number;
+  maxDepth: number | null;
   topColor: string;
   bottomColor: string;
   accentColor: string;
 }
 
+export const WORLD_AND_PROGRESSION_CONFIG = worldAndProgressionJson;
+
 export const GAME_CONFIG = {
   world: {
-    width: 3000,
-    height: 1800,
-    baseSharkSpeed: 140,
-    boostSpeedMultiplier: 2.0,
-    baseHpDrainPerSec: 3.4,
-    baseBoostDrainPerSec: 34,
-    baseBoostRegenPerSec: 18,
-    baseMagnetRadius: 110,
-    baseBiteTier: 2,
-    frenzyDuration: 8.0,
+    width: worldAndProgressionJson.world.width,
+    height: worldAndProgressionJson.world.height,
+    baseSharkSpeed: worldAndProgressionJson.world.baseSharkSpeed,
+    boostSpeedMultiplier: worldAndProgressionJson.world.boostSpeedMultiplier,
+    baseHpDrainPerSec: worldAndProgressionJson.world.baseHpDrainPerSec,
+    baseBoostDrainPerSec: worldAndProgressionJson.world.baseBoostDrainPerSec,
+    baseBoostRegenPerSec: worldAndProgressionJson.world.baseBoostRegenPerSec,
+    baseMagnetRadius: worldAndProgressionJson.world.baseMagnetRadius,
+    baseBiteTier: worldAndProgressionJson.world.baseBiteTier,
+    frenzyDuration: worldAndProgressionJson.world.frenzyDuration,
   },
 
-  zones: [
-    {
-      id: 'shallow',
-      nameKey: 'zone_shallow',
-      minDepth: 0,
-      maxDepth: 520,
-      topColor: '#0284c7',
-      bottomColor: '#0369a1',
-      accentColor: '#38bdf8',
-    },
-    {
-      id: 'twilight',
-      nameKey: 'zone_twilight',
-      minDepth: 520,
-      maxDepth: 1150,
-      topColor: '#0369a1',
-      bottomColor: '#0f172a',
-      accentColor: '#818cf8',
-    },
-    {
-      id: 'abyss',
-      nameKey: 'zone_abyss',
-      minDepth: 1150,
-      maxDepth: Number.POSITIVE_INFINITY,
-      topColor: '#0f172a',
-      bottomColor: '#020617',
-      accentColor: '#c084fc',
-    },
-  ] as OceanZoneConfig[],
+  zones: worldAndProgressionJson.zones as OceanZoneConfig[],
 
+  /** Active biological marine species + cyber_mine loaded directly from shared/configs/prey_ecology_config.json */
   preyTiers: buildPrey140TiersWithMines(),
 };
 
-/**
- * Reserved External PNG Texture Cache
- * Allows drop-in replacement of procedural Canvas parts with external PNG images.
- */
 export const EXTERNAL_SPRITE_CACHE: Record<string, HTMLImageElement> = {};
 
 export function registerExternalSprite(key: string, url: string): void {
   if (typeof Image === 'undefined') return;
+  if (EXTERNAL_SPRITE_CACHE[key]) return;
   const img = new Image();
-  img.crossOrigin = 'anonymous';
   img.src = url;
   EXTERNAL_SPRITE_CACHE[key] = img;
 }
-

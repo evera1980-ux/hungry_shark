@@ -150,18 +150,25 @@ async function main(): Promise<void> {
   const keepPrey = new Set<string>();
   const keepSharks = new Set<string>();
 
-  // 1. 134 Active Marine Prey + cyber_mine (135 total) -> pre-trimmed <=420px WebP
+  // 1. 234 Active Marine Prey + cyber_mine (235 total) -> pre-trimmed <=420px WebP
   const activePreyIds = [...PREY_140_RECORDS.map((r) => r.id), 'cyber_mine'];
   for (const id of activePreyIds) {
     const outName = `${id}@3x.webp`;
     keepPrey.add(outName);
+    const pngCandidates = [
+      path.join(PUBLIC_PREY, `${id}@3x.png`),
+      path.join(IOS_ASSETS, `${id}@3x.png`),
+    ];
+    const hasPngSource = pngCandidates.some((c) => fs.existsSync(c));
+    const dstPath = path.join(PUBLIC_PREY, outName);
+    if (!hasPngSource && fs.existsSync(dstPath)) {
+      // Preserve existing pink placeholder WebP (or user-supplied direct WebP) when raw PNG is absent
+      continue;
+    }
     jobs.push({
       label: `prey/${outName}`,
-      srcCandidates: [
-        path.join(PUBLIC_PREY, `${id}@3x.png`),
-        path.join(IOS_ASSETS, `${id}@3x.png`),
-      ],
-      dst: path.join(PUBLIC_PREY, outName),
+      srcCandidates: pngCandidates,
+      dst: dstPath,
       args: (src, dst) => [
         src,
         '-alpha',
@@ -232,30 +239,30 @@ async function main(): Promise<void> {
     quality: number;
     alphaQuality?: number;
   }> = [
-    // Water canopies & ambient sprites
-    { srcFile: 'bg_shallow_0_water_0e65cb68.png', dstFile: 'bg_shallow_0_water_0e65cb68.webp', quality: 84 },
-    { srcFile: 'bg_twilight_0_17bcb84c.png', dstFile: 'bg_twilight_0_17bcb84c.webp', quality: 84 },
-    { srcFile: 'bg_abyss_0_1bbf506a.png', dstFile: 'bg_abyss_0_1bbf506a.webp', quality: 84 },
-    { srcFile: 'bg_ambient_sprites_0c6882ce.png', dstFile: 'bg_ambient_sprites_0c6882ce.webp', quality: 92 },
-    // UI Atlases & Title Logo (high quality so BFS white-key slicing stays 100% razor-sharp)
-    { srcFile: 'icons_f5128c12.png', dstFile: 'icons_f5128c12.webp', quality: 92 },
-    { srcFile: 'buttons_16e3a0cf.png', dstFile: 'buttons_16e3a0cf.webp', quality: 92 },
-    { srcFile: 'setting_83a7a273.png', dstFile: 'setting_83a7a273.webp', quality: 92 },
-    { srcFile: 'title3_cae0290c.png', dstFile: 'title3_cae0290c.webp', quality: 90, alphaQuality: 98 },
-    // 4 Seabed Strips (runtime draws into 960x540 canvas -> cap at 1024px wide)
-    { srcFile: 'seabed_strip_coral_reef.png', dstFile: 'seabed_strip_coral_reef.webp', maxGeom: '1024x1024>', quality: 86, alphaQuality: 95 },
-    { srcFile: 'seabed_strip_rocky_shelf.png', dstFile: 'seabed_strip_rocky_shelf.webp', maxGeom: '1024x1024>', quality: 86, alphaQuality: 95 },
-    { srcFile: 'seabed_strip_underwater_canyon.png', dstFile: 'seabed_strip_underwater_canyon.webp', maxGeom: '1024x1024>', quality: 86, alphaQuality: 95 },
-    { srcFile: 'seabed_strip_deep_abyss.png', dstFile: 'seabed_strip_deep_abyss.webp', maxGeom: '1024x1024>', quality: 86, alphaQuality: 95 },
-    // 4 Ecology Sprites (cap at 768px)
-    { srcFile: 'ecology_coral_reef_cluster.png', dstFile: 'ecology_coral_reef_cluster.webp', maxGeom: '768x768>', quality: 86, alphaQuality: 95 },
-    { srcFile: 'ecology_rocky_outcrop.png', dstFile: 'ecology_rocky_outcrop.webp', maxGeom: '768x768>', quality: 86, alphaQuality: 95 },
-    { srcFile: 'ecology_kelp_forest_cluster.png', dstFile: 'ecology_kelp_forest_cluster.webp', maxGeom: '768x768>', quality: 86, alphaQuality: 95 },
-    { srcFile: 'ecology_abyssal_vent_debris.png', dstFile: 'ecology_abyssal_vent_debris.webp', maxGeom: '768x768>', quality: 86, alphaQuality: 95 },
-    // 2 World Atlases (BFS white-key sliced at runtime -> quality 90)
-    { srcFile: 'world_pois_atlas_1794473250443.jpg', dstFile: 'world_pois_atlas_1794473250443.webp', quality: 90 },
-    { srcFile: 'world_ecology_atlas_1794473252524.jpg', dstFile: 'world_ecology_atlas_1794473252524.webp', quality: 90 },
-  ];
+      // Water canopies & ambient sprites
+      { srcFile: 'bg_shallow_0_water_0e65cb68.png', dstFile: 'bg_shallow_0_water_0e65cb68.webp', quality: 84 },
+      { srcFile: 'bg_twilight_0_17bcb84c.png', dstFile: 'bg_twilight_0_17bcb84c.webp', quality: 84 },
+      { srcFile: 'bg_abyss_0_1bbf506a.png', dstFile: 'bg_abyss_0_1bbf506a.webp', quality: 84 },
+      { srcFile: 'bg_ambient_sprites_0c6882ce.png', dstFile: 'bg_ambient_sprites_0c6882ce.webp', quality: 92 },
+      // UI Atlases & Title Logo (high quality so BFS white-key slicing stays 100% razor-sharp)
+      { srcFile: 'icons_f5128c12.png', dstFile: 'icons_f5128c12.webp', quality: 92 },
+      { srcFile: 'buttons_16e3a0cf.png', dstFile: 'buttons_16e3a0cf.webp', quality: 92 },
+      { srcFile: 'setting_83a7a273.png', dstFile: 'setting_83a7a273.webp', quality: 92 },
+      { srcFile: 'title3_cae0290c.png', dstFile: 'title3_cae0290c.webp', quality: 90, alphaQuality: 98 },
+      // 4 Seabed Strips (runtime draws into 960x540 canvas -> cap at 1024px wide)
+      { srcFile: 'seabed_strip_coral_reef.png', dstFile: 'seabed_strip_coral_reef.webp', maxGeom: '1024x1024>', quality: 86, alphaQuality: 95 },
+      { srcFile: 'seabed_strip_rocky_shelf.png', dstFile: 'seabed_strip_rocky_shelf.webp', maxGeom: '1024x1024>', quality: 86, alphaQuality: 95 },
+      { srcFile: 'seabed_strip_underwater_canyon.png', dstFile: 'seabed_strip_underwater_canyon.webp', maxGeom: '1024x1024>', quality: 86, alphaQuality: 95 },
+      { srcFile: 'seabed_strip_deep_abyss.png', dstFile: 'seabed_strip_deep_abyss.webp', maxGeom: '1024x1024>', quality: 86, alphaQuality: 95 },
+      // 4 Ecology Sprites (cap at 768px)
+      { srcFile: 'ecology_coral_reef_cluster.png', dstFile: 'ecology_coral_reef_cluster.webp', maxGeom: '768x768>', quality: 86, alphaQuality: 95 },
+      { srcFile: 'ecology_rocky_outcrop.png', dstFile: 'ecology_rocky_outcrop.webp', maxGeom: '768x768>', quality: 86, alphaQuality: 95 },
+      { srcFile: 'ecology_kelp_forest_cluster.png', dstFile: 'ecology_kelp_forest_cluster.webp', maxGeom: '768x768>', quality: 86, alphaQuality: 95 },
+      { srcFile: 'ecology_abyssal_vent_debris.png', dstFile: 'ecology_abyssal_vent_debris.webp', maxGeom: '768x768>', quality: 86, alphaQuality: 95 },
+      // 2 World Atlases (BFS white-key sliced at runtime -> quality 90)
+      { srcFile: 'world_pois_atlas_1794473250443.jpg', dstFile: 'world_pois_atlas_1794473250443.webp', quality: 90 },
+      { srcFile: 'world_ecology_atlas_1794473252524.jpg', dstFile: 'world_ecology_atlas_1794473252524.webp', quality: 90 },
+    ];
 
   for (const spec of aistudioSpecs) {
     keepAistudio.add(spec.dstFile);

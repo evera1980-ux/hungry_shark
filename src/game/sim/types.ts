@@ -3,6 +3,7 @@ import { FactionId, GAME_CONFIG, PreyTierConfig } from '../config';
 import {
   ComputedSharkStats,
   computeEvolvedSharkStats,
+  ECONOMY_PREDATION_CONFIG,
   getGeneSurgeCost,
   getGoldOverdriveCost,
   getXpRequiredForLevel,
@@ -32,8 +33,8 @@ export type TutorialStep =
 export const TUTORIAL_STORAGE_KEY = 'hungry_shark_tutorial_done_v1';
 
 export const MAX_PARTICLES = 220;
-export const MAX_PICKUPS = 65;
-export const MAX_FLOAT_TEXTS = 36;
+export const MAX_PICKUPS = 120;
+export const MAX_FLOAT_TEXTS = 64;
 export const TARGET_PREY_COUNT = 54;
 
 export interface PooledParticle {
@@ -52,6 +53,8 @@ export interface PooledParticle {
 
 export interface PooledPickup {
   active: boolean;
+  collected?: boolean;
+  id?: number;
   x: number;
   y: number;
   vx: number;
@@ -59,6 +62,7 @@ export interface PooledPickup {
   kind: 'COIN' | 'DNA_CRYSTAL' | 'SUPPLY_CHEST';
   value: number;
   phase: number;
+  life: number;
 }
 
 export interface PooledFloatText {
@@ -93,6 +97,7 @@ export interface RunSummarySnapshot {
   activeSharkId: string;
   personalBestScore: number;
   isNewRecord: boolean;
+  masteryCoinsBonus: number;
   masteryGenesBonus: number;
   masteryCrownTier: number;
 }
@@ -103,7 +108,12 @@ export interface EconomyUsesState {
   runStartCoins: number;
   runStartGenes: number;
   runStartBestScore: number;
+  runMasteryCoinsAwarded: number;
   runMasteryGenesAwarded: number;
+  runCoinsEarned: number;
+  runGenesEarned: number;
+  settlementDoubled: boolean;
+  announcedCrownTier: number;
 }
 
 export interface HudStateSnapshot {
@@ -212,6 +222,9 @@ export interface SharkSimState {
   particleCursor: number;
   pickups: PooledPickup[];
   pickupCursor: number;
+  nextPickupId: number;
+  settledPreyUids: Set<number>;
+  genePityState: { pityMissStreak: number };
   floatTexts: PooledFloatText[];
   floatCursor: number;
   lastHudSyncTime: number;
@@ -339,7 +352,7 @@ export function createInitialHudState(initialSave: SharkMetaSaveData): HudStateS
     trialActive: false,
     targetFishNameKey: 'prey_140_PREY-002',
     targetFishProgress: 0,
-    targetFishRequired: 2,
+    targetFishRequired: ECONOMY_PREDATION_CONFIG.bounty.requiredKills,
     targetFishLengthCm: 23,
     targetFishSpeed: 68,
     activeSynergy: null,
@@ -348,8 +361,8 @@ export function createInitialHudState(initialSave: SharkMetaSaveData): HudStateS
     comboCount: 0,
     comboMultiplier: 1.0,
     goldenMutantCharge: 0,
-    goldenMutantRequired: 8,
-    frenzyCooldown: 12,
+    goldenMutantRequired: ECONOMY_PREDATION_CONFIG.frenzy.goldenChargeRequired,
+    frenzyCooldown: ECONOMY_PREDATION_CONFIG.frenzy.initProtectionSec,
     activeSharkId: activeForm.id,
     activeUpgradeLevel: activeUpg,
     unlockedFormsCount: initialSave.unlockedSharkIds.length,
@@ -451,6 +464,8 @@ export function createInitialSimState(metaSave: SharkMetaSaveData): SharkSimStat
     particleCursor: 0,
     pickups: Array.from({ length: MAX_PICKUPS }, () => ({
       active: false,
+      collected: false,
+      id: 0,
       x: 0,
       y: 0,
       vx: 0,
@@ -458,8 +473,12 @@ export function createInitialSimState(metaSave: SharkMetaSaveData): SharkSimStat
       kind: 'COIN',
       value: 1,
       phase: 0,
+      life: 0,
     })),
     pickupCursor: 0,
+    nextPickupId: 1,
+    settledPreyUids: new Set<number>(),
+    genePityState: { pityMissStreak: 0 },
     floatTexts: Array.from({ length: MAX_FLOAT_TEXTS }, () => ({
       active: false,
       x: 0,
@@ -479,7 +498,7 @@ export function createInitialSimState(metaSave: SharkMetaSaveData): SharkSimStat
         GAME_CONFIG.preyTiers.find((p) => p.id === 'PREY-002') ??
         GAME_CONFIG.preyTiers[1],
       progress: 0,
-      required: 2,
+      required: ECONOMY_PREDATION_CONFIG.bounty.requiredKills,
     },
     breachedTerraceCells: new Set<string>(),
     shallowDepletionTimer: 0,
@@ -522,9 +541,20 @@ export function spawnPooledPickup(
   kind: PooledPickup['kind'],
   value: number
 ): void {
-  const pk = sim.pickups[sim.pickupCursor];
-  sim.pickupCursor = (sim.pickupCursor + 1) % MAX_PICKUPS;
+  // Prefer an inactive slot first before overwriting an uncollected pickup via ring cursor
+  let chosenIdx = sim.pickupCursor;
+  for (let offset = 0; offset < MAX_PICKUPS; offset++) {
+    const probe = (sim.pickupCursor + offset) % MAX_PICKUPS;
+    if (!sim.pickups[probe].active) {
+      chosenIdx = probe;
+      break;
+    }
+  }
+  const pk = sim.pickups[chosenIdx];
+  sim.pickupCursor = (chosenIdx + 1) % MAX_PICKUPS;
   pk.active = true;
+  pk.collected = false;
+  pk.id = sim.nextPickupId++;
   pk.x = x;
   pk.y = y;
   pk.vx = vx;
@@ -532,6 +562,7 @@ export function spawnPooledPickup(
   pk.kind = kind;
   pk.value = value;
   pk.phase = Math.random() * Math.PI * 2;
+  pk.life = ECONOMY_PREDATION_CONFIG.pickups.lifetimeSec;
 }
 
 export function spawnPooledFloatText(
@@ -676,5 +707,6 @@ export function createPreyEntityForSim(
     phase: Math.random() * Math.PI * 2,
     telegraphTimer: 0,
     isInflated: false,
+    devoured: false,
   };
 }

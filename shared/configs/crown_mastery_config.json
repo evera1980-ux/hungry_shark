@@ -1,0 +1,1718 @@
+{
+  "schemaVersion": 2,
+  "settlementTiming": "end_of_run",
+  "allowInTrial": false,
+  "allowDoubleSettlement": false,
+  "hudUnlockNotificationOnly": true,
+  "bronzeBaseByRow": [
+    3000,
+    7500,
+    16000,
+    34000,
+    68000,
+    130000
+  ],
+  "bronzeStepByRow": [
+    500,
+    1000,
+    2000,
+    3800,
+    7000,
+    11000
+  ],
+  "silverScoreMult": 2.4,
+  "goldScoreMult": 4.8,
+  "tierRewardMultipliers": [
+    1,
+    2,
+    3.5
+  ],
+  "totals": {
+    "totalCoins": 44940,
+    "totalGenes": 9619,
+    "first3GenCoins": 11238,
+    "first3GenGenes": 2659
+  },
+  "sharks": [
+    {
+      "sharkId": "shark_00_clown_fry",
+      "index": 0,
+      "row": 0,
+      "col": 0,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 3000,
+          "coinReward": 8,
+          "geneReward": 6
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 7200,
+          "coinReward": 16,
+          "geneReward": 12
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 14400,
+          "coinReward": 28,
+          "geneReward": 21
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_01_lemon_pup",
+      "index": 1,
+      "row": 0,
+      "col": 1,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 3500,
+          "coinReward": 13,
+          "geneReward": 6
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 8400,
+          "coinReward": 26,
+          "geneReward": 12
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 16800,
+          "coinReward": 46,
+          "geneReward": 21
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_02_neon_reef",
+      "index": 2,
+      "row": 0,
+      "col": 2,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 4000,
+          "coinReward": 17,
+          "geneReward": 7
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 9600,
+          "coinReward": 34,
+          "geneReward": 14
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 19200,
+          "coinReward": 60,
+          "geneReward": 25
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_03_leopard_shark",
+      "index": 3,
+      "row": 0,
+      "col": 3,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 4500,
+          "coinReward": 22,
+          "geneReward": 7
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 10800,
+          "coinReward": 44,
+          "geneReward": 14
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 21600,
+          "coinReward": 77,
+          "geneReward": 25
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_04_glow_spotted",
+      "index": 4,
+      "row": 0,
+      "col": 4,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 5000,
+          "coinReward": 26,
+          "geneReward": 8
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 12000,
+          "coinReward": 52,
+          "geneReward": 16
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 24000,
+          "coinReward": 91,
+          "geneReward": 28
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_05_rivet_proto",
+      "index": 5,
+      "row": 0,
+      "col": 5,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 5500,
+          "coinReward": 31,
+          "geneReward": 9
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 13200,
+          "coinReward": 62,
+          "geneReward": 18
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 26400,
+          "coinReward": 109,
+          "geneReward": 32
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_06_hammerhead_pup",
+      "index": 6,
+      "row": 0,
+      "col": 6,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 6000,
+          "coinReward": 35,
+          "geneReward": 9
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 14400,
+          "coinReward": 70,
+          "geneReward": 18
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 28800,
+          "coinReward": 123,
+          "geneReward": 32
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_07_steel_patrol",
+      "index": 7,
+      "row": 0,
+      "col": 7,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 6500,
+          "coinReward": 40,
+          "geneReward": 10
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 15600,
+          "coinReward": 80,
+          "geneReward": 20
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 31200,
+          "coinReward": 140,
+          "geneReward": 35
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_08_blacktip_reef",
+      "index": 8,
+      "row": 1,
+      "col": 0,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 7500,
+          "coinReward": 56,
+          "geneReward": 15
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 18000,
+          "coinReward": 112,
+          "geneReward": 30
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 36000,
+          "coinReward": 196,
+          "geneReward": 53
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_09_blue_mako",
+      "index": 9,
+      "row": 1,
+      "col": 1,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 8500,
+          "coinReward": 61,
+          "geneReward": 15
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 20400,
+          "coinReward": 122,
+          "geneReward": 30
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 40800,
+          "coinReward": 214,
+          "geneReward": 53
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_10_bull_shark",
+      "index": 10,
+      "row": 1,
+      "col": 2,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 9500,
+          "coinReward": 65,
+          "geneReward": 16
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 22800,
+          "coinReward": 130,
+          "geneReward": 32
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 45600,
+          "coinReward": 228,
+          "geneReward": 56
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_11_tiger_shark",
+      "index": 11,
+      "row": 1,
+      "col": 3,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 10500,
+          "coinReward": 70,
+          "geneReward": 17
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 25200,
+          "coinReward": 140,
+          "geneReward": 34
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 50400,
+          "coinReward": 245,
+          "geneReward": 60
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_12_starry_whale",
+      "index": 12,
+      "row": 1,
+      "col": 4,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 11500,
+          "coinReward": 74,
+          "geneReward": 17
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 27600,
+          "coinReward": 148,
+          "geneReward": 34
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 55200,
+          "coinReward": 259,
+          "geneReward": 60
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_13_steam_conduit",
+      "index": 13,
+      "row": 1,
+      "col": 5,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 12500,
+          "coinReward": 79,
+          "geneReward": 18
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 30000,
+          "coinReward": 158,
+          "geneReward": 36
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 60000,
+          "coinReward": 277,
+          "geneReward": 63
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_14_magma_ember",
+      "index": 14,
+      "row": 1,
+      "col": 6,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 13500,
+          "coinReward": 83,
+          "geneReward": 19
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 32400,
+          "coinReward": 166,
+          "geneReward": 38
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 64800,
+          "coinReward": 291,
+          "geneReward": 67
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_15_abyss_tentacle",
+      "index": 15,
+      "row": 1,
+      "col": 7,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 14500,
+          "coinReward": 88,
+          "geneReward": 19
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 34800,
+          "coinReward": 176,
+          "geneReward": 38
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 69600,
+          "coinReward": 308,
+          "geneReward": 67
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_16_great_white",
+      "index": 16,
+      "row": 2,
+      "col": 0,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 16000,
+          "coinReward": 104,
+          "geneReward": 24
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 38400,
+          "coinReward": 208,
+          "geneReward": 48
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 76800,
+          "coinReward": 364,
+          "geneReward": 84
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_17_sabre_tiger",
+      "index": 17,
+      "row": 2,
+      "col": 1,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 18000,
+          "coinReward": 109,
+          "geneReward": 25
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 43200,
+          "coinReward": 218,
+          "geneReward": 50
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 86400,
+          "coinReward": 382,
+          "geneReward": 88
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_18_battle_scar",
+      "index": 18,
+      "row": 2,
+      "col": 2,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 20000,
+          "coinReward": 113,
+          "geneReward": 25
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 48000,
+          "coinReward": 226,
+          "geneReward": 50
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 96000,
+          "coinReward": 396,
+          "geneReward": 88
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_19_thresher_shark",
+      "index": 19,
+      "row": 2,
+      "col": 3,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 22000,
+          "coinReward": 118,
+          "geneReward": 26
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 52800,
+          "coinReward": 236,
+          "geneReward": 52
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 105600,
+          "coinReward": 413,
+          "geneReward": 91
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_20_goblin_jaw",
+      "index": 20,
+      "row": 2,
+      "col": 4,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 24000,
+          "coinReward": 122,
+          "geneReward": 27
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 57600,
+          "coinReward": 244,
+          "geneReward": 54
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 115200,
+          "coinReward": 427,
+          "geneReward": 95
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_21_cyber_alloy",
+      "index": 21,
+      "row": 2,
+      "col": 5,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 26000,
+          "coinReward": 127,
+          "geneReward": 27
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 62400,
+          "coinReward": 254,
+          "geneReward": 54
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 124800,
+          "coinReward": 445,
+          "geneReward": 95
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_22_obsidian_lava",
+      "index": 22,
+      "row": 2,
+      "col": 6,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 28000,
+          "coinReward": 131,
+          "geneReward": 28
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 67200,
+          "coinReward": 262,
+          "geneReward": 56
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 134400,
+          "coinReward": 459,
+          "geneReward": 98
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_23_mindflayer_shark",
+      "index": 23,
+      "row": 2,
+      "col": 7,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 30000,
+          "coinReward": 136,
+          "geneReward": 28
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 72000,
+          "coinReward": 272,
+          "geneReward": 56
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 144000,
+          "coinReward": 476,
+          "geneReward": 98
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_24_megalodon",
+      "index": 24,
+      "row": 3,
+      "col": 0,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 34000,
+          "coinReward": 152,
+          "geneReward": 33
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 81600,
+          "coinReward": 304,
+          "geneReward": 66
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 163200,
+          "coinReward": 532,
+          "geneReward": 116
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_25_bio_venom",
+      "index": 25,
+      "row": 3,
+      "col": 1,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 37800,
+          "coinReward": 157,
+          "geneReward": 34
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 90700,
+          "coinReward": 314,
+          "geneReward": 68
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 181400,
+          "coinReward": 550,
+          "geneReward": 119
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_26_twin_rocket",
+      "index": 26,
+      "row": 3,
+      "col": 2,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 41600,
+          "coinReward": 161,
+          "geneReward": 34
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 99800,
+          "coinReward": 322,
+          "geneReward": 68
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 199700,
+          "coinReward": 564,
+          "geneReward": 119
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_27_glacial_crystal",
+      "index": 27,
+      "row": 3,
+      "col": 3,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 45400,
+          "coinReward": 166,
+          "geneReward": 35
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 109000,
+          "coinReward": 332,
+          "geneReward": 70
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 217900,
+          "coinReward": 581,
+          "geneReward": 123
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_28_void_lightning",
+      "index": 28,
+      "row": 3,
+      "col": 4,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 49200,
+          "coinReward": 170,
+          "geneReward": 36
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 118100,
+          "coinReward": 340,
+          "geneReward": 72
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 236200,
+          "coinReward": 595,
+          "geneReward": 126
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_29_crimson_cyborg",
+      "index": 29,
+      "row": 3,
+      "col": 5,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 53000,
+          "coinReward": 175,
+          "geneReward": 36
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 127200,
+          "coinReward": 350,
+          "geneReward": 72
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 254400,
+          "coinReward": 613,
+          "geneReward": 126
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_30_earth_golem",
+      "index": 30,
+      "row": 3,
+      "col": 6,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 56800,
+          "coinReward": 179,
+          "geneReward": 37
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 136300,
+          "coinReward": 358,
+          "geneReward": 74
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 272600,
+          "coinReward": 627,
+          "geneReward": 130
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_31_multi_eyed_fiend",
+      "index": 31,
+      "row": 3,
+      "col": 7,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 60600,
+          "coinReward": 184,
+          "geneReward": 38
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 145400,
+          "coinReward": 368,
+          "geneReward": 76
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 290900,
+          "coinReward": 644,
+          "geneReward": 133
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_32_chrono_mecha",
+      "index": 32,
+      "row": 4,
+      "col": 0,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 68000,
+          "coinReward": 200,
+          "geneReward": 42
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 163200,
+          "coinReward": 400,
+          "geneReward": 84
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 326400,
+          "coinReward": 700,
+          "geneReward": 147
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_33_hellfire_behemoth",
+      "index": 33,
+      "row": 4,
+      "col": 1,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 75000,
+          "coinReward": 205,
+          "geneReward": 43
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 180000,
+          "coinReward": 410,
+          "geneReward": 86
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 360000,
+          "coinReward": 718,
+          "geneReward": 151
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_34_dark_matter",
+      "index": 34,
+      "row": 4,
+      "col": 2,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 82000,
+          "coinReward": 209,
+          "geneReward": 44
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 196800,
+          "coinReward": 418,
+          "geneReward": 88
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 393600,
+          "coinReward": 732,
+          "geneReward": 154
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_35_golden_dragon",
+      "index": 35,
+      "row": 4,
+      "col": 3,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 89000,
+          "coinReward": 214,
+          "geneReward": 44
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 213600,
+          "coinReward": 428,
+          "geneReward": 88
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 427200,
+          "coinReward": 749,
+          "geneReward": 154
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_36_dreadnought_cannon",
+      "index": 36,
+      "row": 4,
+      "col": 4,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 96000,
+          "coinReward": 218,
+          "geneReward": 45
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 230400,
+          "coinReward": 436,
+          "geneReward": 90
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 460800,
+          "coinReward": 763,
+          "geneReward": 158
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_37_matrix_phantom",
+      "index": 37,
+      "row": 4,
+      "col": 5,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 103000,
+          "coinReward": 223,
+          "geneReward": 46
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 247200,
+          "coinReward": 446,
+          "geneReward": 92
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 494400,
+          "coinReward": 781,
+          "geneReward": 161
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_38_poseidon_king",
+      "index": 38,
+      "row": 4,
+      "col": 6,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 110000,
+          "coinReward": 227,
+          "geneReward": 46
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 264000,
+          "coinReward": 454,
+          "geneReward": 92
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 528000,
+          "coinReward": 795,
+          "geneReward": 161
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_39_kraken_hydra",
+      "index": 39,
+      "row": 4,
+      "col": 7,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 117000,
+          "coinReward": 232,
+          "geneReward": 47
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 280800,
+          "coinReward": 464,
+          "geneReward": 94
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 561600,
+          "coinReward": 812,
+          "geneReward": 165
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_40_nebula_galaxy",
+      "index": 40,
+      "row": 5,
+      "col": 0,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 130000,
+          "coinReward": 248,
+          "geneReward": 52
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 312000,
+          "coinReward": 496,
+          "geneReward": 104
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 624000,
+          "coinReward": 868,
+          "geneReward": 182
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_41_star_destroyer",
+      "index": 41,
+      "row": 5,
+      "col": 1,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 141000,
+          "coinReward": 253,
+          "geneReward": 52
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 338400,
+          "coinReward": 506,
+          "geneReward": 104
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 676800,
+          "coinReward": 886,
+          "geneReward": 182
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_42_sea_dragon_leviathan",
+      "index": 42,
+      "row": 5,
+      "col": 2,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 152000,
+          "coinReward": 257,
+          "geneReward": 53
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 364800,
+          "coinReward": 514,
+          "geneReward": 106
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 729600,
+          "coinReward": 900,
+          "geneReward": 186
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_43_solar_supernova",
+      "index": 43,
+      "row": 5,
+      "col": 3,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 163000,
+          "coinReward": 262,
+          "geneReward": 53
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 391200,
+          "coinReward": 524,
+          "geneReward": 106
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 782400,
+          "coinReward": 917,
+          "geneReward": 186
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_44_celestial_paladin",
+      "index": 44,
+      "row": 5,
+      "col": 4,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 174000,
+          "coinReward": 266,
+          "geneReward": 54
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 417600,
+          "coinReward": 532,
+          "geneReward": 108
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 835200,
+          "coinReward": 931,
+          "geneReward": 189
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_45_chaos_void_elder",
+      "index": 45,
+      "row": 5,
+      "col": 5,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 185000,
+          "coinReward": 271,
+          "geneReward": 55
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 444000,
+          "coinReward": 542,
+          "geneReward": 110
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 888000,
+          "coinReward": 949,
+          "geneReward": 193
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_46_aurora_valkyrie",
+      "index": 46,
+      "row": 5,
+      "col": 6,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 196000,
+          "coinReward": 275,
+          "geneReward": 55
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 470400,
+          "coinReward": 550,
+          "geneReward": 110
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 940800,
+          "coinReward": 963,
+          "geneReward": 193
+        }
+      ]
+    },
+    {
+      "sharkId": "shark_47_omega_devourer",
+      "index": 47,
+      "row": 5,
+      "col": 7,
+      "tiers": [
+        {
+          "tier": 1,
+          "badgeIcon": "🥉",
+          "nameZh": "铜冠·掠食者",
+          "nameEn": "Bronze Predator",
+          "scoreThreshold": 207000,
+          "coinReward": 280,
+          "geneReward": 56
+        },
+        {
+          "tier": 2,
+          "badgeIcon": "🥈",
+          "nameZh": "银冠·深海领主",
+          "nameEn": "Silver Overlord",
+          "scoreThreshold": 496800,
+          "coinReward": 560,
+          "geneReward": 112
+        },
+        {
+          "tier": 3,
+          "badgeIcon": "👑",
+          "nameZh": "金冠·深渊霸主",
+          "nameEn": "Gold Apex Monarch",
+          "scoreThreshold": 993600,
+          "coinReward": 980,
+          "geneReward": 196
+        }
+      ]
+    }
+  ]
+}

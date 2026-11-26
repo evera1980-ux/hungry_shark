@@ -3,6 +3,10 @@ import { soundFX } from '../game/audio';
 import { Lang } from '../game/i18n';
 import { computeEvolvedSharkStats } from '../game/rules';
 import {
+  getMaxUnlockedRowFromSave,
+  getScaledSupplyDropReward,
+} from '../game/adManager';
+import {
   evaluateSharkUnlock,
   getGlobalAtlasBonuses,
   getSharkFormById,
@@ -24,9 +28,11 @@ interface SharkEvolutionAtlasModalProps {
   liveRunGenes: number;
   liveRunLevel: number;
   liveRunMaxDepth: number;
+  trialLockedInRun?: boolean;
   onSelectActiveShark: (sharkId: string) => void;
   onUpgradeShark: (sharkId: string) => void;
   onUnlockShark: (sharkId: string) => void;
+  onSupplyDropAd?: () => void;
   onClose: () => void;
 }
 
@@ -69,13 +75,16 @@ export const SharkEvolutionAtlasModal: React.FC<
   liveRunGenes,
   liveRunLevel,
   liveRunMaxDepth,
+  trialLockedInRun = false,
   onSelectActiveShark,
   onUpgradeShark,
   onUnlockShark,
+  onSupplyDropAd,
   onClose,
 }) => {
   // Pre-compute all locked sharks that currently meet all 3 evolution gates
   const readyToEvolveSharks = useMemo(() => {
+    if (trialLockedInRun) return [];
     return SHARK_EVOLUTION_FORMS.filter((shark) => {
       if (metaSave.unlockedSharkIds.includes(shark.id)) return false;
       return evaluateSharkUnlock(
@@ -1023,9 +1032,15 @@ export const SharkEvolutionAtlasModal: React.FC<
                           {claimed ? (
                             <span className="text-emerald-400">✓</span>
                           ) : (
-                            <span className="text-emerald-300 flex items-center gap-0.5">
-                              +{mTier.geneReward}
-                              <UiAtlasIcon iconKey="UI_ICON_GENE" size={9} />
+                            <span className="flex flex-col items-end gap-0.5 leading-none">
+                              <span className="text-amber-300 flex items-center gap-0.5">
+                                +{mTier.coinReward}
+                                <UiAtlasIcon iconKey="UI_ICON_COIN" size={9} />
+                              </span>
+                              <span className="text-emerald-300 flex items-center gap-0.5">
+                                +{mTier.geneReward}
+                                <UiAtlasIcon iconKey="UI_ICON_GENE" size={9} />
+                              </span>
                             </span>
                           )}
                         </div>
@@ -1179,7 +1194,13 @@ export const SharkEvolutionAtlasModal: React.FC<
 
             {/* 5. Side-by-Side Thumb-Zone Action Buttons (Fixed 40px / 44px Height) */}
             <div className="pt-1">
-              {isInspectedUnlocked ? (
+              {trialLockedInRun ? (
+                <div className="w-full h-10 sm:h-11 px-3.5 rounded-2xl font-black text-xs flex items-center justify-center bg-amber-500/15 border border-amber-400/35 text-amber-200 whitespace-nowrap">
+                  {lang === 'zh'
+                    ? '试玩模式仅预览图谱（本局结束后可消费金币/基因）'
+                    : 'Trial Preview Only (Spend earned currency after run)'}
+                </div>
+              ) : isInspectedUnlocked ? (
                 <div className="grid grid-cols-[1.45fr_1fr] gap-2.5">
                   {/* Coin + Breakthrough Gene Upgrade Button (Lv.1 -> Lv.10) */}
                   <button
@@ -1253,28 +1274,47 @@ export const SharkEvolutionAtlasModal: React.FC<
                   </button>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  data-testid="atlas-unlock-btn"
-                  disabled={!unlockCheck.canUnlockNow}
-                  onClick={() => onUnlockShark(inspectedForm.id)}
-                  className={`w-full h-10 sm:h-11 px-3.5 rounded-2xl font-black text-xs flex items-center justify-center gap-2 transition whitespace-nowrap ${
-                    unlockCheck.canUnlockNow
-                      ? 'bg-gradient-to-r from-emerald-400 via-teal-400 to-sky-400 hover:brightness-110 text-slate-950 shadow-[0_0_24px_rgba(52,211,153,0.45)] cursor-pointer'
-                      : 'bg-white/[0.05] text-slate-500 cursor-not-allowed'
-                  }`}
-                >
-                  <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={17} />
-                  <span>
-                    {unlockCheck.canUnlockNow
-                      ? lang === 'zh'
-                        ? '立即进化'
-                        : 'Evolve'
-                      : lang === 'zh'
-                      ? '条件未满'
-                      : 'Locked'}
-                  </span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    data-testid="atlas-unlock-btn"
+                    disabled={!unlockCheck.canUnlockNow}
+                    onClick={() => onUnlockShark(inspectedForm.id)}
+                    className={`flex-1 h-10 sm:h-11 px-3.5 rounded-2xl font-black text-xs flex items-center justify-center gap-2 transition whitespace-nowrap ${
+                      unlockCheck.canUnlockNow
+                        ? 'bg-gradient-to-r from-emerald-400 via-teal-400 to-sky-400 hover:brightness-110 text-slate-950 shadow-[0_0_24px_rgba(52,211,153,0.45)] cursor-pointer'
+                        : 'bg-white/[0.05] text-slate-500 cursor-not-allowed'
+                    }`}
+                  >
+                    <UiAtlasIcon iconKey="UI_BTN_MORPH_EVOLVE" size={17} />
+                    <span>
+                      {unlockCheck.canUnlockNow
+                        ? lang === 'zh'
+                          ? '立即进化'
+                          : 'Evolve'
+                        : lang === 'zh'
+                        ? '条件未满'
+                        : 'Locked'}
+                    </span>
+                  </button>
+                  {onSupplyDropAd && (!unlockCheck.coinsMet || !unlockCheck.genesMet) && (() => {
+                    const drop = getScaledSupplyDropReward(
+                      getMaxUnlockedRowFromSave(metaSave.unlockedSharkIds)
+                    );
+                    return (
+                      <button
+                        type="button"
+                        data-testid="atlas-supply-drop-btn"
+                        onClick={onSupplyDropAd}
+                        className="h-10 sm:h-11 px-3 rounded-2xl font-black text-[11px] bg-gradient-to-r from-amber-300 to-yellow-400 hover:brightness-110 text-slate-950 shadow-[0_6px_18px_rgba(250,204,21,0.3)] cursor-pointer whitespace-nowrap"
+                      >
+                        {lang === 'zh'
+                          ? `📺 补给 +${drop.coins}🪙+${drop.genes}🧬`
+                          : `📺 Drop +${drop.coins}🪙+${drop.genes}🧬`}
+                      </button>
+                    );
+                  })()}
+                </div>
               )}
             </div>
           </div>

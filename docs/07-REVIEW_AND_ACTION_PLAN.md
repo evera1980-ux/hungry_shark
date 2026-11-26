@@ -28,16 +28,16 @@
 ### P0 · 立即止血（上线硬阻塞项）
 - [x] **P0-1**：清理 5,583 行孤儿死代码 & 恢复 `tsc --noEmit` 0 Error 绿灯
 - [x] **P0-2**：Web 资源包体瘦身（61 MB → < 10 MB）& 消除启动期重复加载与主线程 `getImageData` 卡顿
-- [ ] **P0-3**：修复 `adManager.ts` 跨平台广告位配置错误、补齐频控与防白嫖兜底
+- [x] **P0-3**：修复 `adManager.ts` 跨平台广告位配置错误、补齐频控与防白嫖兜底
 
 ### P1 · 上线前必做（核心体验与架构稳固）
-- [ ] **P1-1**：重平衡 135 种猎物的 `T1 ~ T48` 阶位分布（消除 T1 拥挤与 T37~T48 生态真空）
+- [x] **P1-1**：重平衡 135→235 种猎物的 `T1 ~ T48` 阶位分布（新增 100 种深渊/星穹粉红占位猎物 `PREY-301~400` 填满 `T37~T48`）
 - [x] **P1-2**：修正 `0.8m -> 45.0m` 巨鲨缩放与浅海空海闭环（废除微缩投影补丁、回归真相机变焦 + 撞碎上层阶梯海床 + 浅海深潜引导）
 - [x] **P1-3**：拆分上帝文件（`worldGenerationSystem.ts` / `App.tsx`）并同步刷新 `AGENTS.md` 与 `docs/`
 - [ ] **P1-4**：补齐听觉闭环（浅海/暮光/深渊 3 层自适应环境音与 BGM + 黄金狂热变奏 + 连击音阶爬升）
 
 ### P2 · 商业化与长线留存放大
-- [ ] **P2-1**：补强中后期留存玩法（4 大血统主动技能 + 局内 Boss 战 + 每日任务/成就 + 云存档/榜单）
+- [ ] **P2-1**：补强中后期留存玩法（4 大血统主动技能 + 局内 Boss 战 + 每日任务/成就 + 云存档/榜单）— 详见 [09-P2_1_RETENTION_MONETIZATION_PLAN.md](./09-P2_1_RETENTION_MONETIZATION_PLAN.md)
 - [x] **P2-2**：重构 Web ↔ iOS 双端同步架构（摆脱 12,422 行 TS 模板字符串拼 Swift 源码）
 
 ---
@@ -78,7 +78,7 @@
 
 ---
 
-### [ ] P0-3 · 修复广告 SDK 配置与变现合规隐患
+### [x] P0-3 · 修复广告 SDK 配置与变现合规隐患
 - **当前问题**：
   - `adManager.ts:299` 将 Google AdMob 的 `admobRewardedAdUnitId` 传给微信/抖音小游戏 SDK。
   - `adManager.ts:391` `showInterstitialAd()` 默认参数错误复用了 Rewarded Video 的 Unit ID。
@@ -86,26 +86,26 @@
 - **可选方案**：
   - **方案 A（推荐）**：拆分独立配置项（AdMob 激励/插屏、微信激励/插屏、抖音激励/插屏），补齐统一频控状态机，生产环境禁止未观看完直接发奖，仅在显式 Dev Flag 下启用浏览器模拟播放。
   - **方案 B**：仅修复 Unit ID 错配与移除白嫖发奖，暂不加频控 UI。
-- **决策记录**：`待决策`
+- **决策记录**：**采用方案 A（2026-11-25 执行完成）** — 重构 `src/game/adManager.ts`：拆分 `admobInterstitialAdUnitId`（不再复用激励视频 ID）与 `PLATFORM_ADS_CONFIG`（微信 `VITE_WX_*` / 抖音 `VITE_TT_*` 激励与插屏完全独立，绝不回退 AdMob ID）；新增 `AD_PLACEMENT_RULES` + `canShowAd()` + `localStorage` 持久化频控状态机（冷却时间 + 每日次数上限 + 并发 `inFlight` 锁）；彻底移除无广告时的默认 `onReward()` 白嫖兜底，仅在显式 Dev Flag（`VITE_ENABLE_AD_SIMULATOR` / `import.meta.env.DEV`）下允许模拟播放，否则触发 `onCancel` 与 `AdErrorInfo` 双语提示；在 `src/App.tsx` 接入 `adManager.registerErrorHandler` 展示非阻断冷却/报错 Toast。
 - **验收标准（DoD）**：
-  - [ ] 激励视频与插屏广告使用完全独立的 Unit ID 配置与环境变量映射
-  - [ ] 微信/抖音小游戏使用独立 AdUnit 配置，不再串用 AdMob ID
-  - [ ] 具备广告位冷却与错误提示，非开发模式严禁失败时直接调用 `onReward()`
+  - [x] 激励视频与插屏广告使用完全独立的 Unit ID 配置与环境变量映射
+  - [x] 微信/抖音小游戏使用独立 AdUnit 配置，不再串用 AdMob ID
+  - [x] 具备广告位冷却与错误提示，非开发模式严禁失败时直接调用 `onReward()`
 
 ---
 
-### [ ] P1-1 · 重平衡 135 种猎物的 T1~T48 阶位生态曲线
+### [x] P1-1 · 重平衡猎物的 T1~T48 阶位生态曲线（新增 100 种 T37~T48 深渊猎物）
 - **当前问题**：
-  - 89/135 种猎物全挤在 `T1`，15 个中间阶位为 0，`T37~T48` 全空（最高仅 1 种 `T36`），导致 48 阶鲨鱼成长阶梯断层。
+  - 原 89/135 种猎物（65.9%）挤在 `T1`，`T37~T48` 全空，导致 48 阶鲨鱼后期无同阶生态。
 - **可选方案**：
-  - **方案 A（推荐）**：保留 48 阶鲨鱼体系，按体长与深度带对 135 种猎物重新映射到连续分布的 `T1~T42`，并在深渊/异界层补足 `T37~T48` 终极猎物与巨型敌对单位。
+  - **方案 A（推荐）**：保留 48 阶鲨鱼体系，再增加 100 种高阶深渊/冥渊/星穹猎物（`PREY-301 ~ PREY-400`）均匀填满 `T37 ~ T48`（每阶 8~9 种），暂借前 100 种剪影并统一烘焙为高饱和粉红占位 WebP（方便后续生成正式图直接覆盖替换）。
   - **方案 B**：将鲨鱼咬合阶位从 `T1~T48` 收敛为更紧凑的 **`T1~T16`**（每 3 阶鲨鱼共用 1 个咬合阶位），让 135 种猎物在每个阶位都有 6~10 种丰富生态。
   - **方案 C**：保持当前阶位表不动，通过动态精英变体（黄金/变异/巨化）填补高阶空缺。
-- **决策记录**：`待决策`
+- **决策记录**：**采用方案 A（2026-11-25 执行完成）** — 按照原声明式元组规范在 `src/game/preyDatabase140.ts` 的 `RAW_PREY_140_TUPLES` 直接录入 100 种 `PREY-301 ~ PREY-400`（总生态扩至 **234 种海洋生物 + `cyber_mine` = 235 项**，配置内零程序化替换逻辑），真实水深 `4,000m ~ 11,000m`（`meterDepthToWorldY` 映射为 `10,000px ~ 20,000px`，绝不在 1,000m~3,000m 提前出现），并同步对齐 Web/iOS 刷新器的分段 `targetTier` 曲线；按真实体长（`26.2m ~ 45.0m`）均匀分布于 `T37 ~ T48`（每阶 8~9 种）；`docs/06-PREY_DATABASE_140.md` 明确记录 `PREY-301~400` 为 `⏳ 缺少正式素材`，当前磁盘暂以 `PREY-001~100` 轮廓烘焙为粉红 WebP 占位（`public/assets/` 共 `6.4 MB`），后续出图直接覆盖同名文件即可；同步更新 `ios-native/` 步态目录与双端单测。
 - **验收标准（DoD）**：
-  - [ ] 不再存在 50% 以上生物堆叠在单一阶位的情况
-  - [ ] 玩家从 1 阶成长到最高阶，每一代都有明确的“由躲避/破甲变为直接吞噬”的标志性猎物
-  - [ ] `rules.test.ts` 新增阶位覆盖率与生态连续性单元测试
+  - [x] 不再存在 50% 以上生物堆叠在单一阶位的情况（`T1` 占比降至 `89 / 235 = 37.9% < 50%`）
+  - [x] 玩家从 1 阶成长到最高阶，`T37 ~ T48` 每一代均有 8~9 种明确的“由躲避/破甲变为直接吞噬”标志性粉红巨兽猎物
+  - [x] `rules.test.ts` 新增 `P1-1 Ecology Rebalance` 阶位覆盖率与生态连续性单元测试（50/50 全绿）
 
 ---
 
@@ -153,12 +153,13 @@
 ---
 
 ### [ ] P2-1 · 中后期留存玩法与商业化闭环升级
-- **待规划子项**：
-  - [ ] 4 大血统（生物 / 机甲 / 元素 / 深渊）各 1 套差异化主动技能
-  - [ ] 阶段性 Boss 战（海面猎鲨战舰 / 深渊克拉肯 / 核动力潜艇）
-  - [ ] 每日任务、里程碑成就与云存档（Firebase / 平台云存档）+ 榜单
-  - [ ] 混合变现设计（去广告礼盒 / 基因月卡 / 限时特惠鲨）
-- **决策记录**：`待决策`
+- **详细分步实施方案**：已落盘至独立可执行计划文档 [**`docs/09-P2_1_RETENTION_MONETIZATION_PLAN.md`**](./09-P2_1_RETENTION_MONETIZATION_PLAN.md)（共 **4 大 Phase · 24 个可逐条 Check 步骤 `A1~D6`**，含双端文件映射、数值公式、红线约束与验收标准）。
+- **分阶段总览（24 步 Check 清单映射）**：
+  - [ ] **Phase A（`A1~A6`）· 4 大血统差异化主动技能**：血嗜狂潮（`APEX_BIO`）/ 电磁脉冲炮（`CYBER_MECHA`）/ 熔核爆裂（`ELEMENTAL_CORE`）/ 虚空黑洞（`ELDER_ABYSS`），复用 `UI_LINEAGE_*` 徽章与双端多指 MOBA 扇形按键
+  - [ ] **Phase B（`B1~B6`）· 阶段性深海 Boss 战**：猎鲨战舰（浅海）/ 核动力潜艇（暮光半深海）/ 克拉肯虚空本体（深渊海沟），含 4s 预警演出、多阶段破防弱点、专属 HUD 血条与 `SUPPLY_CHEST` 宝箱爆奖
+  - [ ] **Phase C（`C1~C6`）· 每日任务、成就、云存档与榜单**：`SharkMetaSaveData v2` 无损迁移、每日 3 任务 + 12 项三阶成就、Web 加密存档码 + iOS iCloud KVS 单调并集云同步、Web/Game Center 榜单
+  - [ ] **Phase D（`D1~D6`）· 混合变现闭环（IAP + IAA）**：去广告礼盒（含跳过券）+ 基因月卡（+35% 基因/-15% 技能 CD）+ 限时特惠神鲨直购，iOS 原生 StoreKit 2 + 恢复购买与转化漏斗埋点
+- **决策记录**：`待按 Phase A -> B -> C -> D 分期确认并启动开发`
 
 ---
 
@@ -187,3 +188,5 @@
 | 2026-11-22 | P1-3 | 拆分 `worldGenerationSystem.ts`（11,285→15 行 + `world/` 11 模块）与 `App.tsx`（5,448→1,607 行 + `sim/` 4 引擎模块 + `components/game/` 5 视图覆盖层）；修复浏览器验收捕获的 `seabedRenderer.ts` `ctx.save()` 栈泄漏；同步刷新 `AGENTS.md` 与 `docs/00/01/07` | `[x]` | `rules.test.ts` 46/46 通过；`tsc --noEmit` 0 Error；`npm run build` 成功；无头 Chromium Title/Playing/Pause 三态验证 0 Error |
 | 2026-11-23 | P0-2 | 执行方案 A：新增 `scripts/optimize-web-assets.ts`（`npm run optimize:assets`）离线预裁切透明边并全量转 WebP（`public/assets/` 61.18 MB → 4.50 MB，-92.6%）；移除 `sharks_ec921c3b.png` / `fish_24bdaa5a.png` / `fish2_fc857cfa.png` 重复加载与主线程 `getImageData` 猎物裁切；实装按水深带懒加载猎物与按需加载鲨鱼 | `[x]` | `rules.test.ts` 47/47 通过；`tsc --noEmit` 0 Error；`npm run build` 成功；首屏网络资源实测 2.55 MB（2 张鲨鱼 + 浅海带猎物，0 旧图集，0 404） |
 | 2026-11-23 | P1-2 | 废除 `seabedScale` 微缩投影补丁，全面回归单一 1:1 世界坐标 + 原生 2D 真相机变焦（`CAMERA_ZOOM_MIN = 0.22` / `worldScale = scale / cameraZoom`）+ 严守线性猎物体长比 + 巨鲨撞碎上层阶梯海床（`Tier 0~4: 8/12/18/26/36m`，`breachedTerraceCells`）+ 保持浅海空海并实装广角视口刷怪/回收同步与双语 HUD 深潜引导 | `[x]` | `rules.test.ts` 48/48 通过；`npm run sync:ios` 同步；`tsc --noEmit` 0 Error；`npm run build` 成功 |
+| 2026-11-25 | P0-3 | 执行方案 A：拆分 AdMob 激励/插屏与微信/抖音独立 `PLATFORM_ADS_CONFIG`，实装 `AD_PLACEMENT_RULES` 频控状态机（冷却 + 每日上限 + 并发锁），移除非开发模式白嫖发奖兜底并在 `App.tsx` 接入双语冷却/错误 Toast | `[x]` | `rules.test.ts` 49/49 通过；`tsc --noEmit` 0 Error；`npm run build` 成功；`npm run sync:ios` 成功 |
+| 2026-11-25 | P1-1 | 执行方案 A（增量扩充）：按原声明式元组规范新增 100 种深渊/星穹占位猎物 `PREY-301~400`（`4000m~11000m` / `10000~20000px`，均匀填满 `T37~T48`，总库 235 项，`T1` 降至 37.9%）并校准双端刷新器分段 `targetTier` 曲线消除 1000m 提前刷出问题；在 `docs/06-PREY_DATABASE_140.md` 登记缺少正式素材清单，暂用 `PREY-001~100` 粉红 WebP 占位（总包体 `6.4 MB`）；同步更新 iOS 步态目录与双端单测 | `[x]` | `rules.test.ts` 50/50 通过；`npm run sync:ios` 成功（302 资产 + 235 猎物）；`tsc --noEmit` 0 Error；`npm run build` 成功；`xcodebuild` iOS 模拟器测试 6/6 通过 |

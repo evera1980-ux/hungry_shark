@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Lang } from '../../game/i18n';
 import { adManager } from '../../game/adManager';
 import {
+  getPermanentProgressEligibility,
   getSharkFormById,
   SharkFormConfig,
   SharkMetaSaveData,
@@ -29,11 +30,14 @@ export interface GameOverModalOverlayProps {
   setShowAtlasModal: React.Dispatch<React.SetStateAction<boolean>>;
   reviveOffered: boolean;
   setReviveOffered: React.Dispatch<React.SetStateAction<boolean>>;
+  settlementDoubled: boolean;
   runSnapshot: RunSummarySnapshot;
   hudState: HudStateSnapshot;
-  startNewRun: (withMaxMechaTrial?: boolean) => void;
+  startNewRun: (withTrialShark?: boolean) => void;
   handleReviveWithFrenzyAd: () => void;
-  handleTrialMaxMechaAd: () => void;
+  handleDoubleSettlementAd: () => void;
+  handleTrialSharkAd: () => void;
+  trialTargetForm: SharkFormConfig;
   activeHudSharkForm: SharkFormConfig;
 }
 
@@ -46,11 +50,14 @@ export const GameOverModalOverlay: React.FC<GameOverModalOverlayProps> = ({
   setShowAtlasModal,
   reviveOffered,
   setReviveOffered,
+  settlementDoubled,
   runSnapshot,
   hudState,
   startNewRun,
   handleReviveWithFrenzyAd,
-  handleTrialMaxMechaAd,
+  handleDoubleSettlementAd,
+  handleTrialSharkAd,
+  trialTargetForm,
   activeHudSharkForm,
 }) => {
   return (
@@ -213,7 +220,11 @@ export const GameOverModalOverlay: React.FC<GameOverModalOverlayProps> = ({
                   {/* Row 0: Permanent Account Banked Currencies Strip */}
                   <div className="h-[5.8%] shrink-0 flex items-center justify-center gap-[1.3cqw] text-[2.0cqw] font-sans font-bold text-slate-200/95 tracking-wide leading-none">
                     <span>
-                      {lang === 'zh'
+                      {hudState.trialActive
+                        ? lang === 'zh'
+                          ? '试玩奖励已存入账户（不计王冠/纪录）：'
+                          : 'Trial harvest banked (No Crown/Record):'
+                        : lang === 'zh'
                         ? '本局金币与基因已永久存入账户：'
                         : 'Run coins & genes permanently banked:'}
                     </span>
@@ -356,8 +367,9 @@ export const GameOverModalOverlay: React.FC<GameOverModalOverlayProps> = ({
                         </span>
                       </div>
                       <div className="text-[1.55cqw] font-mono text-emerald-200/80 mt-[0.35cqw] leading-none whitespace-nowrap">
-                        {runSnapshot.masteryGenesBonus > 0
-                          ? `👑 +${runSnapshot.masteryGenesBonus}🧬`
+                        {runSnapshot.masteryCoinsBonus > 0 ||
+                        runSnapshot.masteryGenesBonus > 0
+                          ? `👑 +${runSnapshot.masteryCoinsBonus}🪙 +${runSnapshot.masteryGenesBonus}🧬`
                           : lang === 'zh'
                           ? '已永久入库'
                           : 'Banked'}
@@ -380,28 +392,65 @@ export const GameOverModalOverlay: React.FC<GameOverModalOverlayProps> = ({
                     </div>
                   </div>
 
-                  {/* Row 3: Primary Full-Width Glowing Emerald Play Again Button */}
-                  <UiSettingButton
-                    settingKey="SETTING_BTN_RESUME"
-                    dataStart={true}
-                    dataTestId="settlement-restart-btn"
-                    onClick={() => startNewRun(false)}
-                    className="w-full h-[15.8%] shrink-0"
-                    labelClassName="text-[3.35cqw]"
-                  >
-                    {t('btn_restart')}
-                  </UiSettingButton>
+                  {/* Row 3: Primary Play Again + 2X Settlement Double Reward */}
+                  {(() => {
+                    const permElig = getPermanentProgressEligibility({
+                      trialActive: hudState.trialActive,
+                    });
+                    const canDouble =
+                      permElig.allowDoubleSettlementAd &&
+                      !settlementDoubled &&
+                      (runSnapshot.coinsEarned > 0 || runSnapshot.genesEarned > 0);
+                    return (
+                      <div className="grid grid-cols-2 grid-rows-[minmax(0,1fr)] gap-[2.2cqw] w-full h-[15.8%] shrink-0 overflow-hidden">
+                        <UiSettingButton
+                          settingKey="SETTING_BTN_LANG"
+                          customIconKey="UI_ICON_VIDEO_AD"
+                          dataTestId="settlement-double-btn"
+                          disabled={!canDouble}
+                          onClick={handleDoubleSettlementAd}
+                          className="w-full h-full"
+                          labelClassName="text-[2.25cqw]"
+                        >
+                          {!permElig.allowDoubleSettlementAd
+                            ? lang === 'zh'
+                              ? '试玩不可翻倍'
+                              : 'Trial: No 2X'
+                            : settlementDoubled
+                            ? lang === 'zh'
+                              ? '✓ 已翻倍领取'
+                              : '✓ 2X Claimed'
+                            : lang === 'zh'
+                            ? '📺 收获×2倍'
+                            : '📺 2X Harvest'}
+                        </UiSettingButton>
 
-                  {/* Row 4: Full-Width Gold Trial Mecha Leviathan Button */}
+                        <UiSettingButton
+                          settingKey="SETTING_BTN_RESUME"
+                          dataStart={true}
+                          dataTestId="settlement-restart-btn"
+                          onClick={() => startNewRun(false)}
+                          className="w-full h-full"
+                          labelClassName="text-[2.85cqw]"
+                        >
+                          {t('btn_restart')}
+                        </UiSettingButton>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Row 4: Full-Width Gold Next-Unowned Trial Shark Button */}
                   <UiSettingButton
                     settingKey="SETTING_BTN_TUTORIAL"
                     customIconKey="UI_ICON_VIDEO_AD"
                     dataTestId="settlement-trial-mecha-btn"
-                    onClick={handleTrialMaxMechaAd}
+                    onClick={handleTrialSharkAd}
                     className="w-full h-[12.6%] shrink-0"
-                    labelClassName="text-[2.35cqw]"
+                    labelClassName="text-[2.2cqw]"
                   >
-                    {lang === 'zh' ? '试驾机甲利维坦' : 'Trial Mecha'}
+                    {lang === 'zh'
+                      ? `试玩 · ${trialTargetForm.nameZh}`
+                      : `Trial · ${trialTargetForm.nameEn}`}
                   </UiSettingButton>
 
                   {/* Row 5: 2-Column Evolution / Upgrade + Return to Main Menu */}

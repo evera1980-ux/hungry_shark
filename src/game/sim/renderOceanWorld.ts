@@ -1,6 +1,6 @@
 import { GAME_CONFIG } from '../config';
 import { Lang, translate } from '../i18n';
-import { MIN_RENDER_ZOOM_FLOOR } from '../rules';
+import { ECONOMY_PREDATION_CONFIG, MIN_RENDER_ZOOM_FLOOR } from '../rules';
 import { spriteSheetManager } from '../spriteSheetManager';
 import {
   drawOffScreenRadarIndicators,
@@ -189,6 +189,11 @@ export function renderOceanWorld(params: RenderOceanWorldParams): void {
           continue;
         }
         ctx.save();
+        const blinkThresh =
+          ECONOMY_PREDATION_CONFIG.pickups.blinkStartRemainingSec;
+        if (pk.life > 0 && pk.life <= blinkThresh) {
+          ctx.globalAlpha = 0.35 + 0.65 * Math.abs(Math.sin(pk.life * 14));
+        }
         const bobY = Math.sin(pk.phase) * (3.5 * pickupVisualScale);
         ctx.translate(pk.x, pk.y + bobY);
         ctx.scale(pickupVisualScale, pickupVisualScale);

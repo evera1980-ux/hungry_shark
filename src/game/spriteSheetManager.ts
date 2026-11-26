@@ -790,7 +790,7 @@ export class SpriteSheetManager {
   }
 
   /**
-   * Depth-band lazy loader for the 135 active marine prey WebP assets.
+   * Depth-band lazy loader for the 235 active marine prey WebP assets.
    * Quantizes depth into 400m buckets so calling every simulation tick is O(1) zero-cost,
    * and streams only uncached species overlapping `[depth - 350m, depth + lookaheadMeters]`
    * in gentle batches of 8 with zero main-thread pixel trimming.

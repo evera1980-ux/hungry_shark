@@ -10,3 +10,7 @@ coverage/
 xcuserdata/
 *.xcworkspace/
 !default.xcworkspace/
+.build/
+*.build/
+DerivedData/
+

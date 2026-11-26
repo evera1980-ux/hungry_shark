@@ -1,7 +1,7 @@
 # 01. 项目系统架构与模块说明书 (System Architecture)
 
 > **文档状态**：生效中（Active）
-> **最后更新**：2026-11-23
+> **最后更新**：2026-11-25
 > **关联约束**：修改任何模块划分、文件职责、主循环状态或存档 Schema 时，必须同步更新本文档（参见 [`docs/00-AI_CONSTRAINTS.md`](./00-AI_CONSTRAINTS.md)）。
 
 ---
@@ -148,11 +148,14 @@
 | `unlockedSharkIds` | `string[]` | `['shark_00_clown_fry']` | 已解锁的鲨鱼形态 ID 列表（共 48 阶） |
 | `selectedSharkId` | `string` | `'shark_00_clown_fry'` | 当前出战的鲨鱼形态 ID |
 | `sharkUpgradeLevels` | `Record<string, number>` | `{ shark_00_clown_fry: 1 }` | 每只已解锁鲨鱼的本体强化等级（范围 `1 ~ 10`） |
-| `bestInRunLevel` | `number` | `1` | 历史单局达到的最高局内等级 `Lv`（用于三重进化门禁校验） |
-| `bestDepthReached` | `number` | `220` | 历史下潜达到的最大深度 `m`（用于三重进化门禁校验） |
-| `totalRunsPlayed` | `number` | `0` | 累计游玩局数 |
+| `bestInRunLevel` | `number` | `1` | 历史单局达到的最高局内等级 `Lv`（受 `isEligibleForPermanentProgress` 门控，Trial 试玩禁止写入） |
+| `bestDepthReached` | `number` | `220` | 历史下潜达到的最大深度 `m`（受 `isEligibleForPermanentProgress` 门控，Trial 试玩禁止写入） |
+| `totalRunsPlayed` | `number` | `0` | 累计正式游玩局数（开局计 1 次，复活与 Trial 不重复计次） |
+| `onboardingGiftClaimed` | `boolean` | `false` | 一次性新手引导补给礼包（`+80C/+20G`）是否已领取；老存档按历史进度兼容推断 |
 
-此外，3 步实操新手引导完成标记保存在 `localStorage` 键名 `hungry_shark_tutorial_done_v1`（值为 `'1'` 表示已完成或跳过，可通过暂停菜单“🎓 重温新手引导”重置）。
+此外，3 步实操新手引导完成标记保存在 `localStorage` 键名 `hungry_shark_tutorial_done_v1`（值为 `'1'` 表示已完成或跳过，可通过暂停菜单“🎓 重温新手引导”重置，但不会重置 `onboardingGiftClaimed`）。
+
+- **统一正式进度资格门控 (`isEligibleForPermanentProgress` / `getPermanentProgressEligibility`)**：定义于 `src/game/sharkEvolutionConfig.ts` 与 iOS `GameRules.swift`，集中校验 `trialActive`、`activeInRun` 与 `sandboxOrCheatMode`。按已确认产品规则 `D1 + D2`：Trial 局拾取/悬赏所得金币与基因全额带回账户，但严格禁止更新 `bestInRunLevel` / `bestDepthReached`、禁止局内解锁/升级/切换正式鲨鱼、禁止领取王冠与 `DOUBLE_SETTLEMENT` 翻倍，并为后续 `Achievement`、`Mission`、`图鉴发现` 提供统一隔离守门。
 
 ---
 
@@ -181,6 +184,7 @@
 
 | 日期 | 变更摘要 | 关联代码文件 |
 | :--- | :--- | :--- |
+| 2026-11-25 | **Task 02 修复 P0 经济漏洞与 Trial 正式进度隔离**：① `SharkMetaSaveData` 新增 `onboardingGiftClaimed` 持久化字段与旧存档兼容推断；② 引入 `isEligibleForPermanentProgress` / `getPermanentProgressEligibility` 统一隔离 Trial 期间的 `bestInRunLevel`、`bestDepthReached`、局内 `evaluateSharkUnlockForRun`、王冠、局内升级/解锁/切鲨与 `totalRunsPlayed`（仅正式开局计 1 次）；③ Web 捕食结算移除直接加账并改为单源拾取物统一入账（`buildPredationRewardPlan` + `collectPickupEntity` + `RunSummary` 独立累加） | `src/game/sharkEvolutionConfig.ts`, `src/game/rules.ts`, `src/game/sim/types.ts`, `src/game/sim/stepSimulation.ts`, `src/App.tsx`, `ios-native/HungrySharkEvolution/Core/GameRules.swift`, `ios-native/HungrySharkEvolution/State/GameViewModel.swift`, `docs/01-ARCHITECTURE.md`, `docs/P0_ECONOMY_FIX_REPORT.md` |
 | 2026-11-23 | **P1-2 彻底废除 `seabedScale` 微缩投影补丁，全面回归单一 1:1 世界坐标 + 原生 2D 真相机变焦 + 巨鲨撞碎上层阶梯海床（Tiers 0~4）+ 浅海空海深潜闭环**：① 在 `rules.ts` 新增 `CAMERA_ZOOM_MIN = 0.22`、`MIN_RENDER_ZOOM_FLOOR = 0.14`、`computeTrueCameraZoom(realBodyLengthM)` 与 `stats.worldScale = scale / cameraZoom`，全实体与海床统一运行于单一 1:1 世界坐标系并仅由原生 `ctx.scale(renderZoom)` 驱动变焦，彻底删除 `renderOceanWorld.ts` / `stepSimulation.ts` / `seabedRenderer.ts` / `worldRenderer.ts` 中所有 `seabedScale` 与 `effPreyX/Y` 双空间投影补丁；② 将 `WorldConfig.chunk.maxActiveChunks` 由 `10` 扩容至 `20`（`maxQueueSize: 32 -> 48`），保障 `zoom = 0.22` 巨幅广角视口下的无缝 Chunk 覆盖，并在 `seabedRenderer.ts` / `worldRenderer.ts` 加入低缩放 LOD 抽稀；③ 在 `terrainSystem.ts` 为 `SEABED_TERRACE_TIERS[0..4]` 引入 `shatterLengthM`（`8/12/18/26/36m`）与 `breachedTerraceCells` 破壁单元机制，巨鲨撞穿浅中层阶梯海床时触发碎岩粒子、`soundFX.playRockShatter()` 与镜头震动，同时保留 `Tiers 5..8` 及主海床为不可破坏深渊基岩；④ 对齐 `EcosystemSpawner` 在 `zoom = 0.22` 广角视口下的屏外刷新边距与回收阈值，保留 45m 巨鲨浅海无鱼状态，同步升级 `rollTargetBountySpecies`（按 `minPreyLengthCm` 过滤）并在 `InGameHudOverlay` 新增非阻断式双语深潜引导提示 | `src/game/rules.ts`, `src/game/world/worldCore.ts`, `src/game/world/terrainSystem.ts`, `src/game/world/seabedRenderer.ts`, `src/game/world/worldRenderer.ts`, `src/game/parallaxBackground.ts`, `src/game/canvasRenderer.ts`, `src/game/ecosystemSpawner.ts`, `src/game/audio.ts`, `src/game/i18n.ts`, `src/game/sim/types.ts`, `src/game/sim/stepSimulation.ts`, `src/game/sim/renderOceanWorld.ts`, `src/App.tsx`, `src/components/game/InGameHudOverlay.tsx`, `src/game/rules.test.ts` |
 | 2026-11-22 | **P1-3 拆分两大上帝文件（`worldGenerationSystem.ts` + `App.tsx`）并同步文档体系 + 修复浅海海床 Canvas `ctx.save()` 栈泄漏**：① 将原 11,285 行 `src/game/worldGenerationSystem.ts` 按职责拆分为 `src/game/world/` 下 11 个严格无环子模块（`worldCore` / `terrainSystem` / `biomeSystem` / `ecologyAndPoi` / `chunkStateAndPersistence` / `worldAssetRegistry` / `seabedRenderer` / `worldRenderer` / `chunkLifecycleManager` / `worldDebug` / `proceduralWorldSystem`），原入口瘦身为 15 行向后兼容 Barrel；② 将原 5,448 行 `src/App.tsx` 拆分为 4 个纯 TS 60FPS 引擎模块（`src/game/sim/{types,SharkGameEngine,stepSimulation,renderOceanWorld}.ts`）与 5 个薄层 React UI 覆盖层（`src/components/game/{DebugPanel,TitleScreen,InGameHud,PauseModal,GameOverModal}Overlay.tsx`），`App.tsx` 瘦身至 1,607 行；③ 实测浏览器验收捕获并修复 `seabedRenderer.ts` 在浅海提前 `return` 及函数尾部遗漏外层 `ctx.restore()` 导致相机矩阵逐帧累乘的渲染缺陷，补充 `try/finally` 栈守恒与 `renderOceanWorld.ts` 每帧 `setTransform` 归零保护；④ 全面刷新 `AGENTS.md`、`docs/00`、`docs/01`、`docs/07` 消除过期规范漂移 | `src/game/worldGenerationSystem.ts`, `src/game/world/*.ts`, `src/game/sim/*.ts`, `src/components/game/*.tsx`, `src/App.tsx`, `AGENTS.md`, `docs/00-AI_CONSTRAINTS.md`, `docs/01-ARCHITECTURE.md`, `docs/07-REVIEW_AND_ACTION_PLAN.md` |
 | 2026-11-21 | **P2-2 跨端同步架构解耦（共享 JSON 数据契约替代 12,422 行 TS 字符串拼 Swift）**：① 新增 `src/game/sharedGameData.ts` 纯函数构建器，导出 `shared/game_data.json`（含 48 阶鲨鱼、135 项猎物、4 血统元数据、UI 切片坐标、261 条双语词典、世界常量与广告配置）；② 将 `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift` 由 6,489 行生成字面量重构为 ~255 行 `JSONDecoder` 轻量加载器，100% 保持原公开 Swift API 不变；③ 将 `scripts/build-ios-native.ts` 从 12,423 行瘦身至 ~440 行，仅负责导出 JSON、同步资源与刷新 `project.pbxproj`（动态扫描 `.swift` 并注册 `game_data.json`），**永不覆盖原生 Swift 源码**；④ `rules.test.ts` 新增跨端 JSON 契约一致性单测 | `src/game/sharedGameData.ts`, `shared/game_data.json`, `scripts/build-ios-native.ts`, `ios-native/HungrySharkEvolution/Generated/GameConfigGenerated.swift`, `ios-native/HungrySharkEvolution.xcodeproj/project.pbxproj`, `ios-native/project.yml`, `package.json`, `src/game/rules.test.ts` |

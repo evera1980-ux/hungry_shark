@@ -23,6 +23,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, '..');
 const SHARED_DIR = path.join(ROOT_DIR, 'shared');
+const SHARED_CONFIGS_DIR = path.join(SHARED_DIR, 'configs');
 const SHARED_JSON_PATH = path.join(SHARED_DIR, 'game_data.json');
 const IOS_ROOT = path.join(ROOT_DIR, 'ios-native');
 const APP_DIR = path.join(IOS_ROOT, 'HungrySharkEvolution');
@@ -990,16 +991,11 @@ function main(): void {
     `<?xml version="1.0" encoding="UTF-8"?>\n<Workspace\n   version = "1.0">\n   <FileRef\n      location = "self:">\n   </FileRef>\n</Workspace>\n`
   );
 
-  // 1. Export cross-platform Shared JSON Data Contract (`shared/game_data.json` -> iOS Resources/Assets/game_data.json)
+  // 1. Export cross-platform Shared JSON Data Contract (`shared/game_data.json` & `shared/configs/*.json` -> iOS Resources/Assets/)
   const payload = buildSharedGameData();
   const jsonContent = JSON.stringify(payload, null, 2) + '\n';
   writeFileIfChanged(SHARED_JSON_PATH, jsonContent);
   copyIfChanged(SHARED_JSON_PATH, path.join(assetsDst, 'game_data.json'));
-
-  // 2. Sync compact WebP/PNG/JPG art assets (aistudio, 48 @3x sharks, 135 @3x prey + cyber_mine) & Launch Assets.xcassets
-  // iOS 16+ ImageIO natively decodes WebP, shrinking Resources/Assets from ~61MB legacy PNGs to ~6MB.
-  const srcAssetsDir = path.join(ROOT_DIR, 'public', 'assets', 'aistudio');
-  generateLaunchAssetsCatalog(APP_DIR, srcAssetsDir);
 
   const expectedAssetFiles = new Set<string>([
     'game_data.json',
@@ -1008,6 +1004,19 @@ function main(): void {
     'loading_logo.png',
     'loading_mascot.png',
   ]);
+
+  if (fs.existsSync(SHARED_CONFIGS_DIR)) {
+    for (const cfgFile of fs.readdirSync(SHARED_CONFIGS_DIR)) {
+      if (!cfgFile.endsWith('.json')) continue;
+      copyIfChanged(path.join(SHARED_CONFIGS_DIR, cfgFile), path.join(assetsDst, cfgFile));
+      expectedAssetFiles.add(cfgFile);
+    }
+  }
+
+  // 2. Sync compact WebP/PNG/JPG art assets (aistudio, 48 @3x sharks, 135 @3x prey + cyber_mine) & Launch Assets.xcassets
+  // iOS 16+ ImageIO natively decodes WebP, shrinking Resources/Assets from ~61MB legacy PNGs to ~6MB.
+  const srcAssetsDir = path.join(ROOT_DIR, 'public', 'assets', 'aistudio');
+  generateLaunchAssetsCatalog(APP_DIR, srcAssetsDir);
 
   let syncedImageCount = 0;
   const syncAssetDir = (

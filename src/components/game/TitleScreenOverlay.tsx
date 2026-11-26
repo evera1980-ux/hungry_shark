@@ -1,6 +1,7 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Lang } from '../../game/i18n';
+import { SharkFormConfig } from '../../game/sharkEvolutionConfig';
 import { GameState } from '../../game/sim/types';
 import { UiBannerButton } from '../UiAtlasIcon';
 
@@ -9,9 +10,10 @@ export interface TitleScreenOverlayProps {
   t: (key: string, params?: Record<string, string | number>) => string;
   gameState: GameState;
   unlockedTotalCount: number;
+  trialTargetForm: SharkFormConfig;
   setShowAtlasModal: React.Dispatch<React.SetStateAction<boolean>>;
-  startNewRun: (withMaxMechaTrial?: boolean) => void;
-  handleTrialMaxMechaAd: () => void;
+  startNewRun: (withTrialShark?: boolean) => void;
+  handleTrialSharkAd: () => void;
 }
 
 export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
@@ -19,9 +21,10 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
   t,
   gameState,
   unlockedTotalCount,
+  trialTargetForm,
   setShowAtlasModal,
   startNewRun,
-  handleTrialMaxMechaAd,
+  handleTrialSharkAd,
 }) => {
   return (
       <AnimatePresence>
@@ -96,11 +99,13 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
               <UiBannerButton
                 variant="gold"
                 dataTestId="trial-mecha-btn"
-                onClick={handleTrialMaxMechaAd}
+                onClick={handleTrialSharkAd}
                 className="w-[154px] sm:w-[144px] md:w-[162px]"
                 labelClassName="text-[9.5px] sm:text-[10px] md:text-[11px]"
               >
-                {lang === 'zh' ? '试驾机甲利维坦' : 'Trial Mecha'}
+                {lang === 'zh'
+                  ? `试玩 · ${trialTargetForm.nameZh}`
+                  : `Trial · ${trialTargetForm.nameEn}`}
               </UiBannerButton>
             </motion.div>
           </motion.section>

@@ -575,6 +575,8 @@ export interface PreyEntity {
   isInflated: boolean;
   scaleMultiplier?: number;
   mutationVariant?: PreyMutationVariant;
+  armorHp?: number;
+  devoured?: boolean;
 }
 
 /**

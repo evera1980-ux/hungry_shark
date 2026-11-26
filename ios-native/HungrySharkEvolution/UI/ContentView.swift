@@ -90,6 +90,7 @@ public struct ContentView: View {
         if vm.gameState == "playing" {
             vm.pauseGame(silent: true)
         }
+        vm.persistSave()
         OceanAudioEngine.shared.handleAppBackgrounded()
     }
 
@@ -377,7 +378,7 @@ public struct ContentView: View {
                         bannerKey: "UI_BAR_BTN_GOLD",
                         title: vm.lang == "zh" ? "试驾 · \(showcaseName)" : "TRIAL · \(showcaseName)",
                         subtitle: vm.lang == "zh" ? "📺 免费体验高阶巨兽" : "📺 FREE APEX TRIAL",
-                        badgeText: "T\(showcase.baseBiteTier) · Lv.5",
+                        badgeText: "T\(showcase.baseBiteTier) · Lv.\(vm.trialConfig.trialInRunLevel)",
                         width: btnW,
                         height: btnH,
                         leftContent: {
@@ -432,7 +433,7 @@ public struct ContentView: View {
                 } else {
                     UiAtlasIconView(iconKey: "UI_ICON_BOUNTY_TARGET", size: iconSz)
                 }
-                Text("\(vm.targetBountyCaptured)/3")
+                Text("\(vm.targetBountyCaptured)/\(vm.targetBountyRequired)")
                     .foregroundColor(Color(red: 253/255, green: 224/255, blue: 71/255))
             }
             // Golden Mutant Charge

@@ -374,31 +374,43 @@ extension OceanGameScene {
     }
 
     func spawnDevourPickups(x: Double, y: Double, coinGain: Int, geneGain: Int) {
+        let pickupCfg = DomainConfigs.economyPredation.pickups
         let coinTex = SpriteAtlasManager.shared.uiIconTexture(for: "UI_ICON_COIN")
-        let coinCount = min(4, max(1, (coinGain + 3) / 4))
-        let baseCoinVal = max(1, coinGain / coinCount)
-        for i in 0..<coinCount {
-            let val = (i == coinCount - 1) ? max(1, coinGain - baseCoinVal * (coinCount - 1)) : baseCoinVal
-            let node = SKSpriteNode(texture: coinTex)
-            node.size = CGSize(width: 22, height: 22)
-            node.zPosition = 24
-            fxContainer.addChild(node)
-            let ang = Double.random(in: 0...(Double.pi * 2))
-            let spd = Double.random(in: 75...165)
-            activePickups.append(
-                ActivePickup(
-                    isGene: false,
-                    value: val,
-                    node: node,
-                    x: x + cos(ang) * 10.0,
-                    y: y + sin(ang) * 10.0,
-                    vx: cos(ang) * spd,
-                    vy: sin(ang) * spd - 35.0
+        if coinGain > 0 {
+            let maxSplit = max(1, pickupCfg.maxCoinsPerPredation)
+            let coinCount = min(maxSplit, max(1, (coinGain + maxSplit - 1) / maxSplit))
+            let baseCoinVal = max(1, coinGain / coinCount)
+            for i in 0..<coinCount {
+                if activePickups.count >= pickupCfg.maxPooledPickups {
+                    let evicted = activePickups.removeFirst()
+                    evicted.node.removeFromParent()
+                }
+                let val = (i == coinCount - 1) ? max(1, coinGain - baseCoinVal * (coinCount - 1)) : baseCoinVal
+                let node = SKSpriteNode(texture: coinTex)
+                node.size = CGSize(width: 22, height: 22)
+                node.zPosition = 24
+                fxContainer.addChild(node)
+                let ang = Double.random(in: 0...(Double.pi * 2))
+                let spd = Double.random(in: 75...165)
+                activePickups.append(
+                    ActivePickup(
+                        isGene: false,
+                        value: val,
+                        node: node,
+                        x: x + cos(ang) * 10.0,
+                        y: y + sin(ang) * 10.0,
+                        vx: cos(ang) * spd,
+                        vy: sin(ang) * spd - 35.0
+                    )
                 )
-            )
+            }
         }
 
         if geneGain > 0 {
+            if activePickups.count >= pickupCfg.maxPooledPickups {
+                let evicted = activePickups.removeFirst()
+                evicted.node.removeFromParent()
+            }
             let geneTex = SpriteAtlasManager.shared.uiIconTexture(for: "UI_ICON_GENE")
             let node = SKSpriteNode(texture: geneTex)
             node.size = CGSize(width: 24, height: 24)
@@ -471,8 +483,11 @@ extension OceanGameScene {
             pIdx -= 1
         }
 
-        let magnetR = ((vm.frenzyActive ? 390.0 : 120.0) + stats.magnetRadius) * invZoom
-        let collectRadius = 38.0 * stats.worldScale
+        let pickupCfg = DomainConfigs.economyPredation.pickups
+        let currentHeatBuff = vm.huntingHeatBuff
+        let frenzyMagMult = vm.frenzyActive ? pickupCfg.frenzyMagnetMultiplier : 1.0
+        let magnetR = (stats.magnetRadius + currentHeatBuff.magnetRadiusBonus) * invZoom * frenzyMagMult
+        let collectRadius = pickupCfg.collectRadiusWorldFactor * stats.worldScale
         var kIdx = activePickups.count - 1
         while kIdx >= 0 {
             let pk = activePickups[kIdx]
@@ -494,30 +509,32 @@ extension OceanGameScene {
             pk.y += pk.vy * dt
 
             if dist < collectRadius || pk.life <= 0 {
-                if dist < collectRadius {
+                if dist < collectRadius, let collectedVal = pk.collectIfEligible() {
                     if pk.isGene {
-                        vm.save.bankedGenes += pk.value
-                        vm.runGenesEarned += pk.value
+                        vm.save.bankedGenes += collectedVal
+                        vm.runGenesEarned += collectedVal
+                        vm.score += collectedVal * pickupCfg.geneScorePerUnit
                         if vm.save.soundEnabled {
                             OceanAudioEngine.shared.playCoin(isGene: true)
                         }
                         spawnFloatingText(
                             x: pk.x,
                             y: pk.y - 12.0 * invZoom,
-                            text: "+\(pk.value) 🧬",
+                            text: "+\(collectedVal) 🧬",
                             color: UIColor(red: 110/255, green: 231/255, blue: 183/255, alpha: 1.0),
                             fontSize: 13
                         )
                     } else {
-                        vm.save.bankedCoins += pk.value
-                        vm.runCoinsEarned += pk.value
+                        vm.save.bankedCoins += collectedVal
+                        vm.runCoinsEarned += collectedVal
+                        vm.score += collectedVal * pickupCfg.coinScorePerUnit
                         if vm.save.soundEnabled {
                             OceanAudioEngine.shared.playCoin(isGene: false)
                         }
                         spawnFloatingText(
                             x: pk.x,
                             y: pk.y - 10.0 * invZoom,
-                            text: "+\(pk.value) 🪙",
+                            text: "+\(collectedVal) 🪙",
                             color: UIColor(red: 253/255, green: 224/255, blue: 71/255, alpha: 1.0),
                             fontSize: 12
                         )
@@ -535,6 +552,9 @@ extension OceanGameScene {
             let pkScale = CGFloat(max(0.72, min(1.15, 0.82 + 0.18 * zoom)))
             pk.node.xScale = CGFloat(0.35 + 0.65 * abs(cos(pk.spinPhase))) * pkScale
             pk.node.yScale = pkScale
+            pk.node.alpha = pk.life <= pickupCfg.blinkStartRemainingSec
+                ? CGFloat(0.28 + 0.72 * abs(sin(pk.life * 14.0)))
+                : 1.0
             kIdx -= 1
         }
 

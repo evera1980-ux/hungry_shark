@@ -42,6 +42,8 @@ export interface InGameHudOverlayProps {
   handleInRunBreakthroughOrAtlas: () => void;
   handleGoldOverdrive: () => void;
   handleGeneSurge: () => void;
+  handleSupplyDropAd: () => void;
+  supplyDropReward: { coins: number; genes: number };
   handleJoystickPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
   handleJoystickPointerMove: (e: React.PointerEvent<HTMLDivElement>) => void;
   handleJoystickPointerUp: (e: React.PointerEvent<HTMLDivElement>) => void;
@@ -76,6 +78,8 @@ export const InGameHudOverlay: React.FC<InGameHudOverlayProps> = ({
   handleInRunBreakthroughOrAtlas,
   handleGoldOverdrive,
   handleGeneSurge,
+  handleSupplyDropAd,
+  supplyDropReward,
   handleJoystickPointerDown,
   handleJoystickPointerMove,
   handleJoystickPointerUp,
@@ -646,16 +650,21 @@ export const InGameHudOverlay: React.FC<InGameHudOverlayProps> = ({
                     <button
                       type="button"
                       data-testid="inrun-gold-frenzy-btn"
-                      disabled={hudState.coins < hudState.goldOverdriveCost}
+                      disabled={
+                        hudState.frenzyTimer > 0 ||
+                        hudState.coins < hudState.goldOverdriveCost
+                      }
                       {...bindMultiTouchButton(
                         handleGoldOverdrive,
-                        hudState.coins < hudState.goldOverdriveCost
+                        hudState.frenzyTimer > 0 ||
+                          hudState.coins < hudState.goldOverdriveCost
                       )}
                       title={t('btn_gold_overdrive', {
                         cost: hudState.goldOverdriveCost,
                       })}
                       style={getFanSlotStyle(0, fanSlotCount)}
                       className={`game-btn-spring absolute rounded-full flex items-center justify-center transition-all touch-manipulation ${
+                        hudState.frenzyTimer <= 0 &&
                         hudState.coins >= hudState.goldOverdriveCost
                           ? 'cursor-pointer opacity-100 scale-100'
                           : 'cursor-not-allowed opacity-50 scale-95'
@@ -868,6 +877,39 @@ export const InGameHudOverlay: React.FC<InGameHudOverlayProps> = ({
                         </button>
                       );
                     })()}
+
+                    {/* Emergency Scaled Supply Drop Medallion when short on all resources */}
+                    {hudState.coins < hudState.goldOverdriveCost &&
+                      hudState.genes < hudState.geneSurgeCost &&
+                      !hudState.canUpgradeBodyNow &&
+                      !hudState.canBreakthroughNow && (
+                        <button
+                          type="button"
+                          data-testid="inrun-supply-drop-btn"
+                          {...bindMultiTouchButton(handleSupplyDropAd)}
+                          title={
+                            lang === 'zh'
+                              ? `观看广告领取补给 (+${supplyDropReward.coins}🪙 +${supplyDropReward.genes}🧬)`
+                              : `Watch Ad for Supply Drop (+${supplyDropReward.coins}🪙 +${supplyDropReward.genes}🧬)`
+                          }
+                          style={{
+                            width: 'calc(var(--sat-size) * 0.92)',
+                            height: 'calc(var(--sat-size) * 0.92)',
+                            right: 'calc(var(--boost-half) + var(--fan-radius) * 1.48)',
+                            bottom: 'calc(var(--boost-half) + var(--fan-radius) * 0.52)',
+                          }}
+                          className="game-btn-spring absolute rounded-full flex items-center justify-center cursor-pointer touch-manipulation animate-pulse ring-2 ring-amber-300/80 shadow-[0_0_16px_rgba(250,204,21,0.75)]"
+                        >
+                          <UiAtlasIcon
+                            iconKey="UI_BTN_SUPPLY_DROP"
+                            size={40}
+                            className="w-full h-full drop-shadow"
+                          />
+                          <span className="absolute -bottom-1.5 px-1.5 py-0.5 rounded-full bg-amber-300 text-slate-950 font-mono-num font-black text-[7px] shadow leading-none whitespace-nowrap">
+                            +{supplyDropReward.coins}🪙 +{supplyDropReward.genes}🧬
+                          </span>
+                        </button>
+                      )}
 
                     {/* Center Anchor (Bottom-Right Corner): Primary 2x Turbo Boost Medallion with Integrated SVG Energy Ring */}
                     <button

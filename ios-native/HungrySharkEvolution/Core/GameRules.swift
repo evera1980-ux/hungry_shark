@@ -5,7 +5,6 @@ import simd
 public enum PreyMutationVariant: String, Codable, Sendable {
     case NONE
     case GOLDEN_SWARM
-    case FRENZY_PREY
     case ABYSS_BEHEMOTH
 }
 
@@ -44,9 +43,18 @@ public struct ComputedSharkStats: Sendable {
     public let devourHealMultiplier: Double
     public let frenzyDurationBonus: Double
     public let jawSuctionMultiplier: Double
+    public let scoreMultiplier: Double
     public let coinYieldMultiplier: Double
     public let geneYieldMultiplier: Double
+    public let bossRewardMultiplier: Double
+    public let specialPreyScoreMultiplier: Double
     public let damageTakenMultiplier: Double
+    public let mineDamageTakenMultiplier: Double
+    public let knockbackMultiplier: Double
+    public let boostRegenMultiplier: Double
+    public let killEnergyBonus: Int
+    public let maxComboBonus: Double
+    public let goldenMutantReduction: Int
     public let canEatMines: Bool
     public let realBodyLengthM: Double
     public let cruiseSpeedMps: Double
@@ -113,7 +121,21 @@ public struct HuntingHeatBuff: Sendable {
     public let heatLevel: Int
     public let speedMultiplier: Double
     public let scoreMultiplier: Double
+    public let magnetRadiusBonus: Double
+    public let energyRegenBonus: Double
     public let labelKey: String
+}
+
+public struct PredationSettlementMetrics: Sendable {
+    public let hpDelta: Double
+    public let xpGain: Int
+    public let scoreGain: Int
+    public let coinGain: Int
+    public let geneGain: Int
+    public let failDamage: Double
+    public let knockbackForce: Double
+    public let floatTextKey: String
+    public let isCrit: Bool
 }
 
 public struct SharkMetaSaveData: Codable, Sendable {
@@ -127,6 +149,7 @@ public struct SharkMetaSaveData: Codable, Sendable {
     public var bestInRunLevel: Int
     public var maxDepthReached: Double
     public var totalRuns: Int
+    public var onboardingGiftClaimed: Bool
     public var language: String
     public var soundEnabled: Bool
 
@@ -141,6 +164,7 @@ public struct SharkMetaSaveData: Codable, Sendable {
         bestInRunLevel: Int,
         maxDepthReached: Double,
         totalRuns: Int,
+        onboardingGiftClaimed: Bool = false,
         language: String,
         soundEnabled: Bool
     ) {
@@ -154,53 +178,174 @@ public struct SharkMetaSaveData: Codable, Sendable {
         self.bestInRunLevel = bestInRunLevel
         self.maxDepthReached = maxDepthReached
         self.totalRuns = totalRuns
+        self.onboardingGiftClaimed = onboardingGiftClaimed
         self.language = language
         self.soundEnabled = soundEnabled
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.selectedSharkId = (try? c.decode(String.self, forKey: .selectedSharkId)) ?? "shark_00_clown_fry"
-        self.unlockedSharkIds = (try? c.decode([String].self, forKey: .unlockedSharkIds)) ?? ["shark_00_clown_fry"]
-        self.sharkUpgradeLevels = (try? c.decode([String: Int].self, forKey: .sharkUpgradeLevels)) ?? ["shark_00_clown_fry": 1]
+        let defaults = DomainConfigs.worldAndProgression.starterSaveDefaults
+        let decodedSelected = (try? c.decode(String.self, forKey: .selectedSharkId)) ?? defaults.selectedSharkId
+        let decodedUnlocked = (try? c.decode([String].self, forKey: .unlockedSharkIds)) ?? defaults.unlockedSharkIds
+        let decodedUpgrades = (try? c.decode([String: Int].self, forKey: .sharkUpgradeLevels)) ?? defaults.sharkUpgradeLevels
+        let decodedTotalRuns = (try? c.decode(Int.self, forKey: .totalRuns)) ?? defaults.totalRunsPlayed
+        self.selectedSharkId = decodedSelected
+        self.unlockedSharkIds = decodedUnlocked
+        self.sharkUpgradeLevels = decodedUpgrades
         self.sharkBestScores = (try? c.decode([String: Int].self, forKey: .sharkBestScores)) ?? [:]
         self.sharkMasteryTiers = (try? c.decode([String: Int].self, forKey: .sharkMasteryTiers)) ?? [:]
-        self.bankedCoins = (try? c.decode(Int.self, forKey: .bankedCoins)) ?? 120
-        self.bankedGenes = (try? c.decode(Int.self, forKey: .bankedGenes)) ?? 15
-        self.bestInRunLevel = (try? c.decode(Int.self, forKey: .bestInRunLevel)) ?? 1
-        self.maxDepthReached = (try? c.decode(Double.self, forKey: .maxDepthReached)) ?? 180
-        self.totalRuns = (try? c.decode(Int.self, forKey: .totalRuns)) ?? 0
+        self.bankedCoins = (try? c.decode(Int.self, forKey: .bankedCoins)) ?? defaults.bankedCoins
+        self.bankedGenes = (try? c.decode(Int.self, forKey: .bankedGenes)) ?? defaults.bankedGenes
+        self.bestInRunLevel = (try? c.decode(Int.self, forKey: .bestInRunLevel)) ?? defaults.bestInRunLevel
+        self.maxDepthReached = (try? c.decode(Double.self, forKey: .maxDepthReached)) ?? Double(defaults.bestDepthReached)
+        self.totalRuns = decodedTotalRuns
+        if let decodedClaimed = try? c.decode(Bool.self, forKey: .onboardingGiftClaimed) {
+            self.onboardingGiftClaimed = decodedClaimed
+        } else {
+            let legacyOnboardingDone = UserDefaults.standard.bool(forKey: "hungry_shark_onboarding_v2_done")
+            self.onboardingGiftClaimed = legacyOnboardingDone
+                || decodedTotalRuns > 0
+                || decodedUnlocked.count > 1
+                || (decodedUpgrades[defaults.selectedSharkId] ?? 1) > 1
+        }
         self.language = (try? c.decode(String.self, forKey: .language)) ?? "zh"
         self.soundEnabled = (try? c.decode(Bool.self, forKey: .soundEnabled)) ?? true
     }
 
     public static func createDefault() -> SharkMetaSaveData {
-        SharkMetaSaveData(
-            selectedSharkId: "shark_00_clown_fry",
-            unlockedSharkIds: ["shark_00_clown_fry"],
-            sharkUpgradeLevels: ["shark_00_clown_fry": 1],
+        let defaults = DomainConfigs.worldAndProgression.starterSaveDefaults
+        return SharkMetaSaveData(
+            selectedSharkId: defaults.selectedSharkId,
+            unlockedSharkIds: defaults.unlockedSharkIds,
+            sharkUpgradeLevels: defaults.sharkUpgradeLevels,
             sharkBestScores: [:],
             sharkMasteryTiers: [:],
-            bankedCoins: 120,
-            bankedGenes: 15,
-            bestInRunLevel: 1,
-            maxDepthReached: 180,
-            totalRuns: 0,
+            bankedCoins: defaults.bankedCoins,
+            bankedGenes: defaults.bankedGenes,
+            bestInRunLevel: defaults.bestInRunLevel,
+            maxDepthReached: Double(defaults.bestDepthReached),
+            totalRuns: defaults.totalRunsPlayed,
+            onboardingGiftClaimed: defaults.onboardingGiftClaimed,
             language: "zh",
             soundEnabled: true
         )
     }
 }
 
+public struct PermanentProgressRunContext: Sendable, Equatable {
+    public let isTrial: Bool
+    public let activeInRun: Bool
+    public let sandboxOrCheatMode: Bool
+
+    public init(isTrial: Bool, activeInRun: Bool = true, sandboxOrCheatMode: Bool = false) {
+        self.isTrial = isTrial
+        self.activeInRun = activeInRun
+        self.sandboxOrCheatMode = sandboxOrCheatMode
+    }
+}
+
+public struct PermanentProgressEligibility: Sendable, Equatable {
+    public let eligible: Bool
+    public let allowRunRecords: Bool
+    public let allowSharkMasteryAndCrown: Bool
+    public let allowSharkUnlockAndUpgrade: Bool
+    public let allowAchievements: Bool
+    public let allowMissions: Bool
+    public let allowEncyclopediaDiscovery: Bool
+    public let allowRunCountIncrement: Bool
+    public let allowTrialCurrencyCarryOver: Bool
+    public let allowDoubleSettlementAd: Bool
+}
+
 public enum GameRules {
-    public static let sharkBaseDrawSize: Double = 110.4 // 96.0 * 1.15 mobile viewport presence parity with Web
-    public static let preyRadiusToDrawSize: Double = 2.25
-    public static let sharkEquivalentRadius: Double = 110.4 / 2.25 // 49.0667 (preserves 1:1 sharkParityScale ratio)
-    public static let defaultPreySizeMultiplier: Double = 1.0
+    /// Unified permanent-progress eligibility gate matching Web `isEligibleForPermanentProgress`.
+    /// Approved policy (D1 + D2):
+    /// - Trial currency from pickups/bounty is kept (allowTrialCurrencyCarryOver = true).
+    /// - Trial double-settlement ad and ALL permanent progression mutations/records are strictly blocked.
+    public static func isEligibleForPermanentProgress(_ runContext: PermanentProgressRunContext) -> Bool {
+        return !runContext.isTrial && !runContext.sandboxOrCheatMode
+    }
+
+    public static func getPermanentProgressEligibility(_ runContext: PermanentProgressRunContext) -> PermanentProgressEligibility {
+        let eligible = isEligibleForPermanentProgress(runContext)
+        return PermanentProgressEligibility(
+            eligible: eligible,
+            allowRunRecords: eligible,
+            allowSharkMasteryAndCrown: eligible,
+            allowSharkUnlockAndUpgrade: eligible || !runContext.activeInRun,
+            allowAchievements: eligible,
+            allowMissions: eligible,
+            allowEncyclopediaDiscovery: eligible,
+            allowRunCountIncrement: eligible,
+            allowTrialCurrencyCarryOver: !runContext.sandboxOrCheatMode,
+            allowDoubleSettlementAd: eligible
+        )
+    }
+
+    @discardableResult
+    public static func recordFormalRunStarted(runContext: PermanentProgressRunContext, save: inout SharkMetaSaveData) -> Bool {
+        let eligibility = getPermanentProgressEligibility(runContext)
+        guard eligibility.allowRunCountIncrement else { return false }
+        save.totalRuns += 1
+        return true
+    }
+
+    @discardableResult
+    public static func recordPermanentRunProgress(
+        save: inout SharkMetaSaveData,
+        runContext: PermanentProgressRunContext,
+        inRunLevel: Int,
+        maxDepthMeters: Double
+    ) -> Bool {
+        let eligibility = getPermanentProgressEligibility(runContext)
+        guard eligibility.allowRunRecords else { return false }
+        var changed = false
+        if inRunLevel > save.bestInRunLevel {
+            save.bestInRunLevel = inRunLevel
+            changed = true
+        }
+        if maxDepthMeters > save.maxDepthReached {
+            save.maxDepthReached = maxDepthMeters
+            changed = true
+        }
+        return changed
+    }
+
+    @discardableResult
+    public static func claimOnboardingStarterTopUp(save: inout SharkMetaSaveData) -> Bool {
+        guard !save.onboardingGiftClaimed else { return false }
+        save.onboardingGiftClaimed = true
+        // Anchor starter top-up strictly to Lv.1 starter shark cost (22C), never high-tier active shark cost
+        if let starterForm = GameConfigGenerated.sharkForms.first {
+            let firstCost = getSharkUpgradeCoinCost(form: starterForm, currentLevel: 1)
+            if save.bankedCoins < firstCost {
+                save.bankedCoins = firstCost
+            }
+        }
+        return true
+    }
+
+    public static var sharkBaseDrawSize: Double {
+        DomainConfigs.worldAndProgression.world.sharkBaseDrawSizeIos
+    }
+    public static var preyRadiusToDrawSize: Double {
+        DomainConfigs.worldAndProgression.world.preyRadiusToDrawSize
+    }
+    public static var sharkEquivalentRadius: Double {
+        sharkBaseDrawSize / max(1.0, preyRadiusToDrawSize)
+    }
+    public static var defaultPreySizeMultiplier: Double {
+        DomainConfigs.worldAndProgression.world.defaultPreySizeMultiplier
+    }
     /// True 2D camera zoom lower bound at 45m+ Leviathan tier (1:1 parity with Web CAMERA_ZOOM_MIN)
-    public static let cameraZoomMin: Double = 0.22
+    public static var cameraZoomMin: Double {
+        DomainConfigs.worldAndProgression.world.cameraZoomMin
+    }
     /// Hard safety floor for render zoom projection
-    public static let minRenderZoomFloor: Double = 0.14
+    public static var minRenderZoomFloor: Double {
+        DomainConfigs.worldAndProgression.world.minRenderZoomFloor
+    }
 
     /// Computes true 2D camera zoom from shark's real body length (0.8m -> 1.00, 45m+ -> 0.22)
     public static func computeTrueCameraZoom(realBodyLengthM: Double) -> Double {
@@ -210,53 +355,98 @@ public enum GameRules {
         return (zoom * 1000.0).rounded() / 1000.0
     }
 
-    /// XP required to advance from `level` to `level + 1` (matches src/game/rules.ts)
+    /// XP required to advance from `level` to `level + 1` (matches shared/configs/world_and_progression_config.json)
     public static func getXpRequiredForLevel(_ level: Int) -> Int {
-        if level <= 1 { return 140 }
+        let xpCfg = DomainConfigs.worldAndProgression.inRunLevelProgression.xpCurve
+        if level <= 1 { return Int(xpCfg.base.rounded()) }
         let l = Double(level - 1)
-        return Int((140.0 + l * 145.0 + pow(l, 1.75) * 65.0).rounded())
+        return Int((xpCfg.base + l * xpCfg.linearStep + pow(l, xpCfg.exponent) * xpCfg.powerStep).rounded())
     }
 
-    /// Dynamic Gold Frenzy cost (Generation-Anchored + Quadratic Acceleration)
+    /// Dynamic Gold Frenzy cost (loaded from shared/configs/economy_predation_config.json)
     public static func getGoldOverdriveCost(useCount: Int, generationRow: Int) -> Int {
+        let cfg = DomainConfigs.economyPredation.activeSkills.goldOverdrive
         let n = Double(max(0, useCount))
-        let rowMult = 1.0 + Double(max(0, generationRow)) * 0.35
-        return Int(((35.0 + n * 25.0 + n * n * 12.0) * rowMult).rounded())
+        let rowMult = 1.0 + Double(max(0, generationRow)) * cfg.rowScale
+        return Int(((cfg.baseCost + n * cfg.useLinear + n * n * cfg.useQuad) * rowMult).rounded())
     }
 
-    /// Dynamic Gene Surge cost
+    /// Dynamic Gene Surge cost (loaded from shared/configs/economy_predation_config.json)
     public static func getGeneSurgeCost(level: Int, useCount: Int, generationRow: Int) -> Int {
+        let cfg = DomainConfigs.economyPredation.activeSkills.geneSurge
         let lv = Double(max(1, level))
         let n = Double(max(0, useCount))
-        let rowMult = 1.0 + Double(max(0, generationRow)) * 0.25
-        return Int(((12.0 + (lv - 1.0) * 5.0 + n * 10.0 + n * n * 6.0) * rowMult).rounded())
+        let rowMult = 1.0 + Double(max(0, generationRow)) * cfg.rowScale
+        return Int(((cfg.baseCost + (lv - 1.0) * cfg.levelLinear + n * cfg.useLinear + n * n * cfg.useQuad) * rowMult).rounded())
     }
 
     /// Body upgrade coin cost (Lv.1 -> Lv.10)
     public static func getSharkUpgradeCoinCost(form: SharkFormConfig, currentLevel: Int) -> Int {
-        let lv = max(1, min(9, currentLevel))
-        return Int((Double(form.baseUpgradeCoinCost) * pow(1.36, Double(lv - 1))).rounded())
+        let cfg = DomainConfigs.worldAndProgression.upgradeProgression
+        let lv = max(1, min(cfg.maxUpgradeLevel - 1, currentLevel))
+        return Int((Double(form.baseUpgradeCoinCost) * pow(cfg.coinCostExponent, Double(lv - 1))).rounded())
     }
 
     /// Body upgrade gene cost (only at Bite Tier breakthrough gates Lv.4->5 and Lv.9->10)
     public static func getSharkUpgradeGeneCost(form: SharkFormConfig, currentLevel: Int) -> Int {
-        let refGenes = Double(max(8, form.unlockGenes))
+        let cfg = DomainConfigs.worldAndProgression.upgradeProgression
+        let refGenes = Double(max(cfg.geneUnlockMinRef, form.unlockGenes))
         if currentLevel == 4 {
-            return Int((refGenes * 0.35 + 6.0).rounded())
+            return Int((refGenes * cfg.geneCostGateLv4.refMult + cfg.geneCostGateLv4.flatBonus).rounded())
         }
         if currentLevel == 9 {
-            return Int((refGenes * 0.65 + 14.0).rounded())
+            return Int((refGenes * cfg.geneCostGateLv9.refMult + cfg.geneCostGateLv9.flatBonus).rounded())
         }
         return 0
+    }
+
+    /// Returns linear (`index - 1`) and vertical (`(row - 1) * 8 + col`) parent shark candidates
+    public static func getParentCandidatesForForm(_ form: SharkFormConfig) -> [SharkFormConfig] {
+        guard form.index > 0 else { return [] }
+        let upgCfg = DomainConfigs.worldAndProgression.upgradeProgression
+        var candidates: [SharkFormConfig] = [GameConfigGenerated.sharkForms[form.index - 1]]
+        if upgCfg.allowVerticalParentUnlock && form.row > 0 {
+            let verticalIdx = (form.row - 1) * 8 + form.col
+            if verticalIdx >= 0 && verticalIdx < GameConfigGenerated.sharkForms.count && verticalIdx != form.index - 1 {
+                candidates.append(GameConfigGenerated.sharkForms[verticalIdx])
+            }
+        }
+        return candidates
     }
 
     /// Evaluates whether a shark form can be unlocked right now
     public static func evaluateSharkUnlock(form: SharkFormConfig, save: SharkMetaSaveData) -> UnlockCheckResult {
         let isUnlocked = save.unlockedSharkIds.contains(form.id)
-        let parentForm = form.index > 0 ? GameConfigGenerated.sharkForms[form.index - 1] : nil
-        let parentUnlocked = parentForm == nil ? true : save.unlockedSharkIds.contains(parentForm!.id)
-        let parentUpgradeLevel = parentForm == nil ? 10 : (save.sharkUpgradeLevels[parentForm!.id] ?? 1)
-        let parentLevelMet = parentForm == nil ? true : (parentUpgradeLevel >= form.reqParentUpgradeLevel)
+        let parents = getParentCandidatesForForm(form)
+        var parentForm: SharkFormConfig? = parents.first
+        var parentUnlocked = form.index == 0
+        var parentUpgradeLevel = form.index == 0 ? DomainConfigs.worldAndProgression.upgradeProgression.maxUpgradeLevel : 0
+        var parentLevelMet = form.index == 0
+
+        if !parents.isEmpty {
+            var bestRank = -1
+            for p in parents {
+                let pUnlocked = save.unlockedSharkIds.contains(p.id)
+                let pLv = pUnlocked ? (save.sharkUpgradeLevels[p.id] ?? 1) : 0
+                let rank = pUnlocked ? (100 + pLv) : pLv
+                if rank > bestRank {
+                    bestRank = rank
+                    parentForm = p
+                    parentUnlocked = pUnlocked
+                    parentUpgradeLevel = pLv
+                }
+                if pUnlocked && pLv >= form.reqParentUpgradeLevel {
+                    parentLevelMet = true
+                }
+            }
+            if parentLevelMet, let qualifiedParent = parents.first(where: {
+                save.unlockedSharkIds.contains($0.id) && (save.sharkUpgradeLevels[$0.id] ?? 1) >= form.reqParentUpgradeLevel
+            }) {
+                parentForm = qualifiedParent
+                parentUnlocked = true
+                parentUpgradeLevel = save.sharkUpgradeLevels[qualifiedParent.id] ?? 1
+            }
+        }
 
         let inRunLevelMet = save.bestInRunLevel >= form.reqMaxInRunLevel
         let depthMet = save.maxDepthReached >= form.reqMaxDepth
@@ -284,6 +474,35 @@ public enum GameRules {
         )
     }
 
+    public static func evaluateSharkUnlockForRun(
+        form: SharkFormConfig,
+        save: SharkMetaSaveData,
+        runContext: PermanentProgressRunContext
+    ) -> UnlockCheckResult {
+        let base = evaluateSharkUnlock(form: form, save: save)
+        let eligibility = getPermanentProgressEligibility(runContext)
+        guard eligibility.allowSharkUnlockAndUpgrade else {
+            return UnlockCheckResult(
+                isUnlocked: base.isUnlocked,
+                canUnlockNow: false,
+                parentForm: base.parentForm,
+                parentUnlocked: base.parentUnlocked,
+                parentUpgradeLevel: base.parentUpgradeLevel,
+                reqParentUpgradeLevel: base.reqParentUpgradeLevel,
+                parentLevelMet: base.parentLevelMet,
+                currentBestInRunLevel: base.currentBestInRunLevel,
+                reqMaxInRunLevel: base.reqMaxInRunLevel,
+                inRunLevelMet: base.inRunLevelMet,
+                currentMaxDepth: base.currentMaxDepth,
+                reqMaxDepth: base.reqMaxDepth,
+                depthMet: base.depthMet,
+                coinsMet: base.coinsMet,
+                genesMet: base.genesMet
+            )
+        }
+        return base
+    }
+
     /// Returns the immediate next locked shark form in the 48-shark chain (or nil if all 48 are unlocked)
     public static func getNextEvolutionTarget(save: SharkMetaSaveData) -> (form: SharkFormConfig, check: UnlockCheckResult)? {
         for form in GameConfigGenerated.sharkForms {
@@ -294,55 +513,54 @@ public enum GameRules {
         return nil
     }
 
-    /// Computes 3-tier score mastery milestones & one-time bounty rewards for any of the 48 sharks
+    /// Loads 3-tier score mastery milestones & one-time crown rewards from shared/configs/crown_mastery_config.json
     public static func getSharkMasteryConfig(form: SharkFormConfig) -> SharkMasteryConfig {
-        let idx = Double(form.index)
-        let row = Double(form.row)
-        let baseScore = Double(round((1800.0 + idx * 1450.0 + pow(idx, 1.65) * 420.0) / 100.0) * 100.0)
-        let baseCoin = Int((45.0 + idx * 24.0 + row * 65.0).rounded())
-        let baseGene = Int((4.0 + floor(idx * 0.85) + row * 3.0).rounded())
-
+        let entries = DomainConfigs.crownBySharkId[form.id]
+            ?? DomainConfigs.crownMastery.sharks.first?.tiers
+            ?? []
         return SharkMasteryConfig(
             sharkId: form.id,
-            tiers: [
+            tiers: entries.map { entry in
                 MasteryRewardTierConfig(
-                    tier: 1,
-                    labelZh: "铜冠猎手",
-                    labelEn: "BRONZE CROWN",
-                    targetScore: Int(baseScore),
-                    rewardCoins: baseCoin,
-                    rewardGenes: baseGene
-                ),
-                MasteryRewardTierConfig(
-                    tier: 2,
-                    labelZh: "银冠霸主",
-                    labelEn: "SILVER CROWN",
-                    targetScore: Int(round((baseScore * 2.4) / 100.0) * 100.0),
-                    rewardCoins: Int((Double(baseCoin) * 2.2).rounded()),
-                    rewardGenes: Int((Double(baseGene) * 2.0).rounded())
-                ),
-                MasteryRewardTierConfig(
-                    tier: 3,
-                    labelZh: "金冠深渊王",
-                    labelEn: "GOLD CROWN",
-                    targetScore: Int(round((baseScore * 4.8) / 100.0) * 100.0),
-                    rewardCoins: Int((Double(baseCoin) * 4.5).rounded()),
-                    rewardGenes: Int((Double(baseGene) * 4.0).rounded())
+                    tier: entry.tier,
+                    labelZh: entry.nameZh,
+                    labelEn: entry.nameEn,
+                    targetScore: entry.scoreThreshold,
+                    rewardCoins: entry.coinReward,
+                    rewardGenes: entry.geneReward
                 )
-            ]
+            }
         )
     }
 
-    /// Evaluates a completed run's score against the active shark's mastery milestones
+    /// Evaluates a completed run's score against the active shark's mastery milestones.
+    /// Enforces `isEligibleForPermanentProgress(runContext)` & `allowInTrial` so Trial runs NEVER claim crowns or overwrite personal bests.
     public static func settleSharkScoreMastery(
         sharkId: String,
         runScore: Int,
-        save: SharkMetaSaveData
+        save: SharkMetaSaveData,
+        runContext: PermanentProgressRunContext = PermanentProgressRunContext(isTrial: false)
     ) -> MasterySettlementResult {
         let form = GameConfigGenerated.sharkForms.first(where: { $0.id == sharkId }) ?? GameConfigGenerated.sharkForms[0]
         let config = getSharkMasteryConfig(form: form)
         let prevBest = save.sharkBestScores[sharkId] ?? 0
         let prevTier = save.sharkMasteryTiers[sharkId] ?? 0
+        let trialBlocked = runContext.isTrial && !DomainConfigs.crownMastery.allowInTrial
+
+        guard isEligibleForPermanentProgress(runContext) && !trialBlocked else {
+            return MasterySettlementResult(
+                sharkId: sharkId,
+                previousBestScore: prevBest,
+                newBestScore: prevBest,
+                isNewRecord: false,
+                previousMasteryTier: prevTier,
+                newMasteryTier: prevTier,
+                newlyClaimedTiers: [],
+                totalBonusCoins: 0,
+                totalBonusGenes: 0
+            )
+        }
+
         let cleanScore = max(0, runScore)
         let newBest = max(prevBest, cleanScore)
         let isNewRecord = cleanScore > prevBest && cleanScore > 0
@@ -374,8 +592,9 @@ public enum GameRules {
         )
     }
 
-    /// Computes global collection & mastery crown bonuses across all 48 sharks
+    /// Computes global collection & mastery crown bonuses across all 48 sharks from shared/configs/world_and_progression_config.json
     public static func getGlobalAtlasBonuses(save: SharkMetaSaveData) -> GlobalAtlasBonuses {
+        let atlasCfg = DomainConfigs.worldAndProgression.atlasPassives
         let unlockedCount = max(1, save.unlockedSharkIds.count)
         let extraUnlocked = Double(max(0, unlockedCount - 1))
         let totalMasteryCrowns = save.sharkMasteryTiers.values.reduce(0) { $0 + max(0, min(3, $1)) }
@@ -384,25 +603,31 @@ public enum GameRules {
         return GlobalAtlasBonuses(
             unlockedCount: unlockedCount,
             totalMasteryCrowns: totalMasteryCrowns,
-            hpMultiplier: 1.0 + extraUnlocked * 0.02 + crowns * 0.005,
-            speedBonus: extraUnlocked * 0.008 + crowns * 0.002,
-            rewardMultiplier: 1.0 + extraUnlocked * 0.025 + crowns * 0.008,
-            scoreMultiplierBonus: crowns * 0.015
+            hpMultiplier: 1.0 + extraUnlocked * atlasCfg.extraSharkHpBonusPerShark + crowns * atlasCfg.crownHpBonusPerCrown,
+            speedBonus: extraUnlocked * atlasCfg.extraSharkSpeedBonusPerShark,
+            rewardMultiplier: 1.0 + extraUnlocked * atlasCfg.extraSharkRewardBonusPerShark + crowns * atlasCfg.crownRewardBonusPerCrown,
+            scoreMultiplierBonus: crowns * atlasCfg.crownScoreBonusPerCrown
         )
     }
 
-    /// Computes Hunting Heat streak buff from combo count
+    /// Computes Hunting Heat streak buff from combo count (read from shared/configs/economy_predation_config.json)
     public static func computeHuntingHeatBuff(comboCount: Int) -> HuntingHeatBuff {
-        if comboCount >= 18 {
-            return HuntingHeatBuff(heatLevel: 3, speedMultiplier: 1.24, scoreMultiplier: 1.6, labelKey: "hud_heat_lv3")
+        let cleanCombo = max(0, comboCount)
+        let tiers = DomainConfigs.economyPredation.huntingHeatTiers.tiers
+        var active = tiers[0]
+        for tier in tiers {
+            if cleanCombo >= tier.minCombo {
+                active = tier
+            }
         }
-        if comboCount >= 10 {
-            return HuntingHeatBuff(heatLevel: 2, speedMultiplier: 1.15, scoreMultiplier: 1.3, labelKey: "hud_heat_lv2")
-        }
-        if comboCount >= 4 {
-            return HuntingHeatBuff(heatLevel: 1, speedMultiplier: 1.08, scoreMultiplier: 1.15, labelKey: "hud_heat_lv1")
-        }
-        return HuntingHeatBuff(heatLevel: 0, speedMultiplier: 1.0, scoreMultiplier: 1.0, labelKey: "hud_heat_lv0")
+        return HuntingHeatBuff(
+            heatLevel: active.level,
+            speedMultiplier: 1.0,
+            scoreMultiplier: active.scoreMult,
+            magnetRadiusBonus: active.magnetBonus,
+            energyRegenBonus: active.energyRegenPerSec,
+            labelKey: "hud_heat_lv\(min(3, active.level))"
+        )
     }
 
     /// Optical Far / Mid / Near background shrinking ratios driven by true camera zoom (`cameraZoom`: 1.00 -> 0.22)
@@ -596,40 +821,61 @@ public enum GameRules {
         )
     }
 
-    /// Computes evolved shark stats for any of the 48 shark forms
+    /// Computes evolved shark stats for any of the 48 shark forms from DomainConfigs
     public static func computeEvolvedSharkStats(
         inRunLevel: Int,
         sharkFormId: String,
         upgradeLevel: Int = 1,
         frenzyActive: Bool = false,
         globalDifficultyMultiplier: Double = 1.0,
-        unlockedCount: Int = 1
+        unlockedCount: Int = 1,
+        totalCrownCount: Int = 0
     ) -> ComputedSharkStats {
         let form = GameConfigGenerated.sharkForms.first(where: { $0.id == sharkFormId })
             ?? GameConfigGenerated.sharkForms[0]
-        let upLv = max(1, min(10, upgradeLevel))
+        let worldCfg = DomainConfigs.worldAndProgression.world
+        let upgCfg = DomainConfigs.worldAndProgression.upgradeProgression
+        let lvlCfg = DomainConfigs.worldAndProgression.inRunLevelProgression
+        let atlasCfg = DomainConfigs.worldAndProgression.atlasPassives
+        let diffCfg = DomainConfigs.worldAndProgression.timeDifficulty
+        let frenzyCfg = DomainConfigs.economyPredation.frenzy
+        let linPassive = DomainConfigs.worldAndProgression.lineagePassives[form.lineage.rawValue]
+        let traits = DomainConfigs.sharkTraitsById[form.id] ?? DomainConfigs.defaultTraits()
+
+        let upLv = max(1, min(upgCfg.maxUpgradeLevel, upgradeLevel))
         let extraUnlocked = Double(max(0, unlockedCount - 1))
+        let cleanCrowns = Double(max(0, totalCrownCount))
 
-        let collectionHpMult = 1.0 + extraUnlocked * 0.02
-        let collectionSpeedBonus = extraUnlocked * 0.008
-        let collectionRewardMult = 1.0 + extraUnlocked * 0.025
+        let collectionHpMult = 1.0 + extraUnlocked * atlasCfg.extraSharkHpBonusPerShark + cleanCrowns * atlasCfg.crownHpBonusPerCrown
+        let collectionSpeedBonus = extraUnlocked * atlasCfg.extraSharkSpeedBonusPerShark
+        let collectionScoreMult = 1.0 + cleanCrowns * atlasCfg.crownScoreBonusPerCrown
+        let collectionRewardMult = 1.0 + extraUnlocked * atlasCfg.extraSharkRewardBonusPerShark + cleanCrowns * atlasCfg.crownRewardBonusPerCrown
 
-        let upgradeHpMult = 1.0 + Double(upLv - 1) * 0.08
-        let upgradeSpeedBonus = Double(upLv - 1) * 0.022
-        let upgradeDrainRed = Double(upLv - 1) * 0.015
-        let upgradeBoostRed = Double(upLv - 1) * 0.018
-        let upgradeBiteBonus = upLv >= 10 ? 3 : (upLv >= 6 ? 2 : (upLv >= 3 ? 1 : 0))
+        let upgradeHpMult = 1.0 + Double(upLv - 1) * upgCfg.hpMultPerUpgradeLevel
+        let upgradeSpeedBonus = Double(upLv - 1) * upgCfg.speedPerUpgradeLevel
+        let upgradeDrainRed = Double(upLv - 1) * upgCfg.hpDrainReductionPerUpgradeLevel
+        let upgradeBoostRed = Double(upLv - 1) * upgCfg.boostCostReductionPerUpgradeLevel
 
-        let inRunBiteBonus = inRunLevel >= 9 ? 3 : (inRunLevel >= 5 ? 2 : (inRunLevel >= 2 ? 1 : 0))
+        var upgradeBiteBonus = 0
+        var hpBreakthroughBonusPct = 0.0
+        for node in upgCfg.biteTierNodes where upLv >= node.minUpgradeLevel {
+            upgradeBiteBonus = max(upgradeBiteBonus, node.bonusTier)
+            hpBreakthroughBonusPct = max(hpBreakthroughBonusPct, node.hpBreakthroughBonusPct)
+        }
 
-        let genMaxBiteTier = min(48, form.baseBiteTier + 6)
+        var inRunBiteBonus = 0
+        for node in lvlCfg.biteTierNodes where inRunLevel >= node.minLevel {
+            inRunBiteBonus = max(inRunBiteBonus, node.bonusTier)
+        }
+
+        let genMaxBiteTier = min(upgCfg.maxBiteTier, form.baseBiteTier + upgCfg.maxBiteTierBonusOverBase)
         let rawBiteTier = min(genMaxBiteTier, form.baseBiteTier + upgradeBiteBonus + inRunBiteBonus)
-        let normalBiteTier = min(48, rawBiteTier)
-        let biteTier = frenzyActive ? 48 : normalBiteTier
+        let normalBiteTier = min(upgCfg.maxBiteTier, rawBiteTier)
+        let biteTier = frenzyActive ? upgCfg.maxBiteTier : normalBiteTier
 
         let scale = min(
             1.28,
-            1.0 + Double(inRunLevel - 1) * 0.028 + Double(form.row) * 0.025 + Double(upLv - 1) * 0.006
+            1.0 + Double(inRunLevel - 1) * lvlCfg.scalePerLevel + Double(form.row) * 0.025 + Double(upLv - 1) * 0.006
         )
         let realBodyLengthM = form.realBodyLengthM * (1.0 + Double(inRunLevel - 1) * 0.025)
         let relativePreyScale = max(0.015, min(1.0, 0.8 / realBodyLengthM))
@@ -639,34 +885,33 @@ public enum GameRules {
         let hpDrainReduction = min(0.58, form.hpDrainReduction + upgradeDrainRed)
         let boostCostReduction = min(0.68, form.boostCostReduction + upgradeBoostRed)
 
-        let totalSpeedBonus = form.speedBonus + upgradeSpeedBonus + collectionSpeedBonus + Double(inRunLevel - 1) * 0.028
+        let totalSpeedBonus = form.speedBonus + upgradeSpeedBonus + collectionSpeedBonus + Double(inRunLevel - 1) * lvlCfg.speedPerLevel
         let lengthGrowthFactor = pow(realBodyLengthM / 0.8, 0.08)
-        let baseSpeed = GameConfigGenerated.baseSharkSpeed * lengthGrowthFactor * (1.0 + totalSpeedBonus)
+        let baseSpeed = worldCfg.baseSharkSpeed * lengthGrowthFactor * (1.0 + totalSpeedBonus)
         let moveSpeed = frenzyActive ? baseSpeed * 1.35 : baseSpeed
-        let boostSpeed = moveSpeed * GameConfigGenerated.boostSpeedMultiplier
+        let boostSpeed = moveSpeed * worldCfg.boostSpeedMultiplier
 
-        let metabolicBaseDrain = (GameConfigGenerated.baseHpDrainPerSec + Double(inRunLevel - 1) * 0.65)
-            * (1.0 + max(0.0, globalDifficultyMultiplier - 1.0) * 0.52)
+        let metabolicBaseDrain = (worldCfg.baseHpDrainPerSec + Double(inRunLevel - 1) * lvlCfg.hpDrainGrowthPerLevel)
+            * (1.0 + max(0.0, globalDifficultyMultiplier - 1.0) * diffCfg.hpDrainScalingFactor)
         let hpDrainPerSec = frenzyActive ? 0.0 : metabolicBaseDrain * (1.0 - hpDrainReduction)
-        let boostDrainPerSec = frenzyActive ? 0.0 : GameConfigGenerated.baseBoostDrainPerSec * (1.0 - boostCostReduction)
+        let boostDrainPerSec = frenzyActive ? 0.0 : worldCfg.baseBoostDrainPerSec * (1.0 - boostCostReduction)
 
-        let magnetRadius = (GameConfigGenerated.baseMagnetRadius + form.magnetBonus + Double(upLv - 1) * 8.0 + Double(inRunLevel - 1) * 10.0)
-            * (frenzyActive ? 1.35 : 1.0)
-        let maxHp = (form.baseHp + Double(inRunLevel - 1) * 16.0) * upgradeHpMult * collectionHpMult
-        let maxEnergy = form.baseEnergy + Double(upLv - 1) * 5.0 + Double(inRunLevel - 1) * 4.0
+        let magnetRadius = (worldCfg.baseMagnetRadius + form.magnetBonus + Double(upLv - 1) * upgCfg.magnetPerUpgradeLevel + Double(inRunLevel - 1) * lvlCfg.magnetPerLevel)
+            * (frenzyActive ? frenzyCfg.magnetMultiplier : 1.0)
+        let maxHp = ((form.baseHp + Double(inRunLevel - 1) * lvlCfg.hpPerLevelFlat) * upgradeHpMult * collectionHpMult * (1.0 + hpBreakthroughBonusPct)).rounded()
+        let maxEnergy = (form.baseEnergy + Double(upLv - 1) * upgCfg.energyFlatPerUpgradeLevel + Double(inRunLevel - 1) * lvlCfg.energyPerLevelFlat).rounded()
 
-        let jawSuctionMultiplier: Double = form.id == "shark_34_dark_matter" ? 2.0
-            : (form.id == "shark_20_goblin_jaw" ? 1.4
-            : (form.id == "shark_12_starry_whale" ? 1.35
-            : (form.id == "shark_19_thresher_shark" || form.id == "shark_15_abyss_tentacle" ? 1.25
-            : (form.lineage == .APEX_BIO ? 1.18 : 1.0))))
-        let baseRewardMult = collectionRewardMult * (1.0 + Double(form.row) * 0.12)
-        let canEatMines = form.id == "shark_25_bio_venom" || form.generation >= 6
+        let frenzyDurationBonus = (linPassive?.frenzyDurationBonus ?? 0.0) + traits.frenzyDurationBonus
+        let jawSuctionMultiplier = max(linPassive?.jawSuctionMult ?? 1.0, traits.jawSuctionMult)
+        let baseRewardMult = collectionRewardMult * (1.0 + Double(form.row) * upgCfg.rowYieldCoinBaseStep)
+        let coinYieldMultiplier = baseRewardMult * traits.coinYieldTraitMult
+        let geneYieldMultiplier = baseRewardMult * (linPassive?.geneYieldMult ?? 1.0) * traits.geneYieldTraitMult
+        let scoreMultiplier = form.scoreMult * collectionScoreMult
 
         let cruiseSpeedMps = form.cruiseSpeedMps * (1.0 + totalSpeedBonus)
         let boostSpeedMps = cruiseSpeedMps * (frenzyActive ? 2.6 : 2.2)
         let viewportScale = (120.0 * scale) / realBodyLengthM
-        let minSpawnablePreyLengthM = realBodyLengthM * 0.133
+        let minSpawnablePreyLengthM = realBodyLengthM * worldCfg.minSpawnablePreyLengthRatio
 
         return ComputedSharkStats(
             level: inRunLevel,
@@ -684,12 +929,21 @@ public enum GameRules {
             boostDrainPerSec: boostDrainPerSec,
             magnetRadius: magnetRadius,
             devourHealMultiplier: form.devourHealMult,
-            frenzyDurationBonus: form.lineage == .ELEMENTAL_CORE ? 1.0 + Double(form.row) * 0.3 : 0.0,
+            frenzyDurationBonus: frenzyDurationBonus,
             jawSuctionMultiplier: jawSuctionMultiplier,
-            coinYieldMultiplier: baseRewardMult,
-            geneYieldMultiplier: baseRewardMult * (form.lineage == .ELDER_ABYSS ? 1.15 : 1.0),
-            damageTakenMultiplier: 1.0,
-            canEatMines: canEatMines,
+            scoreMultiplier: scoreMultiplier,
+            coinYieldMultiplier: coinYieldMultiplier,
+            geneYieldMultiplier: geneYieldMultiplier,
+            bossRewardMultiplier: traits.bossRewardMult,
+            specialPreyScoreMultiplier: traits.specialPreyScoreMult,
+            damageTakenMultiplier: traits.damageTakenMult,
+            mineDamageTakenMultiplier: traits.mineDamageTakenMult,
+            knockbackMultiplier: traits.knockbackMult,
+            boostRegenMultiplier: traits.boostRegenMult,
+            killEnergyBonus: traits.killEnergyBonus,
+            maxComboBonus: traits.maxComboBonus,
+            goldenMutantReduction: traits.goldenMutantReduction,
+            canEatMines: traits.canEatMines,
             realBodyLengthM: realBodyLengthM,
             cruiseSpeedMps: cruiseSpeedMps,
             boostSpeedMps: boostSpeedMps,
@@ -710,7 +964,8 @@ public enum GameRules {
         let preyLengthM = max(0.05, (prey.bodyLengthCm > 0 ? prey.bodyLengthCm : prey.radius * 2.5) / 100.0)
         let realRatio = preyLengthM / sharkLengthM
 
-        let behemothMult = mutationVariant == .ABYSS_BEHEMOTH ? 1.25 : 1.0
+        let behemothScale = DomainConfigs.economyPredation.mutations.abyssBehemoth.visualScaleMult
+        let behemothMult = mutationVariant == .ABYSS_BEHEMOTH ? behemothScale : 1.0
         let bossMult = prey.isBoss ? 1.2 : 1.0
         let targetRatio = realRatio * behemothMult * bossMult
 
@@ -749,6 +1004,27 @@ public enum GameRules {
         return best
     }
 
+    public static func getEffectivePreyTier(
+        prey: PreyTierConfig,
+        mutationVariant: PreyMutationVariant = .NONE
+    ) -> Int {
+        if mutationVariant == .ABYSS_BEHEMOTH {
+            return min(50, prey.tier + DomainConfigs.economyPredation.mutations.abyssBehemoth.effectiveTierOffset)
+        }
+        return prey.tier
+    }
+
+    public static func getRequiredArmorHits(
+        prey: PreyTierConfig,
+        mutationVariant: PreyMutationVariant = .NONE
+    ) -> Int {
+        let cfg = DomainConfigs.economyPredation.armorCrush
+        if prey.isBoss || mutationVariant == .ABYSS_BEHEMOTH {
+            return cfg.bossOrBehemothHitsRequired
+        }
+        return cfg.normalHitsRequired
+    }
+
     /// Collision encounter resolution (DEVOUR vs ARMOR_CRUSH vs NEED_BOOST vs DAMAGE)
     public static func resolvePreyEncounter(
         prey: PreyTierConfig,
@@ -761,15 +1037,151 @@ public enum GameRules {
         if prey.isHazard {
             return sharkStats.canEatMines ? .DEVOUR : .DAMAGE
         }
-        let effectiveTier = mutationVariant == .ABYSS_BEHEMOTH ? min(50, prey.tier + 1) : prey.tier
+        let crushCfg = DomainConfigs.economyPredation.armorCrush
+        let effectiveTier = getEffectivePreyTier(prey: prey, mutationVariant: mutationVariant)
         let tierDiff = effectiveTier - sharkStats.biteTier
         if tierDiff <= 0 {
             return .DEVOUR
         }
-        if tierDiff >= 1 && tierDiff <= 3 {
+        if tierDiff >= crushCfg.armorBandMinDelta && tierDiff <= crushCfg.armorBandMaxDelta {
             return isBoosting ? .ARMOR_CRUSH : .NEED_BOOST
         }
         return .DAMAGE
+    }
+
+    /// Config-driven predation economy & pity-counter settlement matching Web `rules.ts` 1:1.
+    public static func computePredationSettlement(
+        prey: PreyTierConfig,
+        sharkStats: ComputedSharkStats,
+        encounter: EncounterOutcome,
+        frenzyActive: Bool,
+        isBoosting: Bool,
+        mutationVariant: PreyMutationVariant,
+        globalDifficultyMultiplier: Double,
+        comboScoreMultiplier: Double,
+        genePityMissStreak: inout Int,
+        rng: () -> Double = { Double.random(in: 0..<1) }
+    ) -> PredationSettlementMetrics {
+        let frenzyCfg = DomainConfigs.economyPredation.frenzy
+        let crushCfg = DomainConfigs.economyPredation.armorCrush
+        let mutCfg = DomainConfigs.economyPredation.mutations
+        let xpCfg = DomainConfigs.economyPredation.xpMultipliers
+        let geneDropCfg = DomainConfigs.economyPredation.predationGeneDrop
+        let combatCfg = DomainConfigs.economyPredation.combat
+
+        let isArmorCrush = encounter == .ARMOR_CRUSH && !frenzyActive
+        if encounter == .DEVOUR || encounter == .ARMOR_CRUSH {
+            let isCrit = frenzyActive || isBoosting || isArmorCrush || prey.tier >= 10 || mutationVariant != .NONE
+            let frenzyCoinMult = frenzyActive ? frenzyCfg.coinMultiplier : 1.0
+            let frenzyGeneMult = frenzyActive ? frenzyCfg.geneMultiplier : 1.0
+            let frenzyScoreMult = frenzyActive ? frenzyCfg.scoreMultiplier : 1.0
+
+            let crushCoinMult = isArmorCrush ? crushCfg.coinMult : 1.0
+            let crushGeneMult = isArmorCrush ? crushCfg.geneMult : 1.0
+            let crushScoreMult = isArmorCrush ? crushCfg.scoreMult : 1.0
+
+            let mutCoinMult: Double = mutationVariant == .GOLDEN_SWARM
+                ? mutCfg.golden.coinMult
+                : (mutationVariant == .ABYSS_BEHEMOTH ? mutCfg.abyssBehemoth.coinMult : 1.0)
+            let mutGeneMult: Double = mutationVariant == .ABYSS_BEHEMOTH
+                ? mutCfg.abyssBehemoth.geneMult
+                : (mutationVariant == .GOLDEN_SWARM ? mutCfg.golden.geneMult : 1.0)
+            let mutScoreMult: Double = mutationVariant == .GOLDEN_SWARM
+                ? mutCfg.golden.scoreMult
+                : (mutationVariant == .ABYSS_BEHEMOTH ? mutCfg.abyssBehemoth.scoreMult : 1.0)
+
+            let xpMult: Double
+            if frenzyActive {
+                xpMult = xpCfg.frenzy
+            } else if mutationVariant == .GOLDEN_SWARM {
+                xpMult = xpCfg.golden
+            } else if isArmorCrush {
+                xpMult = xpCfg.armorCrush
+            } else if mutationVariant == .ABYSS_BEHEMOTH {
+                xpMult = xpCfg.behemoth
+            } else {
+                xpMult = xpCfg.normal
+            }
+
+            let xpGain = prey.xpValue > 0 ? max(1, Int((Double(prey.xpValue) * xpMult).rounded())) : 0
+            let bossBonus = prey.isBoss ? sharkStats.bossRewardMultiplier : 1.0
+            let goldenSpecialBonus = mutationVariant == .GOLDEN_SWARM ? sharkStats.specialPreyScoreMultiplier : 1.0
+
+            let rawScore = Double(prey.scoreValue) * frenzyScoreMult * crushScoreMult * mutScoreMult
+                * sharkStats.scoreMultiplier * bossBonus * goldenSpecialBonus * comboScoreMultiplier
+            let scoreGain = max(0, Int(rawScore.rounded()))
+
+            let applySharkYields = !isArmorCrush || crushCfg.applySharkYieldMultipliers
+            let coinYield = applySharkYields ? sharkStats.coinYieldMultiplier : 1.0
+            let geneYield = applySharkYields ? sharkStats.geneYieldMultiplier : 1.0
+
+            let rawCoins = Double(prey.coinValue) * frenzyCoinMult * crushCoinMult * mutCoinMult * bossBonus
+            let coinGain = rawCoins > 0 ? max(1, Int((rawCoins * coinYield).rounded())) : 0
+
+            var geneGain = 0
+            let rawGeneBase = Double(prey.geneValue) * frenzyGeneMult * crushGeneMult * mutGeneMult * bossBonus
+            if rawGeneBase > 0 && prey.geneValue > 0 {
+                let isSpecial = prey.isBoss || isArmorCrush || mutationVariant == .GOLDEN_SWARM || mutationVariant == .ABYSS_BEHEMOTH
+                if isSpecial && geneDropCfg.specialGuaranteed {
+                    genePityMissStreak = 0
+                    geneGain = max(geneDropCfg.minGenesWhenGuaranteed, Int((rawGeneBase * geneYield).rounded()))
+                } else {
+                    let isLowTier = prey.tier <= geneDropCfg.lowTierMaxTier
+                    let chance = isLowTier ? geneDropCfg.lowTierChance : geneDropCfg.highTierChance
+                    let pityLimit = isLowTier ? geneDropCfg.lowTierPityMissLimit : geneDropCfg.highTierPityMissLimit
+                    if genePityMissStreak >= pityLimit || rng() < chance {
+                        genePityMissStreak = 0
+                        geneGain = max(geneDropCfg.minGenesWhenGuaranteed, Int((rawGeneBase * geneYield).rounded()))
+                    } else {
+                        genePityMissStreak += 1
+                    }
+                }
+            }
+
+            let floatTextKey: String
+            if prey.isBoss { floatTextKey = "float_boss_kill" }
+            else if prey.isHazard { floatTextKey = "float_mine_crunch" }
+            else if isArmorCrush { floatTextKey = "float_armor_crush" }
+            else if frenzyActive || mutationVariant == .GOLDEN_SWARM { floatTextKey = "float_gold_rush" }
+            else if isCrit { floatTextKey = "float_crit" }
+            else { floatTextKey = "float_devour" }
+
+            return PredationSettlementMetrics(
+                hpDelta: (prey.hpRestore * sharkStats.devourHealMultiplier).rounded(),
+                xpGain: xpGain,
+                scoreGain: scoreGain,
+                coinGain: coinGain,
+                geneGain: geneGain,
+                failDamage: 0,
+                knockbackForce: 0,
+                floatTextKey: floatTextKey,
+                isCrit: isCrit
+            )
+        }
+
+        let crushBand = encounter == .NEED_BOOST
+        let behemothFailMult = mutationVariant == .ABYSS_BEHEMOTH ? mutCfg.abyssBehemoth.failDamageMult : 1.0
+        let maxHpPenalty: Double = prey.isHazard
+            ? (sharkStats.maxHp * 0.14).rounded()
+            : ((prey.tier >= 30 || mutationVariant == .ABYSS_BEHEMOTH) ? (sharkStats.maxHp * 0.08).rounded() : 0.0)
+        let needBoostDamping = crushBand ? combatCfg.armorFailDamageFactor : 1.0
+        let mineExtraMult = prey.isHazard ? 1.4 : 1.0
+        let rawFail = (prey.damageOnFail * needBoostDamping * mineExtraMult * behemothFailMult * max(1.0, globalDifficultyMultiplier)).rounded() + maxHpPenalty
+        let armorMit = sharkStats.damageTakenMultiplier * (prey.isHazard ? sharkStats.mineDamageTakenMultiplier : 1.0)
+        let scaledFail = max(1.0, (rawFail * armorMit).rounded())
+        let knockback = ((prey.isHazard ? combatCfg.mineKnockbackForce : (crushBand ? 260.0 : combatCfg.predatorKnockbackForce)) * sharkStats.knockbackMultiplier).rounded()
+
+        return PredationSettlementMetrics(
+            hpDelta: -scaledFail,
+            xpGain: 0,
+            scoreGain: 0,
+            coinGain: 0,
+            geneGain: 0,
+            failDamage: scaledFail,
+            knockbackForce: knockback,
+            floatTextKey: prey.isHazard ? "float_mine_hit" : (crushBand ? "float_need_boost" : "float_too_big"),
+            isCrit: false
+        )
     }
 
     /// Continuous bathymetric water color interpolation across 0m ~ 20,000m (1:1 parity with Web parallaxBackground.ts)

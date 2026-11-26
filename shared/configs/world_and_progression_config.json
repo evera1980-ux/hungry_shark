@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 2,
+  "world": {
+    "width": 3000,
+    "height": 1800,
+    "seaSurfaceY": 0,
+    "maxDepthMeters": 20000,
+    "baseSharkSpeed": 140,
+    "boostSpeedMultiplier": 2,
+    "baseHpDrainPerSec": 3.4,
+    "baseBoostDrainPerSec": 34,
+    "baseBoostRegenPerSec": 18,
+    "baseMagnetRadius": 110,
+    "baseBiteTier": 1,
+    "frenzyDuration": 6,
+    "cameraZoomMin": 0.22,
+    "minRenderZoomFloor": 0.14,
+    "sharkBaseDrawSizeWeb": 96,
+    "sharkBaseDrawSizeIos": 110.4,
+    "preyRadiusToDrawSize": 2.25,
+    "defaultPreySizeMultiplier": 1,
+    "preyBaseLengthDenominatorCm": 80,
+    "minSpawnablePreyLengthRatio": 0.133,
+    "shallowSanctuaryDepthY": 520,
+    "twilightStartDepthY": 520,
+    "abyssStartDepthY": 1150
+  },
+  "zones": [
+    {
+      "id": "shallow",
+      "nameKey": "zone_shallow",
+      "minDepth": 0,
+      "maxDepth": 520,
+      "topColor": "#0284c7",
+      "bottomColor": "#0369a1",
+      "accentColor": "#38bdf8"
+    },
+    {
+      "id": "twilight",
+      "nameKey": "zone_twilight",
+      "minDepth": 520,
+      "maxDepth": 1150,
+      "topColor": "#0369a1",
+      "bottomColor": "#0f172a",
+      "accentColor": "#818cf8"
+    },
+    {
+      "id": "abyss",
+      "nameKey": "zone_abyss",
+      "minDepth": 1150,
+      "maxDepth": null,
+      "topColor": "#0f172a",
+      "bottomColor": "#020617",
+      "accentColor": "#c084fc"
+    }
+  ],
+  "starterSaveDefaults": {
+    "version": 1,
+    "bankedCoins": 120,
+    "bankedGenes": 20,
+    "selectedSharkId": "shark_00_clown_fry",
+    "unlockedSharkIds": [
+      "shark_00_clown_fry"
+    ],
+    "sharkUpgradeLevels": {
+      "shark_00_clown_fry": 1
+    },
+    "bestInRunLevel": 1,
+    "bestDepthReached": 200,
+    "totalRunsPlayed": 0,
+    "onboardingGiftClaimed": false
+  },
+  "upgradeProgression": {
+    "maxUpgradeLevel": 10,
+    "coinCostExponent": 1.28,
+    "geneUnlockMinRef": 12,
+    "geneCostGateLv4": {
+      "refMult": 0.35,
+      "flatBonus": 6
+    },
+    "geneCostGateLv9": {
+      "refMult": 0.65,
+      "flatBonus": 14
+    },
+    "hpMultPerUpgradeLevel": 0.08,
+    "energyFlatPerUpgradeLevel": 5,
+    "speedPerUpgradeLevel": 0.022,
+    "magnetPerUpgradeLevel": 8,
+    "hpDrainReductionPerUpgradeLevel": 0.015,
+    "boostCostReductionPerUpgradeLevel": 0.018,
+    "devourHealPerUpgradeLevel": 0.03,
+    "biteTierNodes": [
+      {
+        "minUpgradeLevel": 5,
+        "bonusTier": 1,
+        "hpBreakthroughBonusPct": 0.06
+      },
+      {
+        "minUpgradeLevel": 10,
+        "bonusTier": 2,
+        "hpBreakthroughBonusPct": 0.12
+      }
+    ],
+    "maxBiteTierBonusOverBase": 6,
+    "maxBiteTier": 48,
+    "allowVerticalParentUnlock": true,
+    "maxParentReqCapByRow": [
+      3,
+      4,
+      5,
+      5,
+      5,
+      6
+    ],
+    "unlockCoinsMultByRow": [
+      1,
+      1,
+      1,
+      1.25,
+      1.55,
+      1.85
+    ],
+    "rowYieldCoinBaseStep": 0.12,
+    "rowYieldGeneBaseStep": 0.12
+  },
+  "inRunLevelProgression": {
+    "xpCurve": {
+      "base": 140,
+      "linearStep": 145,
+      "powerStep": 65,
+      "exponent": 1.75
+    },
+    "biteTierNodes": [
+      {
+        "minLevel": 2,
+        "bonusTier": 1
+      },
+      {
+        "minLevel": 5,
+        "bonusTier": 2
+      },
+      {
+        "minLevel": 8,
+        "bonusTier": 3
+      },
+      {
+        "minLevel": 12,
+        "bonusTier": 4
+      }
+    ],
+    "hpPerLevelFlat": 16,
+    "energyPerLevelFlat": 4,
+    "speedPerLevel": 0.028,
+    "magnetPerLevel": 10,
+    "scalePerLevel": 0.028,
+    "hpDrainGrowthPerLevel": 0.65,
+    "devourHealPerLevel": 0.02,
+    "levelUpHealMaxHpPct": 0.35,
+    "levelUpEnergyRestorePct": 0.5
+  },
+  "atlasPassives": {
+    "extraSharkHpBonusPerShark": 0.02,
+    "extraSharkSpeedBonusPerShark": 0.008,
+    "extraSharkScoreBonusPerShark": 0.025,
+    "extraSharkRewardBonusPerShark": 0.025,
+    "crownScoreBonusPerCrown": 0.0035,
+    "crownHpBonusPerCrown": 0.002,
+    "crownRewardBonusPerCrown": 0
+  },
+  "lineagePassives": {
+    "APEX_BIO": {
+      "jawSuctionMult": 1.18,
+      "devourHealBonus": 0,
+      "hpMult": 1,
+      "speedMult": 1,
+      "boostDrainMult": 1,
+      "magnetFlatBonus": 0,
+      "scoreMult": 1,
+      "frenzyDurationBonus": 0,
+      "armorBreakMult": 1,
+      "geneYieldMult": 1,
+      "synergyTag": null
+    },
+    "CYBER_MECHA": {
+      "jawSuctionMult": 1,
+      "devourHealBonus": 0,
+      "hpMult": 1,
+      "speedMult": 1,
+      "boostDrainMult": 1,
+      "magnetFlatBonus": 0,
+      "scoreMult": 1,
+      "frenzyDurationBonus": 0,
+      "armorBreakMult": 1,
+      "geneYieldMult": 1,
+      "synergyTag": "MECHA"
+    },
+    "ELEMENTAL_CORE": {
+      "jawSuctionMult": 1,
+      "devourHealBonus": 0,
+      "hpMult": 1,
+      "speedMult": 1,
+      "boostDrainMult": 1,
+      "magnetFlatBonus": 0,
+      "scoreMult": 1,
+      "frenzyDurationBonus": 1,
+      "armorBreakMult": 1.4,
+      "geneYieldMult": 1,
+      "synergyTag": "MAGMA"
+    },
+    "ELDER_ABYSS": {
+      "jawSuctionMult": 1,
+      "devourHealBonus": 0,
+      "hpMult": 1,
+      "speedMult": 1,
+      "boostDrainMult": 1,
+      "magnetFlatBonus": 0,
+      "scoreMult": 1,
+      "frenzyDurationBonus": 0,
+      "armorBreakMult": 1,
+      "geneYieldMult": 1.1,
+      "synergyTag": "ABYSS"
+    }
+  },
+  "timeDifficulty": {
+    "intervalSec": 60,
+    "ratePerInterval": 0.05,
+    "maxDifficultyMultiplier": 2.2,
+    "scoreScalingExponent": 0.65,
+    "minScoreScalingFloor": 1,
+    "hpDrainScalingFactor": 0.52,
+    "spawnScoreScalingCap": 1.6
+  }
+}

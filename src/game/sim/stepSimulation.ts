@@ -1,31 +1,43 @@
 import { GAME_CONFIG } from '../config';
 import {
   addEvolutionProgress,
+  buildPredationRewardPlan,
   CAMERA_ZOOM_MIN,
+  collectPickupEntity,
   computeHuntingHeatBuff,
+  ECONOMY_PREDATION_CONFIG,
   getDepthZone,
   getDebugPreySizeMultiplier,
   getEffectivePreyTier,
   getGeneSurgeCost,
   getGoldOverdriveCost,
   getPreyRelativeVisualScale,
+  getRequiredArmorHits,
   getXpRequiredForLevel,
   MIN_RENDER_ZOOM_FLOOR,
   resolvePreyEncounter,
+  WORLD_CONFIG,
 } from '../rules';
 import {
-  evaluateSharkUnlock,
+  claimOnboardingStarterGift,
+  evaluateSharkUnlockForRun,
   getGlobalAtlasBonuses,
   getNextEvolutionTarget,
+  getPermanentProgressEligibility,
   getSharkFormById,
   getSharkUpgradeCost,
   getSharkUpgradeGeneCost,
+  recordPermanentRunProgress,
   saveSharkMetaSave,
   settleSharkScoreMastery,
   SharkMetaSaveData,
 } from '../sharkEvolutionConfig';
 import { soundFX } from '../audio';
-import { adManager } from '../adManager';
+import {
+  adManager,
+  getOnboardingStarterGiftConfig,
+  getTrialTargetSharkSpec,
+} from '../adManager';
 import { spriteSheetManager } from '../spriteSheetManager';
 import {
   detectShatterableTerraceHit,
@@ -359,37 +371,41 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             shark.energy - shark.stats.boostDrainPerSec * simDt
           );
           soundFX.playBoostPulse();
-          // Tutorial Step 2 -> Step 3: Accumulate 0.7s of Boost and immediately award +80 Coins & +20 Genes starter supply gift!
+          // Tutorial Step 2 -> Step 3: Accumulate 0.7s of Boost and award one-time +80 Coins & +20 Genes starter gift!
           if (tutorialStepRef.current === 'HOLD_BOOST') {
             tutorialBoostAccumRef.current += simDt;
             if (tutorialBoostAccumRef.current >= 0.7) {
               tutorialStepRef.current = 'HANDS_ON_UPGRADE';
               setTutorialStep('HANDS_ON_UPGRADE');
-              const giftCoins = 80;
-              const giftGenes = 20;
               const curSave = metaSaveRef.current;
-              const giftedSave: SharkMetaSaveData = {
+              const syncedSave: SharkMetaSaveData = {
                 ...curSave,
-                bankedCoins: curSave.bankedCoins + giftCoins,
-                bankedGenes: curSave.bankedGenes + giftGenes,
+                bankedCoins: shark.coins,
+                bankedGenes: shark.genes,
               };
-              metaSaveRef.current = giftedSave;
-              saveSharkMetaSave(giftedSave);
-              setMetaSave(giftedSave);
-              shark.coins = giftedSave.bankedCoins;
-              shark.genes = giftedSave.bankedGenes;
-              sim.lastHudSyncTime = 0;
-              soundFX.playEvolution();
-              spawnFloatText(
-                shark.x,
-                shark.y - 48 * worldScale,
-                'float_supply_drop',
-                langRef.current === 'zh'
-                  ? '🎁 新手补给 +80🪙 +20🧬!'
-                  : '🎁 Starter Gift +80🪙 +20🧬!',
-                '#fde047',
-                1.35
-              );
+              const giftCfg = getOnboardingStarterGiftConfig();
+              const giftResult = giftCfg.enabled
+                ? claimOnboardingStarterGift(syncedSave, giftCfg.coins, giftCfg.genes)
+                : { updatedSave: syncedSave, granted: false };
+              if (giftResult.granted) {
+                metaSaveRef.current = giftResult.updatedSave;
+                saveSharkMetaSave(giftResult.updatedSave);
+                setMetaSave(giftResult.updatedSave);
+                shark.coins = giftResult.updatedSave.bankedCoins;
+                shark.genes = giftResult.updatedSave.bankedGenes;
+                sim.lastHudSyncTime = 0;
+                soundFX.playEvolution();
+                spawnFloatText(
+                  shark.x,
+                  shark.y - 48 * worldScale,
+                  'float_supply_drop',
+                  langRef.current === 'zh'
+                    ? `🎁 新手补给 +${giftCfg.coins}🪙 +${giftCfg.genes}🧬!`
+                    : `🎁 Starter Gift +${giftCfg.coins}🪙 +${giftCfg.genes}🧬!`,
+                  '#fde047',
+                  1.35
+                );
+              }
             }
           }
           // 柔和尾迹气泡（按真实世界体长 worldScale 锚定尾尖位置与粒子尺寸）
@@ -408,11 +424,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             );
           }
         } else {
-          const activeSharkForm = getSharkFormById(shark.sharkFormId);
-          const heatBuff = computeHuntingHeatBuff(
-            shark.score,
-            activeSharkForm.row
-          );
+          const heatBuff = computeHuntingHeatBuff(shark.comboCount);
           const surfaceBreatherBonus = shark.y < 48 * worldScale ? 18 : 0;
           const boostRegenMult = shark.stats.boostRegenMultiplier ?? 1.0;
           shark.energy = Math.min(
@@ -681,7 +693,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           sim.targetBounty = {
             preyConfig: zoneNativeTarget,
             progress: 0,
-            required: 2,
+            required: ECONOMY_PREDATION_CONFIG.bounty.requiredKills,
           };
           ecosystemSpawner.activeTargetPreyId = zoneNativeTarget.id;
         }
@@ -712,6 +724,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
         // Update Prey AI, Jaw Suction Assist & Check Mouth Devour Collision
         for (let i = sim.preyList.length - 1; i >= 0; i--) {
           const prey = sim.preyList[i];
+          if (prey.devoured) continue;
 
           // 1:1 单一世界坐标判定：视觉绘制与物理碰撞共享完全一致的 (prey.x, prey.y) 与 visualPreyScale
           const distToShark = Math.hypot(shark.x - prey.x, shark.y - prey.y);
@@ -959,44 +972,78 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             );
 
             if (outcome.canDevour) {
+              const variant = prey.mutationVariant ?? 'NONE';
+              if (outcome.isArmorCrush) {
+                const neededHits = getRequiredArmorHits(prey.config, variant);
+                const curArmorHp = prey.armorHp ?? neededHits;
+                if (curArmorHp > 1) {
+                  prey.armorHp = curArmorHp - 1;
+                  const bounceAng = Math.atan2(shark.y - prey.y, shark.x - prey.x);
+                  shark.invulnerableTimer = Math.max(shark.invulnerableTimer, 0.28);
+                  shark.vx = Math.cos(bounceAng) * 210 * invZoom;
+                  shark.vy = Math.sin(bounceAng) * 210 * invZoom;
+                  shark.cameraShakeTrauma = Math.max(shark.cameraShakeTrauma, 0.3);
+                  soundFX.playHit();
+                  spawnFloatText(
+                    prey.x,
+                    prey.y - 24 * worldScale,
+                    'float_armor_crush',
+                    langRef.current === 'zh' ? '破甲裂缝!' : 'CRACK!',
+                    '#f97316',
+                    1.15
+                  );
+                  for (let k = 0; k < 8; k++) {
+                    const ang = (k * Math.PI * 2) / 8;
+                    spawnParticle(
+                      prey.x,
+                      prey.y,
+                      Math.cos(ang) * 140 * fxScale,
+                      Math.sin(ang) * 140 * fxScale,
+                      4 * fxScale,
+                      0.35,
+                      '#f97316',
+                      'SPARK'
+                    );
+                  }
+                  continue;
+                }
+              }
+
               // Devour! Build Feeding Combo Chain + Restore Boost Energy on every kill
               shark.comboCount += 1;
-              shark.comboTimer = 3.2;
+              shark.comboTimer = ECONOMY_PREDATION_CONFIG.huntingHeatTiers.comboWindowSec;
               const maxComboBonus = shark.stats.maxComboBonus ?? 1.0;
               const comboMult = Number(
                 (
-                  1 + Math.min(maxComboBonus, (shark.comboCount - 1) * 0.08)
+                  1 +
+                  Math.min(
+                    maxComboBonus,
+                    (shark.comboCount - 1) *
+                      ECONOMY_PREDATION_CONFIG.huntingHeatTiers.comboScorePerStack
+                  )
                 ).toFixed(2)
               );
               const boostRefill =
-                6 +
-                Math.round(prey.config.tier * 0.45) +
+                ECONOMY_PREDATION_CONFIG.huntingHeatTiers.baseKillEnergyBonus +
+                Math.round(
+                  prey.config.tier *
+                    ECONOMY_PREDATION_CONFIG.huntingHeatTiers.killEnergyPerTier
+                ) +
                 (shark.stats.killEnergyBonus ?? 0);
               shark.energy = Math.min(
                 shark.stats.maxEnergy,
                 shark.energy + boostRefill
               );
 
-              const variant = prey.mutationVariant ?? 'NONE';
-              const variantScoreMult =
-                variant === 'GOLDEN_MUTANT'
-                  ? 3.0
-                  : variant === 'ABYSS_BEHEMOTH'
-                  ? 2.2
-                  : 1.0;
+              const heatBuff = computeHuntingHeatBuff(shark.comboCount);
               const bountyPreyScoreBonus =
                 prey.config.id === sim.targetBounty.preyConfig.id
                   ? shark.stats.specialPreyScoreMultiplier ?? 1.0
                   : 1.0;
-              const frenzyStackMult =
-                shark.frenzyTimer > 0
-                  ? infiniteProgressionManager.getFrenzyScoreMultiplier()
-                  : 1.0;
               const rewardScale =
                 (prey.scaleMultiplier ?? 1.0) *
-                variantScoreMult *
                 bountyPreyScoreBonus *
-                frenzyStackMult *
+                heatBuff.scoreMultiplier *
                 comboMult;
 
               const finalScoreGain = infiniteProgressionManager.getScaledPreyValue(
@@ -1012,31 +1059,28 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 shark.stats.rewardMultiplier ??
                 atlasBonus.rewardMultiplier;
 
-              const earnedGenes = Math.max(
-                1,
-                Math.round(
-                  outcome.geneGain *
-                    (variant === 'ABYSS_BEHEMOTH' ? 2.5 : 1.0) *
-                    effectiveGeneMult
-                )
+              // Single-source predation reward plan: D6-X stratified probability + pity counter
+              const rewardPlan = buildPredationRewardPlan(
+                prey,
+                outcome,
+                {
+                  effectiveCoinMult,
+                  effectiveGeneMult,
+                  finalScoreGain,
+                },
+                sim.settledPreyUids,
+                sim.genePityState
               );
-              const earnedCoins = Math.max(
-                1,
-                Math.round(
-                  outcome.coinGain *
-                    (variant === 'GOLDEN_MUTANT' ? 3.0 : 1.0) *
-                    effectiveCoinMult
-                )
-              );
+              if (!rewardPlan.settled) {
+                continue;
+              }
 
               shark.biteAnim = 1.0;
               shark.hp = Math.min(
                 shark.stats.maxHp,
-                shark.hp + Math.round(outcome.hpDelta * (prey.scaleMultiplier ?? 1.0))
+                shark.hp + rewardPlan.hpDelta
               );
-              shark.score += finalScoreGain;
-              shark.genes += earnedGenes;
-              shark.coins += earnedCoins;
+              shark.score += rewardPlan.scoreGain;
               shark.preyEatenCount += 1;
 
               // Tutorial Step 1 -> Step 2 progression when player eats 3 small fish
@@ -1050,27 +1094,17 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 }
               }
 
-              // Requires devouring 8 true Golden Mutants outside of Frenzy (or 7 with Void Lightning trait) + passing cooldown
+              // Golden Mutant charge -> Gold Frenzy (D4-A: 6 Golden Mutants [5 for #28], 15s CD, 6.0s + bonus, no stack inflation)
               if (variant === 'GOLDEN_MUTANT' && shark.frenzyTimer <= 0) {
-                const triggeredStandard =
-                  infiniteProgressionManager.registerGoldenMutantDevoured();
-                const reducedReq = Math.max(
-                  3,
-                  infiniteProgressionManager.goldenMutantRequired -
-                    (shark.stats.goldenMutantReduction ?? 0)
-                );
-                const triggeredByTrait =
-                  !triggeredStandard &&
-                  (shark.stats.goldenMutantReduction ?? 0) > 0 &&
-                  infiniteProgressionManager.goldenMutantCharge >= reducedReq;
-                if (triggeredByTrait) {
-                  infiniteProgressionManager.goldenMutantCharge = 0;
-                  infiniteProgressionManager.frenzyCooldownTimer = 25;
-                  infiniteProgressionManager.addFrenzyStack();
-                }
-                if (triggeredStandard || triggeredByTrait) {
+                const triggeredFrenzy =
+                  infiniteProgressionManager.registerGoldenMutantDevoured(
+                    shark.stats.goldenMutantReduction ?? 0
+                  );
+                if (triggeredFrenzy) {
                   shark.stats = recomputeSharkStats(shark.level, true);
-                  shark.frenzyTimer = 3.6 + shark.stats.frenzyDurationBonus;
+                  shark.frenzyTimer =
+                    ECONOMY_PREDATION_CONFIG.frenzy.baseDurationSec +
+                    shark.stats.frenzyDurationBonus;
                 }
               }
               if (
@@ -1101,45 +1135,20 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 );
               }
 
-              // Spawn Collectible Gold Coins (75%) & DNA Helix Pickups (25% on normal fish; guaranteed bonus DNA on Bounty Target / Abyss Behemoth / T18+)
-              const isHighGeneSource =
-                prey.config.id === sim.targetBounty.preyConfig.id ||
-                variant === 'ABYSS_BEHEMOTH' ||
-                prey.config.tier >= 18;
-              const pickupDrops = Math.min(6, Math.ceil(prey.config.tier / 9) + 1);
-              for (let d = 0; d < pickupDrops; d++) {
-                const ang = Math.random() * Math.PI * 2;
-                const dropKind =
-                  isHighGeneSource && d % 2 === 1
-                    ? 'DNA_CRYSTAL'
-                    : d % 4 === 3
-                    ? 'DNA_CRYSTAL'
-                    : 'COIN';
-                const basePickupVal =
-                  dropKind === 'COIN'
-                    ? Math.max(
-                        3,
-                        Math.round(
-                          Math.max(1, prey.config.tier * 0.45) *
-                            2.5 *
-                            effectiveCoinMult
-                        )
-                      )
-                    : Math.max(
-                        1,
-                        Math.round(
-                          Math.max(1, prey.config.tier * 0.45) *
-                            1.2 *
-                            effectiveGeneMult
-                        )
-                      );
+              // Spawn Collectible Gold Coins & DNA Crystal Pickups summing strictly to the single-source predation reward plan
+              for (let d = 0; d < rewardPlan.pickups.length; d++) {
+                const drop = rewardPlan.pickups[d];
+                const ang =
+                  (d * Math.PI * 2) / Math.max(1, rewardPlan.pickups.length) +
+                  (Math.random() - 0.5) * 0.6;
+                const spd = (82 + Math.random() * 56) * fxScale;
                 spawnPickup(
                   prey.x,
                   prey.y,
-                  Math.cos(ang) * 95 * fxScale,
-                  Math.sin(ang) * 95 * fxScale,
-                  dropKind,
-                  basePickupVal
+                  Math.cos(ang) * spd,
+                  Math.sin(ang) * spd,
+                  drop.kind,
+                  drop.value
                 );
               }
 
@@ -1154,31 +1163,36 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 outcome.isCrit || shark.comboCount >= 5 ? 1.22 : 1.0
               );
 
-              // Check if devoured prey matches the active Target Fish Bounty (🎯 悬赏目标鱼 — Primary High-Concentration Gene & Coin Source)
+              // Check if devoured prey matches the active Target Fish Bounty (D5-A unified 2-kill scaled bounty)
               if (prey.config.id === sim.targetBounty.preyConfig.id) {
                 sim.targetBounty.progress += 1;
                 if (sim.targetBounty.progress >= sim.targetBounty.required) {
+                  const bountyCfg = ECONOMY_PREDATION_CONFIG.bounty;
                   const bountyBonusScore = infiniteProgressionManager.getScaledPreyValue(
                     Math.round(
-                      350 *
-                        Math.max(1, prey.config.tier * 0.35) *
+                      bountyCfg.scoreBase *
+                        Math.max(1, prey.config.tier * bountyCfg.scoreTierMult) *
                         bountyPreyScoreBonus
                     )
                   );
                   const bountyGenes = Math.round(
-                    (18 + prey.config.tier * 0.85) * effectiveGeneMult
+                    (bountyCfg.baseGenes + prey.config.tier * bountyCfg.genesPerTier) *
+                      (bountyCfg.applySharkYieldMultipliers ? effectiveGeneMult : 1.0)
                   );
                   const bountyCoins = Math.round(
-                    (48 + prey.config.tier * 2.5) * effectiveCoinMult
+                    (bountyCfg.baseCoins + prey.config.tier * bountyCfg.coinsPerTier) *
+                      (bountyCfg.applySharkYieldMultipliers ? effectiveCoinMult : 1.0)
                   );
                   shark.score += bountyBonusScore;
                   shark.genes += bountyGenes;
                   shark.coins += bountyCoins;
+                  economyUsesRef.current.runCoinsEarned += bountyCoins;
+                  economyUsesRef.current.runGenesEarned += bountyGenes;
                   spawnFloatText(
                     shark.x,
                     shark.y - 38 * worldScale,
                     'float_target_bounty',
-                    `+${bountyBonusScore} 🎯 (+${bountyGenes}🧬)`,
+                    `+${bountyBonusScore} 🎯 (+${bountyCoins}🪙 +${bountyGenes}🧬)`,
                     '#38bdf8',
                     1.28
                   );
@@ -1191,7 +1205,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                   sim.targetBounty = {
                     preyConfig: nextTarget,
                     progress: 0,
-                    required: 2,
+                    required: bountyCfg.requiredKills,
                   };
                   ecosystemSpawner.activeTargetPreyId = nextTarget.id;
 
@@ -1313,16 +1327,25 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           }
         }
 
-        // Update Pickups (Magnet Pull toward Shark + Hunting Heat Magnet Bonus in 1:1 world space)
-        const activeFormForHeat = getSharkFormById(shark.sharkFormId);
-        const currentHeatBuff = computeHuntingHeatBuff(
-          shark.score,
-          activeFormForHeat.row
-        );
+        // Update Pickups (D5-A: 14s lifetime expiry + 1.45x frenzy magnet + combo Heat Magnet Bonus)
+        const currentHeatBuff = computeHuntingHeatBuff(shark.comboCount);
+        const frenzyMagMult =
+          shark.frenzyTimer > 0
+            ? ECONOMY_PREDATION_CONFIG.pickups.frenzyMagnetMultiplier
+            : 1.0;
         const effectiveMagnetRadius =
-          (shark.stats.magnetRadius + currentHeatBuff.magnetRadiusBonus) * invZoom;
+          (shark.stats.magnetRadius + currentHeatBuff.magnetRadiusBonus) *
+          invZoom *
+          frenzyMagMult;
+        const collectRadius =
+          ECONOMY_PREDATION_CONFIG.pickups.collectRadiusWorldFactor * worldScale;
         for (const pk of sim.pickups) {
           if (!pk.active) continue;
+          pk.life -= simDt;
+          if (pk.life <= 0) {
+            pk.active = false;
+            continue;
+          }
           pk.phase += simDt * 4;
           pk.vx *= 0.92;
           pk.vy *= 0.92;
@@ -1338,15 +1361,40 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           pk.x += pk.vx * simDt;
           pk.y += pk.vy * simDt;
 
-          if (dist < 34 * worldScale) {
-            pk.active = false;
-            soundFX.playCoin();
-            if (pk.kind === 'COIN') {
-              shark.coins += pk.value;
-              shark.score += pk.value * 10;
-            } else {
-              shark.genes += pk.value;
-              shark.score += pk.value * 15;
+          if (dist < collectRadius) {
+            const pickupRes = collectPickupEntity(pk, {
+              coins: shark.coins,
+              genes: shark.genes,
+              score: shark.score,
+              runCoinsEarned: economyUsesRef.current.runCoinsEarned,
+              runGenesEarned: economyUsesRef.current.runGenesEarned,
+            });
+            if (pickupRes.collected) {
+              shark.coins += pickupRes.coinsAdded;
+              shark.genes += pickupRes.genesAdded;
+              shark.score += pickupRes.scoreAdded;
+              economyUsesRef.current.runCoinsEarned += pickupRes.coinsAdded;
+              economyUsesRef.current.runGenesEarned += pickupRes.genesAdded;
+              soundFX.playCoin();
+              if (pickupRes.genesAdded > 0) {
+                spawnFloatText(
+                  pk.x,
+                  pk.y - 12 * invZoom,
+                  'float_devour',
+                  `+${pickupRes.genesAdded}🧬`,
+                  '#6ee7b7',
+                  0.92
+                );
+              } else if (pickupRes.coinsAdded > 0) {
+                spawnFloatText(
+                  pk.x,
+                  pk.y - 10 * invZoom,
+                  'float_devour',
+                  `+${pickupRes.coinsAdded}🪙`,
+                  '#fde047',
+                  0.84
+                );
+              }
             }
           }
         }
@@ -1402,20 +1450,22 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
           xpBarFillRef.current.style.transform = `scaleX(${xpPct / 100})`;
         }
 
-        // Check Defeat Condition (HP <= 0) -> Persist all earned Coins, Genes, and Per-Shark Mastery Records!
+        // Check Defeat Condition (HP <= 0) -> Persist earned Coins/Genes (D1) while enforcing unified Trial permanent-progress gate (D2)!
         if (shark.hp <= 0) {
           soundFX.playHit();
           const curSave = metaSaveRef.current;
+          const runContext = { trialActive: shark.trialActive, activeInRun: true };
+          const permEligibility = getPermanentProgressEligibility(runContext);
+          const progressedSave = recordPermanentRunProgress(
+            curSave,
+            runContext,
+            shark.level,
+            shark.maxDepthReached
+          );
           const preMasterySave: SharkMetaSaveData = {
-            ...curSave,
+            ...progressedSave,
             bankedCoins: shark.coins,
             bankedGenes: shark.genes,
-            bestInRunLevel: Math.max(curSave.bestInRunLevel, shark.level),
-            bestDepthReached: Math.max(
-              curSave.bestDepthReached,
-              Math.round(shark.maxDepthReached)
-            ),
-            totalRunsPlayed: curSave.totalRunsPlayed + 1,
           };
           const finalMastery = settleSharkScoreMastery(
             shark.sharkFormId,
@@ -1423,6 +1473,11 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             shark.trialActive,
             preMasterySave
           );
+          if (finalMastery.coinsAwarded > 0) {
+            shark.coins = finalMastery.updatedSave.bankedCoins;
+            economyUsesRef.current.runMasteryCoinsAwarded +=
+              finalMastery.coinsAwarded;
+          }
           if (finalMastery.genesAwarded > 0) {
             shark.genes = finalMastery.updatedSave.bankedGenes;
             economyUsesRef.current.runMasteryGenesAwarded +=
@@ -1438,25 +1493,35 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             maxDepth: Math.round(shark.maxDepthReached),
             preyEaten: shark.preyEatenCount,
             level: shark.level,
-            coinsEarned: Math.max(
-              0,
-              shark.coins - economyUsesRef.current.runStartCoins
-            ),
-            genesEarned: Math.max(
-              0,
-              shark.genes - economyUsesRef.current.runStartGenes
-            ),
+            coinsEarned: economyUsesRef.current.runCoinsEarned,
+            genesEarned: economyUsesRef.current.runGenesEarned,
             unlockedFormsCount: settledSave.unlockedSharkIds.length,
             activeSharkId: shark.sharkFormId,
-            personalBestScore: finalMastery.newBestScore,
+            personalBestScore: permEligibility.allowSharkMasteryAndCrown
+              ? finalMastery.newBestScore
+              : curSave.sharkBestScores?.[shark.sharkFormId] ?? 0,
             isNewRecord:
-              !shark.trialActive &&
+              permEligibility.allowRunRecords &&
               Math.round(shark.score) >
                 economyUsesRef.current.runStartBestScore &&
               Math.round(shark.score) > 0,
-            masteryGenesBonus: economyUsesRef.current.runMasteryGenesAwarded,
-            masteryCrownTier: finalMastery.newCrownTier,
+            masteryCoinsBonus: permEligibility.allowSharkMasteryAndCrown
+              ? economyUsesRef.current.runMasteryCoinsAwarded
+              : 0,
+            masteryGenesBonus: permEligibility.allowSharkMasteryAndCrown
+              ? economyUsesRef.current.runMasteryGenesAwarded
+              : 0,
+            masteryCrownTier: permEligibility.allowSharkMasteryAndCrown
+              ? finalMastery.newCrownTier
+              : 0,
           });
+          if (
+            permEligibility.allowRunRecords &&
+            settledSave.totalRunsPlayed >=
+              adManager.getInterstitialProtectedRunsCount()
+          ) {
+            adManager.showInterstitialAd();
+          }
           clearAllInputs();
           document.body.dataset.state = 'gameover';
           setGameState('gameover');
@@ -1466,38 +1531,39 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
         if (now - sim.lastHudSyncTime > 120) {
           sim.lastHudSyncTime = now;
           const curSave = metaSaveRef.current;
-          const nextBestLv = Math.max(curSave.bestInRunLevel, shark.level);
-          const nextBestDepth = Math.max(
-            curSave.bestDepthReached,
-            Math.round(shark.maxDepthReached)
+          const runContext = { trialActive: shark.trialActive, activeInRun: true };
+          const permEligibility = getPermanentProgressEligibility(runContext);
+          const progressedSave = recordPermanentRunProgress(
+            curSave,
+            runContext,
+            shark.level,
+            shark.maxDepthReached
           );
-          let activeSave = curSave;
+          let activeSave = progressedSave;
           if (
-            curSave.bankedCoins !== shark.coins ||
-            curSave.bankedGenes !== shark.genes ||
-            curSave.bestInRunLevel !== nextBestLv ||
-            curSave.bestDepthReached !== nextBestDepth
+            progressedSave.bankedCoins !== shark.coins ||
+            progressedSave.bankedGenes !== shark.genes
           ) {
             activeSave = {
-              ...curSave,
+              ...progressedSave,
               bankedCoins: shark.coins,
               bankedGenes: shark.genes,
-              bestInRunLevel: nextBestLv,
-              bestDepthReached: nextBestDepth,
             };
           }
 
-          // Live Per-Shark Mastery Crown Evaluation (awards 1st-clear Gene bonus immediately upon crossing threshold!)
+          // D3-A: Preview Crown attainment for HUD notification only; actual Crown payout settles cleanly at GameOver
           const liveMastery = settleSharkScoreMastery(
             shark.sharkFormId,
             shark.score,
             shark.trialActive,
-            activeSave
+            activeSave,
+            { previewOnly: true }
           );
-          if (liveMastery.genesAwarded > 0) {
-            shark.genes = liveMastery.updatedSave.bankedGenes;
-            economyUsesRef.current.runMasteryGenesAwarded +=
-              liveMastery.genesAwarded;
+          if (
+            liveMastery.newlyUnlockedTiers.length > 0 &&
+            liveMastery.newCrownTier > economyUsesRef.current.announcedCrownTier
+          ) {
+            economyUsesRef.current.announcedCrownTier = liveMastery.newCrownTier;
             const topNewTier =
               liveMastery.newlyUnlockedTiers[
                 liveMastery.newlyUnlockedTiers.length - 1
@@ -1511,13 +1577,12 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
                 langRef.current === 'zh'
                   ? topNewTier.nameZh
                   : topNewTier.nameEn
-              } (+${liveMastery.genesAwarded}🧬)`,
+              }!`,
               '#fde047',
               1.35
             );
           }
-          if (liveMastery.updatedSave !== curSave || activeSave !== curSave) {
-            activeSave = liveMastery.updatedSave;
+          if (activeSave !== curSave) {
             metaSaveRef.current = activeSave;
             saveSharkMetaSave(activeSave);
             setMetaSave(activeSave);
@@ -1525,24 +1590,25 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
 
           const activeForm = getSharkFormById(shark.sharkFormId);
           const activeUpg = shark.trialActive
-            ? 10
+            ? getTrialTargetSharkSpec(activeSave.unlockedSharkIds).upgradeLevel
             : activeSave.sharkUpgradeLevels[shark.sharkFormId] ?? 1;
           const nextEvo = getNextEvolutionTarget(shark.sharkFormId, activeSave);
           const nextEval = nextEvo
-            ? evaluateSharkUnlock(
+            ? evaluateSharkUnlockForRun(
                 nextEvo,
                 activeSave,
+                runContext,
                 0,
                 0,
-                nextBestLv,
-                nextBestDepth
+                shark.level,
+                Math.round(shark.maxDepthReached)
               )
             : null;
           const upgCost = getSharkUpgradeCost(activeForm, activeUpg);
           const upgGeneCost = getSharkUpgradeGeneCost(activeForm, activeUpg);
           const currentDepthMeters = Math.round(worldYToMeterDepth(shark.y));
           const currentZone = getDepthZone(currentDepthMeters);
-          const hudHeat = computeHuntingHeatBuff(shark.score, activeForm.row);
+          const hudHeat = computeHuntingHeatBuff(shark.comboCount);
 
           setHudState({
             hp: Math.ceil(shark.hp),
@@ -1596,9 +1662,11 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
             activeUpgradeLevel: activeUpg,
             unlockedFormsCount: activeSave.unlockedSharkIds.length,
             nextEvoTargetId: nextEvo?.id ?? null,
-            canBreakthroughNow: Boolean(nextEval?.canUnlockNow),
+            canBreakthroughNow: Boolean(
+              permEligibility.allowSharkUnlockAndUpgrade && nextEval?.canUnlockNow
+            ),
             canUpgradeBodyNow:
-              !shark.trialActive &&
+              permEligibility.allowSharkUnlockAndUpgrade &&
               activeUpg < 10 &&
               activeSave.bankedCoins >= upgCost &&
               activeSave.bankedGenes >= upgGeneCost,

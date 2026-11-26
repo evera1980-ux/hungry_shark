@@ -22,7 +22,7 @@
 | `npm run lint` | 运行 `tsc --noEmit` 全量 TypeScript 类型检查 |
 | `npm run build` | 执行生产环境打包，产物输出至 `dist/` 目录 |
 | `npm run preview` | 本地预览 `dist/` 生产构建产物 |
-| `npm run optimize:assets` | **离线 Web 资源预裁切与 WebP 瘦身管线（P0-2）**：将 135 种猎物、48 阶鲨鱼与 18 项 UI/水体/海床/世界图集离线裁切透明边并编码为高保真 WebP（`public/assets/` 总包体 `4.5 MB`），保留 `ios-native/` 下的原生 PNG/JPG 不变 |
+| `npm run optimize:assets` | **离线 Web 资源预裁切与 WebP 瘦身管线（P0-2）**：将 235 种猎物、48 阶鲨鱼与 18 项 UI/水体/海床/世界图集离线裁切透明边并编码为高保真 WebP（`public/assets/` 总包体 `6.4 MB`），保留 `ios-native/` 下的原生 PNG/JPG 不变 |
 | `npm run sync:ios` / `npm run build:ios` | **跨端数据与资源同步（Shared JSON Data Contract）**：从 Web TypeScript 唯一数据源导出 `shared/game_data.json` 并同步至 `ios-native/HungrySharkEvolution/Resources/Assets/`，同步全部 PNG/JPG 资源并刷新 Xcode `project.pbxproj` / `project.yml`（**不再覆盖任何 Swift 源码**） |
 
 ---
@@ -96,7 +96,7 @@
 npm run sync:ios   # 或兼容别名 npm run build:ios
 ```
 该脚本仅负责**数据、资源与工程配置同步（绝不覆盖任何 `.swift` 源码或 `Info.plist`）**：
-1. 调用 `src/game/sharedGameData.ts` 的纯函数 `buildSharedGameData()`，将 48 阶鲨鱼矩阵、四重血统元数据、135 项海洋猎物配置、UI 图集裁切坐标、中英双语词典及广告配置导出为标准 JSON 契约 `shared/game_data.json`，并同步拷贝至 `ios-native/HungrySharkEvolution/Resources/Assets/game_data.json`。
+1. 调用 `src/game/sharedGameData.ts` 的纯函数 `buildSharedGameData()`，将 48 阶鲨鱼矩阵、四重血统元数据、235 项海洋猎物配置、UI 图集裁切坐标、中英双语词典及广告配置导出为标准 JSON 契约 `shared/game_data.json`，并同步拷贝至 `ios-native/HungrySharkEvolution/Resources/Assets/game_data.json`。
 2. 原生 Swift 模块均为独立可直接在 Xcode 中编辑与调试的一等公民源码（`npm run sync:ios` 永不覆写）：
    - `Generated/GameConfigGenerated.swift`（~255 行）：轻量化 `JSONDecoder` 数据加载器，启动时一次性解码捆绑的 `game_data.json`，对外 100% 保持原有 `GameConfigGenerated.*` 静态 API 契约。
    - `Core/GameRules.swift`：纯原生游戏数值、进化门禁、9 层海床地形与双向防穿透物理碰撞模块。

@@ -4,11 +4,13 @@
  * 并在视野外随机重生，且随着游戏时间推移，鱼群会自动变强（Infinite Scaling: scaleMultiplier = 1.0 + gameTime * 0.01）。
  */
 
-import { GAME_CONFIG, PreyTierConfig } from './config';
+import { GAME_CONFIG, PreyTierConfig, WORLD_AND_PROGRESSION_CONFIG } from './config';
+import { PREY_SPAWNER_RULES } from './preyDatabase140';
+import economyPredationJson from '../../shared/configs/economy_predation_config.json';
 import { PreyEntity } from './canvasRenderer';
 import { infiniteWorldManager } from './infiniteWorldManager';
 import { infiniteProgressionManager } from './infiniteProgressionManager';
-import { proceduralOceanWorld, getFloorDepthAt } from './worldGenerationSystem';
+import { proceduralOceanWorld, getFloorDepthAt, worldYToMeterDepth } from './worldGenerationSystem';
 
 export interface ViewportSpawnBounds {
   halfW: number;
@@ -68,13 +70,13 @@ export class EcosystemSpawner {
   } | null = null;
 
   constructor(
-    maxActivePreys: number = 20,
-    spawnRadius: number = 1650,
-    minSpawnRadius: number = 880
+    maxActivePreys: number = PREY_SPAWNER_RULES.maxActivePreys,
+    spawnRadius: number = PREY_SPAWNER_RULES.spawnRadius,
+    minSpawnRadius: number = PREY_SPAWNER_RULES.minSpawnRadius
   ) {
     this.maxActivePreys = maxActivePreys;
     this.spawnRadius = spawnRadius;
-    this.minSpawnRadius = Math.max(760, minSpawnRadius);
+    this.minSpawnRadius = Math.max(PREY_SPAWNER_RULES.minSpawnRadius, minSpawnRadius);
   }
 
   /**
@@ -100,11 +102,21 @@ export class EcosystemSpawner {
    * 【核心创新】计算当前游戏时长对应的无限变强倍率（前 50s 线性成长，50s 后平滑收敛至 1.65x 软上限，防止小鱼视觉体型超过高阶巨鲨）
    */
   public getScaleMultiplier(): number {
-    if (this.gameTime <= 50) {
-      return Number((1.0 + this.gameTime * 0.01).toFixed(4));
+    if (this.gameTime <= PREY_SPAWNER_RULES.infiniteScaleEarlySec) {
+      return Number(
+        (1.0 + this.gameTime * PREY_SPAWNER_RULES.infiniteScaleEarlyRate).toFixed(4)
+      );
     }
-    const extra = Math.min(0.15, (this.gameTime - 50) * 0.0012);
-    return Number((1.5 + extra).toFixed(4));
+    const base =
+      1.0 +
+      PREY_SPAWNER_RULES.infiniteScaleEarlySec *
+        PREY_SPAWNER_RULES.infiniteScaleEarlyRate;
+    const extra = Math.min(
+      PREY_SPAWNER_RULES.infiniteScaleLateCapExtra,
+      (this.gameTime - PREY_SPAWNER_RULES.infiniteScaleEarlySec) *
+        PREY_SPAWNER_RULES.infiniteScaleLateRate
+    );
+    return Number((base + extra).toFixed(4));
   }
 
   /**
@@ -122,6 +134,7 @@ export class EcosystemSpawner {
   ): PreyEntity | null {
     const [removed] = activePreys.splice(index, 1);
     if (removed) {
+      removed.devoured = true;
       this.pool.push(removed);
     }
     return this.spawnPreyOffScreen(
@@ -210,10 +223,10 @@ export class EcosystemSpawner {
     // 在真相机变焦（如 45m 巨鲨 zoom = 0.22，视口半宽 ~2900px）下，回收半径必须同步大于真实视口对角线半长，杜绝刚在屏幕外刷出就被立即误杀！
     const cullThreshold = viewportBounds
       ? Math.max(
-          this.spawnRadius * 1.5,
+          this.spawnRadius * PREY_SPAWNER_RULES.cullRadiusMultiplier,
           Math.hypot(viewportBounds.halfW, viewportBounds.halfH) * 1.55
         )
-      : this.spawnRadius * 1.5;
+      : this.spawnRadius * PREY_SPAWNER_RULES.cullRadiusMultiplier;
     for (let i = activePreys.length - 1; i >= 0; i--) {
       const prey = activePreys[i];
       const dx = infiniteWorldManager.getShortestDeltaX(sharkX, prey.x);
@@ -252,8 +265,10 @@ export class EcosystemSpawner {
           currentSharkLengthM,
           viewportBounds
         );
-        // 随机下一次刷新间隔 0.35s ~ 0.88s，平滑自然吐出单条或小群，告别集中波次刷怪
-        this.spawnTimer += 0.35 + rng() * 0.53;
+        // 随机下一次刷新间隔，平滑自然吐出单条或小群，告别集中波次刷怪
+        this.spawnTimer +=
+          PREY_SPAWNER_RULES.spawnIntervalMinSec +
+          rng() * PREY_SPAWNER_RULES.spawnIntervalRangeSec;
       }
     }
   }
@@ -316,6 +331,7 @@ export class EcosystemSpawner {
       entity.isInflated = false;
       entity.scaleMultiplier = scaleMultiplier;
       entity.mutationVariant = 'NONE';
+      entity.devoured = false;
 
       activePreys.push(entity);
       return entity;
@@ -377,8 +393,8 @@ export class EcosystemSpawner {
       const maxShallowSpawnY =
         this.tutorialProtectionActive ||
         (this.activeSharkBiteTier <= 1 && this.gameTime < 20)
-          ? 440
-          : 495;
+          ? PREY_SPAWNER_RULES.tutorialShallowMaxY
+          : PREY_SPAWNER_RULES.shallowProtectMaxY;
       spawnY = Math.min(maxShallowSpawnY, spawnY);
     }
 
@@ -398,16 +414,26 @@ export class EcosystemSpawner {
       spawnY = Math.max(chosenTier.minDepth, floorY - chosenTier.radius - 28);
     }
 
-    const rolledMutation = infiniteProgressionManager.rollPreyMutation(currentScore, rng);
-    // 水雷/核废料等危险物不生成黄金变异，且浅海前 10 秒降低黄金变异出现率
+    const rolledMutation = infiniteProgressionManager.rollPreyMutation(
+      currentScore,
+      rng,
+      chosenTier.tier,
+      worldYToMeterDepth(spawnY)
+    );
+    // 水雷/核废料等危险物不生成黄金变异，且浅海前 N 秒保护期不生成黄金变异
     const mutationVariant =
       chosenTier.isHazard && rolledMutation === 'GOLDEN_MUTANT'
         ? 'NONE'
         : rolledMutation;
 
     const speedBoost =
-      (mutationVariant === 'ABYSS_BEHEMOTH' ? 1.25 : 1.0) *
-      Math.min(1.6, infiniteProgressionManager.globalDifficultyMultiplier);
+      (mutationVariant === 'ABYSS_BEHEMOTH'
+        ? economyPredationJson.mutations.abyssBehemoth.speedBoostMult
+        : 1.0) *
+      Math.min(
+        WORLD_AND_PROGRESSION_CONFIG.timeDifficulty.spawnScoreScalingCap,
+        infiniteProgressionManager.globalDifficultyMultiplier
+      );
     const vx = moveDir * chosenTier.baseSpeed * speedBoost;
     const vy = (rng() - 0.5) * 16;
 
@@ -475,7 +501,13 @@ export class EcosystemSpawner {
     entity.telegraphTimer = 0;
     entity.isInflated = false;
     entity.scaleMultiplier = scaleMultiplier;
+    const armorHits =
+      mutationVariant === 'ABYSS_BEHEMOTH' || chosenTier.isBoss
+        ? economyPredationJson.armorCrush.bossOrBehemothHitsRequired
+        : economyPredationJson.armorCrush.normalHitsRequired;
     entity.mutationVariant = mutationVariant;
+    entity.armorHp = armorHits;
+    entity.devoured = false;
 
     activePreys.push(entity);
     return entity;
@@ -618,7 +650,7 @@ export class EcosystemSpawner {
     // 浅水区对巨齿鲨/利维坦成为无微型猎物的纯净大洋，巨兽必须游向深水
     const minPreyLengthCm =
       typeof currentSharkLengthM === 'number' && currentSharkLengthM > 0
-        ? currentSharkLengthM * 13.3
+        ? currentSharkLengthM * PREY_SPAWNER_RULES.minPreyLengthRatio
         : 0;
     const activePool =
       minPreyLengthCm > 0
@@ -643,8 +675,11 @@ export class EcosystemSpawner {
       }
     }
 
-    // 若存在当前悬赏目标鱼，仅当该目标鱼确实属于当前水深栖息群落时，才以 26% 概率优先刷新
-    if (this.activeTargetPreyId && rng() < 0.26) {
+    // 若存在当前悬赏目标鱼，仅当该目标鱼确实属于当前水深栖息群落时，才按配置概率优先刷新
+    if (
+      this.activeTargetPreyId &&
+      rng() < PREY_SPAWNER_RULES.bountySpawnBias
+    ) {
       const targetConfig = activePool.find(
         (p) => p.id === this.activeTargetPreyId
       );
@@ -653,9 +688,11 @@ export class EcosystemSpawner {
       }
     }
 
-    // 深海 18% 发光伴生口粮鱼保障：在 520m+ 中深海与深渊，保持 18% 概率刷新同水深栖息的小型伴生发光鱼（T11~T14 灯笼鱼/银斧鱼等），保障深海续航
-    if (!isShallowZone && rng() < 0.18) {
-      const companionPool = activePool.filter((p) => p.tier <= 14);
+    // 深海发光伴生口粮鱼保障
+    if (!isShallowZone && rng() < PREY_SPAWNER_RULES.deepCompanionSpawnProb) {
+      const companionPool = activePool.filter(
+        (p) => p.tier <= PREY_SPAWNER_RULES.deepCompanionMaxTier
+      );
       if (companionPool.length > 0) {
         const idx = Math.min(
           companionPool.length - 1,
@@ -665,32 +702,39 @@ export class EcosystemSpawner {
       }
     }
 
-    // 纯按水深 (0m ~ 20,000m) 固定计算生态目标阶位 T_center(depth)，不随玩家鲨鱼当前 T 阶动态调整
+    // 纯按水深 (worldY 0 ~ 20,000px <-> 真实水深 0m ~ 11,000m) 对齐 depthScale 分段固定计算生态目标阶位 T_center(depth)
     let targetTier = 2;
-    if (depth <= 520) {
-      // 0m ~ 520m 阳光浅海：自然分布 T1 ~ T10 珊瑚礁鱼群（在 120~240m 出生带自然产出 T1~T2 口粮、T3~T4 可破甲鱼、T5~T8 巡游大鱼）
+    if (depth <= PREY_SPAWNER_RULES.shallowSanctuaryY) {
+      // 0 ~ 52m 阳光珊瑚浅滩：自然分布 T1 ~ T9.5
       targetTier = 1 + ((depth - 25) / 495) * 8.5;
-    } else if (depth <= 1150) {
-      // 520m ~ 1150m 暮光带：自然分布 T11 ~ T24
-      targetTier = 11 + ((depth - 520) / 630) * 13;
-    } else if (depth <= 3500) {
-      // 1150m ~ 3500m 午夜热液带：自然分布 T24 ~ T35
-      targetTier = 24 + ((depth - 1150) / 2350) * 11;
-    } else if (depth <= 9500) {
-      // 3500m ~ 9500m 深渊海沟带：自然分布 T35 ~ T43
-      targetTier = 35 + ((depth - 3500) / 6000) * 8;
+    } else if (depth <= 2000) {
+      // 52m ~ 200m 表层近海外缘：自然分布 T9.5 ~ T16
+      targetTier = 9.5 + ((depth - 520) / 1480) * 6.5;
+    } else if (depth <= 6000) {
+      // 200m ~ 1,000m 暮光中层带：自然分布 T16 ~ T26
+      targetTier = 16 + ((depth - 2000) / 4000) * 10;
+    } else if (depth <= 10000) {
+      // 1,000m ~ 4,000m 半深海巨鲸带：自然分布 T26 ~ T36
+      targetTier = 26 + ((depth - 6000) / 4000) * 10;
+    } else if (depth <= 16000) {
+      // 4,000m ~ 6,000m 深渊巨兽带：自然分布 T36 ~ T43
+      targetTier = 36 + ((depth - 10000) / 6000) * 7;
     } else {
-      // 9500m ~ 20000m 超深渊与巨鲸带：自然分布 T43 ~ T48
-      targetTier = 43 + Math.min(1, (depth - 9500) / 9000) * 5;
+      // 6,000m ~ 11,000m 超深渊海沟带：自然分布 T43 ~ T48
+      targetTier = 43 + Math.min(1, (depth - 16000) / 4000) * 5;
     }
 
-    // 12% 概率在该水深生成高出当前层均值 +4T ~ +7T 的巡游天敌（让每个水深都有需要走位躲避的大家伙）
     const predatorRoll = rng();
-    if (predatorRoll < 0.12) {
-      targetTier = Math.min(48, targetTier + 4.5);
-    } else if (predatorRoll < 0.36) {
-      // 24% 概率微幅上浮 +1.5T ~ +3T（提供丰富的可冲刺破甲目标）
-      targetTier = Math.min(48, targetTier + 2.0);
+    if (predatorRoll < PREY_SPAWNER_RULES.predatorRollProb) {
+      targetTier = Math.min(
+        48,
+        targetTier + PREY_SPAWNER_RULES.predatorTierOffset
+      );
+    } else if (predatorRoll < PREY_SPAWNER_RULES.armorBandRollThreshold) {
+      targetTier = Math.min(
+        48,
+        targetTier + PREY_SPAWNER_RULES.armorBandTierOffset
+      );
     }
 
     const weights = activePool.map((p) => {
@@ -709,8 +753,11 @@ export class EcosystemSpawner {
   }
 }
 
-// 局内实时生态生成器：将刷新圈扩至宽广视野环 (640px ~ 1650px)，默认同屏上限设为 20 条（保留 Debug 实时调参能力）
-export const ecosystemSpawner = new EcosystemSpawner(20, 1650, 640);
+export const ecosystemSpawner = new EcosystemSpawner(
+  PREY_SPAWNER_RULES.maxActivePreys,
+  PREY_SPAWNER_RULES.spawnRadius,
+  PREY_SPAWNER_RULES.minSpawnRadius
+);
 
 
 

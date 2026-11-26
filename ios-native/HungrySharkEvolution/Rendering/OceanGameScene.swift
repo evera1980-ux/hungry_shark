@@ -73,6 +73,7 @@ public final class OceanGameScene: SKScene {
         let cruiseAmpY: Double
         let cruiseFreq: Double
         var lastWarpTime: TimeInterval = 0
+        var isDevoured: Bool = false
 
         init(config: PreyTierConfig, node: SKSpriteNode, x: Double, y: Double, vx: Double, vy: Double, mutation: PreyMutationVariant) {
             self.config = config
@@ -83,7 +84,7 @@ public final class OceanGameScene: SKScene {
             self.vy = vy
             self.phase = Double.random(in: 0...(Double.pi * 2))
             self.stateTimer = Double.random(in: 0...4.0)
-            self.armorHp = 2
+            self.armorHp = GameRules.getRequiredArmorHits(prey: config, mutationVariant: mutation)
             self.mutation = mutation
             self.inflateRatio = 0.0
             self.cruiseDepthCenter = max(config.minDepth + 35.0, min(config.maxDepth - 35.0, y))
@@ -126,6 +127,7 @@ public final class OceanGameScene: SKScene {
         var vy: Double
         var spinPhase: Double
         var life: Double
+        var isCollected: Bool = false
 
         init(isGene: Bool, value: Int, node: SKSpriteNode, x: Double, y: Double, vx: Double, vy: Double) {
             self.isGene = isGene
@@ -136,7 +138,13 @@ public final class OceanGameScene: SKScene {
             self.vx = vx
             self.vy = vy
             self.spinPhase = Double.random(in: 0...(Double.pi * 2))
-            self.life = 11.0
+            self.life = DomainConfigs.economyPredation.pickups.lifetimeSec
+        }
+
+        func collectIfEligible() -> Int? {
+            guard !isCollected, value > 0 else { return nil }
+            isCollected = true
+            return value
         }
     }
 
@@ -194,7 +202,9 @@ public final class OceanGameScene: SKScene {
     var activePickups: [ActivePickup] = []
     var activeFloatTexts: [ActiveFloatText] = []
     var preySpawnTimer: Double = 0.0
-    let maxActivePreys = 22
+    var maxActivePreys: Int {
+        DomainConfigs.preyEcology.spawnerRules.maxActivePreys
+    }
 
     public override func didMove(to view: SKView) {
         backgroundColor = UIColor(red: 6/255, green: 21/255, blue: 40/255, alpha: 1)
@@ -363,7 +373,8 @@ public final class OceanGameScene: SKScene {
                 sharkY = max(46.0, min(20000.0, sharkY))
                 cameraX = sharkX
                 cameraY = sharkY
-                invulnTimer = max(invulnTimer, 2.5)
+                invulnTimer = max(invulnTimer, DomainConfigs.adsAndMonetization.placements.REVIVE.invulnDurationSec)
+                vm.pendingSkillInvulnSec = 0.0
                 vm.resetInputState()
                 spawnFloatingText(
                     x: sharkX,
@@ -416,6 +427,13 @@ public final class OceanGameScene: SKScene {
                 vm.deepDivePromptMeters = nil
             }
         } else if vm.gameState == "playing" {
+            vm.runSurvivalElapsedSec += dt
+            vm.updateTimeDifficulty(elapsedSec: vm.runSurvivalElapsedSec)
+            vm.frenzyCooldownRemaining = max(0.0, vm.frenzyCooldownRemaining - dt)
+            if vm.pendingSkillInvulnSec > 0.0 {
+                invulnTimer = max(invulnTimer, vm.pendingSkillInvulnSec)
+                vm.pendingSkillInvulnSec = 0.0
+            }
             survivalAccumulator += dt
             if survivalAccumulator >= 1.0 {
                 survivalAccumulator -= 1.0
@@ -438,16 +456,16 @@ public final class OceanGameScene: SKScene {
                 if vm.onboardingStep == .HOLD_BOOST {
                     vm.onboardingBoostSeconds = min(1.2, vm.onboardingBoostSeconds + dt)
                     if vm.onboardingBoostSeconds >= 1.2 {
-                        let firstCost = GameRules.getSharkUpgradeCoinCost(form: vm.activeSharkForm, currentLevel: vm.activeUpgradeLevel)
-                        if vm.save.bankedCoins < firstCost {
-                            vm.save.bankedCoins = firstCost
+                        if GameRules.claimOnboardingStarterTopUp(save: &vm.save) {
+                            vm.persistSave()
                         }
                         vm.onboardingStep = .HANDS_ON_UPGRADE
                         vm.playSuccessSound()
                     }
                 }
             } else {
-                vm.energy = min(vm.maxEnergy, vm.energy + GameConfigGenerated.baseBoostRegenPerSec * dt)
+                let regenRate = GameConfigGenerated.baseBoostRegenPerSec * stats.boostRegenMultiplier + vm.huntingHeatBuff.energyRegenBonus
+                vm.energy = min(vm.maxEnergy, vm.energy + regenRate * dt)
             }
 
             if vm.onboardingStep == .CELEBRATE {
@@ -468,6 +486,7 @@ public final class OceanGameScene: SKScene {
                 vm.frenzyTimer -= dt
                 if vm.frenzyTimer <= 0 {
                     vm.frenzyActive = false
+                    vm.frenzyCooldownRemaining = DomainConfigs.economyPredation.frenzy.cooldownSec
                     vm.recomputeCurrentSharkStats()
                 }
             } else {
@@ -476,6 +495,9 @@ public final class OceanGameScene: SKScene {
                     vm.hp = 0
                     vm.triggerGameOver()
                 }
+            }
+            if vm.announcedCrownTier < 3 {
+                vm.checkCrownMilestoneHudNotice()
             }
 
             invulnTimer = max(0, invulnTimer - dt)
@@ -486,9 +508,12 @@ public final class OceanGameScene: SKScene {
                 if curDepth > vm.runMaxDepth {
                     vm.runMaxDepth = curDepth
                 }
-                if Double(curDepth) > vm.save.maxDepthReached {
-                    vm.save.maxDepthReached = Double(curDepth)
-                }
+                GameRules.recordPermanentRunProgress(
+                    save: &vm.save,
+                    runContext: vm.permanentProgressContext,
+                    inRunLevel: vm.inRunLevel,
+                    maxDepthMeters: Double(curDepth)
+                )
             }
 
             // Giant-shark shallow depletion guidance: when lingering > 1.5s in waters with no viable prey, prompt deep dive

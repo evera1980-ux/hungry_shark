@@ -1,3 +1,5 @@
+import worldAndProgressionJson from '../../shared/configs/world_and_progression_config.json';
+import economyPredationJson from '../../shared/configs/economy_predation_config.json';
 import {
   FactionId,
   GAME_CONFIG,
@@ -56,24 +58,34 @@ export interface ComputedSharkStats {
   canEatMines?: boolean;
 }
 
+const XP_CFG = worldAndProgressionJson.inRunLevelProgression.xpCurve;
+const OVERDRIVE_CFG = economyPredationJson.activeSkills.goldOverdrive;
+const SURGE_CFG = economyPredationJson.activeSkills.geneSurge;
+
 export function getXpRequiredForLevel(level: number): number {
-  if (level <= 1) return 140;
-  return Math.round(140 + (level - 1) * 145 + Math.pow(level - 1, 1.75) * 65);
+  if (level <= 1) return XP_CFG.base;
+  return Math.round(
+    XP_CFG.base +
+      (level - 1) * XP_CFG.linearStep +
+      Math.pow(level - 1, XP_CFG.exponent) * XP_CFG.powerStep
+  );
 }
 
 /**
- * Dynamic In-Run Economy Costs (Generation-Anchored + Quadratic Acceleration)
- * - First 1~2 uses remain affordable for emergency saves in early runs.
- * - Quadratic `n^2` acceleration + generation row multiplier (`row = 0..5`) prevents
- *   late-game deep-sea infinite Gold Frenzy / Gene Surge loop arbitrage.
+ * Dynamic In-Run Economy Costs loaded from shared/configs/economy_predation_config.json
  */
 export function getGoldOverdriveCost(
   useCount: number,
   generationRow: number = 0
 ): number {
   const n = Math.max(0, useCount);
-  const rowMult = 1 + Math.max(0, generationRow) * 0.35;
-  return Math.round((35 + n * 25 + n * n * 12) * rowMult);
+  const rowMult = 1 + Math.max(0, generationRow) * OVERDRIVE_CFG.rowScale;
+  return Math.round(
+    (OVERDRIVE_CFG.baseCost +
+      n * OVERDRIVE_CFG.useLinear +
+      n * n * OVERDRIVE_CFG.useQuad) *
+      rowMult
+  );
 }
 
 export function getGeneSurgeCost(
@@ -83,19 +95,28 @@ export function getGeneSurgeCost(
 ): number {
   const lv = Math.max(1, level);
   const n = Math.max(0, useCount);
-  const rowMult = 1 + Math.max(0, generationRow) * 0.25;
-  return Math.round((12 + (lv - 1) * 5 + n * 10 + n * n * 6) * rowMult);
+  const rowMult = 1 + Math.max(0, generationRow) * SURGE_CFG.rowScale;
+  return Math.round(
+    (SURGE_CFG.baseCost +
+      (lv - 1) * SURGE_CFG.levelLinear +
+      n * SURGE_CFG.useLinear +
+      n * n * SURGE_CFG.useQuad) *
+      rowMult
+  );
 }
 
-export const SHARK_BASE_DRAW_SIZE = 96;
-export const PREY_RADIUS_TO_DRAW_SIZE = 2.25;
+export const SHARK_BASE_DRAW_SIZE =
+  worldAndProgressionJson.world.sharkBaseDrawSizeWeb;
+export const PREY_RADIUS_TO_DRAW_SIZE =
+  worldAndProgressionJson.world.preyRadiusToDrawSize;
 export const SHARK_EQUIVALENT_RADIUS =
-  SHARK_BASE_DRAW_SIZE / PREY_RADIUS_TO_DRAW_SIZE; // 42.6667
+  SHARK_BASE_DRAW_SIZE / PREY_RADIUS_TO_DRAW_SIZE;
 
 /** Lower bound for native 2D camera zoom at maximum leviathan body length (45m+) */
-export const CAMERA_ZOOM_MIN = 0.22;
-/** Render zoom safety floor accommodating portrait aspect scaling (0.22 * 0.74 = 0.163) */
-export const MIN_RENDER_ZOOM_FLOOR = 0.14;
+export const CAMERA_ZOOM_MIN = worldAndProgressionJson.world.cameraZoomMin;
+/** Render zoom safety floor accommodating portrait aspect scaling */
+export const MIN_RENDER_ZOOM_FLOOR =
+  worldAndProgressionJson.world.minRenderZoomFloor;
 
 /**
  * Computes the true native 2D camera zoom for a shark of biological length `realBodyLengthM` (0.8m -> 45.0m+).
@@ -121,10 +142,27 @@ export function getEffectivePreyTier(
   mutationVariant: PreyMutationVariant = 'NONE'
 ): number {
   if (mutationVariant === 'ABYSS_BEHEMOTH') {
-    return Math.min(50, prey.tier + 1);
+    return Math.min(
+      50,
+      prey.tier + economyPredationJson.mutations.abyssBehemoth.effectiveTierOffset
+    );
   }
   return prey.tier;
 }
+
+export function getRequiredArmorHits(
+  prey: Pick<PreyTierConfig, 'isBoss'>,
+  mutationVariant: PreyMutationVariant = 'NONE'
+): number {
+  const cfg = economyPredationJson.armorCrush;
+  if (prey.isBoss || mutationVariant === 'ABYSS_BEHEMOTH') {
+    return cfg.bossOrBehemothHitsRequired;
+  }
+  return cfg.normalHitsRequired;
+}
+
+export const ECONOMY_PREDATION_CONFIG = economyPredationJson;
+export const WORLD_CONFIG = worldAndProgressionJson;
 
 let debugPreySizeMultiplier = 1.0;
 
@@ -168,7 +206,10 @@ export function getPreyRelativeVisualScale(
   // 100% 真实生物体长比例 (preyLengthM / sharkLengthM)
   const realRatio = preyLengthM / sharkLengthM;
 
-  const behemothMult = mutationVariant === 'ABYSS_BEHEMOTH' ? 1.25 : 1.0;
+  const behemothMult =
+    mutationVariant === 'ABYSS_BEHEMOTH'
+      ? economyPredationJson.mutations.abyssBehemoth.visualScaleMult
+      : 1.0;
   const bossMult = prey.isBoss ? 1.2 : 1.0;
   // 100% 真实生物体长比例：世界空间与屏幕空间绘制尺寸比例严格由 (preyLengthM / sharkLengthM) 决定
   const targetRatio = realRatio * behemothMult * bossMult;
@@ -427,54 +468,90 @@ export function computeEvolvedSharkStats(
   upgradeLevel: number = 1,
   frenzyActive: boolean = false,
   globalDifficultyMultiplier: number = 1.0,
-  unlockedCount: number = 1
+  unlockedCount: number = 1,
+  totalCrownCount: number = 0
 ): ComputedSharkStats {
   const form = getSharkFormById(sharkFormId);
-  const upLv = Math.max(1, Math.min(10, upgradeLevel));
-  const extraUnlocked = Math.max(0, unlockedCount - 1);
+  const upgCfg = worldAndProgressionJson.upgradeProgression;
+  const lvlCfg = worldAndProgressionJson.inRunLevelProgression;
+  const atlasCfg = worldAndProgressionJson.atlasPassives;
+  const linCfg = worldAndProgressionJson.lineagePassives;
+  const diffCfg = worldAndProgressionJson.timeDifficulty;
+  const frenzyCfg = economyPredationJson.frenzy;
 
-  // Global Atlas collection bonuses
-  const collectionHpMult = 1 + extraUnlocked * 0.02;
-  const collectionSpeedBonus = extraUnlocked * 0.008;
-  const collectionRewardMult = 1 + extraUnlocked * 0.025;
+  const upLv = Math.max(1, Math.min(upgCfg.maxUpgradeLevel, upgradeLevel));
+  const extraUnlocked = Math.max(0, unlockedCount - 1);
+  const cleanCrowns = Math.max(0, totalCrownCount);
+
+  // Global Atlas collection + Crown passives (D3-A: Score +0.35%, HP +0.20%, 0% coin mult from crowns)
+  const collectionHpMult =
+    1 +
+    extraUnlocked * atlasCfg.extraSharkHpBonusPerShark +
+    cleanCrowns * atlasCfg.crownHpBonusPerCrown;
+  const collectionSpeedBonus =
+    extraUnlocked * atlasCfg.extraSharkSpeedBonusPerShark;
+  const collectionScoreMult =
+    1 + cleanCrowns * atlasCfg.crownScoreBonusPerCrown;
+  const collectionRewardMult =
+    1 +
+    extraUnlocked * atlasCfg.extraSharkRewardBonusPerShark +
+    cleanCrowns * atlasCfg.crownRewardBonusPerCrown;
 
   // Upgrade level (1..10) bonuses on the current shark form
-  const upgradeHpMult = 1 + (upLv - 1) * 0.08;
-  const upgradeSpeedBonus = (upLv - 1) * 0.022;
-  const upgradeDrainRed = (upLv - 1) * 0.015;
-  const upgradeBoostRed = (upLv - 1) * 0.018;
-  // Body upgrade (Lv.1..10) grants up to +3 Bite Tiers (+1T at Lv.3, +2T at Lv.6, +3T at Lv.10)
-  const upgradeBiteBonus =
-    upLv >= 10 ? 3 : upLv >= 6 ? 2 : upLv >= 3 ? 1 : 0;
+  const upgradeHpMult = 1 + (upLv - 1) * upgCfg.hpMultPerUpgradeLevel;
+  const upgradeSpeedBonus = (upLv - 1) * upgCfg.speedPerUpgradeLevel;
+  const upgradeDrainRed = (upLv - 1) * upgCfg.hpDrainReductionPerUpgradeLevel;
+  const upgradeBoostRed =
+    (upLv - 1) * upgCfg.boostCostReductionPerUpgradeLevel;
 
-  // In-run level grants up to +3 Bite Tiers (+1T at Lv.2, +2T at Lv.5, +3T at Lv.9)
-  // Combined with upgradeBiteBonus (0..3), a single shark can grow by up to +6 Bite Tiers (cross-generation hunting!)
-  const inRunBiteBonus =
-    inRunLevel >= 9 ? 3 : inRunLevel >= 5 ? 2 : inRunLevel >= 2 ? 1 : 0;
-  const genMaxBiteTier = Math.min(48, form.baseBiteTier + 6);
+  // Body upgrade Bite Tier nodes from shared config (D7-1 U-B: Lv.5 -> +1T & +6% HP, Lv.10 -> +2T & +12% HP)
+  let upgradeBiteBonus = 0;
+  let hpBreakthroughBonusPct = 0;
+  for (const node of upgCfg.biteTierNodes) {
+    if (upLv >= node.minUpgradeLevel) {
+      upgradeBiteBonus = Math.max(upgradeBiteBonus, node.bonusTier);
+      hpBreakthroughBonusPct = Math.max(
+        hpBreakthroughBonusPct,
+        node.hpBreakthroughBonusPct
+      );
+    }
+  }
+
+  // In-run level Bite Tier nodes from shared config (D7-1 U-B: Lv.2/+1T, Lv.5/+2T, Lv.8/+3T, Lv.12/+4T)
+  let inRunBiteBonus = 0;
+  for (const node of lvlCfg.biteTierNodes) {
+    if (inRunLevel >= node.minLevel) {
+      inRunBiteBonus = Math.max(inRunBiteBonus, node.bonusTier);
+    }
+  }
+
+  const genMaxBiteTier = Math.min(
+    upgCfg.maxBiteTier,
+    form.baseBiteTier + upgCfg.maxBiteTierBonusOverBase
+  );
   const rawBiteTier = Math.min(
     genMaxBiteTier,
     form.baseBiteTier + upgradeBiteBonus + inRunBiteBonus
   );
-  const normalBiteTier = Math.min(48, rawBiteTier);
-  const biteTier = frenzyActive ? 48 : normalBiteTier;
+  const normalBiteTier = Math.min(upgCfg.maxBiteTier, rawBiteTier);
+  const biteTier = frenzyActive ? upgCfg.maxBiteTier : normalBiteTier;
 
   // Non-obstructive shark scale (1.0 -> 1.28)
   const scale = Number(
     Math.min(
       1.28,
-      1.0 + (inRunLevel - 1) * 0.028 + form.row * 0.025 + (upLv - 1) * 0.006
+      1.0 +
+        (inRunLevel - 1) * lvlCfg.scalePerLevel +
+        form.row * 0.025 +
+        (upLv - 1) * 0.006
     ).toFixed(3)
   );
-  // 100% 真实生物体长（m）：随单局内升级线性增长
   const realBodyLengthM = Number(
     (form.realBodyLengthM * (1.0 + (inRunLevel - 1) * 0.025)).toFixed(2)
   );
-  // 真实生物体长比例指标 (0.8 / realBodyLengthM)，保留供统计与生态度量使用
   const relativePreyScale = Number(
     Math.max(0.015, Math.min(1.0, 0.8 / realBodyLengthM)).toFixed(3)
   );
-  // 原生 2D 真相机变焦倍率（1.000 at 0.8m -> 0.220 floor at 45m+）与单一世界空间体量 worldScale
   const cameraZoom = computeTrueCameraZoom(realBodyLengthM);
   const worldScale = Number((scale / cameraZoom).toFixed(3));
 
@@ -488,18 +565,25 @@ export function computeEvolvedSharkStats(
   );
 
   const totalSpeedBonus =
-    form.speedBonus + upgradeSpeedBonus + collectionSpeedBonus + (inRunLevel - 1) * 0.028;
+    form.speedBonus +
+    upgradeSpeedBonus +
+    collectionSpeedBonus +
+    (inRunLevel - 1) * lvlCfg.speedPerLevel;
   const lengthGrowthFactor = Math.pow(realBodyLengthM / 0.8, 0.08);
   const baseSpeed =
     GAME_CONFIG.world.baseSharkSpeed * lengthGrowthFactor * (1 + totalSpeedBonus);
-  const moveSpeed = Math.round(frenzyActive ? baseSpeed * 1.35 : baseSpeed);
+  const moveSpeed = Math.round(
+    frenzyActive ? baseSpeed * 1.35 : baseSpeed
+  );
   const boostSpeed = Math.round(
     moveSpeed * GAME_CONFIG.world.boostSpeedMultiplier
   );
 
   const metabolicBaseDrain =
-    (GAME_CONFIG.world.baseHpDrainPerSec + (inRunLevel - 1) * 0.65) *
-    (1 + Math.max(0, globalDifficultyMultiplier - 1.0) * 0.52);
+    (GAME_CONFIG.world.baseHpDrainPerSec + (inRunLevel - 1) * lvlCfg.hpDrainGrowthPerLevel) *
+    (1 +
+      Math.max(0, globalDifficultyMultiplier - 1.0) *
+        diffCfg.hpDrainScalingFactor);
   const hpDrainPerSec = frenzyActive
     ? 0
     : Number((metabolicBaseDrain * (1 - hpDrainReduction)).toFixed(2));
@@ -516,121 +600,60 @@ export function computeEvolvedSharkStats(
   const magnetRadius = Math.round(
     (GAME_CONFIG.world.baseMagnetRadius +
       form.magnetBonus +
-      (upLv - 1) * 8 +
-      (inRunLevel - 1) * 10) *
-      (frenzyActive ? 1.35 : 1.0)
+      (upLv - 1) * upgCfg.magnetPerUpgradeLevel +
+      (inRunLevel - 1) * lvlCfg.magnetPerLevel) *
+      (frenzyActive ? frenzyCfg.magnetMultiplier : 1.0)
   );
 
   const maxHp = Math.round(
-    (form.baseHp + (inRunLevel - 1) * 16) * upgradeHpMult * collectionHpMult
+    (form.baseHp + (inRunLevel - 1) * lvlCfg.hpPerLevelFlat) *
+      upgradeHpMult *
+      collectionHpMult *
+      (1 + hpBreakthroughBonusPct)
   );
   const maxEnergy = Math.round(
-    form.baseEnergy + (upLv - 1) * 5 + (inRunLevel - 1) * 4
+    form.baseEnergy +
+      (upLv - 1) * upgCfg.energyFlatPerUpgradeLevel +
+      (inRunLevel - 1) * lvlCfg.energyPerLevelFlat
   );
+
+  const linPassive = linCfg[form.lineage];
+  const traits = form.traits;
 
   const activeSynergy: FactionId | null =
-    form.lineage === 'CYBER_MECHA'
-      ? 'MECHA'
-      : form.lineage === 'ELDER_ABYSS'
-      ? 'ABYSS'
-      : form.lineage === 'ELEMENTAL_CORE'
-      ? 'MAGMA'
-      : null;
+    (linPassive.synergyTag as FactionId | null) ?? null;
 
   const frenzyDurationBonus =
-    form.id === 'shark_43_solar_supernova'
-      ? 4.0
-      : form.id === 'shark_33_hellfire_behemoth'
-      ? 2.5
-      : form.lineage === 'ELEMENTAL_CORE'
-      ? 1.0 + form.row * 0.3
-      : 0;
+    linPassive.frenzyDurationBonus + traits.frenzyDurationBonus;
 
-  // Jaw Suction Radius multiplier (APEX_BIO lineage passive +18%, plus specialized suction sharks)
-  const jawSuctionMultiplier =
-    form.id === 'shark_34_dark_matter'
-      ? 2.0
-      : form.id === 'shark_20_goblin_jaw'
-      ? 1.4
-      : form.id === 'shark_12_starry_whale'
-      ? 1.35
-      : form.id === 'shark_19_thresher_shark' || form.id === 'shark_15_abyss_tentacle'
-      ? 1.25
-      : form.lineage === 'APEX_BIO'
-      ? 1.18
-      : 1.0;
+  const jawSuctionMultiplier = Math.max(
+    linPassive.jawSuctionMult,
+    traits.jawSuctionMult
+  );
 
-  // Base generation + Atlas collection reward multiplier
-  const baseRewardMult = collectionRewardMult * (1 + form.row * 0.12);
+  const baseRewardMult =
+    collectionRewardMult * (1 + form.row * upgCfg.rowYieldCoinBaseStep);
 
-  // Shark-specific Coin & Gene yield trait multipliers (+ ELDER_ABYSS lineage +15% Gene yield)
-  const traitCoinBonus =
-    form.id === 'shark_47_omega_devourer'
-      ? 2.5
-      : form.id === 'shark_44_celestial_paladin'
-      ? 2.0
-      : form.id === 'shark_35_golden_dragon'
-      ? 1.65
-      : form.id === 'shark_31_multi_eyed_fiend'
-      ? 1.45
-      : form.id === 'shark_23_mindflayer_shark'
-      ? 1.3
-      : 1.0;
-
-  const lineageGeneBonus = form.lineage === 'ELDER_ABYSS' ? 1.15 : 1.0;
-  const traitGeneBonus =
-    form.id === 'shark_47_omega_devourer'
-      ? 2.5
-      : form.id === 'shark_45_chaos_void_elder'
-      ? 2.0
-      : form.id === 'shark_40_nebula_galaxy'
-      ? 1.8
-      : form.id === 'shark_35_golden_dragon'
-      ? 1.65
-      : form.id === 'shark_31_multi_eyed_fiend'
-      ? 1.45
-      : form.id === 'shark_23_mindflayer_shark'
-      ? 1.3
-      : form.id === 'shark_15_abyss_tentacle'
-      ? 1.2
-      : 1.0;
-
-  const coinYieldMultiplier = Number((baseRewardMult * traitCoinBonus).toFixed(2));
+  const coinYieldMultiplier = Number(
+    (baseRewardMult * traits.coinYieldTraitMult).toFixed(2)
+  );
   const geneYieldMultiplier = Number(
-    (baseRewardMult * lineageGeneBonus * traitGeneBonus).toFixed(2)
+    (
+      baseRewardMult *
+      linPassive.geneYieldMult *
+      traits.geneYieldTraitMult
+    ).toFixed(2)
   );
   const rewardMultiplier = Number(
-    (baseRewardMult * Math.max(traitCoinBonus, traitGeneBonus)).toFixed(2)
+    (
+      baseRewardMult *
+      Math.max(traits.coinYieldTraitMult, traits.geneYieldTraitMult)
+    ).toFixed(2)
   );
 
-  // Damage mitigation & knockback armor traits
-  const damageTakenMultiplier =
-    form.id === 'shark_44_celestial_paladin'
-      ? 0.5
-      : form.id === 'shark_10_bull_shark'
-      ? 0.75
-      : 1.0;
-  const mineDamageTakenMultiplier =
-    form.id === 'shark_21_cyber_alloy' ? 0.6 : 1.0;
-  const knockbackMultiplier = form.id === 'shark_30_earth_golem' ? 0.5 : 1.0;
-
-  // Boost energy recovery & feeding combo traits
-  const boostRegenMultiplier =
-    form.id === 'shark_37_matrix_phantom'
-      ? 2.0
-      : form.id === 'shark_09_blue_mako'
-      ? 1.25
-      : 1.0;
-  const killEnergyBonus = form.id === 'shark_18_battle_scar' ? 4 : 0;
-  const maxComboBonus = form.id === 'shark_18_battle_scar' ? 1.4 : 1.0;
-  const goldenMutantReduction = form.id === 'shark_28_void_lightning' ? 1 : 0;
-  const specialPreyScoreMultiplier =
-    form.id === 'shark_06_hammerhead_pup' ? 1.2 : 1.0;
-  const bossRewardMultiplier = form.id === 'shark_39_kraken_hydra' ? 2.0 : 1.0;
-
-  // Bio-Radioactive Venom Shark (#25) and Generation VI Cosmic Elder Gods can crunch mines directly
-  const canEatMines =
-    form.id === 'shark_25_bio_venom' || form.generation >= 6;
+  const scoreMultiplier = Number(
+    (form.scoreMult * collectionScoreMult).toFixed(3)
+  );
 
   return {
     level: inRunLevel,
@@ -653,30 +676,39 @@ export function computeEvolvedSharkStats(
     totalOrganStars: upLv,
     sharkFormId: form.id,
     upgradeLevel: upLv,
-    scoreMultiplier: form.scoreMult,
+    scoreMultiplier,
     rewardMultiplier,
     coinYieldMultiplier,
     geneYieldMultiplier,
     jawSuctionMultiplier,
-    damageTakenMultiplier,
-    mineDamageTakenMultiplier,
-    knockbackMultiplier,
-    boostRegenMultiplier,
-    killEnergyBonus,
-    maxComboBonus,
-    goldenMutantReduction,
-    specialPreyScoreMultiplier,
-    bossRewardMultiplier,
-    canEatMines,
+    damageTakenMultiplier: traits.damageTakenMult,
+    mineDamageTakenMultiplier: traits.mineDamageTakenMult,
+    knockbackMultiplier: traits.knockbackMult,
+    boostRegenMultiplier: traits.boostRegenMult,
+    killEnergyBonus: traits.killEnergyBonus,
+    maxComboBonus: traits.maxComboBonus,
+    goldenMutantReduction: traits.goldenMutantReduction,
+    specialPreyScoreMultiplier: traits.specialPreyScoreMult,
+    bossRewardMultiplier: traits.bossRewardMult,
+    canEatMines: traits.canEatMines,
     realBodyLengthM,
     cruiseSpeedMps: Number(
       (form.cruiseSpeedMps * (1 + totalSpeedBonus)).toFixed(2)
     ),
     boostSpeedMps: Number(
-      (form.cruiseSpeedMps * (1 + totalSpeedBonus) * (frenzyActive ? 2.6 : 2.2)).toFixed(2)
+      (
+        form.cruiseSpeedMps *
+        (1 + totalSpeedBonus) *
+        (frenzyActive ? 2.6 : 2.2)
+      ).toFixed(2)
     ),
     viewportScale: Number(((120 * scale) / realBodyLengthM).toFixed(3)),
-    minSpawnablePreyLengthM: Number((realBodyLengthM * 0.133).toFixed(2)),
+    minSpawnablePreyLengthM: Number(
+      (
+        realBodyLengthM *
+        worldAndProgressionJson.world.minSpawnablePreyLengthRatio
+      ).toFixed(2)
+    ),
   };
 }
 
@@ -704,13 +736,16 @@ export function resolvePreyEncounter(
 ): EncounterOutcome {
   const effectiveTier = getEffectivePreyTier(prey, mutationVariant);
   const tierDiff = effectiveTier - sharkStats.biteTier;
+  const crushCfg = economyPredationJson.armorCrush;
+  const frenzyCfg = economyPredationJson.frenzy;
+  const mutCfg = economyPredationJson.mutations;
+  const xpCfg = economyPredationJson.xpMultipliers;
+  const combatCfg = economyPredationJson.combat;
 
-  // 48-Shark Evolution Encounter Tiers:
-  // - tierDiff <= 0: Direct Devour (DEVOUR)
-  // - 1 <= tierDiff <= 3: Boost Armor-Crush (ARMOR_CRUSH when isBoosting, NEED_BOOST when not boosting)
-  // - tierDiff >= 4: Deadly Apex Predator (DEADLY_PREDATOR — unbreakable even when boosting, must evade!)
   const isArmorCrushBand =
-    !prey.isHazard && tierDiff >= 1 && tierDiff <= 3;
+    !prey.isHazard &&
+    tierDiff >= crushCfg.armorBandMinDelta &&
+    tierDiff <= crushCfg.armorBandMaxDelta;
 
   let predatorGate = false;
   let isArmorCrush = false;
@@ -721,7 +756,6 @@ export function resolvePreyEncounter(
     isArmorCrush = true;
   }
 
-  // Deep-sea hazards (Naval Mines) ALWAYS explode on contact unless Gold Frenzy is active or shark has Bio-Venom / Elder God Mine Immunity!
   const canDevour = prey.isHazard
     ? frenzyActive || Boolean(sharkStats.canEatMines)
     : frenzyActive || predatorGate;
@@ -733,8 +767,33 @@ export function resolvePreyEncounter(
       isArmorCrush ||
       prey.tier >= 10 ||
       mutationVariant !== 'NONE';
-    const mult = frenzyActive ? 2 : 1;
-    const armorCrushMult = isArmorCrush && !frenzyActive ? 1.35 : 1.0;
+
+    const frenzyCoinMult = frenzyActive ? frenzyCfg.coinMultiplier : 1.0;
+    const frenzyGeneMult = frenzyActive ? frenzyCfg.geneMultiplier : 1.0;
+    const frenzyScoreMult = frenzyActive ? frenzyCfg.scoreMultiplier : 1.0;
+
+    const crushCoinMult = isArmorCrush && !frenzyActive ? crushCfg.coinMult : 1.0;
+    const crushGeneMult = isArmorCrush && !frenzyActive ? crushCfg.geneMult : 1.0;
+    const crushScoreMult = isArmorCrush && !frenzyActive ? crushCfg.scoreMult : 1.0;
+
+    const mutCoinMult =
+      mutationVariant === 'GOLDEN_MUTANT'
+        ? mutCfg.golden.coinMult
+        : mutationVariant === 'ABYSS_BEHEMOTH'
+        ? mutCfg.abyssBehemoth.coinMult
+        : 1.0;
+    const mutGeneMult =
+      mutationVariant === 'ABYSS_BEHEMOTH'
+        ? mutCfg.abyssBehemoth.geneMult
+        : mutationVariant === 'GOLDEN_MUTANT'
+        ? mutCfg.golden.geneMult
+        : 1.0;
+    const mutScoreMult =
+      mutationVariant === 'GOLDEN_MUTANT'
+        ? mutCfg.golden.scoreMult
+        : mutationVariant === 'ABYSS_BEHEMOTH'
+        ? mutCfg.abyssBehemoth.scoreMult
+        : 1.0;
 
     let floatTextKey = 'float_devour';
     if (prey.isBoss) floatTextKey = 'float_boss_kill';
@@ -745,10 +804,17 @@ export function resolvePreyEncounter(
     else if (isCrit) floatTextKey = 'float_crit';
 
     const healMult = sharkStats.devourHealMultiplier ?? 1.0;
-    // Scale normal hunting XP to 55% and Gold Frenzy XP to 22% so level-ups are well-paced and never spam the player
-    const dampedXpGain = frenzyActive
-      ? Math.max(2, Math.round(prey.xpValue * 0.22))
-      : Math.max(3, Math.round(prey.xpValue * 0.55 * armorCrushMult));
+    const xpMult = frenzyActive
+      ? xpCfg.frenzy
+      : mutationVariant === 'GOLDEN_MUTANT'
+      ? xpCfg.golden
+      : isArmorCrush
+      ? xpCfg.armorCrush
+      : mutationVariant === 'ABYSS_BEHEMOTH'
+      ? xpCfg.behemoth
+      : xpCfg.normal;
+    const dampedXpGain =
+      prey.xpValue > 0 ? Math.max(1, Math.round(prey.xpValue * xpMult)) : 0;
 
     const scoreMult = sharkStats.scoreMultiplier ?? 1.0;
     const bossBonus = prey.isBoss ? sharkStats.bossRewardMultiplier ?? 1.0 : 1.0;
@@ -765,15 +831,18 @@ export function resolvePreyEncounter(
       xpGain: dampedXpGain,
       scoreGain: Math.round(
         prey.scoreValue *
-          mult *
-          armorCrushMult *
+          frenzyScoreMult *
+          crushScoreMult *
+          mutScoreMult *
           scoreMult *
           bossBonus *
           goldenSpecialBonus
       ),
-      geneGain: Math.round(prey.geneValue * mult * bossBonus),
+      geneGain: Math.round(
+        prey.geneValue * frenzyGeneMult * crushGeneMult * mutGeneMult * bossBonus
+      ),
       coinGain: Math.round(
-        prey.coinValue * mult * armorCrushMult * bossBonus
+        prey.coinValue * frenzyCoinMult * crushCoinMult * mutCoinMult * bossBonus
       ),
       knockbackForce: 0,
       floatTextKey,
@@ -781,18 +850,20 @@ export function resolvePreyEncounter(
     };
   }
 
-  // Otherwise shark takes damage scaled by mutation, global difficulty, maxHP percentage, and armor traits (#10 Bull, #21 Cyber Alloy, #44 Celestial Paladin)
-  const behemothDamageMult = mutationVariant === 'ABYSS_BEHEMOTH' ? 1.35 : 1.0;
+  const behemothDamageMult =
+    mutationVariant === 'ABYSS_BEHEMOTH' ? mutCfg.abyssBehemoth.failDamageMult : 1.0;
   const maxHpPercentPenalty = prey.isHazard
     ? Math.round(sharkStats.maxHp * 0.14)
     : prey.tier >= 30 || mutationVariant === 'ABYSS_BEHEMOTH'
     ? Math.round(sharkStats.maxHp * 0.08)
     : 0;
-  const needBoostDamping = isArmorCrushBand ? 0.85 : 1.0;
+  const needBoostDamping = isArmorCrushBand ? combatCfg.armorFailDamageFactor : 1.0;
+  const mineExtraMult = prey.isHazard ? 1.4 : 1.0;
   const rawFailDamage =
     Math.round(
       prey.damageOnFail *
         needBoostDamping *
+        mineExtraMult *
         behemothDamageMult *
         Math.max(1.0, globalDifficultyMultiplier)
     ) + maxHpPercentPenalty;
@@ -804,7 +875,11 @@ export function resolvePreyEncounter(
     Math.round(rawFailDamage * armorMitigation)
   );
   const knockbackForce = Math.round(
-    (prey.isHazard ? 440 : isArmorCrushBand ? 260 : 320) *
+    (prey.isHazard
+      ? combatCfg.mineKnockbackForce
+      : isArmorCrushBand
+      ? 260
+      : combatCfg.predatorKnockbackForce) *
       (sharkStats.knockbackMultiplier ?? 1.0)
   );
 
@@ -870,7 +945,8 @@ import { worldYToMeterDepth } from './depthScale';
 export function getDepthZone(depthMeters: number): OceanZoneConfig {
   const depth = Math.max(0, depthMeters);
   for (const zone of GAME_CONFIG.zones) {
-    if (depth >= zone.minDepth && depth <= zone.maxDepth) {
+    const cap = zone.maxDepth ?? Infinity;
+    if (depth >= zone.minDepth && depth <= cap) {
       return zone;
     }
   }
@@ -878,9 +954,10 @@ export function getDepthZone(depthMeters: number): OceanZoneConfig {
 }
 
 export interface HuntingHeatBuff {
-  heatLevel: number; // 0..5
-  magnetRadiusBonus: number; // +0..+80 px
-  energyRegenBonus: number; // +0..+11 / sec
+  heatLevel: number;
+  scoreMultiplier: number;
+  magnetRadiusBonus: number;
+  energyRegenBonus: number;
 }
 
 /**
@@ -889,19 +966,273 @@ export interface HuntingHeatBuff {
  * Provides wider pickup magnet radius and faster boost energy recovery without
  * polluting the pickup pool or creating suicide-farming incentives.
  */
-export function computeHuntingHeatBuff(
-  currentScore: number,
-  generationRow: number = 0
-): HuntingHeatBuff {
-  const cleanScore = Math.max(0, currentScore);
-  const rowScale = Math.pow(1.85, Math.max(0, Math.min(5, generationRow)));
-  const unitScore = 1200 * rowScale;
-  const rawLevel = Math.floor(Math.sqrt(cleanScore / unitScore));
-  const heatLevel = Math.max(0, Math.min(5, rawLevel));
+export {
+  evaluateSharkUnlockForRun,
+  getPermanentProgressEligibility,
+  isEligibleForPermanentProgress,
+  type PermanentProgressEligibility,
+  type PermanentProgressRunContext,
+} from './sharkEvolutionConfig';
+
+export interface PredationPickupDrop {
+  kind: 'COIN' | 'DNA_CRYSTAL';
+  value: number;
+}
+
+export interface PredationRewardPlan {
+  settled: boolean;
+  totalCoins: number;
+  totalGenes: number;
+  scoreGain: number;
+  xpGain: number;
+  hpDelta: number;
+  pickups: PredationPickupDrop[];
+}
+
+export interface SettleablePreyInput {
+  uid: number;
+  devoured?: boolean;
+  config: PreyTierConfig;
+  mutationVariant?: PreyMutationVariant;
+  scaleMultiplier?: number;
+}
+
+export interface GeneDropRollContext {
+  pityMissStreak: number;
+  rng?: () => number;
+}
+
+/**
+ * Single-source predation reward builder (D6-X stratified gene drop + pity counter, shared with iOS):
+ * - Prevents duplicate settlement for the same prey entity (`prey.devoured` / `settledPreyUids`).
+ * - Never credits currencies directly on devour: all coin/gene rewards are packaged
+ *   deterministically into spawned physical pickups so sum(pickups) === totalCoins / totalGenes.
+ * - Ordinary kills use stratified chance + pity (T1~17: 30%/3-miss pity; T18+: 45%/2-miss pity);
+ *   Golden, Abyss Behemoth, Armor Crush & Boss kills guarantee DNA drop (100%).
+ */
+export function buildPredationRewardPlan(
+  prey: SettleablePreyInput,
+  encounter: EncounterOutcome,
+  multipliers: {
+    effectiveCoinMult: number;
+    effectiveGeneMult: number;
+    finalScoreGain: number;
+  },
+  settledPreyUids?: Set<number>,
+  geneRollContext?: GeneDropRollContext
+): PredationRewardPlan {
+  if (
+    !encounter.canDevour ||
+    prey.devoured ||
+    (settledPreyUids && settledPreyUids.has(prey.uid))
+  ) {
+    return {
+      settled: false,
+      totalCoins: 0,
+      totalGenes: 0,
+      scoreGain: 0,
+      xpGain: 0,
+      hpDelta: 0,
+      pickups: [],
+    };
+  }
+
+  prey.devoured = true;
+  if (settledPreyUids) {
+    settledPreyUids.add(prey.uid);
+  }
+
+  const pickupCfg = economyPredationJson.pickups;
+  const geneDropCfg = economyPredationJson.predationGeneDrop;
+  const variant = prey.mutationVariant ?? 'NONE';
+
+  const totalCoins =
+    encounter.coinGain > 0
+      ? Math.max(
+          1,
+          Math.round(encounter.coinGain * multipliers.effectiveCoinMult)
+        )
+      : 0;
+
+  let totalGenes = 0;
+  if (encounter.geneGain > 0 && prey.config.geneValue > 0) {
+    const isSpecial =
+      Boolean(prey.config.isBoss) ||
+      Boolean(encounter.isArmorCrush) ||
+      variant === 'GOLDEN_MUTANT' ||
+      variant === 'ABYSS_BEHEMOTH';
+    if (isSpecial && geneDropCfg.specialGuaranteed) {
+      if (geneRollContext) {
+        geneRollContext.pityMissStreak = 0;
+      }
+      totalGenes = Math.max(
+        geneDropCfg.minGenesWhenGuaranteed,
+        Math.round(encounter.geneGain * multipliers.effectiveGeneMult)
+      );
+    } else {
+      const isLowTier = prey.config.tier <= geneDropCfg.lowTierMaxTier;
+      const baseChance = isLowTier
+        ? geneDropCfg.lowTierChance
+        : geneDropCfg.highTierChance;
+      const pityLimit = isLowTier
+        ? geneDropCfg.lowTierPityMissLimit
+        : geneDropCfg.highTierPityMissLimit;
+      const missStreak = geneRollContext?.pityMissStreak ?? 0;
+      const rollFn = geneRollContext?.rng ?? Math.random;
+      const pityTriggered = missStreak >= pityLimit;
+      if (pityTriggered || rollFn() < baseChance) {
+        if (geneRollContext) {
+          geneRollContext.pityMissStreak = 0;
+        }
+        totalGenes = Math.max(
+          geneDropCfg.minGenesWhenGuaranteed,
+          Math.round(encounter.geneGain * multipliers.effectiveGeneMult)
+        );
+      } else if (geneRollContext) {
+        geneRollContext.pityMissStreak = missStreak + 1;
+      }
+    }
+  }
+
+  const pickups: PredationPickupDrop[] = [];
+  if (totalCoins > 0) {
+    const maxSplit = pickupCfg.maxCoinsPerPredation;
+    const coinCount = Math.min(
+      maxSplit,
+      Math.max(1, Math.floor((totalCoins + maxSplit - 1) / maxSplit))
+    );
+    const baseCoinVal = Math.max(1, Math.floor(totalCoins / coinCount));
+    for (let d = 0; d < coinCount; d++) {
+      const val =
+        d === coinCount - 1
+          ? Math.max(1, totalCoins - baseCoinVal * (coinCount - 1))
+          : baseCoinVal;
+      pickups.push({ kind: 'COIN', value: val });
+    }
+  }
+  if (totalGenes > 0) {
+    pickups.push({ kind: 'DNA_CRYSTAL', value: totalGenes });
+  }
+
   return {
-    heatLevel,
-    magnetRadiusBonus: heatLevel * 16,
-    energyRegenBonus: Number((heatLevel * 2.2).toFixed(1)),
+    settled: true,
+    totalCoins,
+    totalGenes,
+    scoreGain: multipliers.finalScoreGain,
+    xpGain: encounter.xpGain,
+    hpDelta: Math.round(encounter.hpDelta * (prey.scaleMultiplier ?? 1.0)),
+    pickups,
+  };
+}
+
+export interface CollectiblePickupLike {
+  active: boolean;
+  collected?: boolean;
+  kind: 'COIN' | 'DNA_CRYSTAL' | 'SUPPLY_CHEST';
+  value: number;
+}
+
+export interface PickupCollectionTarget {
+  coins: number;
+  genes: number;
+  score: number;
+  runCoinsEarned: number;
+  runGenesEarned: number;
+}
+
+export interface PickupCollectionResult {
+  collected: boolean;
+  coinsAdded: number;
+  genesAdded: number;
+  scoreAdded: number;
+}
+
+/**
+ * Idempotent single-settlement pickup collector.
+ * Guarantees duplicate collisions with the same pickup never credit currency twice.
+ */
+const PICKUP_CFG = economyPredationJson.pickups;
+
+export function collectPickupEntity(
+  pickup: CollectiblePickupLike,
+  target: PickupCollectionTarget
+): PickupCollectionResult {
+  if (!pickup.active || pickup.collected || pickup.value <= 0) {
+    return {
+      collected: false,
+      coinsAdded: 0,
+      genesAdded: 0,
+      scoreAdded: 0,
+    };
+  }
+
+  pickup.active = false;
+  pickup.collected = true;
+
+  const val = Math.max(0, Math.round(pickup.value));
+  if (val <= 0) {
+    return {
+      collected: false,
+      coinsAdded: 0,
+      genesAdded: 0,
+      scoreAdded: 0,
+    };
+  }
+
+  if (pickup.kind === 'COIN') {
+    const scoreAdded = val * PICKUP_CFG.coinScorePerUnit;
+    target.coins += val;
+    target.runCoinsEarned += val;
+    target.score += scoreAdded;
+    return {
+      collected: true,
+      coinsAdded: val,
+      genesAdded: 0,
+      scoreAdded,
+    };
+  }
+
+  if (pickup.kind === 'DNA_CRYSTAL') {
+    const scoreAdded = val * PICKUP_CFG.geneScorePerUnit;
+    target.genes += val;
+    target.runGenesEarned += val;
+    target.score += scoreAdded;
+    return {
+      collected: true,
+      coinsAdded: 0,
+      genesAdded: val,
+      scoreAdded,
+    };
+  }
+
+  return {
+    collected: false,
+    coinsAdded: 0,
+    genesAdded: 0,
+    scoreAdded: 0,
+  };
+}
+
+/**
+ * Unified Combo-Driven Hunting Heat Buff (D5-A: 100% Parity across Web & iOS, read from shared config).
+ */
+export function computeHuntingHeatBuff(
+  comboCount: number,
+  _legacyRowOrUnused: number = 0
+): HuntingHeatBuff {
+  const cleanCombo = Math.max(0, Math.floor(comboCount));
+  const tiers = economyPredationJson.huntingHeatTiers.tiers;
+  let active = tiers[0];
+  for (const tier of tiers) {
+    if (cleanCombo >= tier.minCombo) {
+      active = tier;
+    }
+  }
+  return {
+    heatLevel: active.level,
+    scoreMultiplier: active.scoreMult,
+    magnetRadiusBonus: active.magnetBonus,
+    energyRegenBonus: active.energyRegenPerSec,
   };
 }
 

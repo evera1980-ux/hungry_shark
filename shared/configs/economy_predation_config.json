@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 2,
+  "frenzy": {
+    "goldenChargeRequired": 6,
+    "minChargeFloor": 3,
+    "initProtectionSec": 8,
+    "cooldownSec": 15,
+    "baseDurationSec": 6,
+    "coinMultiplier": 1.5,
+    "geneMultiplier": 1,
+    "scoreMultiplier": 2,
+    "allowFrenzyStackInflation": false,
+    "speedBonus": 50,
+    "boostSpeedBonus": 100,
+    "magnetMultiplier": 1.35,
+    "pickupMagnetMultiplier": 1.45
+  },
+  "mutations": {
+    "golden": {
+      "baseChance": 0.045,
+      "scoreScaleCap": 0.035,
+      "scoreScaleDivisor": 60000,
+      "maxChance": 0.08,
+      "coinMult": 3,
+      "geneMult": 1,
+      "guaranteedGeneDrop": true,
+      "scoreMult": 3,
+      "xpMult": 2,
+      "effectiveTierOffset": 0
+    },
+    "abyssBehemoth": {
+      "enabled": true,
+      "minPreyTier": 8,
+      "minDepthMeters": 220,
+      "baseChance": 0.06,
+      "scoreScaleCap": 0.1,
+      "scoreScaleDivisor": 80000,
+      "maxChance": 0.16,
+      "coinMult": 1.2,
+      "geneMult": 2,
+      "guaranteedGeneDrop": true,
+      "scoreMult": 2.2,
+      "xpMult": 1.5,
+      "effectiveTierOffset": 1,
+      "failDamageMult": 1.35,
+      "visualScaleMult": 1.25,
+      "speedBoostMult": 1.25
+    }
+  },
+  "armorCrush": {
+    "normalHitsRequired": 1,
+    "bossOrBehemothHitsRequired": 2,
+    "coinMult": 1.35,
+    "geneMult": 1.35,
+    "guaranteedGeneDrop": true,
+    "xpMult": 1.35,
+    "scoreMult": 1.5,
+    "applySharkYieldMultipliers": true,
+    "countTowardBounty": true,
+    "countTowardGoldenCharge": true,
+    "armorBandMinDelta": 1,
+    "armorBandMaxDelta": 3
+  },
+  "xpMultipliers": {
+    "normal": 0.8,
+    "frenzy": 0.5,
+    "armorCrush": 1.35,
+    "golden": 2,
+    "behemoth": 1.5
+  },
+  "predationGeneDrop": {
+    "lowTierMaxTier": 17,
+    "lowTierChance": 0.3,
+    "lowTierPityMissLimit": 3,
+    "highTierMinTier": 18,
+    "highTierChance": 0.45,
+    "highTierPityMissLimit": 2,
+    "specialGuaranteed": true,
+    "minGenesWhenGuaranteed": 1,
+    "removeOrdinaryFloor": true
+  },
+  "bounty": {
+    "requiredKills": 2,
+    "baseCoins": 36,
+    "coinsPerTier": 2.2,
+    "baseGenes": 6,
+    "genesPerTier": 0.35,
+    "scoreBase": 300,
+    "scoreTierMult": 0.3,
+    "spawnBiasProbability": 0.26,
+    "applySharkYieldMultipliers": true,
+    "allowTrialBountyCoinsAndGenes": true
+  },
+  "pickups": {
+    "lifetimeSec": 14,
+    "blinkStartRemainingSec": 2.5,
+    "collectRadiusWorldFactor": 38,
+    "frenzyMagnetMultiplier": 1.45,
+    "maxPooledPickups": 120,
+    "maxCoinsPerPredation": 4,
+    "coinScorePerUnit": 10,
+    "geneScorePerUnit": 15
+  },
+  "huntingHeatTiers": {
+    "comboWindowSec": 3.2,
+    "comboScorePerStack": 0.08,
+    "baseKillEnergyBonus": 6,
+    "killEnergyPerTier": 0.45,
+    "tiers": [
+      {
+        "level": 0,
+        "minCombo": 0,
+        "scoreMult": 1,
+        "magnetBonus": 0,
+        "energyRegenPerSec": 0
+      },
+      {
+        "level": 1,
+        "minCombo": 4,
+        "scoreMult": 1.1,
+        "magnetBonus": 20,
+        "energyRegenPerSec": 2
+      },
+      {
+        "level": 2,
+        "minCombo": 10,
+        "scoreMult": 1.2,
+        "magnetBonus": 40,
+        "energyRegenPerSec": 5
+      },
+      {
+        "level": 3,
+        "minCombo": 18,
+        "scoreMult": 1.35,
+        "magnetBonus": 60,
+        "energyRegenPerSec": 8
+      },
+      {
+        "level": 4,
+        "minCombo": 28,
+        "scoreMult": 1.45,
+        "magnetBonus": 80,
+        "energyRegenPerSec": 10
+      }
+    ]
+  },
+  "activeSkills": {
+    "goldOverdrive": {
+      "blockWhileFrenzy": true,
+      "baseCost": 35,
+      "useLinear": 25,
+      "useQuad": 12,
+      "rowScale": 0.35,
+      "durationSec": 6,
+      "healMaxHpPct": 0.5,
+      "energyRestorePct": 1,
+      "invulnDurationSec": 1
+    },
+    "geneSurge": {
+      "baseCost": 12,
+      "levelLinear": 5,
+      "useLinear": 10,
+      "useQuad": 6,
+      "rowScale": 0.25,
+      "xpGrantRatio": 0.55,
+      "healMinFlat": 35,
+      "healMaxHpPct": 0.15,
+      "energyRestorePct": 1,
+      "skipTutorialOnUse": false
+    }
+  },
+  "combat": {
+    "invulnerableAfterHitSec": 0.55,
+    "deadlyFailBaseDamage": 30,
+    "deadlyFailDamagePerDelta": 7,
+    "armorFailDamageFactor": 0.85,
+    "mineKnockbackForce": 440,
+    "predatorKnockbackForce": 320
+  }
+}

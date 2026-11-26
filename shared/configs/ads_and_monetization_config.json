@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 2,
+  "providers": {
+    "admobAppId": "ca-app-pub-9273669553362347~9016886171",
+    "admobRewardedAdUnitId": "ca-app-pub-9273669553362347/8698331137",
+    "admobInterstitialAdUnitId": "ca-app-pub-3940256099942544/1033173712",
+    "admobIosBackupRewardedAdUnitId": "ca-app-pub-3940256099942544/1712485313",
+    "h5ClientId": "ca-pub-9273669553362347",
+    "imaVastTagUrl": "https://pubads.g.doubleclick.net/gampad/ads?iu=/21775744923/external/single_preroll_skippable&sz=640x480&ciu_szs=300x250,728x90&gdfp_req=1&output=vast&unviewed_position_start=1&env=vp&impl=s",
+    "fallbackVideoStreamUrl": "https://storage.googleapis.com/gvabox/media/samples/stock.mp4"
+  },
+  "placements": {
+    "DOUBLE_SETTLEMENT": {
+      "enabled": true,
+      "cooldownSec": 30,
+      "dailyCap": 2,
+      "multiplier": 2,
+      "excludeCrownAndTrial": true,
+      "minNetPositiveFloor": 0
+    },
+    "SUPPLY_DROP": {
+      "enabled": true,
+      "cooldownSec": 90,
+      "dailyCap": 6,
+      "rewardsByMaxUnlockedRow": [
+        {
+          "row": 0,
+          "generation": 1,
+          "coins": 160,
+          "genes": 14
+        },
+        {
+          "row": 1,
+          "generation": 2,
+          "coins": 480,
+          "genes": 42
+        },
+        {
+          "row": 2,
+          "generation": 3,
+          "coins": 1200,
+          "genes": 100
+        },
+        {
+          "row": 3,
+          "generation": 4,
+          "coins": 3000,
+          "genes": 240
+        },
+        {
+          "row": 4,
+          "generation": 5,
+          "coins": 7500,
+          "genes": 560
+        },
+        {
+          "row": 5,
+          "generation": 6,
+          "coins": 16000,
+          "genes": 1150
+        }
+      ]
+    },
+    "REVIVE": {
+      "enabled": true,
+      "cooldownSec": 15,
+      "dailyCap": 6,
+      "maxPerRun": 1,
+      "hpRestorePct": 1,
+      "energyRestorePct": 1,
+      "frenzyDurationSec": 6,
+      "invulnDurationSec": 2.5,
+      "grantFrenzyStack": false
+    },
+    "TRIAL_SHARK": {
+      "enabled": true,
+      "cooldownSec": 60,
+      "dailyCap": 4,
+      "targetMode": "next_unowned_shark",
+      "fallbackSharkId": "shark_47_omega_devourer",
+      "trialUpgradeLevel": 6,
+      "trialInRunLevel": 5,
+      "initialFrenzyDurationSec": 4.5
+    },
+    "INTERSTITIAL": {
+      "enabled": true,
+      "cooldownSec": 90,
+      "dailyCap": 12,
+      "starterProtectedRuns": 3
+    }
+  },
+  "onboardingStarterGift": {
+    "enabled": true,
+    "coins": 80,
+    "genes": 20,
+    "oneTimeOnly": true
+  }
+}
