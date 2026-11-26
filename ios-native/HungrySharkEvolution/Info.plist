@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDevelopmentRegion</key>
-    <string>zh_CN</string>
+    <string>en</string>
     <key>CFBundleDisplayName</key>
     <string>DeepSea Evolution</string>
     <key>CFBundleExecutable</key>
@@ -54,7 +54,7 @@
     <key>GADApplicationIdentifier</key>
     <string>ca-app-pub-9273669553362347~9016886171</string>
     <key>NSUserTrackingUsageDescription</key>
-    <string>允许追踪以提供个性化深海狩猎激励视频广告体验</string>
+    <string>Allow tracking to deliver personalized rewarded video ads.</string>
     <key>SKAdNetworkItems</key>
     <array>
         <dict>

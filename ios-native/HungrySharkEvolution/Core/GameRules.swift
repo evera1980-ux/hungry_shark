@@ -209,7 +209,7 @@ public struct SharkMetaSaveData: Codable, Sendable {
                 || decodedUnlocked.count > 1
                 || (decodedUpgrades[defaults.selectedSharkId] ?? 1) > 1
         }
-        self.language = (try? c.decode(String.self, forKey: .language)) ?? "zh"
+        self.language = (try? c.decode(String.self, forKey: .language)) ?? "en"
         self.soundEnabled = (try? c.decode(Bool.self, forKey: .soundEnabled)) ?? true
     }
 
@@ -227,7 +227,7 @@ public struct SharkMetaSaveData: Codable, Sendable {
             maxDepthReached: Double(defaults.bestDepthReached),
             totalRuns: defaults.totalRunsPlayed,
             onboardingGiftClaimed: defaults.onboardingGiftClaimed,
-            language: "zh",
+            language: "en",
             soundEnabled: true
         )
     }

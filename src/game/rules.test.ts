@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { I18N, translate } from './i18n';
+import { detectDefaultLang, I18N, translate } from './i18n';
 import {
   AdManager,
   AD_PLACEMENT_RULES,
@@ -4859,6 +4859,7 @@ test('Task 05 D3~D8 Approved Rules & Config-Driven Architecture Verification', (
   assert.equal(WORLD_CONFIG.timeDifficulty.maxDifficultyMultiplier, 2.2);
   assert.equal(ECONOMY_PREDATION_CONFIG.activeSkills.goldOverdrive.healMaxHpPct, 0.5);
   assert.equal(ADS_AND_MONETIZATION_CONFIG.placements.REVIVE.frenzyDurationSec, 6);
+  assert.equal(detectDefaultLang(), 'en');
 });
 
 

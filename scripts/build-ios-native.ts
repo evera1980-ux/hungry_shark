@@ -169,7 +169,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: "DeepSea Evolution"
         INFOPLIST_KEY_GADApplicationIdentifier: "${GOOGLE_ADS_CONFIG.admobAppId}"
         INFOPLIST_KEY_GADIsAdManagerApp: YES
-        INFOPLIST_KEY_NSUserTrackingUsageDescription: "允许追踪以提供个性化深海狩猎激励视频广告体验"
+        INFOPLIST_KEY_NSUserTrackingUsageDescription: "Allow tracking to deliver personalized rewarded video ads."
   HungrySharkEvolutionTests:
     type: bundle.unit-test
     platform: iOS
@@ -514,7 +514,7 @@ ${assetGroupChildren}
 			};
 			buildConfigurationList = A80000012B00000000000001 /* Build configuration list for PBXProject "HungrySharkEvolution" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = zh_CN;
+			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,

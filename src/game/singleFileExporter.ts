@@ -59,8 +59,8 @@ export function downloadStandaloneSingleFileHtml(): void {
 const I18N = ${JSON.stringify(I18N)};
 const GAME_CONFIG = ${JSON.stringify(GAME_CONFIG)};
 const SHARK_FORMS = ${JSON.stringify(SHARK_EVOLUTION_FORMS)};
-let lang = (navigator.language || 'zh').toLowerCase().startsWith('en') ? 'en' : 'zh';
-const t = (k) => (I18N[lang] && I18N[lang][k]) || I18N.zh[k] || k;
+let lang = 'en';
+const t = (k) => (I18N[lang] && I18N[lang][k]) || I18N.en[k] || I18N.zh[k] || k;
 
 const SHARK_COL_SPLITS = [0, 178, 344, 505, 672, 839, 1000, 1170, 1344];
 const SHARK_ROW_SPLITS = [0, 131, 250, 382, 513, 639, 768];

@@ -310,15 +310,12 @@ export const I18N: Record<Lang, Record<string, string>> = {
 };
 
 export function detectDefaultLang(): Lang {
-  if (typeof navigator !== 'undefined' && navigator.language) {
-    return navigator.language.toLowerCase().startsWith('en') ? 'en' : 'zh';
-  }
-  return 'zh';
+  return 'en';
 }
 
 export function translate(key: string, lang: Lang, params?: Record<string, string | number>): string {
-  const dict = I18N[lang] || I18N.zh;
-  let text = dict[key] ?? I18N.zh[key] ?? key;
+  const dict = I18N[lang] || I18N.en;
+  let text = dict[key] ?? I18N.en[key] ?? I18N.zh[key] ?? key;
   if (params) {
     for (const [k, v] of Object.entries(params)) {
       text = text.split(`{${k}}`).join(String(v));

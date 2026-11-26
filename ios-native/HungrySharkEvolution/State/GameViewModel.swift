@@ -184,9 +184,9 @@ public final class GameViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Bilingual I18N (zh / en)
+    // MARK: - Bilingual I18N (en / zh, default: en)
     public var lang: String {
-        save.language == "en" ? "en" : "zh"
+        save.language == "zh" ? "zh" : "en"
     }
 
     public func t(_ key: String, _ params: [String: String] = [:]) -> String {
@@ -204,7 +204,7 @@ public final class GameViewModel: ObservableObject {
     }
 
     public func toggleLanguage() {
-        save.language = (save.language == "zh") ? "en" : "zh"
+        save.language = (lang == "en") ? "zh" : "en"
         persistSave()
         playUiTick()
     }
