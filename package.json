@@ -14,6 +14,7 @@
     "build:seabed": "tsx scripts/build-seabed-strips.ts",
     "build:ecology": "tsx scripts/build-ecology-sprites.ts",
     "optimize:assets": "tsx scripts/optimize-web-assets.ts",
+    "prey:generate-ai": "tsx scripts/generate-abyss-prey-ai.ts",
     "build:ios": "tsx scripts/build-ios-native.ts",
     "sync:ios": "tsx scripts/build-ios-native.ts"
   },

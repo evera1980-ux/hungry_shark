@@ -156,6 +156,7 @@ async function main(): Promise<void> {
     const outName = `${id}@3x.webp`;
     keepPrey.add(outName);
     const pngCandidates = [
+      path.join(ROOT_DIR, 'raw_assets', 'prey_ai_transparent', `${id}@3x.png`),
       path.join(PUBLIC_PREY, `${id}@3x.png`),
       path.join(IOS_ASSETS, `${id}@3x.png`),
     ];
