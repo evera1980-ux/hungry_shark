@@ -4,8 +4,270 @@ import SpriteKit
 // MARK: - SpriteAtlasManager UI Atlas Slicers & Image Normalization
 
 extension SpriteAtlasManager {
-    /// Slices the 6x4 UI Icon Sheet (icons_f5128c12.png) with center hollow seed for UI_AVATAR_FRAME & UI_JOYSTICK_BASE
-    /// and tight bounding-box aspect-fit normalization into a 128x128 square UIImage.
+    /// Renders `@3x` (`384x384`) mathematical Signed-Distance-Field (SDF) textures for
+    /// `UI_JOYSTICK_BASE` and `UI_JOYSTICK_KNOB` with zero white fringe (`0 毛边`).
+    nonisolated private static func renderCrispJoystickIcon3x(key: String, size: Int = 384) -> UIImage? {
+        let w = size
+        let h = size
+        var rgba = [UInt8](repeating: 0, count: w * h * 4)
+        let cx = Double(size) * 0.5
+        let cy = Double(size) * 0.5
+        let scale = Double(size) / 384.0
+
+        if key == "UI_JOYSTICK_BASE" {
+            let rInner = 96.0 * scale
+            let rOuter = 148.0 * scale
+            let rMid = (rInner + rOuter) * 0.5
+            let rHalf = (rOuter - rInner) * 0.5
+
+            func sdSegment(_ px: Double, _ py: Double, _ ax: Double, _ ay: Double, _ bx: Double, _ by: Double) -> Double {
+                let pax = px - ax
+                let pay = py - ay
+                let bax = bx - ax
+                let bay = by - ay
+                let hVal = max(0.0, min(1.0, (pax * bax + pay * bay) / (bax * bax + bay * bay)))
+                return hypot(pax - bax * hVal, pay - bay * hVal)
+            }
+
+            func sdCurvedArrow(_ uRaw: Double, _ vRaw: Double) -> Double {
+                let u = uRaw / scale
+                let v = vRaw / scale
+                let au = abs(u)
+                let tx = 0.0, ty = 171.5, bx = 24.5, by = 125.0
+                let dSideSeg = sdSegment(au, v, tx, ty, bx, by)
+                let clampedU = min(bx, au)
+                let ratio = clampedU / bx
+                let vCurve = 130.0 - 5.0 * ratio * ratio
+                let dBaseCurve = hypot(au - clampedU, v - vCurve)
+                let distBoundary = min(dSideSeg, dBaseCurve)
+                let sideCross = (au - tx) * (ty - by) + (v - ty) * (bx - tx)
+                let fullRatio = au / bx
+                let vBaseAtU = 130.0 - 5.0 * fullRatio * fullRatio
+                let isInsideCore = sideCross <= 0.0 && v >= vBaseAtU && v <= ty
+                let signedCore = isInsideCore ? -distBoundary : distBoundary
+                return (signedCore - 8.5) * scale
+            }
+
+            for y in 0..<h {
+                for x in 0..<w {
+                    let dx = Double(x) + 0.5 - cx
+                    let dy = Double(y) + 0.5 - cy
+                    let rad = hypot(dx, dy)
+                    let dRing = abs(rad - rMid) - rHalf
+
+                    let dTop = sdCurvedArrow(dx, -dy)
+                    let dBot = sdCurvedArrow(dx, dy)
+                    let dRight = sdCurvedArrow(dy, dx)
+                    let dLeft = sdCurvedArrow(dy, -dx)
+                    let dArrow = min(min(dTop, dBot), min(dRight, dLeft))
+
+                    var u = dx / scale
+                    var v = -dy / scale
+                    if dBot == dArrow { u = dx / scale; v = dy / scale }
+                    else if dRight == dArrow { u = dy / scale; v = dx / scale }
+                    else if dLeft == dArrow { u = dy / scale; v = -dx / scale }
+
+                    var outR = 0.0, outG = 0.0, outB = 0.0, outA = 0.0
+
+                    if dRing >= 0.0 && dRing < 5.5 * scale {
+                        let gA = pow(1.0 - dRing / (5.5 * scale), 2.0) * 0.28
+                        outR = 56.0; outG = 228.0; outB = 250.0; outA = gA
+                    }
+
+                    if dRing < 1.15 {
+                        let ringAlphaEdge = max(0.0, min(1.0, 0.55 - dRing * 0.85))
+                        let t = max(0.0, min(1.0, (rad - rInner) / (rOuter - rInner)))
+                        let innerRim = exp(-pow((t - 0.065) / 0.06, 2.0))
+                        let outerRim = exp(-pow((t - 0.935) / 0.06, 2.0))
+                        let rimFactor = max(innerRim, outerRim)
+                        let groove = 0.44 * exp(-pow((t - 0.81) / 0.095, 2.0)) + 0.24 * exp(-pow((t - 0.19) / 0.095, 2.0))
+                        let light = 0.5 - 0.5 * ((dx + dy) / (rad * 1.41421356 + 1e-5))
+
+                        var r = 114.0 + 30.0 * light - 54.0 * groove + 48.0 * rimFactor
+                        var g = 199.0 + 20.0 * light - 44.0 * groove + 54.0 * rimFactor
+                        var b = 217.0 + 16.0 * light - 36.0 * groove + 38.0 * rimFactor
+
+                        let edgeDark = max(0.0, 1.0 - abs(dRing) / 1.3)
+                        r = r * (1.0 - 0.42 * edgeDark) + 14.0 * (0.42 * edgeDark)
+                        g = g * (1.0 - 0.30 * edgeDark) + 110.0 * (0.30 * edgeDark)
+                        b = b * (1.0 - 0.20 * edgeDark) + 145.0 * (0.20 * edgeDark)
+
+                        let rCol = max(0.0, min(255.0, r))
+                        let gCol = max(0.0, min(255.0, g))
+                        let bCol = max(0.0, min(255.0, b))
+                        let rA = ringAlphaEdge * (0.84 + 0.14 * rimFactor)
+
+                        let remA = outA * (1.0 - rA)
+                        let totA = rA + remA
+                        if totA > 0.0 {
+                            outR = (rCol * rA + outR * remA) / totA
+                            outG = (gCol * rA + outG * remA) / totA
+                            outB = (bCol * rA + outB * remA) / totA
+                            outA = totA
+                        }
+                    }
+
+                    if dArrow < 5.5 * scale && dRing < 0.5 {
+                        let shadow = max(0.0, min(1.0, (5.5 * scale - max(0.0, dArrow)) / (5.5 * scale))) * 0.35
+                        outR *= (1.0 - shadow)
+                        outG *= (1.0 - shadow * 0.85)
+                        outB *= (1.0 - shadow * 0.70)
+                    }
+
+                    if dArrow < 1.0 {
+                        let arrowEdgeAlpha = max(0.0, min(1.0, 0.5 - dArrow * 0.88))
+                        let dNorm = dArrow / scale
+                        var ar = 0.0, ag = 0.0, ab = 0.0
+                        if dNorm > -5.8 {
+                            let bt = max(0.0, min(1.0, -dNorm / 5.8))
+                            ar = 6.0 + 10.0 * bt
+                            ag = 56.0 + 34.0 * bt
+                            ab = 72.0 + 38.0 * bt
+                        } else {
+                            let innerD = -dNorm - 5.8
+                            let rimMix = exp(-pow((innerD - 1.3) / 1.4, 2.0))
+                            let vt = max(0.0, min(1.0, (v - 122.0) / 50.0))
+                            let ridge = exp(-pow(u / 9.5, 2.0)) * 0.42 + (u < 0.0 ? 0.14 : -0.08)
+                            ar = min(255.0, 22.0 + 120.0 * vt + 75.0 * ridge + 95.0 * rimMix)
+                            ag = min(255.0, 192.0 + 56.0 * vt + 28.0 * ridge + 42.0 * rimMix)
+                            ab = min(255.0, 234.0 + 21.0 * vt + 14.0 * ridge + 20.0 * rimMix)
+
+                            let borderBlend = max(0.0, min(1.0, (-5.8 - dNorm) / 1.25))
+                            ar = 16.0 * (1.0 - borderBlend) + ar * borderBlend
+                            ag = 90.0 * (1.0 - borderBlend) + ag * borderBlend
+                            ab = 110.0 * (1.0 - borderBlend) + ab * borderBlend
+                        }
+
+                        let aA = arrowEdgeAlpha
+                        let remA = outA * (1.0 - aA)
+                        let finalA = aA + remA
+                        if finalA > 0.0 {
+                            outR = (ar * aA + outR * remA) / finalA
+                            outG = (ag * aA + outG * remA) / finalA
+                            outB = (ab * aA + outB * remA) / finalA
+                            outA = finalA
+                        }
+                    }
+
+                    let p = (y * w + x) * 4
+                    rgba[p] = UInt8((outR * outA).rounded())
+                    rgba[p + 1] = UInt8((outG * outA).rounded())
+                    rgba[p + 2] = UInt8((outB * outA).rounded())
+                    rgba[p + 3] = UInt8((outA * 255.0).rounded())
+                }
+            }
+        } else {
+            let rOuter = 162.0 * scale
+            let rCollarOuter = 155.5 * scale
+            let rCollarInner = 131.5 * scale
+            let rOrb = 125.0 * scale
+
+            for y in 0..<h {
+                for x in 0..<w {
+                    let dx = Double(x) + 0.5 - cx
+                    let dy = Double(y) + 0.5 - cy
+                    let rad = hypot(dx, dy)
+                    if rad > rOuter + 1.5 { continue }
+
+                    let edgeAlpha = max(0.0, min(1.0, (rOuter + 0.5 - rad) * 0.9))
+                    var r = 8.0, g = 42.0, b = 54.0
+
+                    if rad > rCollarOuter {
+                        let t = (rad - rCollarOuter) / (rOuter - rCollarOuter)
+                        r = 8.0 + 12.0 * (1.0 - t)
+                        g = 40.0 + 32.0 * (1.0 - t)
+                        b = 52.0 + 38.0 * (1.0 - t)
+                    } else if rad > rCollarInner {
+                        let ct = (rad - rCollarInner) / (rCollarOuter - rCollarInner)
+                        let nx = dx / (rad + 1e-5)
+                        let ny = dy / (rad + 1e-5)
+                        let topLight = max(0.0, -(nx * 0.55 + ny * 0.83))
+                        let botRefl = max(0.0, -nx * 0.45 + ny * 0.89) * 0.55
+                        let radialRidge = sin(ct * .pi)
+                        let sheen = 0.35 + 0.65 * topLight + 0.35 * botRefl
+
+                        r = 45.0 + 135.0 * sheen * radialRidge + 30.0 * pow(topLight, 3.0)
+                        g = 115.0 + 115.0 * sheen * radialRidge + 22.0 * pow(topLight, 3.0)
+                        b = 140.0 + 102.0 * sheen * radialRidge + 15.0 * pow(topLight, 3.0)
+
+                        if rad > rCollarOuter - 1.4 {
+                            let bMix = (rCollarOuter - rad) / 1.4
+                            r = 14.0 * (1.0 - bMix) + r * bMix
+                            g = 58.0 * (1.0 - bMix) + g * bMix
+                            b = 74.0 * (1.0 - bMix) + b * bMix
+                        }
+                    } else if rad > rOrb {
+                        let gt = (rad - rOrb) / (rCollarInner - rOrb)
+                        r = 5.0 + 22.0 * gt
+                        g = 62.0 + 42.0 * gt
+                        b = 78.0 + 46.0 * gt
+                    } else {
+                        let ux = dx / rOrb
+                        let uy = dy / rOrb
+                        let uz = sqrt(max(0.0, 1.0 - ux * ux - uy * uy))
+
+                        let coreDist = hypot(ux + 0.16, uy + 0.18)
+                        let coreGlow = max(0.0, 1.0 - coreDist * 0.88)
+                        let rimCaustic = pow(1.0 - uz, 2.2) * (0.65 + 0.35 * (-ux * 0.6 + uy * 0.5))
+
+                        r = 4.0 + 28.0 * pow(coreGlow, 1.5) + 85.0 * rimCaustic
+                        g = 145.0 + 110.0 * pow(coreGlow, 0.85) + 88.0 * rimCaustic
+                        b = 195.0 + 60.0 * pow(coreGlow, 0.70) + 52.0 * rimCaustic
+
+                        let crescentDist = hypot(ux - 0.36, uy - 0.08)
+                        let crescentShadow = exp(-pow(crescentDist / 0.45, 2.0)) * 0.32 * (1.0 - rimCaustic)
+                        r *= (1.0 - crescentShadow)
+                        g *= (1.0 - crescentShadow * 0.75)
+                        b *= (1.0 - crescentShadow * 0.42)
+
+                        let hx1 = (ux + 0.28) * 0.82 + (uy + 0.54) * -0.57
+                        let hy1 = (ux + 0.28) * 0.57 + (uy + 0.54) * 0.82
+                        let spec1 = exp(-pow(hypot(hx1 / 0.21, hy1 / 0.115), 2.4))
+                        let spec2 = exp(-pow(hypot((ux - 0.04) / 0.065, (uy + 0.66) / 0.048), 2.4)) * 0.65
+
+                        let spec = min(1.0, spec1 * 0.92 + spec2)
+                        r = r * (1.0 - spec) + 235.0 * spec
+                        g = g * (1.0 - spec) + 254.0 * spec
+                        b = b * (1.0 - spec) + 255.0 * spec
+
+                        if rad > rOrb - 1.3 {
+                            let oMix = (rOrb - rad) / 1.3
+                            r = 6.0 * (1.0 - oMix) + r * oMix
+                            g = 68.0 * (1.0 - oMix) + g * oMix
+                            b = 84.0 * (1.0 - oMix) + b * oMix
+                        }
+                    }
+
+                    let cleanR = max(0.0, min(255.0, r))
+                    let cleanG = max(0.0, min(255.0, g))
+                    let cleanB = max(0.0, min(255.0, b))
+                    let p = (y * w + x) * 4
+                    rgba[p] = UInt8((cleanR * edgeAlpha).rounded())
+                    rgba[p + 1] = UInt8((cleanG * edgeAlpha).rounded())
+                    rgba[p + 2] = UInt8((cleanB * edgeAlpha).rounded())
+                    rgba[p + 3] = UInt8((edgeAlpha * 255.0).rounded())
+                }
+            }
+        }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard let ctx = CGContext(
+            data: &rgba,
+            width: w,
+            height: h,
+            bitsPerComponent: 8,
+            bytesPerRow: w * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ), let cgImg = ctx.makeImage() else {
+            return nil
+        }
+        return UIImage(cgImage: cgImg)
+    }
+
+    /// Slices the 6x4 UI Icon Sheet (icons_f5128c12.png) with center hollow seed for UI_AVATAR_FRAME
+    /// and `@3x` (`384x384`) SDF rendering for `UI_JOYSTICK_BASE` & `UI_JOYSTICK_KNOB`.
     nonisolated static func sliceUiIconSheet(_ sheetImage: UIImage) -> [String: UIImage] {
         var outIcons: [String: UIImage] = [:]
         guard let cgSheet = sheetImage.cgImage else { return outIcons }
@@ -15,9 +277,15 @@ extension SpriteAtlasManager {
         let rows = 4.0
         let padX = (fullW / cols) * 0.025
         let padY = (fullH / rows) * 0.025
-        let outSize = 128
+        let outSize = 256
 
         for (key, grid) in GameConfigGenerated.uiIconGridMap {
+            if key == "UI_JOYSTICK_BASE" || key == "UI_JOYSTICK_KNOB" {
+                if let hdJoystick = renderCrispJoystickIcon3x(key: key, size: 384) {
+                    outIcons[key] = hdJoystick
+                    continue
+                }
+            }
             let row = Double(grid.x)
             let col = Double(grid.y)
             let sx = max(0, Int((col * (fullW / cols) + padX).rounded(.down)))

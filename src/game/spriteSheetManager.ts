@@ -850,10 +850,351 @@ export class SpriteSheetManager {
   }
 
   /**
+   * Renders `@3x` (`384x384`) mathematical Signed-Distance-Field (SDF) textures for
+   * `UI_JOYSTICK_BASE` (translucent aqua-crystal sonar ring + 4 rounded beveled directional arrows)
+   * and `UI_JOYSTICK_KNOB` (3D glossy aqua-crystal thumb orb with metallic bevel collar).
+   * Eliminates 100% of white-background matting fringes (`毛边`) and low-DPI pixelation.
+   */
+  private renderCrispJoystickIcon3x(
+    key: 'UI_JOYSTICK_BASE' | 'UI_JOYSTICK_KNOB',
+    size: number = 384
+  ): HTMLCanvasElement {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return canvas;
+
+    const imgData = ctx.createImageData(size, size);
+    const data = imgData.data;
+    const cx = size / 2;
+    const cy = size / 2;
+    const scale = size / 384;
+
+    if (key === 'UI_JOYSTICK_BASE') {
+      const rInner = 96.0 * scale;
+      const rOuter = 148.0 * scale;
+      const rMid = (rInner + rOuter) * 0.5;
+      const rHalf = (rOuter - rInner) * 0.5;
+
+      const sdSegment = (
+        px: number,
+        py: number,
+        ax: number,
+        ay: number,
+        bx: number,
+        by: number
+      ): number => {
+        const pax = px - ax;
+        const pay = py - ay;
+        const bax = bx - ax;
+        const bay = by - ay;
+        const h = Math.max(
+          0,
+          Math.min(1, (pax * bax + pay * bay) / (bax * bax + bay * bay))
+        );
+        return Math.hypot(pax - bax * h, pay - bay * h);
+      };
+
+      const sdCurvedArrow = (uRaw: number, vRaw: number): number => {
+        const u = uRaw / scale;
+        const v = vRaw / scale;
+        const au = Math.abs(u);
+        const tx = 0;
+        const ty = 171.5;
+        const bx = 24.5;
+        const by = 125.0;
+        const dSideSeg = sdSegment(au, v, tx, ty, bx, by);
+
+        const clampedU = Math.min(bx, au);
+        const ratio = clampedU / bx;
+        const vCurve = 130.0 - 5.0 * ratio * ratio;
+        const dBaseCurve = Math.hypot(au - clampedU, v - vCurve);
+        const distBoundary = Math.min(dSideSeg, dBaseCurve);
+
+        const sideCross = (au - tx) * (ty - by) + (v - ty) * (bx - tx);
+        const fullRatio = au / bx;
+        const vBaseAtU = 130.0 - 5.0 * fullRatio * fullRatio;
+        const isInsideCore = sideCross <= 0 && v >= vBaseAtU && v <= ty;
+
+        const signedCore = isInsideCore ? -distBoundary : distBoundary;
+        return (signedCore - 8.5) * scale;
+      };
+
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const dx = x + 0.5 - cx;
+          const dy = y + 0.5 - cy;
+          const rad = Math.hypot(dx, dy);
+          const dRing = Math.abs(rad - rMid) - rHalf;
+
+          const dTop = sdCurvedArrow(dx, -dy);
+          const dBot = sdCurvedArrow(dx, dy);
+          const dRight = sdCurvedArrow(dy, dx);
+          const dLeft = sdCurvedArrow(dy, -dx);
+          const dArrow = Math.min(dTop, dBot, dRight, dLeft);
+
+          let u = dx / scale;
+          let v = -dy / scale;
+          if (dBot === dArrow) {
+            u = dx / scale;
+            v = dy / scale;
+          } else if (dRight === dArrow) {
+            u = dy / scale;
+            v = dx / scale;
+          } else if (dLeft === dArrow) {
+            u = dy / scale;
+            v = -dx / scale;
+          }
+
+          let outR = 0;
+          let outG = 0;
+          let outB = 0;
+          let outA = 0;
+
+          // Pure cyan ambient glow (zero white contamination)
+          if (dRing >= 0 && dRing < 5.5 * scale) {
+            const gA = Math.pow(1 - dRing / (5.5 * scale), 2) * 0.28;
+            outR = 56;
+            outG = 228;
+            outB = 250;
+            outA = gA;
+          }
+
+          // Translucent aqua-crystal torus ring with inner/outer neon rims
+          if (dRing < 1.15) {
+            const ringAlphaEdge = Math.max(0, Math.min(1, 0.55 - dRing * 0.85));
+            const t = Math.max(
+              0,
+              Math.min(1, (rad - rInner) / (rOuter - rInner))
+            );
+            const innerRim = Math.exp(-Math.pow((t - 0.065) / 0.06, 2));
+            const outerRim = Math.exp(-Math.pow((t - 0.935) / 0.06, 2));
+            const rimFactor = Math.max(innerRim, outerRim);
+            const groove =
+              0.44 * Math.exp(-Math.pow((t - 0.81) / 0.095, 2)) +
+              0.24 * Math.exp(-Math.pow((t - 0.19) / 0.095, 2));
+            const light =
+              0.5 - 0.5 * ((dx + dy) / (rad * Math.SQRT2 + 1e-5));
+
+            let r = 114 + 30 * light - 54 * groove + 48 * rimFactor;
+            let g = 199 + 20 * light - 44 * groove + 54 * rimFactor;
+            let b = 217 + 16 * light - 36 * groove + 38 * rimFactor;
+
+            const edgeDark = Math.max(0, 1 - Math.abs(dRing) / 1.3);
+            r = r * (1 - 0.42 * edgeDark) + 14 * (0.42 * edgeDark);
+            g = g * (1 - 0.3 * edgeDark) + 110 * (0.3 * edgeDark);
+            b = b * (1 - 0.2 * edgeDark) + 145 * (0.2 * edgeDark);
+
+            const rCol = Math.max(0, Math.min(255, r));
+            const gCol = Math.max(0, Math.min(255, g));
+            const bCol = Math.max(0, Math.min(255, b));
+            const rA = ringAlphaEdge * (0.84 + 0.14 * rimFactor);
+
+            const remA = outA * (1 - rA);
+            const totA = rA + remA;
+            if (totA > 0) {
+              outR = (rCol * rA + outR * remA) / totA;
+              outG = (gCol * rA + outG * remA) / totA;
+              outB = (bCol * rA + outB * remA) / totA;
+              outA = totA;
+            }
+          }
+
+          // Contact shadow cast by directional arrows onto the ring
+          if (dArrow < 5.5 * scale && dRing < 0.5) {
+            const shadow =
+              Math.max(
+                0,
+                Math.min(1, (5.5 * scale - Math.max(0, dArrow)) / (5.5 * scale))
+              ) * 0.35;
+            outR *= 1 - shadow;
+            outG *= 1 - shadow * 0.85;
+            outB *= 1 - shadow * 0.7;
+          }
+
+          // 4 Rounded Beveled Directional Arrows
+          if (dArrow < 1.0) {
+            const arrowEdgeAlpha = Math.max(
+              0,
+              Math.min(1, 0.5 - dArrow * 0.88)
+            );
+            const dNorm = dArrow / scale;
+            let ar: number;
+            let ag: number;
+            let ab: number;
+            if (dNorm > -5.8) {
+              const bt = Math.max(0, Math.min(1, -dNorm / 5.8));
+              ar = 6 + 10 * bt;
+              ag = 56 + 34 * bt;
+              ab = 72 + 38 * bt;
+            } else {
+              const innerD = -dNorm - 5.8;
+              const rimMix = Math.exp(-Math.pow((innerD - 1.3) / 1.4, 2));
+              const vt = Math.max(0, Math.min(1, (v - 122) / 50));
+              const ridge =
+                Math.exp(-Math.pow(u / 9.5, 2)) * 0.42 +
+                (u < 0 ? 0.14 : -0.08);
+              ar = Math.min(255, 22 + 120 * vt + 75 * ridge + 95 * rimMix);
+              ag = Math.min(255, 192 + 56 * vt + 28 * ridge + 42 * rimMix);
+              ab = Math.min(255, 234 + 21 * vt + 14 * ridge + 20 * rimMix);
+
+              const borderBlend = Math.max(
+                0,
+                Math.min(1, (-5.8 - dNorm) / 1.25)
+              );
+              ar = 16 * (1 - borderBlend) + ar * borderBlend;
+              ag = 90 * (1 - borderBlend) + ag * borderBlend;
+              ab = 110 * (1 - borderBlend) + ab * borderBlend;
+            }
+
+            const aA = arrowEdgeAlpha;
+            const remA = outA * (1 - aA);
+            const finalA = aA + remA;
+            if (finalA > 0) {
+              outR = (ar * aA + outR * remA) / finalA;
+              outG = (ag * aA + outG * remA) / finalA;
+              outB = (ab * aA + outB * remA) / finalA;
+              outA = finalA;
+            }
+          }
+
+          const p = (y * size + x) * 4;
+          data[p] = Math.round(outR);
+          data[p + 1] = Math.round(outG);
+          data[p + 2] = Math.round(outB);
+          data[p + 3] = Math.round(outA * 255);
+        }
+      }
+    } else {
+      // UI_JOYSTICK_KNOB: 3D Glossy Aqua-Crystal Thumb Orb + Metallic Collar
+      const rOuter = 162.0 * scale;
+      const rCollarOuter = 155.5 * scale;
+      const rCollarInner = 131.5 * scale;
+      const rOrb = 125.0 * scale;
+
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const dx = x + 0.5 - cx;
+          const dy = y + 0.5 - cy;
+          const rad = Math.hypot(dx, dy);
+          if (rad > rOuter + 1.5) continue;
+
+          const edgeAlpha = Math.max(
+            0,
+            Math.min(1, (rOuter + 0.5 - rad) * 0.9)
+          );
+          let r = 8;
+          let g = 42;
+          let b = 54;
+
+          if (rad > rCollarOuter) {
+            const t = (rad - rCollarOuter) / (rOuter - rCollarOuter);
+            r = 8 + 12 * (1 - t);
+            g = 40 + 32 * (1 - t);
+            b = 52 + 38 * (1 - t);
+          } else if (rad > rCollarInner) {
+            const ct =
+              (rad - rCollarInner) / (rCollarOuter - rCollarInner);
+            const nx = dx / (rad + 1e-5);
+            const ny = dy / (rad + 1e-5);
+            const topLight = Math.max(0, -(nx * 0.55 + ny * 0.83));
+            const botRefl = Math.max(0, -nx * 0.45 + ny * 0.89) * 0.55;
+            const radialRidge = Math.sin(ct * Math.PI);
+            const sheen = 0.35 + 0.65 * topLight + 0.35 * botRefl;
+
+            r =
+              45 +
+              135 * sheen * radialRidge +
+              30 * Math.pow(topLight, 3);
+            g =
+              115 +
+              115 * sheen * radialRidge +
+              22 * Math.pow(topLight, 3);
+            b =
+              140 +
+              102 * sheen * radialRidge +
+              15 * Math.pow(topLight, 3);
+
+            if (rad > rCollarOuter - 1.4) {
+              const bMix = (rCollarOuter - rad) / 1.4;
+              r = 14 * (1 - bMix) + r * bMix;
+              g = 58 * (1 - bMix) + g * bMix;
+              b = 74 * (1 - bMix) + b * bMix;
+            }
+          } else if (rad > rOrb) {
+            const gt = (rad - rOrb) / (rCollarInner - rOrb);
+            r = 5 + 22 * gt;
+            g = 62 + 42 * gt;
+            b = 78 + 46 * gt;
+          } else {
+            const ux = dx / rOrb;
+            const uy = dy / rOrb;
+            const uz = Math.sqrt(Math.max(0, 1 - ux * ux - uy * uy));
+
+            const coreDist = Math.hypot(ux + 0.16, uy + 0.18);
+            const coreGlow = Math.max(0, 1 - coreDist * 0.88);
+            const rimCaustic =
+              Math.pow(1 - uz, 2.2) *
+              (0.65 + 0.35 * (-ux * 0.6 + uy * 0.5));
+
+            r = 4 + 28 * Math.pow(coreGlow, 1.5) + 85 * rimCaustic;
+            g = 145 + 110 * Math.pow(coreGlow, 0.85) + 88 * rimCaustic;
+            b = 195 + 60 * Math.pow(coreGlow, 0.7) + 52 * rimCaustic;
+
+            const crescentDist = Math.hypot(ux - 0.36, uy - 0.08);
+            const crescentShadow =
+              Math.exp(-Math.pow(crescentDist / 0.45, 2)) *
+              0.32 *
+              (1 - rimCaustic);
+            r *= 1 - crescentShadow;
+            g *= 1 - crescentShadow * 0.75;
+            b *= 1 - crescentShadow * 0.42;
+
+            const hx1 = (ux + 0.28) * 0.82 + (uy + 0.54) * -0.57;
+            const hy1 = (ux + 0.28) * 0.57 + (uy + 0.54) * 0.82;
+            const spec1 = Math.exp(
+              -Math.pow(Math.hypot(hx1 / 0.21, hy1 / 0.115), 2.4)
+            );
+            const spec2 =
+              Math.exp(
+                -Math.pow(
+                  Math.hypot((ux - 0.04) / 0.065, (uy + 0.66) / 0.048),
+                  2.4
+                )
+              ) * 0.65;
+
+            const spec = Math.min(1, spec1 * 0.92 + spec2);
+            r = r * (1 - spec) + 235 * spec;
+            g = g * (1 - spec) + 254 * spec;
+            b = b * (1 - spec) + 255 * spec;
+
+            if (rad > rOrb - 1.3) {
+              const oMix = (rOrb - rad) / 1.3;
+              r = 6 * (1 - oMix) + r * oMix;
+              g = 68 * (1 - oMix) + g * oMix;
+              b = 84 * (1 - oMix) + b * oMix;
+            }
+          }
+
+          const p = (y * size + x) * 4;
+          data[p] = Math.max(0, Math.min(255, Math.round(r)));
+          data[p + 1] = Math.max(0, Math.min(255, Math.round(g)));
+          data[p + 2] = Math.max(0, Math.min(255, Math.round(b)));
+          data[p + 3] = Math.round(edgeAlpha * 255);
+        }
+      }
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    return canvas;
+  }
+
+  /**
    * Slices the 6x4 Game UI Icon Atlas (/assets/aistudio/icons_f5128c12.png) using
    * Flood-Fill Alpha Matting from the cell perimeter (plus hollow center seed for
-   * UI_AVATAR_FRAME and UI_JOYSTICK_BASE) so internal specular highlights and white teeth
-   * remain 100% opaque while the outer background & hollow rings become cleanly transparent.
+   * UI_AVATAR_FRAME) and renders `@3x` (`384x384`) mathematical SDF textures for
+   * `UI_JOYSTICK_BASE` and `UI_JOYSTICK_KNOB` with zero white fringe (`0 毛边`).
    */
   private processAndSliceUiIconsImage(img: HTMLImageElement): void {
     const fullW = img.naturalWidth || img.width;
@@ -871,6 +1212,15 @@ export class SpriteSheetManager {
     const orderedKeys = Object.keys(UI_ICON_GRID_MAP) as UiIconKey[];
 
     for (const key of orderedKeys) {
+      delete this.uiIconDataUrls[key];
+
+      if (key === 'UI_JOYSTICK_BASE' || key === 'UI_JOYSTICK_KNOB') {
+        const hdJoystickCanvas = this.renderCrispJoystickIcon3x(key, 384);
+        this.frames[key] = hdJoystickCanvas;
+        this.uiIconsGridFrames.push(hdJoystickCanvas);
+        continue;
+      }
+
       const [row, col] = UI_ICON_GRID_MAP[key];
       const sx = Math.floor((col / 6) * fullW);
       const sy = Math.floor((row / 4) * fullH);
@@ -888,6 +1238,7 @@ export class SpriteSheetManager {
 
       const isBgWhite = (idx: number): boolean => {
         const p = idx * 4;
+        if (data[p + 3] < 16) return true;
         const r = data[p];
         const g = data[p + 1];
         const b = data[p + 2];
@@ -918,8 +1269,8 @@ export class SpriteSheetManager {
         enqueue(cellW - 1, py);
       }
 
-      // Seed hollow center for ring icons (UI_AVATAR_FRAME and UI_JOYSTICK_BASE)
-      if (key === 'UI_AVATAR_FRAME' || key === 'UI_JOYSTICK_BASE') {
+      // Seed hollow center for ring icons (UI_AVATAR_FRAME)
+      if (key === 'UI_AVATAR_FRAME') {
         const cx = Math.floor(cellW / 2);
         const cy = Math.floor(cellH / 2);
         for (let dy = -4; dy <= 4; dy++) {
@@ -942,7 +1293,7 @@ export class SpriteSheetManager {
         if (cy + 1 < cellH) enqueue(cx, cy + 1);
       }
 
-      // Anti-alias feathering on 1px boundary next to flood-filled background
+      // Anti-alias feathering & white-background unmultiplication on boundary pixels next to flood-filled background
       for (let py = 1; py < cellH - 1; py++) {
         for (let px = 1; px < cellW - 1; px++) {
           const idx = py * cellW + px;
@@ -954,11 +1305,26 @@ export class SpriteSheetManager {
             visited[idx + cellW]
           ) {
             const p = idx * 4;
-            const lum = (data[p] + data[p + 1] + data[p + 2]) / 3;
-            if (lum > 205) {
-              data[p + 3] = Math.round(
-                data[p + 3] * Math.max(0.15, (240 - lum) / 35)
+            const r = data[p];
+            const g = data[p + 1];
+            const b = data[p + 2];
+            const minC = Math.min(r, g, b);
+            if (minC > 155) {
+              const alphaFactor = Math.max(0.08, Math.min(1, (248 - minC) / 93));
+              const invA = 1 / Math.max(0.2, alphaFactor);
+              data[p] = Math.max(
+                0,
+                Math.min(255, Math.round((r - 255 * (1 - alphaFactor)) * invA))
               );
+              data[p + 1] = Math.max(
+                0,
+                Math.min(255, Math.round((g - 255 * (1 - alphaFactor)) * invA))
+              );
+              data[p + 2] = Math.max(
+                0,
+                Math.min(255, Math.round((b - 255 * (1 - alphaFactor)) * invA))
+              );
+              data[p + 3] = Math.round(data[p + 3] * alphaFactor);
             }
           }
         }
@@ -991,17 +1357,19 @@ export class SpriteSheetManager {
         tempCtx.putImageData(cellData, 0, 0);
       }
 
-      // Normalize into a crisp 128x128 square offscreen canvas preserving aspect ratio
-      const outSize = 128;
+      // Normalize into a crisp 256x256 (@2x Retina) square offscreen canvas preserving aspect ratio
+      const outSize = 256;
       const frameCanvas = document.createElement('canvas');
       frameCanvas.width = outSize;
       frameCanvas.height = outSize;
       const fCtx = frameCanvas.getContext('2d');
 
       if (fCtx && hasPixels) {
+        fCtx.imageSmoothingEnabled = true;
+        fCtx.imageSmoothingQuality = 'high';
         const bw = Math.max(1, maxX - minX + 1);
         const bh = Math.max(1, maxY - minY + 1);
-        const targetSpan = outSize - 6; // 3px clean breathing margin on each side
+        const targetSpan = outSize - 10; // 5px clean breathing margin on each side
         const scale = Math.min(targetSpan / bw, targetSpan / bh);
         const dw = bw * scale;
         const dh = bh * scale;
@@ -1724,13 +2092,20 @@ export class SpriteSheetManager {
   }
 
   public getUiIconFrame(key: UiIconKey): HTMLCanvasElement | undefined {
+    if (
+      !this.frames[key] &&
+      (key === 'UI_JOYSTICK_BASE' || key === 'UI_JOYSTICK_KNOB') &&
+      typeof document !== 'undefined'
+    ) {
+      this.frames[key] = this.renderCrispJoystickIcon3x(key, 384);
+    }
     return this.frames[key];
   }
 
   public getUiIconDataUrl(key: UiIconKey): string | undefined {
     const cached = this.uiIconDataUrls[key];
     if (cached) return cached;
-    const frameCanvas = this.frames[key];
+    const frameCanvas = this.getUiIconFrame(key);
     if (!frameCanvas) return undefined;
     try {
       const dataUrl = frameCanvas.toDataURL('image/png');

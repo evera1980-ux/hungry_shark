@@ -579,13 +579,13 @@ export const InGameHudOverlay: React.FC<InGameHudOverlayProps> = ({
                     {lang === 'zh' ? '🕹️ 拖动摇杆' : '🕹️ Drag Here'}
                   </span>
                 )}
-                {/* Sliced Sonar Compass Joystick Base Ring (Translucent so ocean remains visible) */}
+                {/* @3x High-DPI SDF Sonar Compass Joystick Base Ring (Translucent with zero white fringe) */}
                 <UiAtlasIcon
                   iconKey="UI_JOYSTICK_BASE"
-                  size={108}
-                  className="absolute inset-0 w-full h-full opacity-65 pointer-events-none"
+                  size={112}
+                  className="absolute inset-0 w-full h-full opacity-85 pointer-events-none drop-shadow-[0_4px_12px_rgba(2,6,23,0.55)]"
                 />
-                {/* Sliced Aqua-Crystal Orb Thumb Knob */}
+                {/* @3x High-DPI SDF Aqua-Crystal Orb Thumb Knob */}
                 <div
                   ref={joystickKnobRef}
                   className="relative z-10 w-10 h-10 sm:w-11 sm:h-11 rounded-full flex items-center justify-center pointer-events-none"
@@ -595,8 +595,8 @@ export const InGameHudOverlay: React.FC<InGameHudOverlayProps> = ({
                 >
                   <UiAtlasIcon
                     iconKey="UI_JOYSTICK_KNOB"
-                    size={44}
-                    className="w-full h-full drop-shadow-md"
+                    size={48}
+                    className="w-full h-full drop-shadow-[0_3px_8px_rgba(2,6,23,0.65)]"
                   />
                 </div>
               </motion.div>

@@ -231,6 +231,8 @@ interface MiniGameVideoAd {
 
 interface MiniGameInterstitialAd {
   show: () => Promise<void>;
+  onClose?: (cb: () => void) => void;
+  offClose?: (cb: () => void) => void;
 }
 
 interface MiniGameSDK {
@@ -441,6 +443,9 @@ export class AdManager {
     | ((placement: AdPlacement, onReward: () => void, onCancel?: () => void) => void)
     | null = null;
   private errorHandler: ((err: AdErrorInfo) => void) | null = null;
+  private adStateChangeHandler:
+    | ((active: boolean, placement: AdFrequencyKey) => void)
+    | null = null;
   private h5AdsReady = false;
   private admobInitialized = false;
   private inFlight = false;
@@ -450,6 +455,24 @@ export class AdManager {
   constructor() {
     this.freqState = this.loadFrequencyState();
     this.initGoogleAdsRuntime();
+  }
+
+  public isAdInFlight(): boolean {
+    return this.inFlight;
+  }
+
+  public registerAdStateChangeHandler(
+    handler: ((active: boolean, placement: AdFrequencyKey) => void) | null
+  ): void {
+    this.adStateChangeHandler = handler;
+  }
+
+  private setInFlight(active: boolean, placement: AdFrequencyKey): void {
+    const changed = this.inFlight !== active;
+    this.inFlight = active;
+    if (changed && this.adStateChangeHandler) {
+      this.adStateChangeHandler(active, placement);
+    }
   }
 
   private loadFrequencyState(nowMs: number = Date.now()): PersistedFrequencyState {
@@ -673,12 +696,12 @@ export class AdManager {
       this.webVideoAdRunner(
         placement,
         () => {
-          this.inFlight = false;
+          this.setInFlight(false, placement);
           this.recordAdImpression(placement);
           onSuccess();
         },
         () => {
-          this.inFlight = false;
+          this.setInFlight(false, placement);
           this.emitError(placement, 'DISMISSED', onError);
           if (onCancel) onCancel();
         }
@@ -687,7 +710,7 @@ export class AdManager {
     }
 
     // Production / unsimulated fallback: NEVER grant free reward!
-    this.inFlight = false;
+    this.setInFlight(false, placement);
     this.emitError(placement, 'AD_UNAVAILABLE', onError);
     if (onCancel) onCancel();
   }
@@ -717,14 +740,14 @@ export class AdManager {
       return;
     }
 
-    this.inFlight = true;
+    this.setInFlight(true, placement);
     const settleReward = () => {
-      this.inFlight = false;
+      this.setInFlight(false, placement);
       this.recordAdImpression(placement);
       onReward();
     };
     const settleCancel = (reason: AdBlockReason = 'DISMISSED') => {
-      this.inFlight = false;
+      this.setInFlight(false, placement);
       this.emitError(placement, reason, onError);
       if (onCancel) onCancel();
     };
@@ -862,10 +885,14 @@ export class AdManager {
     ) {
       const adId = resolvePlatformAdUnitId('admob', 'interstitial', overrideAdUnitId);
       this.recordAdImpression('INTERSTITIAL');
+      this.setInFlight(true, 'INTERSTITIAL');
       capAdMob
         .prepareInterstitial({ adId })
         .then(() => capAdMob.showInterstitial!())
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          this.setInFlight(false, 'INTERSTITIAL');
+        });
       return true;
     }
 
@@ -881,9 +908,22 @@ export class AdManager {
         try {
           const interstitialAd = sdk.createInterstitialAd({ adUnitId });
           this.recordAdImpression('INTERSTITIAL');
-          interstitialAd.show().catch(() => {});
+          this.setInFlight(true, 'INTERSTITIAL');
+          if (typeof interstitialAd.onClose === 'function') {
+            const onInterstitialClose = () => {
+              if (typeof interstitialAd.offClose === 'function') {
+                interstitialAd.offClose(onInterstitialClose);
+              }
+              this.setInFlight(false, 'INTERSTITIAL');
+            };
+            interstitialAd.onClose(onInterstitialClose);
+          }
+          interstitialAd.show().catch(() => {
+            this.setInFlight(false, 'INTERSTITIAL');
+          });
           return true;
         } catch {
+          this.setInFlight(false, 'INTERSTITIAL');
           return false;
         }
       }
@@ -893,12 +933,17 @@ export class AdManager {
     if (typeof window.adBreak === 'function' && this.h5AdsReady) {
       try {
         this.recordAdImpression('INTERSTITIAL');
+        this.setInFlight(true, 'INTERSTITIAL');
         window.adBreak({
           type: 'next',
           name: 'settlement_interstitial',
+          adBreakDone: () => {
+            this.setInFlight(false, 'INTERSTITIAL');
+          },
         });
         return true;
       } catch {
+        this.setInFlight(false, 'INTERSTITIAL');
         return false;
       }
     }

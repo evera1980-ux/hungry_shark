@@ -75,11 +75,13 @@ export const UiAtlasIcon: React.FC<UiAtlasIconProps> = ({
     );
   }
 
+  const backingSize = Math.max(128, Math.round(size * 3));
+
   return (
     <canvas
       ref={canvasRef}
-      width={64}
-      height={64}
+      width={backingSize}
+      height={backingSize}
       aria-label={alt}
       className={`select-none pointer-events-none shrink-0 ${className}`}
       style={{ width: size, height: size }}

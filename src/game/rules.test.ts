@@ -4860,6 +4860,36 @@ test('Task 05 D3~D8 Approved Rules & Config-Driven Architecture Verification', (
   assert.equal(ECONOMY_PREDATION_CONFIG.activeSkills.goldOverdrive.healMaxHpPct, 0.5);
   assert.equal(ADS_AND_MONETIZATION_CONFIG.placements.REVIVE.frenzyDurationSec, 6);
   assert.equal(detectDefaultLang(), 'en');
+
+  // 7. Ad Pop-up Pause & Auto-Resume Lifecycle Invariant (isAdInFlight + registerAdStateChangeHandler)
+  const testAdMgr = new AdManager();
+  testAdMgr.resetFrequencyStateForTests();
+  testAdMgr.setDevSimulatorEnabled(true);
+  const stateTransitions: Array<{ active: boolean; placement: string }> = [];
+  let capturedReward: (() => void) | null = null;
+  testAdMgr.registerAdStateChangeHandler((active, placement) => {
+    stateTransitions.push({ active, placement });
+  });
+  testAdMgr.registerBrowserSimulator((_placement, onReward) => {
+    capturedReward = onReward;
+  });
+  (globalThis as unknown as { window?: unknown }).window = {};
+  try {
+    assert.equal(testAdMgr.isAdInFlight(), false);
+    testAdMgr.showRewardedVideoAd('SUPPLY_DROP', () => {});
+    assert.equal(testAdMgr.isAdInFlight(), true, 'Game must detect ad in-flight and pause while ad is open');
+    assert.deepEqual(stateTransitions, [{ active: true, placement: 'SUPPLY_DROP' }]);
+    assert.ok(capturedReward, 'Simulator runner must capture reward callback');
+    (capturedReward as () => void)();
+    assert.equal(testAdMgr.isAdInFlight(), false, 'Game must clear ad in-flight and resume after ad closes');
+    assert.deepEqual(stateTransitions, [
+      { active: true, placement: 'SUPPLY_DROP' },
+      { active: false, placement: 'SUPPLY_DROP' },
+    ]);
+  } finally {
+    testAdMgr.registerAdStateChangeHandler(null);
+    delete (globalThis as unknown as { window?: unknown }).window;
+  }
 });
 
 

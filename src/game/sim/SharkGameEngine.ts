@@ -1,6 +1,7 @@
 import { SimEngineHost } from './types';
 import { stepSharkSimulation } from './stepSimulation';
 import { renderOceanWorld } from './renderOceanWorld';
+import { adManager } from '../adManager';
 
 interface CachedDisplayMetrics {
   dpr: number;
@@ -23,6 +24,7 @@ export class SharkGameEngine {
 
   private animId: number = 0;
   private lastTime: number = 0;
+  private simClockMs: number = 0;
   private running: boolean = false;
   private cachedDisplay: CachedDisplayMetrics = {
     dpr: 1,
@@ -79,16 +81,24 @@ export class SharkGameEngine {
     const aspectZoomFactor =
       viewW < viewH ? Math.max(0.74, Math.min(1, viewW / 580)) : 1;
 
+    const isAdActive =
+      Boolean(this.host.simAdRef.current?.active) || adManager.isAdInFlight();
+
     const isPausedOrOverlay =
       this.host.gameStateRef.current === 'paused' ||
       this.host.gameStateRef.current === 'gameover' ||
       Boolean(this.host.showAtlasModalRef.current) ||
-      Boolean(this.host.simAdRef.current?.active);
+      isAdActive;
+
+    const effectiveDt = isPausedOrOverlay ? 0 : dt;
+    if (!isPausedOrOverlay) {
+      this.simClockMs += effectiveDt * 1000;
+    }
 
     stepSharkSimulation({
       host: this.host,
-      dt,
-      now,
+      dt: effectiveDt,
+      now: this.simClockMs,
       viewW,
       viewH,
       aspectZoomFactor,
@@ -98,8 +108,8 @@ export class SharkGameEngine {
     renderOceanWorld({
       ctx: this.ctx,
       sim: this.host.simRef.current,
-      dt,
-      now,
+      dt: effectiveDt,
+      now: this.simClockMs,
       viewW,
       viewH,
       scaleX,
@@ -121,6 +131,9 @@ export class SharkGameEngine {
     window.visualViewport?.addEventListener('resize', this.syncCanvasBufferToDisplayBox);
 
     this.lastTime = performance.now();
+    if (this.simClockMs <= 0) {
+      this.simClockMs = this.lastTime;
+    }
     this.animId = requestAnimationFrame(this.tick);
   }
 

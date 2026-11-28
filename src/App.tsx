@@ -134,6 +134,7 @@ export default function App() {
   const [simAd, setSimAd] = useState<SimulatedAdState | null>(null);
   const simAdRef = useRef<SimulatedAdState | null>(null);
   simAdRef.current = simAd;
+  const wasPlayingBeforeAdRef = useRef<boolean>(false);
   const [adNotice, setAdNotice] = useState<string | null>(null);
   const adNoticeTimerRef = useRef<number | null>(null);
 
@@ -313,13 +314,15 @@ export default function App() {
     });
     parallaxBackground.load();
     adManager.registerBrowserSimulator((placement, onReward, onCancel) => {
-      setSimAd({
+      const nextAd: SimulatedAdState = {
         active: true,
         placement,
         secondsLeft: 3,
         onReward,
         onCancel,
-      });
+      };
+      simAdRef.current = nextAd;
+      setSimAd(nextAd);
     });
     adManager.registerErrorHandler((err: AdErrorInfo) => {
       const msg = langRef.current === 'zh' ? err.messageZh : err.messageEn;
@@ -470,10 +473,28 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (gameState !== 'playing' || showAtlasModal) {
+    if (gameState !== 'playing' || showAtlasModal || simAd?.active) {
       clearAllInputs();
     }
-  }, [gameState, showAtlasModal, clearAllInputs]);
+  }, [gameState, showAtlasModal, simAd?.active, clearAllInputs]);
+
+  useEffect(() => {
+    adManager.registerAdStateChangeHandler((active) => {
+      clearAllInputs();
+      if (active) {
+        wasPlayingBeforeAdRef.current =
+          gameStateRef.current === 'playing' && !showAtlasModalRef.current;
+      } else if (wasPlayingBeforeAdRef.current) {
+        wasPlayingBeforeAdRef.current = false;
+        gameStateRef.current = 'playing';
+        document.body.dataset.state = 'playing';
+        setGameState('playing');
+      }
+    });
+    return () => {
+      adManager.registerAdStateChangeHandler(null);
+    };
+  }, [clearAllInputs]);
 
   // Initialize or reset a run
   const startNewRun = useCallback(
@@ -1362,7 +1383,7 @@ export default function App() {
   // Keyboard Listeners (WASD / Arrows / Space / E / P / M / Enter)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (simAdRef.current?.active) return;
+      if (simAdRef.current?.active || adManager.isAdInFlight()) return;
 
       if (e.code === 'Escape' && showAtlasModalRef.current) {
         e.preventDefault();
@@ -1885,11 +1906,13 @@ export default function App() {
             lang={lang}
             onReward={() => {
               const rewardFn = simAd.onReward;
+              simAdRef.current = null;
               setSimAd(null);
               rewardFn();
             }}
             onCancel={() => {
               const cancelFn = simAd.onCancel;
+              simAdRef.current = null;
               setSimAd(null);
               if (cancelFn) cancelFn();
             }}

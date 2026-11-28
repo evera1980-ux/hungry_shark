@@ -64,6 +64,12 @@ public struct ContentView: View {
                 vm.resetInputState()
             }
         }
+        .onChange(of: adManager.isInFlight) { inFlight in
+            handleAdActivityChange(isAdActive: inFlight || adManager.isConnectingAd)
+        }
+        .onChange(of: adManager.isConnectingAd) { connecting in
+            handleAdActivityChange(isAdActive: connecting || adManager.isInFlight)
+        }
         .onChange(of: scenePhase) { newPhase in
             switch newPhase {
             case .active:
@@ -82,12 +88,27 @@ public struct ContentView: View {
         }
     }
 
+    private func handleAdActivityChange(isAdActive: Bool) {
+        joystickResetToken &+= 1
+        vm.resetInputState()
+        scene.resetFrameClock()
+        if isAdActive {
+            scene.isPaused = true
+            OceanAudioEngine.shared.handleAppBackgrounded()
+        } else {
+            scene.isPaused = false
+            OceanAudioEngine.shared.handleAppForegrounded(soundEnabled: vm.save.soundEnabled)
+        }
+    }
+
     private func handleAppResignedActive() {
         joystickResetToken &+= 1
         vm.resetInputState()
         scene.isPaused = true
         scene.resetFrameClock()
-        if vm.gameState == "playing" {
+        // Only open the manual Pause Modal if the app went to background outside of an active ad flow;
+        // if an ad is playing, closing the ad must automatically resume gameplay!
+        if vm.gameState == "playing" && !adManager.isInFlight && !adManager.isConnectingAd {
             vm.pauseGame(silent: true)
         }
         vm.persistSave()
@@ -96,8 +117,10 @@ public struct ContentView: View {
 
     private func handleAppBecameActive() {
         scene.resetFrameClock()
-        scene.isPaused = false
-        OceanAudioEngine.shared.handleAppForegrounded(soundEnabled: vm.save.soundEnabled)
+        if !adManager.isInFlight && !adManager.isConnectingAd {
+            scene.isPaused = false
+            OceanAudioEngine.shared.handleAppForegrounded(soundEnabled: vm.save.soundEnabled)
+        }
     }
 
     private var oceanSpriteCanvasLayer: some View {

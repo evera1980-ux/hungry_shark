@@ -333,16 +333,17 @@ public final class OceanGameScene: SKScene {
     }
 
     public override func update(_ currentTime: TimeInterval) {
-        let dt = lastUpdateTime == 0 ? (1.0 / 60.0) : min(0.05, max(0.001, currentTime - lastUpdateTime))
-        lastUpdateTime = currentTime
         guard let vm = viewModel else { return }
 
-        // Pause background SpriteKit simulation & @Published mutations while the Evolution Atlas modal is open
-        // so SwiftUI dedicates 100% of main-thread 120Hz budget to the rotary wheel gesture & inertia!
-        if vm.showEvolutionAtlas {
+        // Pause background SpriteKit simulation & @Published mutations while the Evolution Atlas modal or any Ad is open
+        if vm.showEvolutionAtlas || GoogleAdMobManager.shared.isInFlight || GoogleAdMobManager.shared.isConnectingAd {
+            lastUpdateTime = 0
             vm.resetInputState()
             return
         }
+
+        let dt = lastUpdateTime == 0 ? (1.0 / 60.0) : min(0.05, max(0.001, currentTime - lastUpdateTime))
+        lastUpdateTime = currentTime
 
         let viewW = Double(max(320, size.width))
         let viewH = Double(max(240, size.height))

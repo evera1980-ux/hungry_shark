@@ -102,7 +102,7 @@ export function stepSharkSimulation(params: StepSimulationParams): void {
   const shark = sim.shark;
 
       // ==================== 1. UPDATE SIMULATION ====================
-      if (gameStateRef.current === 'title') {
+      if (gameStateRef.current === 'title' && !isPausedOrOverlay) {
         // Title Screen Hero Patrol: uses the exact in-game Hydrodynamic Horizontal Whip-Turn & 2.5D Spinal C-Bend physics
         const selectedId = metaSaveRef.current.selectedSharkId;
         const selectedUpgLv =
